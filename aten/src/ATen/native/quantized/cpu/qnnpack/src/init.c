@@ -59,6 +59,13 @@ static void init(void) {
       .nr = 8,
       .kr = 1,
   };
+  /*
+   * Current q8gemm-sparse-bench shows that for the shapes benchmarked
+   * 4x8 kernels are better than 8x4
+   * Without prepacking it always worse than dense
+   * all benchmarking at 70% sparsity
+   */
+  /*
   pytorch_qnnp_params.q8gemm_sparse = (struct pytorch_q8gemm_sparse_parameters){
       .gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__aarch32_neon,
       .packedA_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon,
@@ -67,6 +74,16 @@ static void init(void) {
       .nr = 4,
       .kr = 4,
       .log2_mr = 3,
+  };
+  */
+  pytorch_qnnp_params.q8gemm_sparse = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon,
+      .packA = pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon,
+      .mr = 4,
+      .nr = 8,
+      .kr = 4,
+      .log2_mr = 2,
   };
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
   pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
