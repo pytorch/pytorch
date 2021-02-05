@@ -953,11 +953,12 @@ void initJITBindings(PyObject* module) {
     bool use_readinto_;
   };
 
-  py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchStreamReader, std::shared_ptr<PyTorchStreamReader>>(
+      m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto adapter = std::make_unique<BufferAdapter>(buffer);
-        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
+        return std::make_shared<PyTorchStreamReader>(std::move(adapter));
       }))
       .def(
           "get_record",

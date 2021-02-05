@@ -86,7 +86,7 @@ class PackageImporter:
         self._mangler = PackageMangler()
 
         # used for torch.serialization._load
-        self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
+        self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self.import_module, *args, **kwargs)
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
@@ -416,7 +416,7 @@ class _UnpicklerWrapper(pickle._Unpickler):  # type: ignore
                 module, name = _compat_pickle.NAME_MAPPING[(module, name)]
             elif module in _compat_pickle.IMPORT_MAPPING:
                 module = _compat_pickle.IMPORT_MAPPING[module]
-        mod = self._importer.import_module(module)
+        mod = self._importer(module)
         return getattr(mod, name)
 
 class _PathNode:

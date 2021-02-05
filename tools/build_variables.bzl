@@ -267,6 +267,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
+    "torch/csrc/deploy/deploy.cpp",
 ]
 
 core_sources_full = core_sources_full_mobile + [

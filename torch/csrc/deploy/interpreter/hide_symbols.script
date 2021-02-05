@@ -1,5 +1,4 @@
 INTERPRETER_0.1 {
-  global:
-    initialize_interface;
-  local: *;         # hide everything else
+  global: new_interpreter_impl;
+  local: *;
 };
