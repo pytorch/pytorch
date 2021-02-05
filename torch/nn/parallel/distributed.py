@@ -1064,6 +1064,9 @@ class DistributedDataParallel(Module):
             ``register_comm_hook`` API, but it is subject to some subtle differences compared
             to ``torch.futures.Future``.
 
+        .. warning ::
+            DDP communication hook is experimental and subject to change.
+
         Example::
             Below is an example of a noop hook that returns back the same tensors:
 

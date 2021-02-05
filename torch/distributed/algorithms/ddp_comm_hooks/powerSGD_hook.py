@@ -452,7 +452,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     but it usually results in a much lower accuracy, unless ``matrix_approximation_rank`` in the state is 1.
     Increasing ``matrix_approximation_rank`` may not necessarily increase the accuracy,
     because batching per-parameter tensors without column/row alignment can destroy low-rank structure.
-    Therefore, the user shoud always consider :meth:`powerSGD_hook` first,
+    Therefore, the user should always consider :meth:`powerSGD_hook` first,
     and only consider this variant when a satisfying accuracy can be achieved when ``matrix_approximation_rank`` is 1.
 
     Note that this communication hook enforces vanilla allreduce for the first ``state.start_powerSGD_iter`` iterations.
