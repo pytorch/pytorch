@@ -1471,7 +1471,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
@@ -1486,7 +1486,9 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/48641
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.int8]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
@@ -1699,7 +1701,7 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.bfloat16]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
                    )),
@@ -1716,7 +1718,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
                    )),
@@ -2327,7 +2329,11 @@ if TEST_SCIPY:
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.bfloat16]),
                            # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
-                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                    dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
                            # Backward of `lgamma` uses `digamma` but `digamma`
                            # is not implemented for `BFloat16`
