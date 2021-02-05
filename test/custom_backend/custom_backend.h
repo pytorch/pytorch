@@ -69,7 +69,7 @@ class CustomBackend : public torch::jit::PyTorchBackendInterface {
 
 c10::IValue backendPreprocessFunction(
     const torch::jit::Module& mod,
-    const c10::Dict<c10::IValueIValue, c10::IValueIValue>& method_compile_spec) {
+    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec) {
   return mod._ivalue();
 }
 
