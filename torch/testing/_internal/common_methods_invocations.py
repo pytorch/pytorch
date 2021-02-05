@@ -1752,8 +1752,16 @@ op_db: List[OpInfo] = [
            # max can have a kwarg for a tuple of tensors, not a tensor
            supports_tensor_out=False,
            test_inplace_grad=False,
-           safe_casts_outputs=True,
-           sample_inputs_func=sample_inputs_max_min,),
+           sample_inputs_func=sample_inputs_max_min,
+           assert_autodiffed=True,
+           skips = (
+               # Skip these tests as they're currently failing
+               # Reference: https://github.com/pytorch/pytorch/pull/51244#issuecomment-772640326
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu', dtypes=[torch.float32, torch.bfloat16],),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cuda', dtypes=[torch.float32],),
+           )),
     OpInfo('min',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -1761,8 +1769,16 @@ op_db: List[OpInfo] = [
            # min can have a kwarg for a tuple of tensors, not a tensor
            supports_tensor_out=False,
            test_inplace_grad=False,
-           safe_casts_outputs=True,
-           sample_inputs_func=sample_inputs_max_min,),
+           sample_inputs_func=sample_inputs_max_min,
+           assert_autodiffed=True,
+           skips = (
+               # Skip these tests as they're currently failing
+               # Reference: https://github.com/pytorch/pytorch/pull/51244#issuecomment-772640326
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu', dtypes=[torch.float32, torch.bfloat16],),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cuda', dtypes=[torch.float32],),
+           )),
     UnaryUfuncInfo('neg',
                    ref=np.negative,
                    skip_bfloat16_grad=True,
