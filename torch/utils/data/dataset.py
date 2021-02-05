@@ -2,11 +2,13 @@ import bisect
 import random
 import warnings
 
+import torch
 from torch._utils import _accumulate
-from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Tuple
+
+from ._utils import index_utils
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
@@ -334,7 +336,7 @@ class Subset(Dataset[T_co]):
 
 
 def random_split(dataset: Dataset[T], lengths: Sequence[int],
-                 generator: Optional[Generator] = default_generator) -> List[Subset[T]]:
+                 generator: Generator = default_generator) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
     Optionally fix the generator for reproducible results, e.g.:
@@ -350,5 +352,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
     if sum(lengths) != len(dataset):  # type: ignore
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths), generator=generator).tolist()
+    seed = int(torch.randint(high=sum(lengths), size=(1,), dtype=torch.int64, generator=generator).item())
+    indices = index_utils.Permutation(sum(lengths), seed)
+
     return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]

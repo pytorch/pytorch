@@ -129,7 +129,7 @@ class TestDatasetRandomSplit(TestCase):
     def test_splits_reproducibility(self):
         self.assertEqual(
             [list(x) for x in random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(1))],
-            [[5, 6, 1], [2, 0, 8, 9, 3, 7, 4]],
+            [[3, 8, 7], [9, 5, 2, 4, 0, 6, 1]],
         )
         self.assertEqual(
             random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),

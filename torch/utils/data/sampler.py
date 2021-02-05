@@ -1,7 +1,11 @@
+import math
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator, default_generator
 
 from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
+
+from ._utils import index_utils
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -70,21 +74,19 @@ class SequentialSampler(Sampler[int]):
 
 
 class RandomSampler(Sampler[int]):
-    r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
-    If with replacement, then user can specify :attr:`num_samples` to draw.
+    r"""Samples elements randomly.
 
     Args:
         data_source (Dataset): dataset to sample from
-        replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
-        num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
-            is supposed to be specified only when `replacement` is ``True``.
+        replacement (bool): samples are drawn with replacement if ``True``, default=``False``
+        num_samples (int): number of samples to draw, default=`len(dataset)`
         generator (Generator): Generator used in sampling.
     """
     data_source: Sized
     replacement: bool
 
     def __init__(self, data_source: Sized, replacement: bool = False,
-                 num_samples: Optional[int] = None, generator=None) -> None:
+                 num_samples: Optional[int] = None, generator: Generator = default_generator) -> None:
         self.data_source = data_source
         self.replacement = replacement
         self._num_samples = num_samples
@@ -111,17 +113,14 @@ class RandomSampler(Sampler[int]):
 
     def __iter__(self):
         n = len(self.data_source)
-        if self.generator is None:
-            generator = torch.Generator()
-            generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
-        else:
-            generator = self.generator
         if self.replacement:
             for _ in range(self.num_samples // 32):
-                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
-            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
+                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=self.generator).tolist()
+            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=self.generator).tolist()
         else:
-            yield from torch.randperm(n, generator=self.generator).tolist()
+            for i in range(math.ceil(self.num_samples / n)):
+                seed = int(torch.randint(high=n, size=(1,), dtype=torch.int64, generator=self.generator).item())
+                yield from index_utils.Permutation(n, seed, stop=min(n, self.num_samples - i * n))
 
     def __len__(self):
         return self.num_samples
@@ -136,12 +135,13 @@ class SubsetRandomSampler(Sampler[int]):
     """
     indices: Sequence[int]
 
-    def __init__(self, indices: Sequence[int], generator=None) -> None:
+    def __init__(self, indices: Sequence[int], generator: Generator = default_generator) -> None:
         self.indices = indices
         self.generator = generator
 
     def __iter__(self):
-        return (self.indices[i] for i in torch.randperm(len(self.indices), generator=self.generator))
+        seed = int(torch.randint(high=len(self.indices), size=(1,), dtype=torch.int64, generator=self.generator).item())
+        return (self.indices[i] for i in index_utils.Permutation(len(self.indices), seed))
 
     def __len__(self):
         return len(self.indices)
