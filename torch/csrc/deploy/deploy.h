@@ -153,6 +153,8 @@ struct TORCH_API InterpreterManager {
   }
   Package load_package(const std::string& uri);
   InterpreterManager(const InterpreterManager&) = delete;
+  InterpreterManager& operator=(const InterpreterManager&) = delete;
+  InterpreterManager& operator=(InterpreterManager&&) = delete;
 
  private:
   friend struct Package;
