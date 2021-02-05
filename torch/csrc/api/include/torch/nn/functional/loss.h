@@ -359,6 +359,12 @@ inline Tensor huber_loss(
     const Tensor& target,
     HuberLossFuncOptions::reduction_t reduction,
     double beta = 1.) {
+  if (target.sizes() != input.sizes()) {
+    TORCH_WARN("Using a target size (", target.sizes(), ") that is different to the input size (", input.sizes(), "). ",
+               "This will likely lead to incorrect results due to broadcasting. ",
+               "Please ensure they have the same size.");
+  }
+
   std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
   return torch::huber_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction), beta);
 }
