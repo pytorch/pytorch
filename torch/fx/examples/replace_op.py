@@ -3,7 +3,8 @@ from torch.fx import symbolic_trace
 import operator
 
 """
-How to replace one op with another
+How to Replace One Op With Another
+
 1. Iterate through all Nodes in your GraphModule's Graph.
 2. Determine if the current Node should be replaced. (Suggested: match
 on the Node's ``target`` attribute).
