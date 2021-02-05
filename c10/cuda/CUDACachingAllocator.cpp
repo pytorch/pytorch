@@ -63,11 +63,13 @@ namespace CUDACachingAllocator {
  * GPU performance.
  *
  * Because capture bakes in memory addresses, the memory used during capture must be available
- * for the graph to use during replay. But Pytorch's current caching allocator assigns and frees
- * memory eagerly and dynamically, so when a graph is replayed, those memory addresses may be in
- * use by other tensors. To guarantee a graph's baked in addresses are safe to reuse in replay,
- * DeviceAllocator satisfies allocations from a graph-private memory pool during capture, and
- * doesn't begin cudaFreeing those addresses until the graph is destroyed.
+ * for the graph to use during replay. DeviceCachingAllocator assigns and frees memory eagerly
+ * and dynamically, so if we're not careful about managing graphs' memory, at replay time those
+ * memory addresses could be use by other tensors.
+ *
+ * To guarantee a graph's baked in addresses are safe to reuse in replay, DeviceAllocator
+ * satisfies allocations from a graph-private memory pool during capture, and doesn't begin
+ * cudaFreeing those addresses until the graph is destroyed.
  *
  * Within the private pool, allocations are freed and reassigned as usual during capture.
  * Memory regions will be used in a consistent order during replay.
@@ -503,6 +505,10 @@ class DeviceCachingAllocator {
     }
     cache_info_aux(large_blocks, total, largest);
     cache_info_aux(small_blocks, total, largest);
+    for (const auto& gp : graph_pools) {
+      cache_info_aux(gp.second.large_blocks, total, largest);
+      cache_info_aux(gp.second.small_blocks, total, largest);
+    }
   }
 
   /** Returns a copy of the memory allocator stats **/
@@ -657,6 +663,10 @@ class DeviceCachingAllocator {
     std::vector<const Block*> blocks;
     blocks.insert(blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
+    for (const auto& gp : graph_pools) {
+      blocks.insert(blocks.end(), gp.second.small_blocks.blocks.begin(), gp.second.small_blocks.blocks.end());
+      blocks.insert(blocks.end(), gp.second.large_blocks.blocks.begin(), gp.second.large_blocks.blocks.end());
+    }
     blocks.insert(blocks.end(), active_blocks.begin(), active_blocks.end());
     return blocks;
   }
@@ -682,7 +692,8 @@ class DeviceCachingAllocator {
     }
 
     active_blocks.erase(block);
-    pool.blocks.insert(block);
+    // Makes sure the Block* isn't already present in the pool we're freeing it back into.
+    TORCH_INTERNAL_ASSERT(pool.blocks.insert(block).second);
 
     if (block->is_split()) {
       net_change_inactive_split_blocks += 1;
@@ -830,7 +841,6 @@ class DeviceCachingAllocator {
       }
     }
 
-    // Dirty but simple check if the new cudaMalloc is for a CUDA graph's PrivatePool
     if (p.pool->owner_PrivatePool) {
       p.pool->owner_PrivatePool->cudaMalloc_count++;
     }
