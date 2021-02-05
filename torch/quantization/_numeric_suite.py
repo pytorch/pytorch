@@ -321,6 +321,7 @@ def prepare_model_with_stubs(
 
     reassign = {}
     for name, mod in q_module.named_children():
+
         if name not in float_module_children:
             continue
 
@@ -329,11 +330,20 @@ def prepare_model_with_stubs(
         if type(float_mod) not in module_swap_list:
             prepare_model_with_stubs(float_mod, mod, module_swap_list, Logger)
 
-        if type(float_mod) in module_swap_list:
+        # Insert shadow module only if the module is not of the same type as
+        # the floating point module
+        if type(float_mod) in module_swap_list and not _is_identical_module_type(mod, float_mod):
             reassign[name] = Shadow(mod, float_mod, Logger)
 
     for key, value in reassign.items():
         q_module._modules[key] = value
+
+def _is_identical_module_type(mod1, mod2):
+    # Compare if two modules have the same dtype
+    mod1_module_types = [type(mod) for mod in mod1.modules()]
+    mod2_module_types = [type(mod) for mod in mod2.modules()]
+    return mod1_module_types == mod2_module_types
+
 
 
 def compare_model_stub(

@@ -1528,12 +1528,15 @@ class TestFrozenOptimizations(JitTestCase):
                 return self.dropout(x)
 
         mod = torch.jit.script(Net())
+        # set optimize to False here, by default freezing runs optimize_frozen_module
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        # inspect frozen mod
+        FileCheck().check("aten::dropout").run(frozen_mod.graph)
+        torch.jit.optimize_frozen_module(frozen_mod)
+        FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
+
         script_mod = torch.jit.script(mod)
         script_mod.eval()
-
-        # By default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
-        FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
 
         input = torch.randn(2)
         output_s = script_mod.forward(input)
@@ -1550,12 +1553,15 @@ class TestFrozenOptimizations(JitTestCase):
                 return self.dropout(x)
 
         mod = torch.jit.script(Net())
+        # set optimize to False here, by default freezing runs optimize_frozen_module
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        # inspect frozen mod
+        FileCheck().check("aten::feature_dropout").run(frozen_mod.graph)
+        torch.jit.optimize_frozen_module(frozen_mod)
+        FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
+
         script_mod = torch.jit.script(mod)
         script_mod.eval()
-
-        # By default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
-        FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
 
         input = torch.randn(2, 2)
         output_s = script_mod.forward(input)
