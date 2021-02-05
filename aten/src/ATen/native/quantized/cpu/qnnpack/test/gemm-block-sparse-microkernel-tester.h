@@ -351,7 +351,7 @@ class GemmBlockSparseMicrokernelTester {
     std::vector<float> acc(m() * n());
     auto m_blocks = (m() + mr()  - 1) / mr();
     auto k_blocks = (k() + 4  - 1) / 4;
-    std::vector<uint8_t> a_packed(m_blocks * k_blocks * mr() * 4 + 8);
+    std::vector<uint8_t> a_packed(m_blocks * k_blocks * mr() * 4 + 8, 0);
 
     const uint8_t* aPtr = a.data();
 
