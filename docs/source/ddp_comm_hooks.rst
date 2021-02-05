@@ -16,7 +16,7 @@ strategies for more advanced use cases.
     DDP communication hooks can only support single process single device mode
     on NCCL backend.
 
-How to Use A Communication Hook?
+How to Use a Communication Hook?
 --------------------------------
 
 To use a communication hook, the user just needs to let the DDP model register
@@ -51,8 +51,9 @@ PowerSGD Hooks
 ^^^^^^^^^^^^^^^^
 
 .. warning ::
-    PowerSGD requires an extra copy of gradients for error feedback,
-    which may be infeasible for use cases that have a memory constraint.
+    As a biased compressor, PowerSGD requires an extra copy of gradients to
+    enable error feedback for a higher accuracy.
+    This may be infeasible for the use cases that have a memory constraint.
 
 .. warning ::
     The current implementation may cause gradient overflow for FP16 input.
@@ -63,6 +64,6 @@ PowerSGD Hooks
 Acknowledgements
 ----------------
 
-Thanks PowerSGD paper author Thijs Vogels for the code review on PowerSGD
-communication hook and the
+Many thanks to PowerSGD paper author **Thijs Vogels** for the code review on
+PowerSGD communication hook and the
 `comparison experiments <https://observablehq.com/@tvogels/powersgd-benchmark>`_.

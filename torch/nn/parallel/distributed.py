@@ -1028,7 +1028,7 @@ class DistributedDataParallel(Module):
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
             hook (callable): Averages gradient tensors across workers and defined as:
-                             hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+                             ``hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
@@ -1068,7 +1068,7 @@ class DistributedDataParallel(Module):
             DDP communication hook is experimental and subject to change.
 
         Example::
-            Below is an example of a noop hook that returns back the same tensors:
+            Below is an example of a noop hook that returns the same tensors.
 
             >>> def noop(state: object, bucket: dist._GradBucket): -> torch.futures.Future
             >>>     fut = torch.futures.Future()
@@ -1092,7 +1092,6 @@ class DistributedDataParallel(Module):
             >>>     return fut.then(decode)
 
             >>> ddp.register_comm_hook(state = None, hook = encode_and_decode)
-
         """
         self._check_comm_hook(hook)
         dist._register_comm_hook(self.reducer, state, hook)
