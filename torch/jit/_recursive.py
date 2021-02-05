@@ -9,6 +9,7 @@ from typing import Dict, List, Set, Type
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args, get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
+from torch.jit._check import AttributeTypeIsSupportedChecker
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
 
@@ -388,6 +389,7 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
     assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
     concrete_type = get_module_concrete_type(nn_module, share_types)
+    AttributeTypeIsSupportedChecker().check(nn_module)
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
