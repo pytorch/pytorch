@@ -992,7 +992,7 @@ class DeviceCachingAllocator {
   }
 
   // Accumulates sizes of all memory blocks for given device in given pool
-  void cache_info_aux(BlockPool& pool, size_t* total, size_t* largest)
+  void cache_info_aux(const BlockPool& pool, size_t* total, size_t* largest)
   {
     for (const auto& block : pool.blocks) {
       size_t blocksize = block->size;
