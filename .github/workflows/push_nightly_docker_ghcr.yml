@@ -1,4 +1,4 @@
-name: Build PyTorch nightly docker and push to GitHub Container Registry
+name: Build PyTorch nightly Docker image and push to GitHub Container Registry
 on:
   schedule:
     # Push the nightly docker daily at 1 PM UTC
@@ -9,6 +9,8 @@ on:
 jobs:
   build-publish-docker:
     runs-on: ubuntu-18.04
+    env:
+      CR_PAT: ${{ secrets.CR_PAT }}
     steps:
       - uses: actions/checkout@v2
         with:

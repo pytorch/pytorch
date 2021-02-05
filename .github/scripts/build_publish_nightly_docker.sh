@@ -10,13 +10,16 @@ PYTORCH_NIGHTLY_COMMIT=$(git log -1 --pretty=%B origin/nightly | head -1 | \
 # Full name: ghcr.io/pytorch-nightly/pytorch:${PYTORCH_NIGHTLY_COMMIT}
 make -f docker.Makefile \
      DOCKER_REGISTRY=ghcr.io \
-     DOCKER_ORG=pytorch-nightly \
+     DOCKER_ORG=pytorch \
+     DOCKER_IMAGE=pytorch-nightly \
      DOCKER_TAG=${PYTORCH_NIGHTLY_COMMIT} \
      INSTALL_CHANNEL=pytorch-nightly BUILD_TYPE=official devel-image
 
 # Push the nightly docker to GitHub Container Registry
+echo $CR_PAT | docker login ghcr.io -u pytorch --password-stdin
 make -f docker.Makefile \
      DOCKER_REGISTRY=ghcr.io \
-     DOCKER_ORG=pytorch-nightly \
+     DOCKER_ORG=pytorch \
+     DOCKER_IMAGE=pytorch-nightly \
      DOCKER_TAG=${PYTORCH_NIGHTLY_COMMIT} \
      devel-push
