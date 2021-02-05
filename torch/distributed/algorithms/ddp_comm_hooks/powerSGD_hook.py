@@ -40,7 +40,7 @@ class PowerSGDState(object):
     they are typically turned on for performance.
 
     Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``]
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     1. To tune ``matrix_approximation_rank``, the user can increase it from 1 by factors of 2,
     until a satisfying accuracy can be reached.
