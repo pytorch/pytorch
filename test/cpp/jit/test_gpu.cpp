@@ -1504,7 +1504,9 @@ TEST(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
   TORCH_CHECK(tv3->getComputeAtView() == tv5 && tv3->nDims() == 3);
   TORCH_CHECK(tv4->hasComputeAt() && tv4->nDims() == 3);
   TORCH_CHECK(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
-  TORCH_CHECK(tv6->getComputeAtView() == tv7 && tv6->nDims() == 3);
+  TORCH_CHECK(
+      !tv6->hasComputeAt() && tv6->getThisComputeAtAxis() == 1 &&
+      tv6->nDims() == 3);
   TORCH_CHECK(!tv7->hasComputeAt());
 
   for (Val* val : fusion.vals()) {
@@ -1842,7 +1844,7 @@ TEST(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
 
   // Note that tv2 is also computed at tv3.
   TORCH_CHECK(tv1->getComputeAtView() == computeAtTarget);
-  TORCH_CHECK(tv2->getComputeAtView() == tv3);
+  TORCH_CHECK(!tv2->hasComputeAt() && tv2->getThisComputeAtAxis() == 1);
   TORCH_CHECK(!tv3->hasComputeAt());
 
   computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
@@ -2091,10 +2093,8 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer3_CUDA) {
   TORCH_CHECK(tv3->getComputeAtView() == tv5);
   TORCH_CHECK(tv4->getComputeAtView() == tv5);
 
-  // tv5 should be computed at tv6 since tv5 is added as an output
-  // before tv6. If we call fusion.addOutput(tv6) first, tv6 should be
-  // computed at tv5.
-  TORCH_CHECK(tv5->getComputeAtView() == tv6);
+  // Output tensors should not have computeAt
+  TORCH_CHECK(!tv5->hasComputeAt() && tv5->getThisComputeAtAxis() == 1);
   TORCH_CHECK(!tv6->hasComputeAt());
 
   for (Val* val : fusion.vals()) {
@@ -2169,7 +2169,7 @@ TEST(NVFuserTest, FusionComputeAtNoCommonConsumer_CUDA) {
   TORCH_CHECK(tv2->getComputeAtView() == tv4);
   TORCH_CHECK(tv3->getComputeAtView() == tv4);
   TORCH_CHECK(tv4->getComputeAtView() == tv5);
-  TORCH_CHECK(tv5->getComputeAtView() == tv6);
+  TORCH_CHECK(!tv5->hasComputeAt() && tv5->getThisComputeAtAxis() == 1);
   TORCH_CHECK(!tv6->hasComputeAt());
 
   computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
@@ -11113,7 +11113,9 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed1_CUDA) {
   TORCH_CHECK(tv3->getComputeAtView() == tv5 && tv3->nDims() == 3);
   TORCH_CHECK(tv4->hasComputeAt() && tv4->nDims() == 3);
   TORCH_CHECK(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
-  TORCH_CHECK(tv6->getComputeAtView() == tv7 && tv6->nDims() == 3);
+  TORCH_CHECK(
+      !tv6->hasComputeAt() && tv6->getThisComputeAtAxis() == 1 &&
+      tv6->nDims() == 3);
   TORCH_CHECK(!tv7->hasComputeAt());
 
   for (Val* val : fusion.vals()) {

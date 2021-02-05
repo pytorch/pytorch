@@ -179,44 +179,17 @@ void TensorView::setComputeAt(
       name(),
       ": ",
       thisPos);
-  // When computeAtView is a consumer, the CA axes must not include
-  // reductions. Note that an output tensor may be set as computed at
-  // another output tensor even if they are not a producer and a
-  // consumer.
-  if (isConsumerOf(computeAtView)) {
-    TORCH_INTERNAL_ASSERT(
-        std::none_of(
-            domain()->domain().begin(),
-            domain()->domain().begin() + thisPos,
-            [](IterDomain* id) { return id->isReduction(); }),
-        "Invalid computeAt for T",
-        name(),
-        " reduction domain inside computeAt axis.");
-  } else {
-    // Make sure both this and computeAtView are terminating
-    // outputs. Otherwise, setting computeAt at tensor computeAtView
-    // is invalid.
-    const auto outputs = FusionGuard::getCurFusion()->getTerminatingOutputs();
-    TORCH_INTERNAL_ASSERT(
-        std::find(outputs.begin(), outputs.end(), this) != outputs.end(),
-        "Invalid computeAt of T",
-        name(),
-        " at T",
-        computeAtView->name(),
-        ". They are not a producer-consumer pair, and T",
-        name(),
-        " is not a terminating output.");
-    TORCH_INTERNAL_ASSERT(
-        std::find(outputs.begin(), outputs.end(), computeAtView) !=
-            outputs.end(),
-        "Invalid computeAt of T",
-        name(),
-        " at T",
-        computeAtView->name(),
-        ". They are not a producer-consumer pair, and T",
-        computeAtView->name(),
-        " is not a terminating output.");
-  }
+  // computeAtView must be a consumer
+  TORCH_INTERNAL_ASSERT(isConsumerOf(computeAtView));
+  // The CA axes must not include reductions.
+  TORCH_INTERNAL_ASSERT(
+      std::none_of(
+          domain()->domain().begin(),
+          domain()->domain().begin() + thisPos,
+          [](IterDomain* id) { return id->isReduction(); }),
+      "Invalid computeAt for T",
+      name(),
+      " reduction domain inside computeAt axis.");
 
   TORCH_INTERNAL_ASSERT(
       relPos > 0 && (unsigned)relPos <= computeAtView->nDims(),
@@ -227,6 +200,18 @@ void TensorView::setComputeAt(
 
   compute_at_view_ = computeAtView;
   relative_compute_at_axis_ = relPos;
+  this_compute_at_axis_ = thisPos;
+}
+
+void TensorView::setComputeAt(int thisPos) {
+  TORCH_INTERNAL_ASSERT(
+      thisPos > 0 && (unsigned)thisPos <= nDims(),
+      "Invalid this computeAt position for T",
+      name(),
+      ": ",
+      thisPos);
+  compute_at_view_ = nullptr;
+  relative_compute_at_axis_ = 0;
   this_compute_at_axis_ = thisPos;
 }
 
@@ -723,20 +708,11 @@ TensorView* TensorView::cache_fork() {
   // Transform new output according to this TV
   TransformReplay::replayCasP(new_output, this, -1);
 
-  // Set the computeAt for this forked TensorView
-  // to the Fusion outputs without any uses
+  // Set the computeAt for this forked TensorView. It is a terminating
+  // output, so set only this position.
   if (hasComputeAt()) {
     auto this_ca_pos = getThisComputeAtAxis();
-    auto rel_ca_pos = getRelativeComputeAtAxis();
-
-    for (Val* out : fusion()->outputs()) {
-      if (out->getValType() == ValType::TensorView) {
-        if (out->uses().empty()) {
-          new_output->setComputeAt(
-              out->as<TensorView>(), this_ca_pos, rel_ca_pos);
-        }
-      }
-    }
+    new_output->setComputeAt(this_ca_pos);
   }
   return new_output;
 }

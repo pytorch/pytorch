@@ -117,47 +117,37 @@ void LoopNestGenerator::handle(const Expr* expr) {
   // Figure out what the entire loop structure should look like.
   std::deque<IterDomain*> loop_structure;
 
-  // Look at each axis individually in out's domain, first only setup loop
-  // structure within computeAt
-  for (int64_t out_i = 0; out_i < (int)out_tv->getThisComputeAtAxis();
-       out_i++) {
-    // Safe to use loop map since this is outside the compute at point
+  // Fill the entire loop structure by Looking at each axis
+  // individually in out's domain
+  for (size_t out_i = 0; out_i < out_tv->nDims(); out_i++) {
+    // Look up the concrete ID in the parallel map, not in the loop
+    // map, which also maps non-CA axes.
     auto concrete_id =
         gpu_lower->caParallelMap().getConcreteMappedID(out_tv->axis(out_i));
     loop_structure.push_back(concrete_id);
   }
 
-  auto out_id_it = loop_structure.begin();
+  auto loop_structure_it = loop_structure.begin();
   auto for_loop_it = for_loops_.begin();
   auto last_for_loop_matched = for_loops_.begin();
 
-  // If the loop is not within the compute at point,
-  // Tee up the loop structure
-
-  while (out_id_it != loop_structure.end() && for_loop_it != for_loops_.end()) {
+  // Match the loop structure with the current for-loops. Reuse
+  // matching loops and close unmatched ones.
+  while (loop_structure_it != loop_structure.end() &&
+         for_loop_it != for_loops_.end()) {
     auto lowered_out_id =
-        gpu_lower->lowerValue(*out_id_it)->as<kir::IterDomain>();
-    if (gpu_lower->caLoopMap().areMapped(
+        gpu_lower->lowerValue(*loop_structure_it)->as<kir::IterDomain>();
+    // Similar to the above, the parallel map is used rather than the
+    // loop map. Again, non-CA axes should not share loops, so the
+    // parallel map should be used.
+    if (gpu_lower->caParallelMap().areMapped(
             lowered_out_id, (*for_loop_it)->iter_domain())) {
-      out_id_it++;
+      loop_structure_it++;
       last_for_loop_matched = ++for_loop_it;
     } else {
       ++for_loop_it;
     }
   }
-
-  // Save position of out_id_it as we will append to loop structure
-  // invalidating it
-  auto out_id_i = std::distance(loop_structure.begin(), out_id_it);
-
-  // Append axes outside the computeAt to the loop structure
-  for (auto out_i = out_tv->getThisComputeAtAxis();
-       out_i < (unsigned int)out_tv->nDims();
-       out_i++) {
-    loop_structure.push_back(out_tv->axis((int)out_i));
-  }
-  // Reset out_id_it
-  out_id_it = loop_structure.begin() + out_id_i;
 
   auto n_loops_to_close =
       std::distance(last_for_loop_matched, for_loops_.end());
@@ -166,8 +156,9 @@ void LoopNestGenerator::handle(const Expr* expr) {
     closeFor();
   }
 
-  for (; out_id_it != loop_structure.end(); ++out_id_it) {
-    openFor(*out_id_it);
+  // Open the remaining needed loops
+  for (; loop_structure_it != loop_structure.end(); ++loop_structure_it) {
+    openFor(*loop_structure_it);
   }
 
   pushFront(gpu_lower->lowerExpr(expr));

@@ -471,9 +471,7 @@ void ComputeAt::setupOutputs() {
   if (touched_output_order.size() > 0) {
     for (size_t i = 0; i < touched_output_order.size() - 1; i++) {
       touched_output_order[i]->setComputeAt(
-          touched_output_order[i + 1],
-          (int)tv_data.at(touched_output_order[i]).getNewPosition(),
-          (int)tv_data.at(touched_output_order[i + 1]).getNewPosition());
+          (int)tv_data.at(touched_output_order[i]).getNewPosition());
     }
   }
 }

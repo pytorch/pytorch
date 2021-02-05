@@ -324,6 +324,8 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   // computeAt with outputs relative to eachother
   void setComputeAt(TensorView* computeAtView, int thisPos, int relPos);
 
+  void setComputeAt(int thisPos);
+
  private:
   int normalizeAxisPos(int pos) const {
     if (pos < 0) {

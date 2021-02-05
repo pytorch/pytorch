@@ -520,11 +520,16 @@ std::string ComputeAtMap::toString() {
 
   for (const auto& disjoint_set : disjoint_sets) {
     ss << "  disjoint_set{ ";
+    TORCH_INTERNAL_ASSERT(disjoint_set->size() > 0);
+    auto concrete_id = concrete_id_map_.at(disjoint_set->front());
     for (auto it = disjoint_set->begin(); it != disjoint_set->end(); it++) {
       if (it != disjoint_set->begin()) {
         ss << ", ";
       }
       ss << (*it);
+      if (*it == concrete_id) {
+        ss << "*";
+      }
     }
     ss << " }";
     if (mapping_mode_ == MappingMode::PARALLEL) {
