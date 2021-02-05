@@ -72,11 +72,11 @@ class _FunctionalAdadelta(object):
                 acc_deltas.append(state['acc_delta'])
 
         with torch.no_grad():
-            F.adadelta(params,
-                       grads,
-                       square_avgs,
-                       acc_deltas,
-                       lr,
-                       rho,
-                       eps,
-                       weight_decay)
+            F._adadelta(params,
+                        grads,
+                        square_avgs,
+                        acc_deltas,
+                        lr,
+                        rho,
+                        eps,
+                        weight_decay)

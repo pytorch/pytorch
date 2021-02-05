@@ -1,24 +1,23 @@
 #ifdef TORCH_ENABLE_LLVM
 #include <gtest/gtest.h>
 
-#include "test/cpp/tensorexpr/test_base.h"
+#include <test/cpp/tensorexpr/test_base.h>
 
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <test/cpp/tensorexpr/padded_buffer.h>
+#include <test/cpp/tensorexpr/test_utils.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <cmath>
 #include <numeric>
 
 namespace torch {
 namespace jit {
-using namespace torch::jit::tensorexpr;
 using namespace torch::jit::tensorexpr;
 
 using LLVMExprEval = ExprEval<LLVMCodeGen>;
@@ -1481,7 +1480,8 @@ TEST(LLVM, RFactorReduction) {
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
   loop_n = loops.at(1);
-  loop.rfactor(b->body(), loop_n->var(), loop_n->body());
+  auto b_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(b_body, loop_n->var(), loop_n->body());
 
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
@@ -1522,7 +1522,8 @@ TEST(LLVM, RFactorVectorizedReduction) {
   For* loop_k = loops.at(0);
   For* loop_m = loops.at(1);
   For* loop_n = loops.at(2);
-  loopnest.rfactor(b->body(), loop_n->var());
+  auto b_body = NodeFinder<ReduceOp>::find(loopnest.root_stmt())[0];
+  loopnest.rfactor(b_body, loop_n->var());
 
   loops = NodeFinder<For>::find(loopnest.root_stmt());
   loop_k = loops.at(0);

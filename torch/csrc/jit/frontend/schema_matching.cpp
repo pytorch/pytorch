@@ -275,7 +275,7 @@ static bool varargsCanBeUsedAsList(
 
   // matching varargs of typevar list nyi
   bool typevar_list = argument_is_list &&
-      arg.type()->cast<ListType>()->getElementType()->cast<VarType>();
+      arg.type()->castRaw<ListType>()->getElementType()->cast<VarType>();
 
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input

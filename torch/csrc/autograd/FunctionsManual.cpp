@@ -591,7 +591,9 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
 // calls that appear in derivative formulas. If the tensor has requires_grad
 // set, this function returns its strides or throws an error if the tensor
 // is sparse. If requires_grad is not set, an empty array is returned since
-// there will be no backward pass.
+// there will be no backward pass. There has one special case, if input is MKLDNN
+// tensor and has requires_grad set, just return an empty array, the reason is
+// that MKLDNN tensor is a opaque tensor which has not stride info.
 //
 // This function only supports the case where `input` is the tensor whose
 // single derivative is being calculated.
@@ -612,6 +614,7 @@ at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & 
       "' tensor to be strided, but a sparse tensor was given instead. ",
       "Please either use a strided tensor or set requires_grad=False for '",
       input_name, "'");
+    if (input.is_mkldnn()) return IntArrayRef({});
     return input.strides();
   } else {
     return IntArrayRef({});
@@ -1949,21 +1952,16 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto gsigma = grads[1];
 
   auto u = raw_u;
-  // Currently torch.svd for complex dtypes returns the conjugate of V,
-  // while the backward formula is derived with just V (without the conjugation)
-  // therefore here we need to conjugate the V output of SVD and grads[2].
-  // Once https://github.com/pytorch/pytorch/issues/45821 is resolved
-  // extra .conj(), that are marked below in the code, shall be removed.
-  auto v = raw_v.conj();  // TODO: remove .conj()
+  auto v = raw_v;
   auto gu = grads[0];
-  auto gv = grads[2].conj();  // TODO: remove .conj()
+  auto gv = grads[2];
 
   if (!some) {
     // We ignore the free subspace here because possible base vectors cancel
     // each other, e.g., both -v and +v are valid base for a dimension.
     // Don't assume behavior of any particular implementation of svd.
     u = raw_u.narrow(-1, 0, k);
-    v = raw_v.narrow(-1, 0, k).conj();  // TODO: remove .conj()
+    v = raw_v.narrow(-1, 0, k);
     if (gu.defined()) {
       gu = gu.narrow(-1, 0, k);
     }
