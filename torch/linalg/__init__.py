@@ -364,31 +364,34 @@ Examples::
 """)
 
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
-matrix_rank(input, tol=None, hermitian=False) -> Tensor
+matrix_rank(input, tol=None, hermitian=False, *, out=None) -> Tensor
 
 Computes the numerical rank of a matrix :attr:`input`, or of each matrix in a batched :attr:`input`.
-The matrix rank is computed as the number of singular values (or the absolute eigenvalues when :attr:`hermitian` is ``True``)
-above the specified :attr:`tol` threshold.
 
-If :attr:`tol` is not specified, :attr:`tol` is set to
-``S.max(dim=-1) * max(input.shape[-2:]) * eps`` where ``S`` is the singular values
-(or the absolute eigenvalues when :attr:`hermitian` is ``True``),
-and ``eps`` is the epsilon value for the datatype of :attr:`input`.
-The epsilon value can be obtained using ``eps`` attribute of :class:`torch.finfo`.
+The matrix rank is computed as the number of singular values (or absolute eigenvalues when :attr:`hermitian` is ``True``)
+that are greater than the specified :attr:`tol` threshold.
 
-The method to compute the matrix rank is done using singular value decomposition (see :func:`torch.linalg.svd`) by default.
-If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
-and the computation of the rank is done by obtaining the eigenvalues (see :func:`torch.linalg.eigvalsh`).
+If :attr:`tol` is not specified, :attr:`tol` is set to ``S.max(dim=-1)*max(input.shape[-2:])*eps``,
+where ``S`` is the singular values (or absolute eigenvalues when :attr:`hermitian` is ``True``), and
+``eps`` is the epsilon value for the datatype of :attr:`input`. The epsilon value can be obtained using
+the ``eps`` attribute of :class:`torch.finfo`.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
+Supports input of float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
+.. note:: The matrix rank is computed using singular value decomposition (see :func:`torch.linalg.svd`) by default.
+          If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
+          and the computation is done by obtaining the eigenvalues (see :func:`torch.linalg.eigvalsh`).
+
 Args:
-    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+    input (Tensor): the input matrix of size `(m, n)` or the batch of matrices of size `(*, m, n)`
                     where `*` is one or more batch dimensions.
-    tol (float, optional): the tolerance value. Default: ``None``
-    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
+    tol (float, optional): the tolerance value. Default is ``None``
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default is ``False``.
+
+Keyword args:
+    out (Tensor, optional): tensor to write the output to. Default is ``None``.
 
 Examples::
 
