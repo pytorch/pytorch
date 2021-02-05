@@ -1,12 +1,12 @@
-import warnings
-
 from torch.utils.data import IterDataPipe, Sampler, SequentialSampler
 from typing import Callable, TypeVar, Type, Iterator, Sized
+
+from .callable import CallableIterDataPipe
 
 T_co = TypeVar('T_co', covariant=True)
 
 
-class FilterIterDataPipe(IterDataPipe[T_co]):
+class FilterIterDataPipe(CallableIterDataPipe[T_co]):
     r""" :class:`FilterIterDataPipe`.
 
     Iterable DataPipe to filter elements from datapipe according to filter_fn.
@@ -14,27 +14,17 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         datapipe: Iterable DataPipe being filterd
         filter_fn: Customized function mapping an element to a boolean.
     """
-    datapipe: IterDataPipe
-    filter_fn: Callable[..., bool]
-
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  *args,
                  filter_fn: Callable[..., bool],
                  **kwargs,
                  ) -> None:
-        super().__init__()
-        self.datapipe = datapipe
-        if filter_fn.__name__ == '<lambda>':
-            warnings.warn("Lambda function for `filter_fn` is not supported for pickle, "
-                          "please use regular python function instead.")
-        self.filter_fn = filter_fn  # type: ignore
-        self.args = args
-        self.kwargs = kwargs
+        super().__init__(datapipe, *args, fn=filter_fn, **kwargs)
 
     def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
-            if (self.filter_fn(data, *self.args, **self.kwargs)):
+            if (self.fn(data, *self.args, **self.kwargs)):
                 yield data
 
     def __len__(self):
