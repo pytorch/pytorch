@@ -1598,6 +1598,19 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(NotImplementedError, "new_args"):
             x[0] = 4
 
+    def test_partial_trace(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if y:
+                    return 2 * x
+                else:
+                    return x
+        mod = Foo()
+        mod_true = symbolic_trace(mod, concrete_args={'y': True})
+        mod_false = symbolic_trace(mod, concrete_args={'y': False})
+        self.assertEqual(mod_true(3), 6)
+        self.assertEqual(mod_false(3), 3)
+
     def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1609,10 +1622,11 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(M())
 
-        out_nodes = [n for n in traced.graph.nodes if n.op == "output"]
-        out = out_nodes[-1]
-        relu_out = traced.graph.call_method(method_name='relu', args=(out.args[0],))
-        out.replace_all_uses_with(relu_out)
+        out = [n for n in traced.graph.nodes if n.op == "output"][-1]
+        with traced.graph.inserting_before(out):
+            relu_out = traced.graph.call_method(method_name='relu',
+                                                args=(out.args[0],))
+        out.args = (relu_out,)
 
         traced.recompile()
 
@@ -1635,21 +1649,12 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(M())
 
-        # TODO: Figure out why using `capture_stderr` as a context
-        # manager doesn't work in this case even though it works on the
-        # other `test_custom_traceback` test. I'd put the "woman
-        # shrugging" emoji in here but I don't want to press my luck
-        # in terms of things unexpectedly failing
+        # Do not change this to `capture_stderr` or another context
+        # manager without ensuring that the output is as expected
         try:
             traced(torch.rand(5, 5))
         except RuntimeError:
             captured = traceback.format_exc()
-
-        # Let's test our test--this will fail if someone changes the
-        # above to `capture_stderr`. I want this in here since the test
-        # wouldn't fail otherwise (obviously only "" is in "" so
-        # `self.AssertNotIn` will always hold)
-        self.assertNotEqual(captured, "")
 
         self.assertNotIn("Call using an FX-traced Module, line 4 of the "
                          "traced Module’s generated forward function:",
