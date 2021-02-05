@@ -205,6 +205,7 @@ class TestUnaryUfuncs(TestCase):
     @ops(unary_ufuncs)
     def test_variant_consistency(self, device, dtype, op):
         torch_op = op.get_op()
+
         def _fn(t):
             return torch_op(t)
 
