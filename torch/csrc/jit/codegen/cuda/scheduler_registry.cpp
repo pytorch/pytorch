@@ -186,29 +186,46 @@ class NormalizationScheduler : public SchedulerEntry {
       return count;
     };
 
-    for (auto red : reduction_tv) {
-      if (!valid_axis_count) {
-        valid_axis_count = true;
-        axis_count = reduction_root_size(red);
-      } else {
-        if (reduction_root_size(red) != axis_count) {
-          return false;
-        }
-      }
-    }
-
     // Another contraint normalization scheduler has is
     //  that all other TVs must have the same root domain width
     //  can consider relaxing later
     valid_axis_count = false;
     axis_count = 0;
 
+    // Want to use a predicate to filter out harmless cases, i.e. castOps
+    auto qualify_tv = [](TensorView* tv) {
+      if (!tv->definition()) {
+        return false;
+      }
+      if (auto uop = dynamic_cast<UnaryOp*>(tv->definition())) {
+        if (uop->getUnaryOpType() == UnaryOpType::Cast) {
+          if (uop->in()->isFusionInput() || uop->out()->isFusionOutput()) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+
     for (auto tv : other_tv) {
+      if (qualify_tv(tv)) {
+        if (!valid_axis_count) {
+          axis_count = tv->getRootDomain().size();
+          valid_axis_count = true;
+        } else {
+          if (axis_count != tv->getRootDomain().size()) {
+            return false;
+          }
+        }
+      }
+    }
+
+    for (auto red : reduction_tv) {
       if (!valid_axis_count) {
-        axis_count = tv->getRootDomain().size();
         valid_axis_count = true;
+        axis_count = reduction_root_size(red);
       } else {
-        if (axis_count != tv->getRootDomain().size()) {
+        if (reduction_root_size(red) != axis_count) {
           return false;
         }
       }
