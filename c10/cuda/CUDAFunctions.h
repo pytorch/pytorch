@@ -25,6 +25,9 @@ namespace cuda {
 // It still might log a warning for user first time it's invoked
 C10_CUDA_API DeviceIndex device_count() noexcept;
 
+// Returns true if cudaDriverGetVersion returns value greater than 0
+C10_CUDA_API bool driver_installed() noexcept;
+
 // Version of device_count that throws is no devices are detected
 C10_CUDA_API DeviceIndex device_count_ensure_non_zero();
 

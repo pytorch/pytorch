@@ -107,6 +107,14 @@ PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject *self, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_isAvailable(PyObject *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  poison_fork();
+  return PyBool_FromLong(c10::cuda::driver_installed() && at::cuda::device_count() > 0);
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
@@ -538,6 +546,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDeviceCount", THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
   {"_cuda_canDeviceAccessPeer", THCPModule_canDeviceAccessPeer_wrap, METH_VARARGS, nullptr},
   {"_cuda_getArchFlags", THCPModule_getArchFlags, METH_NOARGS, nullptr},
+  {"_cuda_isAvailable", THCPModule_isAvailable, METH_NOARGS, nullptr},
   {"_cuda_isInBadFork", THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     THCPModule_getCurrentStream_wrap, METH_O, nullptr},
