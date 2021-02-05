@@ -768,6 +768,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,
+        torch.relu6: lambda input, inplace=False: -1,
         torch.remainder: lambda input, other, out=None: -1,
         torch.renorm: lambda input, p, dim, maxnorm, out=None: -1,
         torch.repeat_interleave: lambda input, dim=None: -1,

@@ -173,8 +173,16 @@ Tensor selu(const Tensor & self) {
   return at::elu(self, SELU_ALPHA, SELU_SCALE);
 }
 
+Tensor relu6(const Tensor & self) {
+  return at::hardtanh(self, /*min_val=*/0, /*max_val=*/6);
+}
+
 Tensor & selu_(Tensor & self) {
   return at::elu_(self, SELU_ALPHA, SELU_SCALE);
+}
+
+Tensor & relu6_(Tensor & self) {
+  return at::hardtanh_(self, /*min_val=*/0, /*max_val=*/6);
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
