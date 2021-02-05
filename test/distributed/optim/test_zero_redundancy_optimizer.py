@@ -14,7 +14,7 @@ import torch.distributed as dist
 from typing import List, Any, Type, cast
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
-from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
+from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase, skip_if_not_multigpu
 from torch.testing._internal.common_distributed import skip_if_rocm
 
 import copy
@@ -335,7 +335,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         all_trainable()
         some_trainable()
 
-    @skip_if_no_gpu
+    @skip_if_not_multigpu
     def test_collect_shards(self):
         """ Check the state consolidation mechanism, and the state dict exposed by ZeroRedundancyOptimizer"""
         self.dist_init(self.rank)
@@ -450,7 +450,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
             check(optimizer)
 
-    @skip_if_no_gpu
+    @skip_if_not_multigpu
     def test_state_dict_distributed(self):
         self.dist_init(self.rank)
         RECIPIENT_RANK = 0
@@ -557,7 +557,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             run_grad_step(model_oss2, head_oss2, sharded_optimizer2)
             check_equal_models("parameters of the two identical models have diverged (after reloading)")
 
-    @skip_if_no_gpu
+    @skip_if_not_multigpu
     def test_pytorch_parity(self):
         """When combined with DDP, check that ZeroRedundancyOptimizer(optimizer) and the same monolithic optimizer
         give the exact same results

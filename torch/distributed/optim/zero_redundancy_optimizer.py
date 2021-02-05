@@ -3,10 +3,10 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 
-from collections import OrderedDict, deque
+from collections import OrderedDict
 import copy
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Deque
+from typing import Any, Callable, Dict, List, Optional, Type
 
 import torch
 import torch.distributed as dist
@@ -127,7 +127,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         self.bucket_max_size = bucket_cap_kb
 
         self.should_bucket_param: List[bool] = []
-        self.work_handles: Deque[Any] = deque()
         self._setup_bucket_strategy()
         self.initialized = True
 
