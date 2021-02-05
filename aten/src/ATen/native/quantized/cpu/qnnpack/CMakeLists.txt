@@ -216,6 +216,8 @@ set(PYTORCH_QNNPACK_AARCH32_ASM_UKERNELS
   src/q8gemm/4x8-aarch32-neon.S
   src/q8gemm/4x8-dq-aarch32-neon.S
   src/q8gemm/4x8c2-xzp-aarch32-neon.S
+  src/q8gemm_sparse/8x4-packA-aarch32-neon.S
+  src/q8gemm_sparse/8x4c1x4-dq-packedA-aarch32-neon.S
   src/q8gemm_sparse/8x4c1x4-dq-aarch32-neon.S)
 
 set(PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS
@@ -808,6 +810,14 @@ if(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
   target_include_directories(q8gemm-bench PRIVATE src)
   target_compile_definitions(q8gemm-bench PRIVATE pytorch_PYTORCH_QNNPACK_BENCHMARK_GEMMLOWP=0)
   target_link_libraries(q8gemm-bench PRIVATE pytorch_qnnpack cpuinfo fp16 benchmark)
+
+  add_executable(q8gemm-sparse-bench bench/q8gemm_sparse.cc)
+  set_target_properties(q8gemm-sparse-bench PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_include_directories(q8gemm-sparse-bench PRIVATE src)
+  target_link_libraries(q8gemm-sparse-bench PRIVATE pytorch_qnnpack cpuinfo fp16 benchmark)
 
   add_executable(hgemm-bench bench/hgemm.cc)
   set_target_properties(hgemm-bench PROPERTIES
