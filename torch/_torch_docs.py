@@ -3850,8 +3850,7 @@ Example::
             [-1.1734,  0.7230]])
 """.format(**common_args))
 
-add_docstr(torch.inverse,
-           r"""
+add_docstr(torch.inverse, r"""
 inverse(input, *, out=None) -> Tensor
 
 Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batches
@@ -3859,6 +3858,8 @@ of 2D square tensors, in which case this function would return a tensor composed
 individual inverses.
 
 Supports real and complex input.
+
+.. note:: :func:`torch.inverse` is deprecated. Please use :func:`torch.linalg.inv` instead.
 
 .. note::
 
