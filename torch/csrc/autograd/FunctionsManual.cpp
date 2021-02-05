@@ -2,19 +2,20 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
+#include <ATen/BatchedTensorImpl.h>
+#include <ATen/core/Reduction.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/SparseTensorUtils.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/Utils.h>
-#include <c10/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/core/Reduction.h>
-#include <ATen/BatchedTensorImpl.h>
-#include <ATen/Dispatch.h>
-#include <ATen/ScalarOps.h>
-#include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/native/IndexingUtils.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/accumulate.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -2736,9 +2737,9 @@ infinitely_differentiable_native_layer_norm_backward(
   const auto input_ndim = X.dim();
   const int axis = input_ndim - normalized_ndim;
   const int64_t M =
-      at::prod_intlist(input_shape.cbegin(), input_shape.cbegin() + axis);
+      c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
   const int64_t N =
-      at::prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
+      c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
 
   Tensor dX;
   Tensor dgamma;
@@ -2942,7 +2943,7 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
   auto dense_grad = sparse_grad_out.is_sparse() ? sparse_grad_out.to_dense() : sparse_grad_out;
   auto full_size = sparse_grad_out.sizes();
   auto flattened_grad_shape = values_shape.vec();
-  flattened_grad_shape[0] = at::prod_intlist(full_size.slice(0, indices.size(0)));
+  flattened_grad_shape[0] = c10::multiply_integers(full_size.slice(0, indices.size(0)));
   auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
   auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
   return flattened_dense_grad.index_select(0, flattened_indices);

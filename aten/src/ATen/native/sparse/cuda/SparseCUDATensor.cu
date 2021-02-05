@@ -1,13 +1,14 @@
+#include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
-#include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-
-#include <THC/THCThrustAllocator.cuh>
+#include <c10/macros/Macros.h>
+#include <c10/util/accumulate.h>
 #include <THC/THCTensorSort.cuh>
+#include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -16,10 +17,9 @@
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <thrust/system/cuda/execution_policy.h>
 #include <thrust/transform.h>
 #include <thrust/unique.h>
-#include <thrust/system/cuda/execution_policy.h>
-#include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 
@@ -91,7 +91,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   if (newValues.numel() > 0) {
     const int SZ = 4;
     values = values.contiguous();
-    int64_t stride = at::prod_intlist(values.sizes().slice(1));
+    int64_t stride = c10::multiply_integers(values.sizes().slice(1));
     dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
     dim3 block(C10_WARP_SIZE, SZ);
     AT_DISPATCH_ALL_TYPES_AND2(
