@@ -199,10 +199,6 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
     but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
 
-    TODO: The above procedure does two matmul+allreduce steps per iteration --
-    one left multiplication and one right multiplication.
-    For warm-start, can take one such step at a time, and alternate between them.
-
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
             To tune the compression configs, see Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``].
@@ -386,6 +382,10 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         for tensor, p, q in zip(high_rank_tensors, ps, qs):
             torch.matmul(tensor.t(), p, out=q)
 
+        # TODO: The above procedure does two matmul+allreduce steps per iteration --
+        # one left multiplication and one right multiplication.
+        # For warm-start, can take one such step at a time, and alternate between them.
+
         # Allreduce Qs.
         return [
             dist.all_reduce(
@@ -458,10 +458,6 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     Note that this communication hook enforces vanilla allreduce for the first ``state.start_powerSGD_iter`` iterations.
     This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
     but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
-
-    TODO: The above procedure does two matmul+allreduce steps per iteration --
-    one left multiplication and one right multiplication.
-    For warm-start, can take one such step at a time, and alternate between them.
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
@@ -582,6 +578,11 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             state.p_memory_dict[bucket_index],
             out=state.q_memory_dict[bucket_index],
         )
+
+
+        # TODO: The above procedure does two matmul+allreduce steps per iteration --
+        # one left multiplication and one right multiplication.
+        # For warm-start, can take one such step at a time, and alternate between them.
 
         return [
             dist.all_reduce(
