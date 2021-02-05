@@ -1,11 +1,11 @@
 #pragma once
 #include <assert.h>
+#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
-#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 
 namespace torch {
 
@@ -70,11 +70,13 @@ struct Package;
 
 struct TORCH_API LoadBalancer {
   LoadBalancer(size_t n) : locks_(new uint64_t[8 * n]), n_(n) {
+    // 8*... to avoid false sharing of atomics on the same cache line
     memset(locks_, 0, 8 * n_ * sizeof(uint64_t));
   }
   void setResourceLimit(size_t n) {
     n_ = n;
   }
+#ifndef _WIN32
   int acquire() {
     thread_local int last = 0;
     size_t minusers = SIZE_MAX;
@@ -107,7 +109,14 @@ struct TORCH_API LoadBalancer {
   void free(int where) {
     __atomic_fetch_sub(&locks_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
   }
-
+#else
+  int acquire() {
+    TORCH_INTERNAL_ASSERT(false, "NYI: windows acquire");
+  }
+  void free(int where) {
+    TORCH_INTERNAL_ASSERT(false, "NYI: windows free");
+  }
+#endif
  private:
   uint64_t* locks_;
   size_t n_;

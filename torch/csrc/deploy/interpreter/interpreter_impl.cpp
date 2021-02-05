@@ -2,8 +2,8 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <iostream>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
+#include <iostream>
 
 #include <assert.h>
 #include <pybind11/embed.h>
@@ -311,8 +311,9 @@ struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
     save_storage.release();
     load_storage.release();
     get_package.release();
-    if(Py_FinalizeEx() != 0) {
-      exit(1); // can't use TORCH_INTERNAL_ASSERT because we are in a non-throwing destructor.
+    if (Py_FinalizeEx() != 0) {
+      exit(1); // can't use TORCH_INTERNAL_ASSERT because we are in a
+               // non-throwing destructor.
     }
     PyMem_RawFree(program);
   }

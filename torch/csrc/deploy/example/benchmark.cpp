@@ -1,6 +1,3 @@
-#define _GNU_SOURCE
-#include <dlfcn.h>
-
 #include <pthread.h>
 #include <algorithm>
 #include <atomic>
