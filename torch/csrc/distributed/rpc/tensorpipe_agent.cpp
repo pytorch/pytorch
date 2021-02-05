@@ -740,19 +740,13 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           Message&& requestMessage,
           std::shared_ptr<LazyStreamContext> ctx) mutable {
         if (error) {
-          // FIXME This is not a correct way to check whether this error was
-          // "intentionally" caused by the remote end shutting down. We should
-          // find a better way, Perhaps sending an empty message?
-          if ((error.isOfType<tensorpipe::PipeClosedError>() &&
-               !rpcAgentRunning_.load()) ||
-              error.isOfType<tensorpipe::EOFError>()) {
+          if (shuttingDown_) {
             // This is expected.
           } else {
             LOG(WARNING)
                 << "RPC agent for " << workerInfo_.name_
                 << " encountered error when reading incoming request from "
-                << pipe->getRemoteName() << ": " << error.what()
-                << " (this is expected to happen during shutdown)";
+                << pipe->getRemoteName() << ": " << error.what();
           }
           return;
         }
@@ -1069,7 +1063,7 @@ void TensorPipeAgent::sync() {
 }
 
 // TODO: Remove join()
-void TensorPipeAgent::join() {
+void TensorPipeAgent::join(bool shutdown) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
   // This method behaves like a barrier, as it can only return once all workers
   // have no more requests pending, including "nested" requests (triggered from
@@ -1113,6 +1107,10 @@ void TensorPipeAgent::join() {
               << (*totalClientActiveCalls[0].data_ptr<int64_t>())
               << " active client calls across all workers";
       if (*totalClientActiveCalls[0].data_ptr<int64_t>() == 0) {
+        if (shutdown) {
+          shuttingDown_ = true;
+          processGroup_->barrier()->wait();
+        }
         break;
       }
     }
