@@ -22,6 +22,8 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
+from torch.fx.experimental.normalize import normalize_functional_args
+from torch.testing._internal.common_nn import module_tests, new_module_tests
 
 try:
     from torchvision.models import resnet18
@@ -748,6 +750,28 @@ terrible spacing
         a = torch.rand(64, 3, 7, 7)
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
+
+    @skipIfNoTorchVision
+    def test_normalize_functional(self):
+        m = resnet18()
+        class FunctionalTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                leaves = set([torch.nn.BatchNorm2d])
+                return type(m) in leaves
+
+        traced = torch.fx.GraphModule(m, FunctionalTracer().trace(m))
+
+        input = torch.randn(5, 3, 224, 224)
+        ref_outs = traced(input)
+
+        traced = normalize_functional_args(traced)
+
+        test_outs = traced(input)
+        self.assertEqual(test_outs, ref_outs)
+
+        for node in traced.graph.nodes:
+            if node.target == torch.nn.functional.relu:
+                self.assertEqual(len(node.args), 0)
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
