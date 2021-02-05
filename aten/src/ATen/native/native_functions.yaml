@@ -95,10 +95,10 @@
   dispatch:
     DefaultBackend: _fw_primal
 
-- func: make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
+- func: _make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
   variants: function
 
-- func: unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
+- func: _unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
   variants: function
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
