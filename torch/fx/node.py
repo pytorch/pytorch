@@ -327,6 +327,13 @@ class Node:
             maybe_return_typename: A single-element list that will store
                 a formatted string representing the output of the
                 generated ``forward`` function. Internal use only.
+
+        Returns:
+            str: If 1) we're using ``format_node`` as an internal helper
+                in the ``__str__`` method of ``Graph``, and 2) ``self``
+                is a placeholder Node, return ``None``. Otherwise,
+                return a  descriptive string representation of the
+                current Node.
         """
         if self.op == 'placeholder':
             assert isinstance(self.target, str)
