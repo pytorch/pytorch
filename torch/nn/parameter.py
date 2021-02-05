@@ -46,7 +46,18 @@ class Parameter(torch.Tensor):
     __torch_function__ = _disabled_torch_function_impl
 
 
-class UninitializedTensorMixin:
+class UninitializedParameter(Parameter):
+    r"""A parameter that is not initialized.
+
+    Unitialized Parameters are a a special case of :class:`torch.nn.Parameter`
+    where the shape of the data is still unknown.
+
+    Unlikely a :class:`torch.nn.Parameter`, uninitialized parameters
+    hold no data and attempting to access some properties, like their shape,
+    will throw a runtime error. The only operations that can be performed on a uninitialized
+    parameter are changing its datatype, moving it to a different device and
+    converting it to a regular :class:`torch.nn.Parameter`.
+    """
     _allowed_methods = [
         torch.Tensor.__hash__,
         torch.Tensor.size,
@@ -63,13 +74,16 @@ class UninitializedTensorMixin:
         torch.Tensor.cpu,
         torch.Tensor.to,
         torch.Tensor.get_device,
-        torch._has_compatible_shallow_copy_type,
-    ]
+        torch._has_compatible_shallow_copy_type] 
+
+    def __new__(cls, requires_grad=True):
+        data = torch.Tensor()
+        return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def materialize(self, shape, device=None, dtype=None):
-        r"""Create a Parameter or Tensor with the same properties of the uninitialized one.
+        r"""Create a Parameter with the same properties of the uninitialized one.
         Given a shape, it materializes a parameter in the same device
-        and with the same `dtype` as the current one or the specified ones in the
+        and with the same `dtype` as the current one or the specified ones in the 
         arguments.
 
         Args:
@@ -84,35 +98,35 @@ class UninitializedTensorMixin:
         if dtype is None:
             dtype = self.data.dtype
         self.data = torch.empty(shape, device=device, dtype=dtype)
-        self.__class__ = self.cls_to_become
+        self.__class__ = Parameter
 
     @property
     def shape(self):
         raise RuntimeError(
-            'Can\'t access the shape of an uninitialized parameter or buffer. '
+            'Can\'t access the shape of an uninitialized parameter. '
             'This error usually happens in `load_state_dict` when trying to load '
             'an uninitialized parameter into an initialized one. '
             'Call `forward` to initialize the parameters before accessing their attributes.')
 
     def share_memory_(self):
         raise RuntimeError(
-            'Can\'t share memory on an uninitialized parameter or buffer. '
+            'Can\'t share memory on an uninitialized parameter. '
             'Call `forward` to initialize the parameters before calling '
             '`module.share_memory()`.')
 
     def __repr__(self):
-        return f'<{self.__class__.__name__}>'
+        return 'Uninitialized parameter'
 
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
         return (
-            self.__class__,
+            UninitializedParameter,
             (self.requires_grad,)
         )
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        # method-wrapper is to detect access to Tensor properties that are
+        # method-wrapper is to detect access to Tensor properties that are 
         # wrapped in descriptors
         if func in cls._allowed_methods or func.__class__.__name__ == 'method-wrapper':
             if kwargs is None:
@@ -121,50 +135,6 @@ class UninitializedTensorMixin:
         raise ValueError(
             'Attempted to use an uninitialized parameter in {}. '
             'This error happens when you are using a `LazyModule` or '
-            'explicitly manipulating `torch.nn.parameter.{}` '
-            'objects. When using LazyModules Call `forward` with a dummy batch '
-            'to initialize the parameters before calling torch functions'.format(func, cls.__name__))
-
-
-def is_lazy(param):
-    return isinstance(param, UninitializedTensorMixin)
-
-
-class UninitializedParameter(UninitializedTensorMixin, Parameter):
-    r"""A parameter that is not initialized.
-
-    Unitialized Parameters are a a special case of :class:`torch.nn.Parameter`
-    where the shape of the data is still unknown.
-
-    Unlike a :class:`torch.nn.Parameter`, uninitialized parameters
-    hold no data and attempting to access some properties, like their shape,
-    will throw a runtime error. The only operations that can be performed on a uninitialized
-    parameter are changing its datatype, moving it to a different device and
-    converting it to a regular :class:`torch.nn.Parameter`.
-    """
-
-    cls_to_become = Parameter
-
-    def __new__(cls, requires_grad=True):
-        data = torch.Tensor()
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
-
-
-class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
-    r"""A buffer that is not initialized.
-
-    Unitialized Buffer is a a special case of :class:`torch.Tensor`
-    where the shape of the data is still unknown.
-
-    Unlike a :class:`torch.Tensor`, uninitialized parameters
-    hold no data and attempting to access some properties, like their shape,
-    will throw a runtime error. The only operations that can be performed on a uninitialized
-    parameter are changing its datatype, moving it to a different device and
-    converting it to a regular :class:`torch.Tensor`.
-    """
-
-    cls_to_become = torch.Tensor
-
-    def __new__(cls, requires_grad=False):
-        data = torch.Tensor()
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+            'explicitly manipulating `torch.nn.parameter.UninitializedParameter` '
+            'objects. When using LazyModules Call `forward` with a dummy batch ' 
+            'to initialize the parameters before calling torch functions'.format(func))
