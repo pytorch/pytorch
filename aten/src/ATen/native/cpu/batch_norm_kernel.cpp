@@ -71,8 +71,8 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
 
   Tensor alpha = at::empty({n_channel}, input.options());
   Tensor beta = at::empty({n_channel}, input.options());
-  auto alpha_data = alpha.data_ptr<scalar_t>();
-  auto beta_data = beta.data_ptr<scalar_t>();
+  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
   batch_norm_cpu_collect_linear_and_constant_terms<scalar_t>(
      alpha_data, beta_data, n_channel, weight, bias,
@@ -147,8 +147,8 @@ void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
 
   Tensor alpha = at::empty({n_channel}, input.options());
   Tensor beta = at::empty({n_channel}, input.options());
-  auto alpha_data = alpha.data_ptr<scalar_t>();
-  auto beta_data = beta.data_ptr<scalar_t>();
+  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
   batch_norm_cpu_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias,
@@ -195,9 +195,9 @@ void batch_norm_cpu_collect_stats_contiguous_impl(
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto mean_data = mean.data_ptr<scalar_t>();
-  auto var_sum_data = var_sum.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  scalar_t* mean_data = mean.data_ptr<scalar_t>();
+  scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
   // parallel dim reduce on 'channel'
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
@@ -238,9 +238,9 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto mean_data = mean.data_ptr<scalar_t>();
-  auto var_sum_data = var_sum.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  scalar_t* mean_data = mean.data_ptr<scalar_t>();
+  scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
   // Typical vertical reduce from shape of {NHW, C} to {C}.
   // Apply two path parallel reduction:
@@ -254,7 +254,7 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
   //
   int num_threads = at::get_num_threads();
   Tensor buffer = at::empty({num_threads, n_channel}, input.options()).zero_();
-  auto buffer_data = buffer.data_ptr<scalar_t>();
+  scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
 
   // compute mean per input
   at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
@@ -263,7 +263,7 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
                 "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     scalar_t* buffer_ptr = buffer_data + tid * n_channel;
     for (int64_t i = begin; i < end; i++) {
-      scalar_t* x_ptr = input_data + i * n_channel;
+      const scalar_t* x_ptr = input_data + i * n_channel;
       vec256::map2<scalar_t>(
           [](Vec x, Vec y) { return x + y; },
           buffer_ptr,
@@ -291,7 +291,7 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
     TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     scalar_t* buffer_ptr = buffer_data + tid * n_channel;
     for (int64_t i = begin; i < end; i++) {
-      scalar_t* x_ptr = input_data + i * n_channel;
+      const scalar_t* x_ptr = input_data + i * n_channel;
       vec256::map3<scalar_t>(
           [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
           buffer_ptr,
@@ -326,8 +326,8 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
@@ -363,8 +363,8 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
       accscalar_t sum = 0;
       accscalar_t dotp = 0;
       for (int64_t n = 0; n < n_batch; n++) {
-        scalar_t* x_ptr = input_data + n * n_channel * image_size + c * image_size;
-        scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
+        const scalar_t* x_ptr = input_data + n * n_channel * image_size + c * image_size;
+        const scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
 
         sum += vec256::reduce_all<scalar_t>(
             [](Vec& x, Vec& y) { return x + y; },
@@ -385,9 +385,9 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
           scalar_t grad_mean = sum / N;
 
           for (int64_t n = 0; n < n_batch; n++) {
-            scalar_t* x_ptr = input_data + n * n_channel * image_size + c * image_size;
+            const scalar_t* x_ptr = input_data + n * n_channel * image_size + c * image_size;
             scalar_t* dx_ptr = grad_input_data + n * n_channel * image_size + c * image_size;
-            scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
+            const scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
 
             // Scalar math:
             // for (int64_t j = 0; j < image_size; ++j) {
@@ -407,7 +407,7 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
         } else { // evaluation mode
           for (int64_t n = 0; n < n_batch; n++) {
             scalar_t* dx_ptr = grad_input_data + n * n_channel * image_size + c * image_size;
-            scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
+            const scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
 
             // Scalar math:
             // for (int64_t j = 0; j < image_size; ++j) {
@@ -446,8 +446,8 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
@@ -459,7 +459,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   scalar_t* running_var_data = conditional_data_ptr<scalar_t>(running_var);
 
   Tensor weight_ = weight.defined() ? weight : at::ones({n_channel}, input.options());
-  scalar_t* weight_data = weight_.data_ptr<scalar_t>();
+  const scalar_t* weight_data = weight_.data_ptr<scalar_t>();
 
   scalar_t* mean_ptr = nullptr;
   scalar_t* invstd_ptr = nullptr;
@@ -497,8 +497,8 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
     scalar_t* sum_ptr = sum_data + tid * n_channel;
     scalar_t* dotp_ptr = dotp_data + tid * n_channel;
     for (int64_t i = begin; i < end; i++) {
-      scalar_t* x_ptr = input_data + i * n_channel;
-      scalar_t* dy_ptr = grad_output_data + i * n_channel;
+      const scalar_t* x_ptr = input_data + i * n_channel;
+      const scalar_t* dy_ptr = grad_output_data + i * n_channel;
 
       vec256::map2<scalar_t>(
           [](Vec sum, Vec dy) { return sum + dy; },
@@ -542,8 +542,8 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
     at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
       for (int64_t i = begin; i < end; i++) {
         scalar_t* dx_ptr = grad_input_data + i * n_channel;
-        scalar_t* x_ptr = input_data + i * n_channel;
-        scalar_t* dy_ptr = grad_output_data + i * n_channel;
+        const scalar_t* x_ptr = input_data + i * n_channel;
+        const scalar_t* dy_ptr = grad_output_data + i * n_channel;
         if (train) {
           int64_t d = 0;
           for (; d < loop_size; d += Vec::size()) {
