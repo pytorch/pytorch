@@ -205,6 +205,10 @@ class TORCH_CUDA_CU_API DependencyCheck {
   // Return registered outputs of the fusion that are a dependency of any val of
   static std::unordered_set<Val*> getAllOutputsOf(
       const std::unordered_set<Val*>& of);
+
+  // Return all Vals that depend on the given Vals
+  static std::unordered_set<Val*> getAllDependentVals(
+      const std::unordered_set<Val*>& of);
 };
 
 // Expr sort will take a fusion and return a topologically sorted list of

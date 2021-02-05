@@ -430,6 +430,66 @@ struct FindOutputs : public IterVisitor {
   }
 };
 
+// Looks for and returns all values that depends on `of`.
+class DependentVals : public IterVisitor {
+ private:
+  // Which nodes to find dependencies of
+  const std::unordered_set<Val*>& of_;
+
+  // Dependencies we have so far
+  std::unordered_set<Val*> outs_;
+
+  // Boundary where we want to stop searching beyond
+  std::unordered_set<Val*> boundary_;
+
+  std::vector<Statement*> next(Val* v) override {
+    if (boundary_.find(v) != boundary_.end())
+      return std::vector<Statement*>();
+    return IterVisitor::next(v);
+  }
+
+  void handle(Val* val) override {
+    if (val->isFusionInput() || val->definition() == nullptr ||
+        of_.count(val) || outs_.count(val)) {
+      return;
+    }
+
+    for (auto v : val->definition()->inputs()) {
+      if (of_.count(v) || outs_.count(v)) {
+        outs_.emplace(val);
+        return;
+      }
+    }
+  }
+
+  // optimization to limit search path
+  void createBoundary() {
+    for (auto v_of : of_) {
+      for (auto v_expr : v_of->uses()) {
+        for (auto v_in : v_expr->inputs()) {
+          boundary_.emplace(v_in);
+        }
+      }
+    }
+  }
+
+  DependentVals(const std::unordered_set<Val*>& _of) : of_(_of) {
+    createBoundary();
+    auto fusion = (*of_.begin())->fusion();
+    traverseFrom(fusion, fusion->outputs(), false);
+  };
+
+ public:
+  static std::unordered_set<Val*> getAllDependentVals(
+      const std::unordered_set<Val*>& of) {
+    if (of.empty()) {
+      return std::unordered_set<Val*>();
+    }
+    DependentVals dependencies(of);
+    return dependencies.outs_;
+  }
+};
+
 class DependencyChains : public IterVisitor {
  public:
   std::deque<std::deque<Val*>> dep_chains;
@@ -551,6 +611,15 @@ std::unordered_set<Val*> DependencyCheck::getAllOutputsOf(
   }
   FusionGuard fg((*of.begin())->fusion());
   return FindOutputs::getAllOutputsOf(of);
+}
+
+std::unordered_set<Val*> DependencyCheck::getAllDependentVals(
+    const std::unordered_set<Val*>& of) {
+  if (of.empty()) {
+    return std::unordered_set<Val*>();
+  }
+  FusionGuard fg((*of.begin())->fusion());
+  return DependentVals::getAllDependentVals(of);
 }
 
 void ExprSort::handle(Expr* expr) {

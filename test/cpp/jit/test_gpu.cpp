@@ -8,11 +8,13 @@
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
@@ -10926,6 +10928,7 @@ TEST(NVFuserTest, FusionSimpleGemmTransposed_CUDA) {
   FusionGuard fg(&fusion);
 
   // Set up your input tensor views
+
   TensorView* tv0 = makeSymbolicTensor(2); // K, M
   TensorView* tv1 = makeSymbolicTensor(2); // N, K
   fusion.addInput(tv0);
@@ -11440,6 +11443,116 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed6_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionSegmentReducePointwise_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  TensorView* tv1 = makeSymbolicTensor(1);
+  TensorView* tv2 = makeSymbolicTensor(2);
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  fusion->addInput(tv2);
+
+  TensorView* tv3 = add(tv0, new Double(1)); // Group 0
+  TensorView* tv4 =
+      max(tv3, {0}); // Group 0 (use max instead to avoid numerical issues)
+  TensorView* tv5 = add(tv4, tv1); //  Group 0 (Non Broadcast after reduce,
+                                   //  keeps normalization scheduler away)
+  TensorView* tv6 = add(tv5, tv2); //  Group 1 (Broadcast after reduce)
+
+  fusion->addOutput(tv6);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({128, 65}, options);
+  at::Tensor t1 = at::randn({65}, options);
+  at::Tensor t2 = at::randn({128, 65}, options);
+
+  auto t3 = t0.add(1.0);
+  auto t4 = std::get<0>(at::max(t3, {0}));
+  auto t5 = t4.add(t1);
+  auto t6 = t5.add(t2);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  TORCH_CHECK(executor_cache.isSegmented(), "segmentation didn't happen");
+  TORCH_CHECK(
+      executor_cache.fusionSegments()->groups().size() == 2,
+      "segmentation didn't happen as expected");
+
+  auto outputs = executor_cache.runFusionWithInputs({t0, t1, t2});
+
+  testValidate(
+      executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
+}
+
+namespace {
+
+// Stolen from cpp benchmark
+static TensorView* setupSoftmax(
+    Fusion* fusion,
+    TensorView* input,
+    const int kNumberOfDims,
+    const int kReductionAxis) {
+  FusionGuard fg(fusion);
+
+  std::vector<bool> broadcast_mask(kNumberOfDims, false);
+  broadcast_mask[kReductionAxis] = true;
+
+  auto max_val = max(input, {kReductionAxis});
+  auto bcast_max = broadcast(max_val, broadcast_mask);
+  auto x_max_sub = sub(input, bcast_max);
+  auto exp = unaryOp(UnaryOpType::Exp, x_max_sub);
+  auto sum_exp = sum(exp, {kReductionAxis});
+  auto bcast_sum = broadcast(sum_exp, broadcast_mask);
+  auto output = div(exp, bcast_sum);
+  return output;
+}
+
+} // namespace
+
+TEST(NVFuserTest, FusionSegmentReduceSoftmax_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  std::vector<int64_t> input_shape{32, 64, 8};
+  const int kReductionAxis = 1;
+
+  auto tv0 = TensorViewBuilder()
+                 .ndims(input_shape.size())
+                 .dtype(DataType::Double)
+                 .build();
+
+  fusion->addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1.0));
+  auto tv2 = sum(tv1, {2}); // Group 0
+
+  auto output = setupSoftmax(
+      fusion.get(), tv2, input_shape.size() - 1, kReductionAxis); // Group 1
+  fusion->addOutput(output);
+
+  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto outputs = executor_cache.runFusionWithInputs({at_x});
+
+  auto t1 = at_x.add(1.0);
+  auto t2 = t1.sum({2});
+  auto t3 = at::_softmax(t2.to(at::kDouble), -1, false);
+
+  TORCH_CHECK(executor_cache.isSegmented(), "segmentation didn't happen");
+  TORCH_CHECK(
+      executor_cache.fusionSegments()->groups().size() == 2,
+      "segmentation didn't happen as expected");
+
+  testValidate(
+      executor_cache.fusion(), outputs, {at_x}, {t3}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionSwizzle1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -11732,5 +11845,4 @@ TEST(NVFuserTest, FusionIssue633_CUDA) {
 
 } // namespace jit
 } // namespace torch
-
 #endif // #if defined(USE_CUDA)

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
@@ -66,32 +67,42 @@ void swap(Fusion& a, Fusion& b) noexcept {
 
 Fusion::Fusion(const Fusion& other) {
   FUSER_PERF_SCOPE("Fusion copy");
+  Fusion::copy(&other, this);
+}
 
-  IrCloner ir_cloner(this);
+std::unique_ptr<SegmentedFusion> Fusion::segment() {
+  FUSER_PERF_SCOPE("Segment Fusion");
+  return SegmentCandidateFinder::segment(this);
+}
 
-  for (auto val : other.val_set_) {
-    val_set_.insert(ir_cloner.clone(val));
+IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
+  to->clear();
+  IrCloner ir_cloner(to);
+
+  for (auto val : from->val_set_) {
+    to->val_set_.insert(ir_cloner.clone(val));
   }
 
-  for (auto expr : other.expr_set_) {
-    expr_set_.insert(ir_cloner.clone(expr));
+  for (auto expr : from->expr_set_) {
+    to->expr_set_.insert(ir_cloner.clone(expr));
   }
 
-  for (auto val : other.val_deque_) {
-    val_deque_.push_back(ir_cloner.clone(val));
+  for (auto val : from->val_deque_) {
+    to->val_deque_.push_back(ir_cloner.clone(val));
   }
 
-  // Fixup potentially cyclic pointers
-  for (auto val : val_set_) {
-    val->definition_ = ir_cloner.clone(val->definition_);
-    val->uses_ = ir_cloner.clone(val->uses_);
+  for (auto val : from->val_set_) {
+    ir_cloner.clone(val)->setDefinition(ir_cloner.clone(val->definition_));
+    ir_cloner.clone(val)->setUses(ir_cloner.clone(val->uses_));
   }
 
-  val_type_name_map_ = other.val_type_name_map_;
-  expr_name_counter_ = other.expr_name_counter_;
+  to->val_type_name_map_ = from->val_type_name_map_;
+  to->expr_name_counter_ = from->expr_name_counter_;
 
-  inputs_ = ir_cloner.clone(other.inputs_);
-  outputs_ = ir_cloner.clone(other.outputs_);
+  to->inputs_ = ir_cloner.clone(from->inputs_);
+  to->outputs_ = ir_cloner.clone(from->outputs_);
+
+  return ir_cloner;
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
@@ -506,8 +517,6 @@ bool Fusion::hasReduction() {
 
 std::vector<Val*> Fusion::getTerminatingOutputs() {
   FUSER_PERF_SCOPE("getTerminatingOutputs");
-
-  FusionGuard fg(this);
 
   std::unordered_set<Val*> used_vals;
 

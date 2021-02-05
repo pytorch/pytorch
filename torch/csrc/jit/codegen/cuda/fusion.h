@@ -48,6 +48,9 @@ namespace cuda {
 class Fusion;
 class TensorView;
 
+class SegmentCandidateFinder;
+class SegmentedFusion;
+
 //! Fusion Guard is our "context manager". It holds the actrive fusion and
 //! allows it to be accessed anywhere through FusionGuard::getCurFusion()
 class TORCH_CUDA_CU_API FusionGuard {
@@ -178,6 +181,9 @@ class TORCH_CUDA_CU_API Fusion final {
   //! Indicate that the fusion contains reduction operations
   bool hasReduction();
 
+  //! Run fusion segmentation algorithm to create a segmented fusion
+  std::unique_ptr<SegmentedFusion> segment();
+
   const auto& inputs() const {
     return inputs_;
   }
@@ -190,6 +196,12 @@ class TORCH_CUDA_CU_API Fusion final {
 
   bool hasInput(const Val* val) const;
   bool hasOutput(const Val* val) const;
+
+ protected:
+  friend SegmentCandidateFinder;
+  friend SegmentedFusion;
+
+  static IrCloner copy(const Fusion* from, Fusion* to);
 
  private:
   // Return an int that monotonically increases for each val/expr, some are

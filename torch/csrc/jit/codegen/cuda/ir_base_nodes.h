@@ -259,6 +259,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
   const ValType vtype_;
   const DataType dtype_;
 
+  // Following is managed by Fusion and can change.
   void setDefinition(Expr* expr) {
     definition_ = expr;
   }

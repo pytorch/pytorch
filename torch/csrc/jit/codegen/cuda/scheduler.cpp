@@ -85,6 +85,10 @@ size_t mergeNonReduction(TensorView* tv) {
 bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
   FUSER_PERF_SCOPE("scheduleFusion");
 
+  return scheduleFusion(fusion);
+}
+
+bool scheduleFusion(Fusion* fusion) {
   FusionGuard fg(fusion);
   // maybe has_reduction for scheduling should be done on a per output tensor
   // basis.
@@ -446,9 +450,8 @@ ReductionParams reductionHeuristic(
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& fusion_inputs,
+    ExpressionEvaluator& evaluator,
     const std::vector<TensorView*>& reduction_tv) {
-  FUSER_PERF_SCOPE("scheduleNormalization");
   FusionGuard fg(fusion);
   if (!fusion->hasReduction()) {
     return c10::nullopt;
@@ -464,8 +467,6 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
             tv->definition()->getExprType().value() == ExprType::ReductionOp,
         "TensorView doesn't have a reduction.");
   }
-
-  auto evaluator = executor_utils::bindFusionInputs(fusion_inputs, fusion);
 
   std::vector<int> reduction_elements;
   std::vector<int> reduction_outer;
@@ -527,9 +528,31 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
       fastest_dim_reduction.front());
 }
 
+TORCH_CUDA_API c10::optional<ReductionParams> getNormalizationHeuristics(
+    Fusion* fusion,
+    const at::ArrayRef<c10::IValue>& fusion_inputs,
+    const std::vector<TensorView*>& reduction_tv) {
+  FUSER_PERF_SCOPE("scheduleNormalization");
+
+  auto evaluator = executor_utils::bindFusionInputs(fusion_inputs, fusion);
+
+  return getNormalizationHeuristics(fusion, evaluator, reduction_tv);
+}
+
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& fusion_inputs,
+    TensorView* red_tv) {
+  FUSER_PERF_SCOPE("getReductionHeuristics");
+
+  auto evaluator = executor_utils::bindFusionInputs(fusion_inputs, fusion);
+
+  return getReductionHeuristics(fusion, evaluator, red_tv);
+}
+
+TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
+    Fusion* fusion,
+    ExpressionEvaluator& evaluator,
     TensorView* red_tv) {
   FUSER_PERF_SCOPE("getReductionHeuristics");
 
@@ -560,8 +583,6 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
       red_expr->getExprType() != c10::nullopt &&
           red_expr->getExprType().value() == ExprType::ReductionOp,
       "TensorView doesn't have a reduction.");
-
-  auto evaluator = executor_utils::bindFusionInputs(fusion_inputs, fusion);
 
   int64_t num_outputs_for_reduction = 1;
   int64_t red_elements = 1;

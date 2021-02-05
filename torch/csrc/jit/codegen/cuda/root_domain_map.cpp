@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -263,12 +264,12 @@ bool UnmappableReductionDomains::isReductionOutputMapped(
   return false;
 }
 
-void ComputeAtRootDomainMap::build() {
+void ComputeAtRootDomainMap::build(bool map_through_reduction) {
   // Make sure we start from scratch. Throw away previous results.
   eq_set_.clear();
   bcast_map_.clear();
   new_broadcast_domains_.clear();
-  ComputeAtRootDomainMapBuilder builder(*this);
+  ComputeAtRootDomainMapBuilder builder(*this, map_through_reduction);
 }
 
 bool ComputeAtRootDomainMap::canMap(
@@ -453,8 +454,9 @@ std::string toString(const ComputeAtRootDomainMap& root_map) {
 }
 
 ComputeAtRootDomainMapBuilder::ComputeAtRootDomainMapBuilder(
-    ComputeAtRootDomainMap& root_map)
-    : root_map_(root_map) {
+    ComputeAtRootDomainMap& root_map,
+    bool map_through_reduction)
+    : root_map_(root_map), map_through_reduction_(map_through_reduction) {
   Fusion* fusion = FusionGuard::getCurFusion();
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
   // Set concrete domains for broadcast domains that never get joined
@@ -728,7 +730,8 @@ bool ComputeAtRootDomainMapBuilder::safeToMap(const DomainKeySet& domains) {
   // if (incompatible_domains_.isReductionOutputMapped(unique_domains,
   // eq_set_)) {
   if (incompatible_domains_.isReductionOutputMapped(
-          unique_domains, root_map_)) {
+          unique_domains, root_map_) &&
+      !map_through_reduction_) {
     return false;
   }
   return true;
