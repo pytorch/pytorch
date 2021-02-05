@@ -131,14 +131,11 @@ class AllocationInserter : public kir::MutableIrVisitor {
         std::stringstream ss;
         ss << id->parallelType();
         new_loop = ir_builder.create<kir::ForLoop>(
-            ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int),
-            id,
-            nullptr);
+            ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int), id);
       } else {
         new_loop = ir_builder.create<kir::ForLoop>(
-            ir_builder.create<kir::Int>(c10::nullopt), id, nullptr);
+            ir_builder.create<kir::Int>(c10::nullopt), id);
       }
-      init_expr->setParentScope(new_loop);
       new_loop->body().push_back(init_expr);
       init_expr = new_loop;
     }
@@ -345,7 +342,6 @@ class AllocationInserter : public kir::MutableIrVisitor {
       } else {
         alloc.for_loop->body().insert_before(
             alloc.place_before, alloc.init_expr);
-        alloc.init_expr->setParentScope(alloc.for_loop);
       }
     }
   }

@@ -11845,6 +11845,183 @@ TEST(NVFuserTest, FusionIssue633_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionKirScoping_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(2));
+  fusion.addOutput(tv2);
+
+  tv2->merge(0);
+  tv2->split(0, 4);
+  tv0->computeAt(tv2, -1);
+
+  GpuLower gpulw(&fusion);
+
+  auto kir_tv1 = gpulw.lowerValue(tv1);
+  auto tv1_scope = kir_tv1->definition()->scope();
+  TORCH_CHECK(tv1_scope != nullptr);
+  TORCH_CHECK(tv1_scope->owner()->as<kir::IfThenElse>());
+
+  auto kir_tv2 = gpulw.lowerValue(tv2);
+  auto tv2_scope = kir_tv2->definition()->scope();
+  TORCH_CHECK(tv2_scope != nullptr);
+  TORCH_CHECK(tv2_scope->owner()->as<kir::IfThenElse>());
+
+  TORCH_CHECK(tv1_scope != tv2_scope);
+
+  // tv1 and tv2 should have the same inner-most ForLoop
+  auto parent_scope = tv1_scope->owner()->scope();
+  TORCH_CHECK(parent_scope == tv2_scope->owner()->scope());
+  TORCH_CHECK(parent_scope->owner()->as<kir::ForLoop>());
+  // There should be one more loop
+  parent_scope = parent_scope->owner()->scope();
+  TORCH_CHECK(parent_scope->owner()->as<kir::ForLoop>());
+
+  // scope() should return nullptr for top-level exprs
+  auto top_level_scope = parent_scope->owner()->scope();
+  TORCH_CHECK(top_level_scope == nullptr);
+}
+
+TEST(NVFuserTest, FusionOmitPredicate1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int x = 128;
+
+  auto tv0 = makeConcreteTensor({x});
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(3);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, new Double(1));
+  auto tv3 = add(tv2, new Double(1));
+  auto tv4 = add(tv3, new Double(1));
+  auto tv5 = add(tv4, new Double(1));
+  auto tv6 = add(tv5, new Double(1));
+  auto tv7 = add(tv6, new Double(1));
+  fusion.addOutput(tv7);
+
+  auto tv8 = add(tv1, new Double(1));
+  auto tv9 = add(tv8, new Double(1));
+  fusion.addOutput(tv9);
+
+  tv8->setMemoryType(MemoryType::Global);
+
+  // No predicate needed with evenly divisible split
+  tv3->split(0, 32);
+  // Predicate needed with non-divisible split
+  tv4->split(0, 31);
+  // All split ops are divisible, so no predicate needed
+  tv5->split(0, 32);
+  tv5->split(0, 2);
+  tv5->split(-1, 16);
+  // Merge does not prevent predicate omission
+  tv6->split(0, 32);
+  tv6->merge(0);
+  // If any of split is not divisible, predicate needed
+  tv7->split(0, 32);
+  tv7->split(0, 8);
+
+  // Predicate needed with split of dynamic sizes
+  tv8->split(0, 32);
+
+  // Predicate is not needed with no split of dynamic sizes
+  tv9->merge(0)->merge(0);
+
+  GpuLower gpulw(&fusion);
+
+  auto is_predicated = [&](TensorView* tv) {
+    return gpulw.lowerValue(tv)
+        ->definition()
+        ->parentScope()
+        ->isA<kir::IfThenElse>();
+  };
+
+  TORCH_CHECK(!is_predicated(tv2));
+  TORCH_CHECK(!is_predicated(tv3));
+  TORCH_CHECK(is_predicated(tv4));
+  TORCH_CHECK(!is_predicated(tv5));
+  TORCH_CHECK(!is_predicated(tv6));
+  TORCH_CHECK(is_predicated(tv7));
+  TORCH_CHECK(is_predicated(tv8));
+  TORCH_CHECK(!is_predicated(tv9));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({x}, options);
+  at::Tensor t1 = at::randn({x, x, x}, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto t7 = t0 + 6;
+  auto t9 = t1 + 2;
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {t7, t9}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionOmitPredicate2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {true, false});
+  auto tv3 = add(tv2, tv1);
+  fusion.addOutput(tv3);
+
+  auto tv4 = broadcast(tv0, {true, false});
+  auto tv5 = add(tv4, tv1);
+  fusion.addOutput(tv5);
+
+  // Both tv2 and tv3 should not need predicate
+  tv3->merge(0);
+  tv2->computeAt(tv3, -1);
+
+  // Both tv4 and tv5 should need predicate as we don't know whether
+  // split by 4 is divisible
+  tv5->merge(0);
+  tv5->split(0, 4);
+  tv4->computeAt(tv5, -1);
+
+  GpuLower gpulw(&fusion);
+
+  auto is_predicated = [&](TensorView* tv) {
+    return gpulw.lowerValue(tv)
+        ->definition()
+        ->parentScope()
+        ->isA<kir::IfThenElse>();
+  };
+
+  TORCH_CHECK(!is_predicated(tv2));
+  TORCH_CHECK(!is_predicated(tv3));
+  TORCH_CHECK(is_predicated(tv4));
+  TORCH_CHECK(is_predicated(tv5));
+
+  const int x = 10;
+  const int y = 20;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({x}, options);
+  at::Tensor t1 = at::randn({y, x}, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto t3 = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {t3, t3}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

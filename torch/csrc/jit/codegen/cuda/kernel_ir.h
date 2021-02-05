@@ -55,6 +55,9 @@ class ForLoop;
 class IfThenElse;
 class GridReduction;
 
+// Expr container
+class Scope;
+
 using ValueId = int32_t;
 
 //! Token used to restrict the access to Kernel IR creation
@@ -308,11 +311,16 @@ class TORCH_CUDA_CU_API Expr : public Node {
     return outputs_;
   }
 
-  Expr* parentScope() const {
-    return parent_scope_;
+  Scope* scope() const {
+    return scope_;
   }
 
-  void setParentScope(Expr* scope);
+  //! Set the current scope
+  void setScope(Scope* scope) {
+    scope_ = scope;
+  }
+
+  Expr* parentScope() const;
 
   Bool* predicate() const {
     return predicate_;
@@ -339,7 +347,7 @@ class TORCH_CUDA_CU_API Expr : public Node {
   std::vector<Val*> outputs_;
 
   // TODO(kir): revisit scope/nesting data structures
-  Expr* parent_scope_ = nullptr;
+  Scope* scope_ = nullptr;
 
   Bool* predicate_ = nullptr;
 };
@@ -1025,22 +1033,10 @@ class TORCH_CUDA_CU_API Sync final : public Expr {
 // TODO(kir): promote to IR node
 class TORCH_CUDA_CU_API Scope {
  public:
-  Scope() = default;
+  explicit Scope(Expr* owner) : owner_(owner) {}
 
   const std::vector<Expr*>& exprs() const {
     return exprs_;
-  }
-
-  void push_back(Expr* e) {
-    exprs_.push_back(e);
-  }
-
-  void insert(size_t pos, Expr* expr) {
-    exprs_.insert(exprs_.begin() + pos, expr);
-  }
-
-  void erase(size_t pos) {
-    exprs_.erase(exprs_.begin() + pos);
   }
 
   bool empty() const {
@@ -1059,20 +1055,46 @@ class TORCH_CUDA_CU_API Scope {
     return exprs_[i];
   }
 
+  // Insert expr before expression at pos
+  void insert(size_t pos, Expr* expr);
+
   // Insert expr before ref
   void insert_before(Expr* ref, Expr* expr);
 
   // Insert expr after ref
   void insert_after(Expr* ref, Expr* expr);
 
-  bool contains(Expr* expr) const;
+  void push_back(Expr* e) {
+    exprs_.push_back(e);
+    e->setScope(this);
+  }
 
+  // Erase expr at pos
+  void erase(size_t pos);
+
+  // Erase expr ref
   void erase(Expr* ref);
+
+  bool contains(Expr* expr) const;
 
   void clear();
 
+  Expr* owner() const {
+    return owner_;
+  }
+
+ private:
+  // Insert expr before pos
+  void insert(std::vector<Expr*>::const_iterator pos, Expr* expr);
+
+  // Erase expr at pos
+  void erase(std::vector<Expr*>::const_iterator pos);
+
  private:
   std::vector<Expr*> exprs_;
+
+  //! Owner exprssion of this scope, e.g., IfThenElse
+  Expr* owner_ = nullptr;
 };
 
 //! ForLoop provides scoping around an int iterator from 0 to range. Exprs
@@ -1084,11 +1106,7 @@ class TORCH_CUDA_CU_API Scope {
 //!
 class TORCH_CUDA_CU_API ForLoop final : public Expr {
  public:
-  ForLoop(
-      Passkey passkey,
-      Val* index,
-      IterDomain* iter_domain,
-      Expr* parent_scope);
+  ForLoop(Passkey passkey, Val* index, IterDomain* iter_domain);
 
   void accept(IrVisitor* visitor) const override {
     visitor->visit(this);
@@ -1129,7 +1147,7 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 //!
 class TORCH_CUDA_CU_API IfThenElse final : public Expr {
  public:
-  explicit IfThenElse(Passkey passkey, Bool* cond, Expr* parent_scope);
+  explicit IfThenElse(Passkey passkey, Bool* cond);
 
   void accept(IrVisitor* visitor) const override {
     visitor->visit(this);

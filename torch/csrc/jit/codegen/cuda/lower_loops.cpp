@@ -43,12 +43,10 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
     std::stringstream ss;
     ss << id->getParallelType();
     new_scope = ir_builder.create<kir::ForLoop>(
-        ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int),
-        kir_id,
-        scope);
+        ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int), kir_id);
   } else {
     new_scope = ir_builder.create<kir::ForLoop>(
-        ir_builder.create<kir::Int>(c10::nullopt), kir_id, scope);
+        ir_builder.create<kir::Int>(c10::nullopt), kir_id);
   }
   if (scope != nullptr) {
     scope->body().insert(0, new_scope);

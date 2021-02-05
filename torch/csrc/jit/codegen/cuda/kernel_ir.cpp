@@ -26,9 +26,12 @@ Val::Val(Passkey passkey, DataType dtype) : Node(passkey), dtype_(dtype) {
   id_ = passkey.kernel->newValueId(passkey);
 }
 
-void Expr::setParentScope(Expr* scope) {
-  // TODO(kir): checks to make sure the scope lists are consistent
-  parent_scope_ = scope;
+Expr* Expr::parentScope() const {
+  if (scope()) {
+    return scope()->owner();
+  } else {
+    return nullptr;
+  }
 }
 
 NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {
@@ -307,6 +310,11 @@ TensorIndex::TensorIndex(
 Sync::Sync(Passkey passkey, bool war_sync)
     : Expr(passkey), war_sync_(war_sync) {}
 
+void Scope::insert(std::vector<Expr*>::const_iterator pos, Expr* expr) {
+  exprs_.insert(pos, expr);
+  expr->setScope(this);
+}
+
 void Scope::insert_before(Expr* ref, Expr* expr) {
   const auto it = std::find(exprs_.begin(), exprs_.end(), ref);
   TORCH_INTERNAL_ASSERT(
@@ -316,7 +324,7 @@ void Scope::insert_before(Expr* ref, Expr* expr) {
       " before the reference: ",
       ref,
       " however the reference was not found in this scope.");
-  exprs_.insert(it, expr);
+  insert(it, expr);
 }
 
 void Scope::insert_after(Expr* ref, Expr* expr) {
@@ -328,14 +336,35 @@ void Scope::insert_after(Expr* ref, Expr* expr) {
       " after the reference: ",
       ref,
       " however the reference was not found in this scope.");
-  exprs_.insert(it + 1, expr);
+  insert(it + 1, expr);
+}
+
+void Scope::insert(size_t pos, Expr* expr) {
+  const auto it = exprs_.begin() + pos;
+  insert(it, expr);
+}
+
+void Scope::erase(std::vector<Expr*>::const_iterator pos) {
+  // Remove the scope of the expr if this is the scope
+  auto expr = *pos;
+  TORCH_INTERNAL_ASSERT(
+      expr->scope() == this,
+      "Inconsistent scoping of expression detected: ",
+      kir::toString(expr));
+  expr->setScope(nullptr);
+  exprs_.erase(pos);
 }
 
 void Scope::erase(Expr* ref) {
   const auto it = std::find(exprs_.begin(), exprs_.end(), ref);
   if (it != exprs_.end()) {
-    exprs_.erase(it);
+    erase(it);
   }
+}
+
+void Scope::erase(size_t pos) {
+  TORCH_INTERNAL_ASSERT(pos < size());
+  erase(exprs_.begin() + pos);
 }
 
 bool Scope::contains(Expr* expr) const {
@@ -347,21 +376,15 @@ void Scope::clear() {
   exprs_.clear();
 }
 
-ForLoop::ForLoop(
-    Passkey passkey,
-    Val* index,
-    IterDomain* iter_domain,
-    Expr* parent_scope)
-    : Expr(passkey), index_{index}, iter_domain_{iter_domain} {
+ForLoop::ForLoop(Passkey passkey, Val* index, IterDomain* iter_domain)
+    : Expr(passkey), index_{index}, iter_domain_{iter_domain}, body_(this) {
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
-  setParentScope(parent_scope);
   addInput(index);
   addInput(iter_domain);
 }
 
-IfThenElse::IfThenElse(Passkey passkey, Bool* cond, Expr* parent_scope)
-    : Expr(passkey), cond_{cond} {
-  setParentScope(parent_scope);
+IfThenElse::IfThenElse(Passkey passkey, Bool* cond)
+    : Expr(passkey), cond_{cond}, then_body_(this), else_body_(this) {
   addInput(cond);
 }
 

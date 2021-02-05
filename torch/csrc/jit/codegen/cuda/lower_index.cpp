@@ -51,8 +51,7 @@ void IndexLowering::visit(const kir::IfThenElse* ite) {
   const auto prev_scope = active_scope_;
 
   // TODO(kir): try to avoid recreating new nodes and leaving old ones around
-  auto new_ite =
-      ir_builder_.create<kir::IfThenElse>(ite->cond(), prev_scope_expr);
+  auto new_ite = ir_builder_.create<kir::IfThenElse>(ite->cond());
   pushBack(new_ite);
 
   active_scope_expr_ = new_ite;
@@ -77,7 +76,7 @@ void IndexLowering::visit(const kir::ForLoop* for_loop) {
   const auto prev_scope = active_scope_;
 
   auto new_for_loop = ir_builder_.create<kir::ForLoop>(
-      for_loop->index(), for_loop->iter_domain(), prev_scope_expr);
+      for_loop->index(), for_loop->iter_domain());
   pushBack(new_for_loop);
 
   active_scope_expr_ = new_for_loop;

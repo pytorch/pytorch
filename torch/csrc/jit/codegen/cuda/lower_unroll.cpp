@@ -17,17 +17,14 @@ namespace cuda {
 
 namespace {
 
-// Provide a new for loop matching the one provided, sets parent_scope as
-// parent_scope, but does not insert into parent scope.
-kir::ForLoop* cloneLoopNest(
-    const kir::ForLoop* for_loop,
-    kir::Expr* parent_scope) {
+// Provide a new for loop matching the one provided
+kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
   const auto new_loop = ir_builder.create<kir::ForLoop>(
-      for_loop->index(), for_loop->iter_domain(), parent_scope);
+      for_loop->index(), for_loop->iter_domain());
   for (auto expr : for_loop->body().exprs()) {
     if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      expr = cloneLoopNest(nested_for_loop, new_loop);
+      expr = cloneLoopNest(nested_for_loop);
     }
     new_loop->body().push_back(expr);
   }
@@ -65,7 +62,8 @@ kir::Bool* UnrollPass::getThreadPredicate(const kir::TensorView* tv) {
     TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorView>());
     const auto out = bop->out()->as<kir::TensorView>()->fuserTv();
     if (ir_utils::getParallelBroadcastDomains(out, thread_predicates_).any()) {
-      return nullptr;
+      return kir::IrBuilder(GpuLower::current()->kernel())
+          .create<kir::Bool>(true);
     }
   }
   return thread_predicates_.getExpr(tv->fuserTv());
@@ -88,14 +86,12 @@ void UnrollPass::handle(kir::Expr* expr) {
     const auto pred =
         PredicateCompute::getInlinePredicate(expr, for_loops_, thread_pred);
 
+    TORCH_INTERNAL_ASSERT(pred != nullptr);
+
     // If we need a predicate, put expr inside an if then else
     if (!pred->isConst() || !(pred->isConst() && pred->value().value())) {
       non_trivial_pred_found_ = true;
-      kir::ForLoop* insert_scope =
-          for_loops_.empty() ? nullptr : for_loops_.back();
-      kir::IfThenElse* inline_ite =
-          ir_builder.create<kir::IfThenElse>(pred, insert_scope);
-      inline_ite->thenBody().push_back(expr);
+      kir::IfThenElse* inline_ite = ir_builder.create<kir::IfThenElse>(pred);
       if (for_loops_.empty()) {
         // Special handling for top level output expressions that still
         // need predicates. One motivating example is a reduction op that
@@ -105,6 +101,7 @@ void UnrollPass::handle(kir::Expr* expr) {
         for_loops_.back()->body().insert_before(expr, inline_ite);
         for_loops_.back()->body().erase(expr);
       }
+      inline_ite->thenBody().push_back(expr);
     }
   } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
     handle(for_loop);
@@ -136,19 +133,16 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 
   auto unroll_pred = UnswitchPredicate::get(for_loops_, fl, p2c_root_map_);
 
-  kir::ForLoop* parent_scope = for_loops_.empty() ? nullptr : for_loops_.back();
-
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  kir::IfThenElse* unroll_ite =
-      ir_builder.create<kir::IfThenElse>(unroll_pred, parent_scope);
+  kir::IfThenElse* unroll_ite = ir_builder.create<kir::IfThenElse>(unroll_pred);
 
   // Get the loop nest for the unrolled path
-  kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl, unroll_ite);
+  kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl);
 
   unroll_ite->thenBody().push_back(unrolled_loop_nest);
 
   // Loop nest for inlined path
-  kir::ForLoop* inlined_loop = cloneLoopNest(fl, unroll_ite);
+  kir::ForLoop* inlined_loop = cloneLoopNest(fl);
 
   // Add inline predicates for inlined loop nest
   look_for_unroll_ = false;
@@ -156,7 +150,6 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   handle(inlined_loop);
   look_for_unroll_ = true;
   if (!non_trivial_pred_found_) {
-    inlined_loop->setParentScope(parent_scope);
     loop_replacement_map_.insert({fl, inlined_loop});
   } else {
     unroll_ite->elseBody().push_back(inlined_loop);
