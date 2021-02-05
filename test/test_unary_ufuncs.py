@@ -913,6 +913,18 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
                          torch.tensor(expectedOutput, dtype=dtype, device=device))
 
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.float, torch.double)
+    def test_hardsigmoid_backward(self, device, dtype):
+        inputValues = [-3.0, 3.0, -2.0, 2.0, -6.0, 6.0]
+        expectedValues = [0.0, 0.0, 1.0 / 6.0, 1.0 / 6.0, 0.0, 0.0]
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device).requires_grad_()
+        expetedTensor = torch.tensor(expectedValues, dtype=dtype, device=device)
+        out = torch.nn.functional.hardsigmoid(inputTensor)
+        out.backward(torch.ones_like(inputTensor))
+        self.assertEqual(inputTensor.grad, expetedTensor)
+
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_silu(self, device, dtype):
