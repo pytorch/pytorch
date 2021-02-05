@@ -13,6 +13,7 @@ import unittest
 from math import sqrt
 from pathlib import Path
 from torch.multiprocessing import Process
+from torch.testing import FileCheck
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 from torch.fx.node import Target
 from torch.fx.passes import shape_prop
@@ -745,19 +746,16 @@ class TestFX(JitTestCase):
 
         traced = symbolic_trace(M())
 
-        printout: List[str] = """%x : torch.Tensor [#users=1] = placeholder[target=x]
-%y : int [#users=1] = placeholder[target=y](default=2)
-%getitem : [#users=1] = call_function[target=operator.getitem](args = (%x, %y), kwargs = {})
-%param : [#users=1] = self.param
-%add_1 : [#users=1] = call_function[target=operator.add](args = (%getitem, %param), kwargs = {})
-%linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
-%clamp_1 : [#users=1] = call_method[target=clamp](args = (%linear_1,), kwargs = {min: 0.0, max: 1.0})
-return clamp_1
-""".splitlines()
+        all_formatted = "\n".join([n.format_node() for n in traced.graph.nodes])
 
-        for node, expected in zip(traced.graph.nodes, printout):
-            actual = node.format_node()
-            self.assertEqual(actual, expected)
+        FileCheck().check("x").check("placeholder") \
+            .check("y").check("placeholder") \
+            .check("getitem").check("call_function") \
+            .check("param").check("get_attr") \
+            .check("add").check("call_function") \
+            .check("linear").check("call_module") \
+            .check("clamp").check("call_method") \
+            .run(all_formatted)
 
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
