@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional
 import torch
-import torch.optim.functional as F
+import torch.optim._functional as F
 
 from torch import Tensor
 
@@ -72,11 +72,11 @@ class _FunctionalAdadelta(object):
                 acc_deltas.append(state['acc_delta'])
 
         with torch.no_grad():
-            F._adadelta(params,
-                        grads,
-                        square_avgs,
-                        acc_deltas,
-                        lr,
-                        rho,
-                        eps,
-                        weight_decay)
+            F.adadelta(params,
+                       grads,
+                       square_avgs,
+                       acc_deltas,
+                       lr,
+                       rho,
+                       eps,
+                       weight_decay)
