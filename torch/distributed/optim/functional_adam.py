@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, Tuple
 import torch
-import torch.optim.functional as F
+import torch.optim._functional as F
 
 from torch import Tensor
 
@@ -99,15 +99,15 @@ class _FunctionalAdam(object):
                 state_steps.append(state['step'].item())
 
         with torch.no_grad():
-            F._adam(params_with_grad,
-                    grads,
-                    exp_avgs,
-                    exp_avg_sqs,
-                    max_exp_avg_sqs,
-                    state_steps,
-                    self.amsgrad,
-                    self.defaults['beta1'],
-                    self.defaults['beta2'],
-                    self.defaults['lr'],
-                    self.defaults['weight_decay'],
-                    self.defaults['eps'])
+            F.adam(params_with_grad,
+                   grads,
+                   exp_avgs,
+                   exp_avg_sqs,
+                   max_exp_avg_sqs,
+                   state_steps,
+                   self.amsgrad,
+                   self.defaults['beta1'],
+                   self.defaults['beta2'],
+                   self.defaults['lr'],
+                   self.defaults['weight_decay'],
+                   self.defaults['eps'])
