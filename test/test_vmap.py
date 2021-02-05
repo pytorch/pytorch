@@ -12,6 +12,14 @@ import types
 
 FALLBACK_REGEX = r'falling back to slow \(for loop( and stack)?\) implementation'
 
+class EnableVmapFallbackWarnings:
+    def __enter__(self):
+        self.prev_state = torch._C._debug_only_are_vmap_fallback_warnings_enabled()
+        torch._C._debug_only_display_vmap_fallback_warnings(True)
+
+    def __exit__(self, *ignored):
+        torch._C._debug_only_display_vmap_fallback_warnings(self.prev_state)
+
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'> as the return"):
@@ -462,9 +470,36 @@ class TestVmapAPI(TestCase):
         vmap(foo, in_dims=(0,))(torch.randn(2, 3))
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
 
+    def test_fallback_does_not_warn_by_default(self):
+        # NB: One day we will implement a batching rule for torch.atan2.
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = torch.atan2
+        x = torch.randn(11)
+        y = torch.randn(11)
+        with warnings.catch_warnings(record=True) as wa:
+            result = vmap(op)(x, y)
+            # The single warning here is the "vmap is experimental"
+            # warning, not a warning from the vmap fallback path.
+            self.assertEqual(len(wa), 1)
+
+    def test_fallback_warns_when_warnings_are_enabled(self):
+        # NB: One day we will implement a batching rule for torch.atan2.
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = torch.atan2
+        x = torch.randn(11)
+        y = torch.randn(11)
+        with warnings.catch_warnings(record=True) as wa:
+            with EnableVmapFallbackWarnings():
+                result = vmap(op)(x, y)
+            self.assertEqual(len(wa), 2)
+            self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
+
     def _assert_uses_vmap_fallback(self, vmap_args, inputs):
         with warnings.catch_warnings(record=True) as wa:
-            result = vmap(*vmap_args)(*inputs)
+            with EnableVmapFallbackWarnings():
+                result = vmap(*vmap_args)(*inputs)
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
@@ -911,7 +946,8 @@ class Namespace:
             def wrapper(self, *args, **kwargs):
                 with warnings.catch_warnings(record=True) as wa:
                     warnings.simplefilter('always')
-                    method(*args, **kwargs)
+                    with EnableVmapFallbackWarnings():
+                        method(*args, **kwargs)
                     for captured_warning in wa:
                         self.assertNotRegex(str(captured_warning.message), FALLBACK_REGEX, msg)
             return types.MethodType(wrapper, self)

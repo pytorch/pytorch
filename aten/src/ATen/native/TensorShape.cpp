@@ -12,6 +12,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/cpu/CatKernel.h>
+#include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -24,6 +25,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(cat_serial_stub);
+DEFINE_DISPATCH(stack_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
@@ -1322,6 +1324,101 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   return inputs;
 }
 
+// Checks to see whether native stack can be invoked under these conditions:
+// - result and input tensors are contiguous
+// - only one thread is used
+// - no type promotion has to occur
+// - tensors dtype is Double or Float
+bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int64_t dim) {
+  TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
+
+  const Tensor& firstTensor = tensors[0];
+  // stack dimension should be in range [0,firstTensor.dim())
+  // dim == firstTensor.dim() is a valid input, but it is handled by default code path
+  // that uses unsqueeze
+  if (dim >= firstTensor.dim()) return false;
+  // Native stack doesn't apply any tensor is skipped.
+  if (should_skip(firstTensor)) return false;
+  // there should be no type promotion
+  if (result.dtype() != firstTensor.dtype()) return false;
+
+  // Inputs cannot alias the output tensor
+  for (size_t i = 0; i < tensors.size(); i++) {
+    auto lap = at::get_overlap_status(result, tensors[i]);
+    TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
+        lap != at::MemOverlapStatus::FULL, 0,
+        "unsupported operation: the input tensors cannot refer to any of the "
+        "output memory locations. Found overlap in input tensor ", i);
+  }
+
+  auto first_tensor_mem_format = firstTensor.suggest_memory_format();
+  ScalarType dtype = firstTensor.scalar_type();
+
+  if (!result.is_contiguous(first_tensor_mem_format)) {
+    return false;
+  }
+
+  // fast path only works for Double and Float
+  if (dtype != ScalarType::Double && dtype != ScalarType::Float) {
+    return false;
+  }
+
+  // check remainder of inputs
+  auto const &first_tensor_shape = firstTensor.sizes();
+  for (size_t i = 1; i < tensors.size(); i++) {
+    auto const &tensor = tensors[i];
+    TORCH_CHECK(tensors[i].sizes() == firstTensor.sizes(),
+      "stack expects each tensor to be equal size, but got ", first_tensor_shape,
+      " at entry 0 and ", tensor.sizes(), " at entry ", i);
+
+    // every tensor must be contiguous
+    // tensor sizes and strides must be the same
+    // there should be no type promotion
+    if (!tensor.is_contiguous(first_tensor_mem_format) ||
+      tensor.strides() != firstTensor.strides() ||
+      tensor.dtype() != dtype) {
+      return false;
+    }
+  }
+
+  // fast native stack should only be used when it is not worth using multiple threads
+  // or there is only one thread. Note that we aren't checking result.numel() here because
+  // it may not have been resized and we want to defer that cost till later.
+  int64_t numel_in_stack = firstTensor.numel() * tensors.size();
+  return numel_in_stack < at::internal::GRAIN_SIZE && at::get_num_threads() == 1;
+}
+
+bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) {
+  if (can_use_native_serial_stack(result, tensors, dim)) {
+    // compute the size of the result
+    auto result_sizes = tensors[0].sizes().vec();
+    result_sizes.insert(result_sizes.begin() + dim, tensors.size());
+
+    // skip resizing if size of result is same as expected
+    if (result.sizes() != result_sizes) {
+      result.resize_(result_sizes);
+    }
+    stack_serial_stub(kCPU, result, tensors, dim);
+    return true;
+  }
+  return false;
+}
+
+Tensor _stack(TensorList tensors, int64_t dim) {
+  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  ScalarType high_type = result_type(tensors);
+  Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
+  return at::native::_stack_out(get_stack_inputs(tensors, dim), dim, result);
+}
+
+Tensor _stack_cpu(TensorList tensors, int64_t dim) {
+  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  ScalarType high_type = result_type(tensors);
+  Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
+  return at::native::_stack_out_cpu(tensors, dim, result);
+}
+
+// TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
@@ -1329,6 +1426,21 @@ Tensor stack(TensorList tensors, int64_t dim) {
   return at::cat(get_stack_inputs(tensors, dim), dim);
 }
 
+// CPU specific implementation
+Tensor& _stack_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
+  if (maybe_native_stack(result, tensors, dim)) {
+    return result;
+  } else {
+    return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+  }
+}
+
+// default backend
+Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
+  return at::cat_out(result, tensors, dim);
+}
+
+// TODO(msubkhankulov): refactor to use _stack_out
 Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
@@ -1770,12 +1882,10 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   start_dim = maybe_wrap_dim(start_dim, self.dim());
   end_dim = maybe_wrap_dim(end_dim, self.dim());
   TORCH_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
-  std::vector<int64_t> shape;
 
   if (self.dim() == 0) {
     return self.reshape({1});
   }
-
   if (start_dim == end_dim) {
     return self;
   }
@@ -1785,13 +1895,14 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
   // can take on any value and satisfy the constraints.
   auto slice_numel = prod_intlist(self.sizes().slice(start_dim, end_dim - start_dim + 1));
+  std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (int64_t i = 0; i < start_dim; i++) {
-    shape.push_back(self.size(i));
+    shape.push_back(self.sizes()[i]);
   }
   shape.push_back(slice_numel);
   for (int64_t i = end_dim + 1; i < self.dim(); i++) {
-    shape.push_back(self.size(i));
+    shape.push_back(self.sizes()[i]);
   }
 
   return native::reshape(self, shape);
