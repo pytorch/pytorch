@@ -2,7 +2,7 @@
 // multi-python abstract code
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include "caffe2/serialize/inline_container.h"
+#include <caffe2/serialize/inline_container.h>
 
 namespace torch {
 

@@ -3,7 +3,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <iostream>
-#include "interpreter_impl.h"
+#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 
 #include <assert.h>
 #include <pybind11/embed.h>
@@ -282,9 +282,9 @@ struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
     status = PyConfig_SetString(&config, &config.executable, L"torch_deploy");
     status = PyConfig_SetString(&config, &config.prefix, L"");
     config.module_search_paths_set = 1;
-    wchar_t* module_search_paths[1] = {L"."};
+    wchar_t* module_search_paths[0] = {};
     status = PyConfig_SetWideStringList(
-        &config, &config.module_search_paths, 1, module_search_paths);
+        &config, &config.module_search_paths, 0, module_search_paths);
 
     status = Py_InitializeFromConfig(&config);
     PyConfig_Clear(&config);
@@ -311,7 +311,9 @@ struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
     save_storage.release();
     load_storage.release();
     get_package.release();
-    TORCH_INTERNAL_ASSERT(Py_FinalizeEx() == 0);
+    if(Py_FinalizeEx() != 0) {
+      exit(1); // can't use TORCH_INTERNAL_ASSERT because we are in a non-throwing destructor.
+    }
     PyMem_RawFree(program);
   }
   torch::InterpreterSessionImpl* acquire_session() override;
