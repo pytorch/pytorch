@@ -988,7 +988,6 @@ void trackAndRegisterAttributesInBlocks(
 }
 
 std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
-    MutationRemover& mr,
     Block* block,
     const std::shared_ptr<Graph>& graph,
     const Module& module_,
@@ -1010,7 +1009,7 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
       for (Block* sub_block : n->blocks()) {
         std::unordered_map<std::string, Value*> map_ =
             registerInplaceOpAsBlockOutputs(
-                mr, sub_block, graph, module_, allAttrValues, setAttrValues);
+                sub_block, graph, module_, allAttrValues, setAttrValues);
         std::unordered_map<std::string, Value*>::iterator mapIt;
         for (mapIt = map_.begin(); mapIt != map_.end(); mapIt++) {
           setAttrValues[mapIt->first] = mapIt->second;
@@ -1022,7 +1021,6 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
 }
 
 void RegisterInplaceOpAsBlockOutputs(
-    MutationRemover& mr,
     Module* module,
     const std::shared_ptr<Graph>& graph) {
   // A map of names and values of referenced attributes, to avoid duplicates.
@@ -1032,7 +1030,7 @@ void RegisterInplaceOpAsBlockOutputs(
 
   Module moduleClone = module->clone(true);
   registerInplaceOpAsBlockOutputs(
-      mr, graph->block(), graph, moduleClone, allAttrValues, setAttrValues);
+      graph->block(), graph, moduleClone, allAttrValues, setAttrValues);
   EliminateDeadCode(graph->block());
 }
 
@@ -1049,7 +1047,7 @@ void RemoveInplaceOpsForONNX(
   ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
   if (model)
-    RegisterInplaceOpAsBlockOutputs(mr, model, graph);
+    RegisterInplaceOpAsBlockOutputs(model, graph);
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
 }
