@@ -16,7 +16,7 @@ make -f docker.Makefile \
      INSTALL_CHANNEL=pytorch-nightly BUILD_TYPE=official devel-image
 
 # Push the nightly docker to GitHub Container Registry
-echo $CR_PAT | docker login ghcr.io -u pytorch --password-stdin
+echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
 make -f docker.Makefile \
      DOCKER_REGISTRY=ghcr.io \
      DOCKER_ORG=pytorch \

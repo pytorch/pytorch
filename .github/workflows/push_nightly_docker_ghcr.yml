@@ -10,7 +10,7 @@ jobs:
   build-publish-docker:
     runs-on: ubuntu-18.04
     env:
-      CR_PAT: ${{ secrets.CR_PAT }}
+      GHCR_PAT: ${{ secrets.GHCR_PAT }}
     steps:
       - uses: actions/checkout@v2
         with:
