@@ -27,6 +27,7 @@ inline int64_t getTimeUs() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
+std::string stacksToStr(const std::vector<std::string>& stacks);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
@@ -122,6 +123,9 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
       } else {
         cpu_trace->activities[idx].inputDims = "[]";
       }
+      if (kineto_events_[idx].hasStack()) {
+        cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
+      }
     }
   }
 
@@ -216,6 +220,14 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   }
   oss << "]";
   return oss.str();
+}
+
+std::string stacksToStr(const std::vector<std::string>& stacks) {
+  std::ostringstream oss;
+  std::copy(stacks.begin(), stacks.end(), std::ostream_iterator<std::string>(oss, ";"));
+  auto rc = oss.str();
+  rc.pop_back();
+  return rc;
 }
 
 } // namespace
@@ -320,7 +332,12 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   device_resource_id_ = activity.resourceId();
   start_us_ = activity.timestamp();
   duration_us_ = activity.duration();
-  correlation_id_ = activity.correlationId();
+  // Set the correlation id for the PyTorch CPU ops.
+  // Note: skip setting the correlation ids for other activities to avoid
+  // an incorrect attribution of CUDA kernels.
+  if (activity.type() == libkineto::ActivityType::CPU_OP) {
+    correlation_id_ = activity.correlationId();
+  }
   activity_type_ = (uint8_t)activity.type();
   if (activity.linkedActivity()) {
     linked_correlation_id_ = activity.linkedActivity()->correlationId();

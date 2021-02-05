@@ -3258,115 +3258,6 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
-    def test_memory_profiler(self):
-        def run_profiler(tensor_creation_fn, metric):
-            # collecting allocs / deallocs
-            with profile(profile_memory=True, record_shapes=True, use_kineto=kineto_available()) as prof:
-                x = None
-                with record_function("test_user_scope_alloc"):
-                    x = tensor_creation_fn()
-                with record_function("test_user_scope_dealloc"):
-                    del x
-            stats = prof.key_averages(group_by_input_shape=True)
-            print(stats.table(sort_by=metric))
-            return stats
-
-        def check_metrics(stats, metric, allocs=None, deallocs=None):
-            stat_metrics = {}
-            for stat in stats:
-                stat_metrics[stat.key] = getattr(stat, metric)
-            if allocs is not None:
-                for alloc_fn in allocs:
-                    self.assertTrue(alloc_fn in stat_metrics)
-                    self.assertTrue(stat_metrics[alloc_fn] > 0)
-            if deallocs is not None:
-                for dealloc_fn in deallocs:
-                    self.assertTrue(dealloc_fn in stat_metrics)
-                    self.assertTrue(stat_metrics[dealloc_fn] < 0)
-
-        def create_cpu_tensor():
-            return torch.rand(10, 10)
-
-        def create_cuda_tensor():
-            return torch.rand(10, 10).cuda()
-
-        def create_mkldnn_tensor():
-            return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
-
-        print("Running CPU test")
-        stats = run_profiler(create_cpu_tensor, "cpu_memory_usage")
-        check_metrics(
-            stats,
-            "cpu_memory_usage",
-            allocs=[
-                "aten::empty",
-                "aten::rand",
-                "test_user_scope_alloc",
-            ],
-            deallocs=[
-                "test_user_scope_dealloc",
-            ]
-        )
-
-        if torch.cuda.is_available():
-            create_cuda_tensor()
-            print("Running CUDA test")
-            stats = run_profiler(create_cuda_tensor, "cuda_memory_usage")
-            check_metrics(
-                stats,
-                "cuda_memory_usage",
-                allocs=[
-                    "test_user_scope_alloc",
-                    "aten::to",
-                    "aten::empty_strided",
-                ],
-                deallocs=[
-                    "test_user_scope_dealloc",
-                ]
-            )
-            check_metrics(
-                stats,
-                "cpu_memory_usage",
-                allocs=[
-                    "aten::rand",
-                    "aten::empty",
-                ]
-            )
-
-        if torch._C.has_mkldnn:
-            create_mkldnn_tensor()
-            print("Running MKLDNN test")
-            stats = run_profiler(create_mkldnn_tensor, "cpu_memory_usage")
-            check_metrics(
-                stats,
-                "cpu_memory_usage",
-                allocs=[
-                    "test_user_scope_alloc",
-                    "aten::rand",
-                    "aten::empty",
-                    "aten::to_mkldnn",
-                ],
-                deallocs=[
-                    "test_user_scope_dealloc",
-                ]
-            )
-
-        # check partial overlap of tensor allocation with memory profiler
-        x = torch.rand(10, 10)
-        with profile(profile_memory=True, record_shapes=True, use_kineto=kineto_available()) as prof:
-            del x
-            x = torch.rand(10, 10)
-        del x
-        stats = prof.key_averages(group_by_input_shape=True)
-        check_metrics(
-            stats,
-            "cpu_memory_usage",
-            allocs=[
-                "aten::rand",
-                "aten::empty",
-            ]
-        )
-
     def test_record_function(self):
         x = torch.randn(10, 10)
 
@@ -5694,6 +5585,26 @@ class TestAutogradFunctional(TestCase):
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
 
+    def _test_vectorize_raises_no_warnings(self, api):
+        # vmap is an experimental prototype. When someone calls torch.vmap,
+        # it raises a python warning. This test checks that
+        # autogradF.{jacobian, hessian} don't raise that experimental prototype
+        # warning; it is not nice for a public-facing API to raise a warning
+        # no matter how it is called.
+        def foo(a):
+            return (a ** 2).sum()
+
+        x = torch.randn(3)
+        with warnings.catch_warnings(record=True) as wa:
+            result = api(foo, x, vectorize=True)
+        self.assertEqual(len(wa), 0)
+
+    def test_jacobian_vectorize_raises_no_warnings(self):
+        return self._test_vectorize_raises_no_warnings(autogradF.jacobian)
+
+    def test_hessian_vectorize_raises_no_warnings(self):
+        return self._test_vectorize_raises_no_warnings(autogradF.hessian)
+
     def _test_jacobian_err_check(self, vectorize):
         def foo(a):
             return 3 * a.narrow(0, 0, 3)
@@ -7786,6 +7697,18 @@ class TestMultithreadAutograd(TestCase):
             tb = sys.exc_info()[2]
             tb_str = "\n".join(traceback.format_tb(tb))
             self.assertTrue('raise ValueError("something")' in tb_str)
+
+    # TODO(@anjali411): add an OpInfo based test for torch.cat
+    # Issue: https://github.com/pytorch/pytorch/issues/51627
+    def test_cat_r_to_c(self):
+        inp_c = torch.rand(3, 2, dtype=torch.cdouble, requires_grad=True)
+        inp_r = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
+
+        def fn(x1, x2):
+            return torch.cat((x1, x2), dim=-1)
+
+        torch.autograd.gradcheck(fn, [inp_r, inp_c])
+        torch.autograd.gradcheck(fn, [inp_c, inp_r])
 
 for test in method_tests():
     add_test(*test)
