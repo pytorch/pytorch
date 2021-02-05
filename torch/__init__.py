@@ -549,20 +549,6 @@ for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
 
-
-# TODO: add explanation
-class _TensorModuleWarner:
-    def __init__(self):
-        self._tensor_fun = globals()["tensor"]
-
-    def __call__(self, *args, **kwargs):
-        # TODO: make the message more expressive
-        warnings.warn("You are using the import wrong!")
-        return self._tensor_fun(*args, **kwargs)
-
-
-sys.modules["torch.tensor"] = _TensorModuleWarner()
-
 ################################################################################
 # Import interface functions defined in Python
 ################################################################################
