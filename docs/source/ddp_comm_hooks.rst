@@ -2,7 +2,8 @@ DDP Communication Hooks
 =======================
 
 DDP communication hook is a generic interface to control how to communicate
-gradients across workers by overriding the vanilla allreduce in ``DistributedDataParallel``.
+gradients across workers by overriding the vanilla allreduce in
+`DistributedDataParallel <https://pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel.>`_.
 A few built-in communication hooks are provided,
 and users can easily apply any of these hooks to optimize communication.
 Besides, the hook interface can also support user-defined communication

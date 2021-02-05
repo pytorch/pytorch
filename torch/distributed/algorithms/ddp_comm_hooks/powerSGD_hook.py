@@ -212,7 +212,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     Example::
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
-    """
+    """  #noqa
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
@@ -472,7 +472,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     Example::
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
         >>> ddp_model.register_comm_hook(state, batched_powerSGD_hook)
-    """
+    """  #noqa
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
