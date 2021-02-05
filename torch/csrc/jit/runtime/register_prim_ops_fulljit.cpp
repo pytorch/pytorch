@@ -62,8 +62,8 @@ RegisterOperators reg(
                  // if an rg property changes we assume a tensor does require
                  // gradients which is set in `guardDifferentiableGraph`
                  TORCH_INTERNAL_ASSERT(
-                     t->cast<TensorType>()->requiresGrad().has_value());
-                 return *t->cast<TensorType>()->requiresGrad();
+                     t->castRaw<TensorType>()->requiresGrad().has_value());
+                 return *t->castRaw<TensorType>()->requiresGrad();
                });
            return [rg_props](Stack* stack) {
              auto num_inputs = rg_props.size();

@@ -147,6 +147,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_convolution_backward_weights,
         torch.mkldnn_max_pool2d,
         torch.mkldnn_max_pool3d,
+        torch.mkldnn_linear_backward_weights,
         torch.normal,
         torch.ones,
         torch.promote_types,
@@ -189,8 +190,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.use_deterministic_algorithms,
         torch.set_deterministic,
         torch.unify_type_list,
-        torch.make_dual,
-        torch.unpack_dual,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -215,6 +214,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.stride,
         Tensor.unflatten,
         Tensor.to_sparse_csr,
+        Tensor._reduce_ex_internal,
     }
 
 
@@ -364,11 +364,12 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.diag: lambda input, diagonal=0, out=None: -1,
         torch.diag_embed: lambda input, diagonal=0, out=None: -1,
         torch.diagflat: lambda input, offset=0: -1,
+        torch.diff: lambda input, n=1, dim=-1, prepend=None, append=None, out=None: -1,
         torch.diagonal: lambda input, offset=0, dim1=0, dim2=1: -1,
         torch.digamma: lambda input, out=None: -1,
         torch.dist: lambda input, other, p=2: -1,
-        torch.div: lambda input, other, out=None: -1,
-        torch.divide: lambda input, other, out=None: -1,
+        torch.div: lambda input, other, rounding_mode='true', out=None: -1,
+        torch.divide: lambda input, other, rounding_mode='true', out=None: -1,
         torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
         torch.dsmm: lambda input, mat2: -1,
@@ -779,7 +780,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
         torch.round: lambda input, out=None: -1,
         torch.row_stack: lambda tensors, out=None: -1,  # alias for torch.vstack
-        torch.rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
+        torch._rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
         torch.rrelu: lambda input, lower=1. / 8, upper=1. / 3, training=False, inplace=False: -1,
         torch.rsqrt: lambda input, out=None: -1,
         torch.rsub: lambda input, other, alpha=1: -1,
