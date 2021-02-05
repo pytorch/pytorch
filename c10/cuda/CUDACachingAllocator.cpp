@@ -622,8 +622,9 @@ class DeviceCachingAllocator {
       it->second.use_count++;
     }
     // Maps this graph_id to mempool_id and makes sure this graph_id wasn't somehow
-    // assigned a mempool_id already.
-    TORCH_INTERNAL_ASSERT(capture_to_pool_map.insert({graph_id, mempool_id}).second);
+    // assigned a mempool_id already. Keeps essential effect (insert) out of macro.
+    bool inserted = capture_to_pool_map.insert({graph_id, mempool_id}).second;
+    TORCH_INTERNAL_ASSERT(inserted);
   }
 
   // Called by CUDAGraph::capture_end
@@ -651,7 +652,8 @@ class DeviceCachingAllocator {
     if (uc == 0) {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
       // and makes sure this pool wasn't somehow made freeable already.
-      TORCH_INTERNAL_ASSERT(graph_pools_freeable.insert({mempool_id, &(it->second)}).second);
+      bool inserted = graph_pools_freeable.insert({mempool_id, &(it->second)}).second;
+      TORCH_INTERNAL_ASSERT(inserted);
     }
   }
 
@@ -693,7 +695,8 @@ class DeviceCachingAllocator {
 
     active_blocks.erase(block);
     // Makes sure the Block* isn't already present in the pool we're freeing it back into.
-    TORCH_INTERNAL_ASSERT(pool.blocks.insert(block).second);
+    bool inserted = pool.blocks.insert(block).second;
+    TORCH_INTERNAL_ASSERT(inserted);
 
     if (block->is_split()) {
       net_change_inactive_split_blocks += 1;
@@ -842,6 +845,7 @@ class DeviceCachingAllocator {
     }
 
     if (p.pool->owner_PrivatePool) {
+      // The block is for a CUDA graph's PrivatePool.
       p.pool->owner_PrivatePool->cudaMalloc_count++;
     }
 
@@ -871,8 +875,10 @@ class DeviceCachingAllocator {
       free_blocks(id_and_PrivatePool.second->small_blocks);
       free_blocks(id_and_PrivatePool.second->large_blocks);
       if (id_and_PrivatePool.second->cudaMalloc_count == 0) {
-        TORCH_INTERNAL_ASSERT(graph_pools.erase(id_and_PrivatePool.first) == 1);
-        TORCH_INTERNAL_ASSERT(graph_pools_freeable.erase(id_and_PrivatePool.first) == 1);
+        auto erase_count = graph_pools.erase(id_and_PrivatePool.first);
+        TORCH_INTERNAL_ASSERT(erase_count == 1);
+        erase_count = graph_pools_freeable.erase(id_and_PrivatePool.first);
+        TORCH_INTERNAL_ASSERT(erase_count == 1);
       }
     }
 
