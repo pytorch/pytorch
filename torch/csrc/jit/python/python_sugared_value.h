@@ -25,7 +25,7 @@ inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
-    SourceRange loc,
+    const SourceRange& loc,
     bool is_constant = false);
 
 c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
