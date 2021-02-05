@@ -18,8 +18,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
-     skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,
-     onlyCPU)
+     skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
