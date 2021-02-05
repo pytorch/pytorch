@@ -21,6 +21,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);
+    case TypeKind::ComplexType: {
+      auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+      return static_cast<c10::complex<double>>(c_obj);
+    }
     case TypeKind::IntType:
     // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
     case TypeKind::LayoutType:
@@ -70,8 +74,11 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
     case TypeKind::DeviceObjType: {
-      auto device = reinterpret_cast<THPDevice*>(obj.ptr());
-      return device->device;
+      if (THPDevice_Check(obj.ptr())) {
+        auto device = reinterpret_cast<THPDevice*>(obj.ptr());
+        return device->device;
+      }
+      return c10::Device(py::cast<std::string>(obj.ptr()));
     }
     case TypeKind::StreamObjType: {
       auto stream = reinterpret_cast<THPStream*>(obj.ptr());
@@ -229,6 +236,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
+      } else if (PyComplex_CheckExact(obj.ptr())) {
+        auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+        return static_cast<c10::complex<double>>(c_obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
@@ -263,8 +273,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::AnyClassType:
     case TypeKind::AnyEnumType:
       break;
-    case TypeKind::ComplexDoubleType:
-       AT_ASSERT(false);
     case TypeKind::EnumType:
       EnumTypePtr enum_type = type->expect<EnumType>();
       py::object py_obj = py::reinterpret_borrow<py::object>(obj);

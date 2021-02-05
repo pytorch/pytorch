@@ -57,6 +57,8 @@ namespace {
     class ComplexTests : public ::testing::Test {};
     template <typename T>
     class QuantizationTests : public ::testing::Test {};
+    template <typename T>
+    class FunctionalTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -91,6 +93,7 @@ namespace {
     TYPED_TEST_CASE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_CASE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_CASE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1177,6 +1180,46 @@ namespace {
                 return  v0.relu6(v1, v2);
             },
             test_case);
+    }
+    TYPED_TEST(FunctionalTests, Map) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        constexpr auto R = 2LL; // residual
+        constexpr auto N = vec::size() + R;
+        CACHE_ALIGN VT x1[N];
+        CACHE_ALIGN VT x2[N];
+        CACHE_ALIGN VT x3[N];
+        CACHE_ALIGN VT x4[N];
+        CACHE_ALIGN VT y[N];
+        CACHE_ALIGN VT ref_y[N];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (int64_t i = 0; i < N; i++) {
+          x1[i] = generator.get();
+          x2[i] = generator.get();
+          x3[i] = generator.get();
+          x4[i] = generator.get();
+        }
+        auto cmp = [&](VT* y, VT* ref_y) {
+          AssertVec256<vec>(NAME_INFO(Map), vec::loadu(y), vec::loadu(ref_y)).check(true);
+          AssertVec256<vec>(NAME_INFO(Map), vec::loadu(y + vec::size(), R), vec::loadu(ref_y + vec::size(), R)).check(true);
+        };
+        // test map: y = x1
+        at::vec256::map<VT>([](vec x) { return x; }, y, x1, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i]; }
+        cmp(y, ref_y);
+        // test map2: y = x1 + x2
+        at::vec256::map2<VT>([](vec x1, vec x2) { return x1 + x2; }, y, x1, x2, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i]; }
+        cmp(y, ref_y);
+        // test map3: y = x1 + x2 + x3
+        at::vec256::map3<VT>([](vec x1, vec x2, vec x3) { return x1 + x2 + x3; }, y, x1, x2, x3, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
+        cmp(y, ref_y);
+        // test map3: y = x1 + x2 + x3 + x4
+        at::vec256::map4<VT>([](vec x1, vec x2, vec x3, vec x4) { return x1 + x2 + x3 + x4; }, y, x1, x2, x3, x4, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
+        cmp(y, ref_y);
     }
 
 #else

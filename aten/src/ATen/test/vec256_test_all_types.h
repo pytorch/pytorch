@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec256/functional.h>
 #include <gtest/gtest.h>
 #include <chrono>
 #include <exception>
