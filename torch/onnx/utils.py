@@ -947,7 +947,7 @@ def _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_t
     return sym_registry.get_registered_op(op_name, domain, opset_version)
 
 
-def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
+def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
@@ -970,9 +970,12 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             ns_op_name = n.kind()
         ns, op_name = ns_op_name.split("::")
         if ns == "onnx":
-            # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
-            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
+            if op_name == "Placeholder":
+                return torch._C._jit_onnx_convert_pattern_from_subblock(block, n, env)
+            else:
+                # Use the original node directly
+                attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+                return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
 
         elif ns == "aten":
             is_exportable_aten_op = sym_registry.is_registered_op(op_name, '', opset_version)
