@@ -213,6 +213,8 @@ class EventList(list):
             # this technique is proven to give a 4x speedup.
             f.write("[")
             for evt in self:
+                if evt.trace_name is None:
+                    continue
                 f.write(
                     '{"name": "%s", '
                     '"ph": "X", '
@@ -849,7 +851,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
-        self.trace_name: str = trace_name if trace_name is not None else self.name
+        self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
         self.fwd_thread: Optional[int] = fwd_thread
@@ -1127,7 +1129,7 @@ def parse_kineto_results(result):
             assert start_record is None
             start_record = record
         if record.kind() == 'memory_alloc':
-            mem_records.append(record)
+            mem_records.append([record, False])
     assert start_record is not None, "Invalid profiler output, __start_profile is missing"
 
     # Create and return FunctionEvent list
@@ -1145,10 +1147,12 @@ def parse_kineto_results(result):
         if kineto_event.device_type() == DeviceType.CPU:
             # find the corresponding memory allocation events
             for mem_record in mem_records:
-                if (mem_record.start_us() >= kineto_event.start_us() and
-                        mem_record.start_us() <= abs_end_us):
-                    cpu_memory_usage += mem_record.cpu_memory_usage()
-                    cuda_memory_usage += mem_record.cuda_memory_usage()
+                if (mem_record[0].start_us() >= kineto_event.start_us() and
+                        mem_record[0].start_us() <= abs_end_us):
+                    cpu_memory_usage += mem_record[0].cpu_memory_usage()
+                    cuda_memory_usage += mem_record[0].cuda_memory_usage()
+                    mem_record[1] = True
+
         is_async = kineto_event.start_thread_id() != kineto_event.end_thread_id()
         fe = FunctionEvent(
             id=kineto_event.correlation_id(),
@@ -1193,6 +1197,29 @@ def parse_kineto_results(result):
                     # parents and children
                     f_evt.thread = fe.thread
 
+
+    # output top-level memory events
+    for mem_record in mem_records:
+        if not mem_record[1]:
+            fe = FunctionEvent(
+                id=mem_record[0].handle(),
+                name="[memory]",
+                trace_name=None,  # not outputting in the trace
+                thread=mem_record[0].thread_id(),
+                start_us=mem_record[0].start_us(),
+                end_us=mem_record[0].start_us(),  # no duration
+                fwd_thread=mem_record[0].fwd_thread_id(),
+                input_shapes=[],
+                stack=[],
+                scope=mem_record[0].scope(),
+                cpu_memory_usage=mem_record[0].cpu_memory_usage(),
+                cuda_memory_usage=mem_record[0].cuda_memory_usage(),
+                is_async=False,
+                sequence_nr=-1,
+                device_type=DeviceType.CPU,
+                device_index=0,
+            )
+            function_events.append(fe)
 
     function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
     return function_events
@@ -1321,10 +1348,28 @@ def parse_legacy_records(thread_records):
                 del cpu_memory_allocs[record_key]
                 del cuda_memory_allocs[record_key]
             elif record.kind() == 'memory_alloc':
+                num_open_handles_cpu = len(cpu_memory_allocs)
+                num_open_handles_cuda = len(cuda_memory_allocs)
+                assert num_open_handles_cpu == num_open_handles_cuda
                 for handle in cpu_memory_allocs.keys():
                     cpu_memory_allocs[handle] += record.cpu_memory_usage()
                 for handle in cuda_memory_allocs.keys():
                     cuda_memory_allocs[handle] += record.cuda_memory_usage()
+                if num_open_handles_cpu == 0:
+                    # output event as a top-level memory event
+                    fe = FunctionEvent(
+                        id=0,
+                        name="[memory]",
+                        trace_name=None,
+                        thread=0,
+                        start_us=0,
+                        end_us=0,
+                        stack=[],
+                        cpu_memory_usage=record.cpu_memory_usage(),
+                        cuda_memory_usage=record.cuda_memory_usage(),
+                        is_legacy=True,
+                    )
+                    functions.append(fe)
             prev_record = record
 
     # Sort functions by start time then by end time ascending.
