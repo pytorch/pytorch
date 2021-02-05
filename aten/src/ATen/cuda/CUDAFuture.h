@@ -23,7 +23,13 @@ namespace at { namespace cuda {
 
 struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
  public:
-  using at::ivalue::Future::Future;
+  CUDAFuture(at::TypePtr type) : at::ivalue::Future(std::move(type)) {
+    // Use current device to initialize currentDevice_. This is necessary
+    // because postMarkCompletedHook won't be called when the Future contains
+    // an error. Uninitialized currentDevice_ could lead to crash when used
+    // in CUDAGuard.
+    currentDevice_ = c10::cuda::current_device();
+  }
 
  protected:
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override {
