@@ -1,4 +1,4 @@
-from functools import reduce, wraps
+from functools import reduce, wraps, partial
 from itertools import product
 from operator import mul, itemgetter
 import collections
@@ -578,6 +578,21 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
                                           requires_grad=requires_grad), shape))
                  for size, shape in test_cases)
 
+def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None):
+    a = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    is_integral = not dtype.is_floating_point and not dtype.is_complex
+    b = make_tensor((S, S, S), device, dtype, low=1 if is_integral else 0.1, high=None,
+                    requires_grad=requires_grad)
+
+    kwargs = None
+    if rounding_mode is not None:
+        kwargs = dict(rounding_mode=rounding_mode)
+
+    return [
+        SampleInput((a, b), kwargs=kwargs),
+        SampleInput((a,), args=(2,)),
+    ]
+
 def sample_inputs_stack(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
@@ -623,6 +638,33 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+def sample_inputs_diff(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((1,), 0, None, None),
+        ((S,), 0, None, None),
+        ((S, 1), 0, None, None),
+        ((S, 1), 1, None, None),
+        ((S, S), 0, None, None),
+        ((S, S), 1, None, None),
+        ((S, S), 0, (1, S), (2, S)),
+        ((S, S), 0, None, (2, S)),
+        ((S, S, S), 1, None, None),
+        ((S, S, S), 1, (S, 1, S), (S, 1, S)),)
+
+    sample_inputs = []
+    for size, dim, size_prepend, size_append in test_cases:
+        args = (make_tensor(size, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad), 1, dim,
+                make_tensor(size_prepend, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad) if size_prepend else None,
+                make_tensor(size_append, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad) if size_append else None)
+        sample_inputs += [SampleInput(args)]
+
+    return tuple(sample_inputs)
 
 def sample_inputs_index_select(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S, S), device, dtype,
@@ -1435,6 +1477,31 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('diff',
+           op=torch.diff,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_diff,
+           test_inplace_grad=False),
+    OpInfo('div',
+           variant_test_name='no_rounding_mode',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_div,
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='true_rounding',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='true'),
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='trunc_rounding',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='trunc'),
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='floor_rounding',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='floor'),
+           assert_autodiffed=True),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half),
@@ -2323,6 +2390,9 @@ NO_ARGS = NoArgsClass()
 def ident(x):
     return x
 
+# Do NOT add to this list. Method tests are being DEPRECATED and replaced by OpInfos.
+# See https://github.com/pytorch/pytorch/wiki/Writing-tests-in-PyTorch-1.8
+#
 # (
 #   method name,
 #   input size/constructing fn,
