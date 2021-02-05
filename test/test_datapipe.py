@@ -180,6 +180,8 @@ class IDP(IterDataPipe):
 def _fake_fn(self, data, *args, **kwargs):
     return data
 
+def _fake_filter_fn(self, data, *args, **kwargs):
+    return data >= 5
 
 class TestFunctionalIterDataPipe(TestCase):
 
@@ -190,6 +192,7 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Callable, IDP(arr), [0], {'fn': _fake_fn, 'test': True}),
             (dp.iter.Collate, IDP(arr), [], {}),
             (dp.iter.Collate, IDP(arr), [0], {'collate_fn': _fake_fn, 'test': True}),
+            (dp.iter.Filter, IDP(arr), [0], {'filter_fn': _fake_filter_fn, 'test': True}),
         ]
         for dpipe, input_dp, args, kargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *args, **kargs))  # type: ignore
@@ -197,6 +200,7 @@ class TestFunctionalIterDataPipe(TestCase):
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, List, Dict[str, Any]]] = [
             (dp.iter.Callable, IDP(arr), [], {'fn': lambda x: x}),
             (dp.iter.Collate, IDP(arr), [], {'collate_fn': lambda x: x}),
+            (dp.iter.Filter, IDP(arr), [], {'filter_fn': lambda x: x >= 5}),
         ]
         for dpipe, input_dp, args, kargs in unpicklable_datapipes:
             with self.assertRaises(AttributeError):
@@ -322,6 +326,25 @@ class TestFunctionalIterDataPipe(TestCase):
 
         _helper(batch_size=7, drop_last=False, bucket_size_mul=5, sort_key=_sort_fn)
         _helper(batch_size=7, drop_last=True, bucket_size_mul=5, sort_key=_sort_fn)
+
+    def test_filter_datapipe(self):
+        input_ds = IDP(range(10))
+
+        def _filter_fn(data, val, clip=False):
+            if clip:
+                return data >= val
+            return True
+
+        filter_dp = dp.iter.Filter(input_ds, 5, filter_fn=_filter_fn)
+        for data, exp in zip(filter_dp, range(10)):
+            self.assertEqual(data, exp)
+
+        filter_dp = dp.iter.Filter(input_ds, filter_fn=_filter_fn, val=5, clip=True)
+        for data, exp in zip(filter_dp, range(5, 10)):
+            self.assertEqual(data, exp)
+
+        with self.assertRaises(NotImplementedError):
+            len(filter_dp)
 
     def test_sampler_datapipe(self):
         arrs = range(10)

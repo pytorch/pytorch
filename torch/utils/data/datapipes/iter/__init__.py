@@ -5,8 +5,11 @@ from torch.utils.data.datapipes.iter.readfilesfromzip import ReadFilesFromZipIte
 
 # Functional DataPipe
 from torch.utils.data.datapipes.iter.batch import BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch
-from torch.utils.data.datapipes.iter.callable import CallableIterDataPipe as Callable, CollateIterDataPipe as Collate
-from torch.utils.data.datapipes.iter.sampler import SamplerIterDataPipe as Sampler
+from torch.utils.data.datapipes.iter.callable import \
+    (CallableIterDataPipe as Callable, CollateIterDataPipe as Collate)
+from torch.utils.data.datapipes.iter.sampler import \
+    (SamplerIterDataPipe as Sampler, FilterIterDataPipe as Filter)
+
 
 __all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFormTar', 'ReadFilesFromZip'
-           'Batch', 'BucketBatch', 'Callable', 'Collate', 'Sampler']
+           'Batch', 'BucketBatch', 'Callable', 'Collate', 'Filter', 'Sampler']
