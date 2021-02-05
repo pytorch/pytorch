@@ -1603,10 +1603,20 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False),
     UnaryUfuncInfo('frexp',
-                   ref=np.frexp,
+                   op=torch.frexp,
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.frexp),
                    dtypesIfCPU=all_types_and(torch.bool, torch.half),
                    dtypesIfCUDA=floating_types_and(torch.half),
-                   test_inplace_grad=False),
+                   test_inplace_grad=False,
+                   safe_casts_outputs=True,
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/pull/51097
+                       # numpy returns exponents as integral arrays, while torch.frexp promotes integral inputs
+                       # to floating types
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics'),
+                       # gpu_kernel_multiple_outputs does not support casting to outputs
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes', device_type='cuda'),
+                   )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),

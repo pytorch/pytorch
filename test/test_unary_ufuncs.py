@@ -204,8 +204,9 @@ class TestUnaryUfuncs(TestCase):
     # TODO: should this jitting the method and inplace variants, too?
     @ops(unary_ufuncs)
     def test_variant_consistency(self, device, dtype, op):
+        torch_op = op.get_op()
         def _fn(t):
-            return op(t)
+            return torch_op(t)
 
         t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
         expected = op(t)
@@ -300,6 +301,16 @@ class TestUnaryUfuncs(TestCase):
 
     # Tests for testing (dis)contiguity consistency
 
+    def _multiple_output_check_helper(self,
+                                      output1, output2,
+                                      func=lambda x: x):
+        if isinstance(output1, torch.Tensor):
+            self.assertEqual(func(output1), output2)
+        else:
+            for i in range(len(output1)):
+                self.assertEqual(func(output1[i]),
+                                 output2[i])
+
     @ops(unary_ufuncs)
     def test_contig_vs_every_other(self, device, dtype, op):
         contig = make_tensor((1026,), device=device, dtype=dtype,
@@ -309,7 +320,11 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertFalse(non_contig.is_contiguous())
 
-        self.assertEqual(op(contig)[::2], op(non_contig))
+        contig_output = op(contig)
+        non_contig_output = op(non_contig)
+        self._multiple_output_check_helper(contig_output,
+                                           non_contig_output,
+                                           lambda x: x[::2])
 
     @ops(unary_ufuncs)
     def test_contig_vs_transposed(self, device, dtype, op):
@@ -320,7 +335,11 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertFalse(non_contig.is_contiguous())
 
-        self.assertEqual(op(contig).T, op(non_contig))
+        contig_output = op(contig)
+        non_contig_output = op(non_contig)
+        self._multiple_output_check_helper(contig_output,
+                                           non_contig_output,
+                                           lambda x: x.T)
 
     @ops(unary_ufuncs)
     def test_non_contig(self, device, dtype, op):
@@ -334,7 +353,10 @@ class TestUnaryUfuncs(TestCase):
             self.assertTrue(contig.is_contiguous())
             self.assertFalse(non_contig.is_contiguous())
 
-            self.assertEqual(op(contig), op(non_contig))
+            contig_output = op(contig)
+            non_contig_output = op(non_contig)
+            self._multiple_output_check_helper(contig_output,
+                                               non_contig_output)
 
     @ops(unary_ufuncs)
     def test_non_contig_index(self, device, dtype, op):
@@ -346,7 +368,9 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertFalse(non_contig.is_contiguous())
 
-        self.assertEqual(op(contig), op(non_contig))
+        contig_ouput = op(contig)
+        non_contig_output = op(non_contig)
+        self._multiple_output_check_helper(contig_ouput, non_contig_output)
 
     @ops(unary_ufuncs)
     def test_non_contig_expand(self, device, dtype, op):
@@ -359,11 +383,16 @@ class TestUnaryUfuncs(TestCase):
             self.assertTrue(contig.is_contiguous())
             self.assertFalse(non_contig.is_contiguous())
 
-            contig = op(contig)
-            non_contig = op(non_contig)
+            contig_output = op(contig)
+            non_contig_output = op(non_contig)
             for i in range(3):
-                self.assertEqual(contig, non_contig[i],
-                                 msg='non-contiguous expand[' + str(i) + ']')
+                if isinstance(contig_output, torch.Tensor):
+                    self.assertEqual(contig_output, non_contig_output[i],
+                                     msg='non-contiguous expand[' + str(i) + ']')
+                else:
+                    for j in range(len(contig_output)):
+                        self.assertEqual(contig_output[j], non_contig_output[j][i],
+                                         msg='non-contiguous expand[' + str(i) + ']')
 
     @ops(unary_ufuncs)
     def test_contig_size1(self, device, dtype, op):
@@ -376,7 +405,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertTrue(contig2.is_contiguous())
 
-        self.assertEqual(op(contig), op(contig2))
+        self._multiple_output_check_helper(op(contig), op(contig2))
 
     @ops(unary_ufuncs)
     def test_contig_size1_large_dim(self, device, dtype, op):
@@ -389,19 +418,27 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertTrue(contig2.is_contiguous())
 
-        self.assertEqual(op(contig), op(contig2))
+        self._multiple_output_check_helper(op(contig), op(contig2))
 
     # Tests that computation on a multiple batches is the same as
     # per-batch computation.
     @ops(unary_ufuncs)
     def test_batch_vs_slicing(self, device, dtype, op):
-        input = make_tensor((1024, 512), dtype=dtype, device=device,
+        input = make_tensor((2, 1), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
 
         actual = op(input)
-        expected = torch.stack([op(slice) for slice in input])
-
-        self.assertEqual(actual, expected)
+        slice_outputs = [op(slice) for slice in input]
+        if isinstance(actual, torch.Tensor):
+            expected = torch.stack(slice_outputs)
+            self.assertEqual(actual, expected)
+        else:
+            # handle unary function that returns multiple outputs,
+            # stacked the sliced results according to the index of actual outputs
+            for i in range(len(actual)):
+                expected = torch.stack([row[i] for row in slice_outputs])
+                self.assertEqual(actual[i],
+                                 expected)
 
     def _test_out_arg(self, op, input, output, expected):
         if op.safe_casts_outputs:
@@ -417,15 +454,40 @@ class TestUnaryUfuncs(TestCase):
             self.assertTrue(res is output)
             self.assertEqual(output, expected.to(output.dtype))
 
+    def _test_multiple_out_arg(self, op, input, output, expected):
+        expect_fail = True
+        output_num = len(expected)
+
+        for i in range(output_num):
+            if op.safe_casts_outputs:
+                expect_fail = not torch.can_cast(expected[i].dtype, output.dtype)
+            else:
+                expect_fail = output.dtype != expected[i].dtype
+            if not expect_fail:
+                break
+
+        out = [torch.empty_like(output) for _ in range(output_num)]
+        if expect_fail:
+            with self.assertRaises(RuntimeError):
+                op(input, out=out)
+        else:
+            res = op(input, out=out)
+            for i in range(output_num):
+                self.assertTrue(res[i] is out[i])
+                self.assertEqual(out[i], expected[i].to(out[i].dtype))
+
     @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
-        input = make_tensor((64, 64), dtype=dtype, device=device,
+        input = make_tensor((2,), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
         expected = op(input)
 
         for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
             out = torch.empty_like(input, dtype=out_dtype)
-            self._test_out_arg(op, input, out, expected)
+            if isinstance(expected, torch.Tensor):
+                self._test_out_arg(op, input, out, expected)
+            else:
+                self._test_multiple_out_arg(op, input, out, expected)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))

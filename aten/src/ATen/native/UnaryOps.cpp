@@ -656,11 +656,22 @@ Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
 static inline TensorIterator build_frexp_iter(const Tensor &self,
                                               Tensor mantissa, Tensor exponent) {
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(mantissa)
-    .add_output(exponent)
-    .add_input(self)
+
+  TensorIteratorConfig config;
+
+  config.set_check_mem_overlap(true)
+  .add_output(mantissa)
+  .add_output(exponent);
+
+  // gpu_kernel_multiple_outputs also has issues of handling non contiguous tensors
+  // Reference: https://github.com/pytorch/pytorch/pull/51097
+  if (self.device().type() == DeviceType::CUDA) {
+    config.add_input(self.contiguous());
+  } else {
+    config.add_input(self);
+  }
+
+  return config
     .cast_common_dtype_to_outputs(true)
     .promote_inputs_to_common_dtype(true)
     .promote_integer_inputs_to_float(true)
@@ -671,7 +682,7 @@ static inline TensorIterator build_frexp_iter(const Tensor &self,
 static inline void frexp_check(const Tensor& self) {
   // torch.frexp currently does not support integral dtypes for cuda tensors
   // due to the casting issues of gpu_kernel_multiple_outputs
-  // https://github.com/pytorch/pytorch/pull/51097
+  // Reference: https://github.com/pytorch/pytorch/pull/51097
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || self.device().is_cpu(),
               "frexp is not implemented for ",
               self.scalar_type(),
@@ -693,6 +704,13 @@ std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
 std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
                                        Tensor& mantissa, Tensor& exponent) {
   frexp_check(self);
+
+  // due to the casting issues of gpu_kernel_multiple_outputs,
+  // torch.frexp cannot do casting to outputs for now
+  // Reference: https://github.com/pytorch/pytorch/pull/51097
+  TORCH_CHECK(self.device().type() == DeviceType::CPU ||
+              (self.dtype() == mantissa.dtype() && self.dtype() == exponent.dtype()),
+              "torch.frexp does not support casting to output on CUDA device.");
 
   auto iter = build_frexp_iter(self, mantissa, exponent);
   frexp_stub(iter.device_type(), iter);

@@ -259,7 +259,7 @@ void frexp_kernel_cuda(TensorIterator& iter) {
       using T_ACC = acc_type<scalar_t, true>;
       gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, scalar_t> {
         int exponent;
-        scalar_t mantissa = ::frexp(a, &exponent);
+        scalar_t mantissa = std::frexp(a, &exponent);
         return {mantissa, static_cast<T_ACC>(exponent)};
       });
   });

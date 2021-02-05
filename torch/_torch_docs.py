@@ -3222,7 +3222,7 @@ Example::
 
 add_docstr(torch.frexp,
            r"""
-frac(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
+frexp(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
 
 Decompose :attr:`input` into mantissa and twos exponent, elementwise.
 The range of mantissa is the open interval(-1, 1).
