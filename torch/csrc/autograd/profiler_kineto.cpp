@@ -9,11 +9,9 @@
 #include <pthread.h>
 #include <torch/cuda.h>
 #include <libkineto.h>
-#endif
 
 namespace torch { namespace autograd { namespace profiler {
 
-#ifdef USE_KINETO
 namespace {
 // TODO: consider TLS (tid + tls counter)
 uint64_t next_correlation_id() {
@@ -381,14 +379,6 @@ void ProfilerResult::save(const std::string& path) {
   saved_ = true;
 }
 
-#endif
 
-bool kinetoAvailable() {
-#ifdef USE_KINETO
-  return true;
-#else
-  return false;
-#endif
-}
-
-}}}
+}}} // namespace torch::autograd::profiler
+#endif /* USE_KINETO */
