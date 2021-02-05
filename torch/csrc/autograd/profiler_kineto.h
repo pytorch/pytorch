@@ -219,7 +219,13 @@ TORCH_API void prepareProfiler(
     const std::set<ActivityType>& activities);
 #endif // USE_KINETO
 
-TORCH_API bool kinetoAvailable();
+TORCH_API constexpr bool kinetoAvailable() {
+#ifdef USE_KINETO
+  return true;
+#else
+  return false;
+#endif // USE_KINETO
+}
 
 } // namespace profiler
 }} // namespace torch::autograd

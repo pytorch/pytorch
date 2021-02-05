@@ -86,7 +86,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
   fully_connected->dynamic_conv_quantization_params.multipliers =
     requantization_scales;
 
-  if (use_prepack_kernel) {
+  if (use_prepack_kernel || (pytorch_qnnp_params.q8gemm_sparse.gemm_dq == NULL)) {
     fully_connected->ukernel_type =
       pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq;
   } else {

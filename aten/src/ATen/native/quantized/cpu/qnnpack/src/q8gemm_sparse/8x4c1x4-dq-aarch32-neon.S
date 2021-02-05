@@ -693,7 +693,7 @@ k_loop:
     POP {r4, r5, r6, r7, r8, r9, r10, r11, lr}
     BX lr
 
-END_FUNCTION pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon
+END_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__aarch32_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits
