@@ -583,14 +583,12 @@ class TestMkldnn(TestCase):
         out_features = torch.randint(3, 100, (1,)).item()
         x = torch.randn(3, in_features, dtype=torch.float32) * 10
         w = torch.randn(in_features, out_features, dtype=torch.float32)
-        # Only works for bias case by dispatch onednn linear to addmm.
-        for bias in [True]:
+        for bias in [True, False]:
             x1 = x.clone().requires_grad_()
             x2 = x.clone().to_mkldnn().requires_grad_()
             linear = torch.nn.Linear(in_features, out_features).float()
-            mkldnn_linear = copy.deepcopy(linear)
             linear.weight = torch.nn.Parameter(w.t())
-            mkldnn_linear.weight = torch.nn.Parameter(w.t())
+            mkldnn_linear = copy.deepcopy(linear)
             y1 = linear(x1).sum()
             y2 = mkldnn_linear(x2).to_dense().sum()
             y1.backward()
@@ -619,8 +617,7 @@ class TestMkldnn(TestCase):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
         x = torch.randn(3, in_features, dtype=torch.float32) * 10
-        # Only works for bias case by dispatch onednn linear to addmm.
-        for bias in [True]:
+        for bias in [True, False]:
             x1 = x.clone().requires_grad_()
             x2 = x.clone().to_mkldnn().requires_grad_()
             linear = torch.nn.Linear(in_features, out_features).float()
