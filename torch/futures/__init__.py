@@ -49,7 +49,8 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         the same ``Future``, and will be invoked in the same order as they were
         added. The callback must take one argument, which is the reference to
         this ``Future``. The callback function can use the ``Future.wait()`` API
-        to get the value.
+        to get the value. Note that if this ``Future`` is already completed, the
+        given callback will be run immediately inline.
 
         Args:
             callback(``Callable``): a ``Callable`` that takes this ``Future`` as
@@ -89,7 +90,8 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         the same ``Future``, and will be invoked in the same order as they were
         added. The callback must take one argument, which is the reference to
         this ``Future``. The callback function can use the ``Future.wait()`` API
-        to get the value.
+        to get the value. Note that if this ``Future`` is already completed, the
+        given callback will be run inline.
 
         We recommend that you use the ``then`` API as it provides a way to synchronize
         after your callback has completed. ``add_done_callback`` can be cheaper if your
