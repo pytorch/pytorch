@@ -93,7 +93,7 @@ void mul_kernel(TensorIterator& iter) {
 }
 
 void div_true_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "div_true_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "div_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
         return a / b;
