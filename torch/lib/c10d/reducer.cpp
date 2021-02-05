@@ -1403,11 +1403,15 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_comm_hook or register_builtin_comm_hook can only be called once.");
-  // TODO(@sinannasir): Single-process multiple-device mode support for DDP
-  // communication hook. Related to GH Issue #42542.
+  // TODO(#42542): Single-process multiple-device mode support for DDP
+  // communication hook.
   TORCH_CHECK(
       replicas_.size() == 1,
       "Communication hook does not support single-process multiple-device mode.");
+  // TODO: Support GLOO and MPI backends for DDP communication hook.
+  TORCH_CHECK(
+      process_group_->getBackendName() == "nccl",
+      "register_comm_hook currently can only support NCCL backend.");
 
   comm_hook_ = std::move(iface);
 }
@@ -1421,6 +1425,9 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       replicas_.size() == 1,
       "Communication hook does not support single-process multiple-device mode.");
+  TORCH_CHECK(
+      process_group_->getBackendName() == "nccl",
+      "register_comm_hook currently can only support NCCL backend.");
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:
