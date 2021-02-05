@@ -11,15 +11,25 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <cassert>
 
+#ifndef _WIN32
+#include <qnnpack/AlignedAllocator.h>
+#endif
 #include <qnnpack/math.h>
 
 namespace qnnpack {
 
 typedef struct BCSRMatrix {
+#ifndef _WIN32
+  std::vector<uint32_t, AlignedAllocator<uint32_t, 16>> col_indices;
+  std::vector<uint32_t, AlignedAllocator<uint32_t, 16>> row_values;
+  std::vector<uint8_t, AlignedAllocator<uint8_t, 16>> values;
+#else
   std::vector<uint32_t> col_indices;
   std::vector<uint32_t> row_values;
   std::vector<uint8_t> values;
+#endif
   uint32_t col_block_size;
   void print() {
     std::cout << "row ptr\n";
