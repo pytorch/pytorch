@@ -11,8 +11,8 @@
 
 # r0 mr
 # r1 nr
-# r2 a
-# r3 a_stride
+# r2 packed_a
+# r3 packed_w
 
 # d14 a_zero_point
 # d15 b_zero_point
@@ -28,9 +28,6 @@
 # 4     output channel index
 # 4     quantization_params
 # --
-# 36 bytes of parameters on stack
-# 16    r4-r7
-# 64    d8-d15
 
 .syntax unified
 
@@ -53,22 +50,20 @@
 #  |----------------|
 #  |d8 - d15        | 0
 #  |r4 - r11,lr     | 64
-#  |packed_w        | 100
-#  |w_row_ptr       | 104
-#  |w_block_ids_ptr | 108
-#  |b               | 112
-#  |c               | 116
-#  |c_stride        | 120
-#  |out ch indx     | 124
-#  |params          | 128
+#  |w_row_ptr       | 100
+#  |w_block_ids_ptr | 104
+#  |b               | 108
+#  |c               | 112
+#  |c_stride        | 116
+#  |out ch indx     | 120
+#  |params          | 124
 #  |----------------|
 #  
 
-# void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__aarch32_neon(
+# void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
-#     const uint8_t* a,
-#     size_t a_stride,
+#     const uint8_t* a_packed,
 #     const uint8_t* packed_w,
 #     const uint32_t* w_row_ptr,
 #     const uint32_t* w_block_ids_ptr,
@@ -77,7 +72,7 @@
 #     size_t c_stride,
 #     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_dynamic_quantization_params quantization_params[restrict static 1])
-BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__aarch32_neon
+BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon
     .arm
 #ifndef __APPLE__
     .arch armv7-a
@@ -87,17 +82,13 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__aarch32_neon
     PUSH {r4, r5, r6, r7, r8, r9, r10, r11, lr}
     VPUSH {d8-d15}
 
-    # Store mr and nr on stack to later load from since
-    # we will not need it once all 8 a pointers are
-    # initialized.
-    # Furthermore, we need all the register we can get.
-    STR r0, [sp, #-4]
-    STR r1, [sp, #-8]
+    # Store nr in r11 as well for late user.
+    MOV r11, r1
     # Load output channel index
-    LDR r5, [sp, 124]
+    LDR r5, [sp, 120]
     # Load quantization params
     # - r7 = quantization_params
-    LDR r7, [sp, 128]
+    LDR r7, [sp, 124]
     # Load input_zero_point
     VLD1.8 {d16[]}, [r7]
     ADD r7, r7, 4
@@ -105,216 +96,71 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__aarch32_neon
     LDR r4, [r7]
     # Add output_channel_index to the b_zero_point pointer
     ADD r4, r4, r5
-    # Store pointer to zero point on stack
-    STR r4, [sp, #-12]
 
-    # Copy mr to r9
-    MOV r9, r0
-    # Stride to r10
-    MOV r10, r3
-    # r0 = a0 = a pointer
-    MOV r0, r2
-    # Use r8 to store nr
-    # and r1 to store a1
-    MOV r8, r1
-
-    CMP r9, 2
-    # r1 = a1
-    ADD r1, r0, r10
-    MOVLO r1, r0
-
-    # r2 = a2
-    ADD r2, r1, r10
-    MOVLS r2, r1
-
-    CMP r9, 4
-    # r3 = a3
-    ADD r3, r2, r10
-    MOVLO r3, r2
-
-    # r4 = a4
-    ADD r4, r3, r10
-    MOVLS r4, r3
-
-    CMP r9, 6
-    # r5 = a5
-    ADD r5, r4, r10
-    MOVLO r5, r4
-
-    # r6 = a6
-    ADD r6, r5, r10
-    MOVLS r6, r5
-
-    CMP r9, 8
-    # r7 = a7
-    ADD r7, r6, r10
-    MOVNE r7, r6
-
-    # We enter the loop if r8 is atleast 1.
-    # r8 = r8 - 1 will happen in the epilogue
+    # We enter the loop if r1 is atleast 1.
+    # r1 = r1 - 1 will happen in the epilogue
     # of the loop
-    CMP r8, 1
+    CMP r1, 1
     BLO 7f
+
+    # Load w_row_ptr + n
+    LDR r5, [sp, 100]
+    # r7 = blocks_id_ptr
+    LDR r7, [sp, 104]
 
     .p2align 5
 0:
-    # Load pointer to weight zero point
-    LDR r9, [sp, #-12]
-    # Load w_row_ptr + n
-    LDR r11, [sp, 104]
     VEOR q10, q10, q10
-    VLD1.8 {d17[]}, [r9]!
-    # Store updated pointer to weight zero point on stack
-    STR r9, [sp, #-12]
+    VLD1.8 {d17[]}, [r4]!
     # ip = w_row_ptr[n], lr = w_row_ptr[n+1]
-    # r11 = r11 + 4 to point to next n
-    LDR ip, [r11], #4
-    LDR lr, [r11]
+    # r5 = r5 + 4 to point to next n
+    LDR ip, [r5], #4
+    LDR lr, [r5]
     VEOR q11, q11, q11
-    STR r11, [sp, 104]
-    # r9 = packed_w
-    LDR r9, [sp, 100]
-    # r10 = blocks_id_ptr
-    LDR r10, [sp, 108]
-    # r9 = temp_packed_w = packed_w + w_row_ptr[n] * 4
+    # r6 = temp_packed_w = packed_w + w_row_ptr[n] * 4
     # This points to the first block of nonzero value
     # for the nth row.
-    ADD r9, r9, ip, LSL #2
-    # r10 = temp_w_block_ids_ptr = w_block_ids_ptr + w_row_ptr[n]
+    ADD r6, r3, ip, LSL #2
+    # r9 = temp_w_block_ids_ptr = w_block_ids_ptr (r7) + w_row_ptr[n]
     # LSL2 because each element is 4 bytes
     # This points to the block id of the first block
-    # It should contain r9 - r8 number of block ids
-    ADD r10, r10, ip, LSL #2
-    # r11 = num_blocks that needs to be processed
-    SUB r11, lr, ip
-    SUBS r11, r11, 2
+    # It should contain lr - ip number of block ids
+    ADD r9, r7, ip, LSL #2
+    # r8 = num_blocks that needs to be processed
+    SUB r8, lr, ip
+    SUBS r8, r8, 2
     BLO 1f
 
 k_loop:
     # Load 2 non zero blocks of weights. Each block = 1x4.
-    VLD1.8 {d19}, [r9]!
-    # q9 = vxb
-    VSUBL.U8 q9, d19, d17
+    VLD1.8 {d19}, [r6]!
 
     #ip = block_id_ptr[0]
     #lr = block_id_ptr[1]
-    LDR ip, [r10], #4
-    LDR lr, [r10], #4
-
-    # Add offset to r0
-    # Shift by 2 because each block id corresponds to 4 uint8_t elements
-    ADD r0, r0, ip, LSL #2
-    ADD r1, r1, ip, LSL #2
-    ADD r2, r2, ip, LSL #2
-    ADD r3, r3, ip, LSL #2
-    ADD r4, r4, ip, LSL #2
-    ADD r5, r5, ip, LSL #2
-    ADD r6, r6, ip, LSL #2
-    ADD r7, r7, ip, LSL #2
-
-    VLD1.32 {d0[]}, [r0]
-    VLD1.32 {d2[]}, [r1]
-    VLD1.32 {d4[]}, [r2]
-    VLD1.32 {d6[]}, [r3]
-    VLD1.32 {d8[]}, [r4]
-    VLD1.32 {d10[]}, [r5]
-    VLD1.32 {d12[]}, [r6]
-    VLD1.32 {d14[]}, [r7]
-
-    SUB ip, lr, ip
-    ADD r0, r0, ip, LSL #2
-    ADD r1, r1, ip, LSL #2
-    ADD r2, r2, ip, LSL #2
-    ADD r3, r3, ip, LSL #2
-    ADD r4, r4, ip, LSL #2
-    ADD r5, r5, ip, LSL #2
-    ADD r6, r6, ip, LSL #2
-    ADD r7, r7, ip, LSL #2
-
-    VLD1.32 {d1[]}, [r0]
-    VLD1.32 {d3[]}, [r1]
-    VLD1.32 {d5[]}, [r2]
-    VLD1.32 {d7[]}, [r3]
-    VLD1.32 {d9[]}, [r4]
-    VLD1.32 {d11[]}, [r5]
-    VLD1.32 {d13[]}, [r6]
-    VLD1.32 {d15[]}, [r7]
-
-    SUB r0, r0, lr, LSL #2
-    SUB r1, r1, lr, LSL #2
-    SUB r2, r2, lr, LSL #2
-    SUB r3, r3, lr, LSL #2
-    SUB r4, r4, lr, LSL #2
-    SUB r5, r5, lr, LSL #2
-    SUB r6, r6, lr, LSL #2
-    SUB r7, r7, lr, LSL #2
-
-    VEXT.8 d0, d0, d1, #4
-    VEXT.8 d1, d2, d3, #4
-    VEXT.8 d2, d4, d5, #4
-    VTRN.8 d0, d1
-    VEXT.8 d3, d6, d7, #4
-    VEXT.8 d4, d8, d9, #4
-    VTRN.8 d2, d3
-    VEXT.8 d5, d10, d11, #4
-    VTRN.16 q0, q1
-    VTRN.8 d4, d5
-    VEXT.8 d6, d12, d13, #4
-    VEXT.8 d7, d14, d15, #4
-
-    VTRN.8 d6, d7
-    VTRN.16 q2, q3
-
-    VTRN.32 q0, q2
-    VTRN.32 q1, q3
-    # Sub offset from r0
-    # This we have to do because we dont have a vector load
-    # instruction with pre-indexed register offset
-
-    # Add offset to r1
-    # Sub offset from r1
-    # This we have to do because we dont have a vector load
-    # instruction with pre-indexed register offset
+    LDR ip, [r9], #4
+    LDR lr, [r9], #4
 
     # Add offset to r2
-    # Sub offset from r2
-    # This we have to do because we dont have a vector load
-    # instruction with pre-indexed register offset
+    # Shift by 5 because each packed block is a block of 8x4
+    # which 32 bytes
+    ADD r10, r2, ip, LSL #5
+    # q9 = vxb
+    VSUBL.U8 q9, d19, d17
 
-    # Add offset to r3
-    # Sub offset from r3
-    # This we have to do because we dont have a vector load
-    # instruction with pre-indexed register offset
+    VLD1.8 {d0}, [r10]!
+    VLD1.8 {d1}, [r10]!
+    VLD1.8 {d2}, [r10]!
+    VLD1.8 {d3}, [r10]
 
-    # Add offset to r4
-    # Sub offset from r4
-    # This we have to do because we dont have a vector load
-    # instruction with pre-indexed register offset
-
-    # Add offset to r5
-    # Sub offset from r5
-    # This we have to do because we dont have a vector load
-    # instruction with pre-indexed register offset
-
-    # Add offset to r6
-    # Sub offset from r6
-    # This we have to do because we dont have a vector load
-    # instruction with pre-indexed register offset
-
-    # Add offset to r7
-    # Sub offset from r7
-    # This we have to do because we dont have a vector load
-    # instruction with pre-indexed register offset
-
-    #
-    # d0, d1 = q0 = va0, va1
-    # d2, d3 = q1 = va2, va3
-    # d4, d5 = q2 = va4, va5
-    # d6, d7 = q3 = va6, va7
-    #Now transpose
-
+    ADD r10, r2, lr, LSL #5
 
     VSUBL.U8 q4, d0, d16  // vxa0_t
+
+    VLD1.8 {d4}, [r10]!
+    VLD1.8 {d5}, [r10]!
+    VLD1.8 {d6}, [r10]!
+    VLD1.8 {d7}, [r10]
+
     VSUBL.U8 q5, d1, d16  // vxa1_t
     VSUBL.U8 q6, d2, d16  // vxa2_t
     VSUBL.U8 q7, d3, d16  // vxa3_t
@@ -323,11 +169,10 @@ k_loop:
     VSUBL.U8 q14, d6, d16  // vxa6_t
     VSUBL.U8 q15, d7, d16  // vxa7_t
     # This setup without the VMOVs is a perfect
-    # setup for double buffering + tranpose
-    # Tranposed result is stored in q0, q1, q2, q3.
+    # setup for double buffering
+    # Load data in q0, q1, q2, q3.
     # vxa* ares in q4-q7, q12-q13.
-    # Now q0-q3 are free to store next iterations of
-    # activations + tranpose
+    # Now q0-q3 are free to load next iterations.
     # We will do this as a later optimization.
 
     VMOV q0, q9
@@ -349,73 +194,31 @@ k_loop:
     VMLAL.S16 q10, d30, d1[3]
     VMLAL.S16 q11, d31, d1[3]
 
-    SUBS r11, r11, 2
+    SUBS r8, r8, 2
 
     BHS k_loop
 1:
-    CMP r11, -2
+    CMP r8, -2
     BEQ 2f
 
     # Load last nonzero block
     # For this we will load 4 8 bit values as one 32 bit value
-    VLD1.32 {d19[]}, [r9]!
+    VLD1.32 {d19[]}, [r6]!
     # q9 = vxb
     VSUBL.U8 q9, d19, d17
 
     #ip = block_id_ptr[0]
-    LDR ip, [r10]
+    LDR ip, [r9]
 
-    # Add offset to r0, r4
-    # Shift by 2 because each block id corresponds to 4 uint8_t elements
-    ADD r0, r0, ip, LSL #2
-    ADD r4, r4, ip, LSL #2
-    ADD r1, r1, ip, LSL #2
-    ADD r5, r5, ip, LSL #2
-    ADD r2, r2, ip, LSL #2
-    ADD r6, r6, ip, LSL #2
-    ADD r3, r3, ip, LSL #2
-    ADD r7, r7, ip, LSL #2
+    # Add offset to r2
+    # Shift by 5 because each packed block is a block of 8x4
+    # which 32 bytes
+    ADD r10, r2, ip, LSL #5
 
-    VLD1.32 {d0[]}, [r0]
-    VLD1.32 {d1[]}, [r4]
-    VLD1.32 {d2[]}, [r1]
-    VLD1.32 {d3[]}, [r5]
-    VLD1.32 {d4[]}, [r2]
-    VLD1.32 {d5[]}, [r6]
-    VLD1.32 {d6[]}, [r3]
-    VLD1.32 {d7[]}, [r7]
-
-    SUB r0, r0, ip, LSL #2
-    SUB r1, r1, ip, LSL #2
-    SUB r5, r5, ip, LSL #2
-    SUB r4, r4, ip, LSL #2
-    SUB r2, r2, ip, LSL #2
-    SUB r6, r6, ip, LSL #2
-    SUB r3, r3, ip, LSL #2
-    SUB r7, r7, ip, LSL #2
-
-    VEXT.8 d0, d0, d1, #4
-    # Add offset to r1, r5
-    # d1 = va1, va5
-    VEXT.8 d1, d2, d3, #4
-    # Add offset to r2, r6
-    # d2 = va2, va6
-    VEXT.8 d2, d4, d5, #4
-    # Add offset to r3, r7
-    # d3 = va3, va7
-    VEXT.8 d3, d6, d7, #4
-
-    #
-    # d0 = va0, va4
-    # d1 = va1, va5
-    # d2 = va2, va6
-    # d3 = va3, va7
-    #Now transpose
-    VTRN.8 d0, d1
-    VTRN.8 d2, d3
-    VTRN.16 d0, d2
-    VTRN.16 d1, d3
-
+    VLD1.8 {d0}, [r10]!
+    VLD1.8 {d1}, [r10]!
+    VLD1.8 {d2}, [r10]!
+    VLD1.8 {d3}, [r10]
 
     VSUBL.U8 q4, d0, d16  // vxa04_t
     VSUBL.U8 q5, d1, d16  // vxa15_t
@@ -450,22 +253,21 @@ k_loop:
     # Each iteration produce 8 values each of 4 bytes
     # Thus 8 x 4 = 32 bytes 2^5
     # In this implementation, first value will be stored at
-    # 1st value: sp - 12 - r8 * 32
-    # 2nd value: sp - 12 - (r8 - 1) * 32
+    # 1st value: sp - 12 - r1 * 32
+    # 2nd value: sp - 12 - (r1 - 1) * 32
     # and so on.
-    SUB r9, r9, r8, LSL #5
+    SUB r9, r9, r1, LSL #5
     VST1.32 {q10}, [r9]!
     VST1.32 {q11}, [r9]
 
     # Check if nr >=1
-    SUBS r8, r8, 1
+    SUBS r1, r1, 1
     BHI 0b
 3:
     # First load all the accumulators from stack
     # Load nr
-    LDR r8, [sp, #-8]
     SUB r9, sp, 140
-    SUB r9, r9, r8, LSL #5
+    SUB r9, r9, r11, LSL #5
     # Now load q8-q15
     # This is 4x8 block (nrxmr)
     # We will transpose this to 8x4 (mrxnr)
@@ -547,17 +349,17 @@ k_loop:
     VMOV q13, q6
 
     # Load output channel index
-    LDR r5, [sp, 124]
+    LDR r5, [sp, 120]
     # Load quantization params
     # - r7 = quantization_params
-    LDR r7, [sp, 128]
+    LDR r7, [sp, 124]
     ADD r7, r7, 8
     # Load pointer to per channel requant scale
     LDR r7, [r7]
     # Now r7 has the base_addr + offset for multipliers
     ADD r7, r7, r5, LSL #2
 
-    LDR r6, [sp, 112]
+    LDR r6, [sp, 108]
     # Load q6: vmultiplier_c0123
     VLD1.32 {d12, d13}, [r7]!
     VCVT.F32.S32 q8, q8
@@ -590,61 +392,57 @@ k_loop:
     VADD.F32 q15, q15, q0
 
     # Load c, c_stride:
-    # - r0 = c
-    # - r10 = c_stride
-    LDR r0, [sp, 116]
-    LDR r10, [sp, 120]
-    LSL r10, r10, 2
+    # - r1 = c
+    # - r9 = c_stride
+    LDR r1, [sp, 112]
+    LDR r9, [sp, 116]
+    LSL r9, r9, 2
 
-    # load mr from stack
-    LDR r9, [sp, #-4]
-    # load nr from stack
-    LDR r8, [sp, #-8]
-    # r0 = c0 = c pointer
+    # r1 = c0 = c pointer
 
-    CMP r9, 2
-    # r1 = c1
-    ADD r1, r0, r10
-    MOVLO r1, r0
+    CMP r0, 2
+    # r2 = c1
+    ADD r2, r1, r9
+    MOVLO r2, r1
 
-    # r2 = c2
-    ADD r2, r1, r10
-    MOVLS r2, r1
+    # r3 = c2
+    ADD r3, r2, r9
+    MOVLS r3, r2
 
-    CMP r9, 4
-    # r3 = c3
-    ADD r3, r2, r10
-    MOVLO r3, r2
+    CMP r0, 4
+    # r4 = c3
+    ADD r4, r3, r9
+    MOVLO r4, r3
 
-    # r4 = c4
-    ADD r4, r3, r10
-    MOVLS r4, r3
+    # r5 = c4
+    ADD r5, r4, r9
+    MOVLS r5, r4
 
-    CMP r9, 6
-    # r5 = c5
-    ADD r5, r4, r10
-    MOVLO r5, r4
+    CMP r0, 6
+    # r6 = c5
+    ADD r6, r5, r9
+    MOVLO r6, r5
 
-    # r6 = c6
-    ADD r6, r5, r10
-    MOVLS r6, r5
+    # r7 = c6
+    ADD r7, r6, r9
+    MOVLS r7, r6
 
-    CMP r9, 8
+    CMP r0, 8
     # r7 = c7
-    ADD r7, r6, r10
-    MOVNE r7, r6
+    ADD r8, r7, r9
+    MOVNE r8, r7
 
-    CMP r8, 4
+    CMP r11, 4
     BNE 4f
 
-    VST1.32 {q8}, [r0]
-    VST1.32 {q9}, [r1]
-    VST1.32 {q10}, [r2]
-    VST1.32 {q11}, [r3]
-    VST1.32 {q12}, [r4]
-    VST1.32 {q13}, [r5]
-    VST1.32 {q14}, [r6]
-    VST1.32 {q15}, [r7]
+    VST1.32 {q8}, [r1]
+    VST1.32 {q9}, [r2]
+    VST1.32 {q10}, [r3]
+    VST1.32 {q11}, [r4]
+    VST1.32 {q12}, [r5]
+    VST1.32 {q13}, [r6]
+    VST1.32 {q14}, [r7]
+    VST1.32 {q15}, [r8]
 
     VPOP {d8-d15}
     POP {r4, r5, r6, r7, r8, r9, r10, r11, lr}
@@ -652,19 +450,19 @@ k_loop:
 
     .p2align 3
 4:
-    CMP r8, 2
+    CMP r11, 2
     BLO 5f
 
-    VST1.32 {d16}, [r0]!
-    VST1.32 {d18}, [r1]!
-    VST1.32 {d20}, [r2]!
-    VST1.32 {d22}, [r3]!
-    VST1.32 {d24}, [r4]!
-    VST1.32 {d26}, [r5]!
-    VST1.32 {d28}, [r6]!
-    VST1.32 {d30}, [r7]!
+    VST1.32 {d16}, [r1]!
+    VST1.32 {d18}, [r2]!
+    VST1.32 {d20}, [r3]!
+    VST1.32 {d22}, [r4]!
+    VST1.32 {d24}, [r5]!
+    VST1.32 {d26}, [r6]!
+    VST1.32 {d28}, [r7]!
+    VST1.32 {d30}, [r8]!
 
-    SUB r8, 2
+    SUB r11, 2
 
     VMOV.32 d16, d17
     VMOV.32 d18, d19
@@ -676,17 +474,17 @@ k_loop:
     VMOV.32 d30, d31
 
 5:
-    CMP r8, 0
+    CMP r11, 0
     BEQ 7f
 
-    VST1.32 {d16[0]}, [r0]
-    VST1.32 {d18[0]}, [r1]
-    VST1.32 {d20[0]}, [r2]
-    VST1.32 {d22[0]}, [r3]
-    VST1.32 {d24[0]}, [r4]
-    VST1.32 {d26[0]}, [r5]
-    VST1.32 {d28[0]}, [r6]
-    VST1.32 {d30[0]}, [r7]
+    VST1.32 {d16[0]}, [r1]
+    VST1.32 {d18[0]}, [r2]
+    VST1.32 {d20[0]}, [r3]
+    VST1.32 {d22[0]}, [r4]
+    VST1.32 {d24[0]}, [r5]
+    VST1.32 {d26[0]}, [r6]
+    VST1.32 {d28[0]}, [r7]
+    VST1.32 {d30[0]}, [r8]
 
 7:
     VPOP {d8-d15}
