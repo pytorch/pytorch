@@ -43,12 +43,13 @@ namespace at {
 namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
-// at::Half should be treated as floating point
+// at::Half and at::BFloat16 should be treated as floating point
 template <typename T>
 struct is_floating_point:
     std::integral_constant<bool,
       std::is_floating_point<T>::value ||
-      std::is_same<T, at::Half>::value> {
+      std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value> {
 };
 
 template<size_t n> struct int_of_size;
@@ -313,6 +314,13 @@ public:
     Vec256<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = std::atan2(values[i], exp[i]);
+    }
+    return ret;
+  }
+  Vec256<T> copysign(const Vec256<T> &sign) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::copysign(values[i], sign[i]);
     }
     return ret;
   }
