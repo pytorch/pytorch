@@ -1597,6 +1597,18 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(NotImplementedError, "new_args"):
             x[0] = 4
 
+    def test_partial_trace(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if y:
+                    return 2 * x
+                else:
+                    return x
+        mod = Foo()
+        mod_true = symbolic_trace(mod, concrete_args={'y': True})
+        mod_false = symbolic_trace(mod, concrete_args={'y': False})
+        self.assertEqual(mod_true(3), 6)
+        self.assertEqual(mod_false(3), 3)
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
