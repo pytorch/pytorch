@@ -133,13 +133,13 @@ class TestSparseCSR(TestCase):
         sparse = dense.to_sparse_csr()
         self.assertEqual(sparse.to_dense(), dense)
 
-        crow_indices = torch.tensor([0, 3, 6, 9])
-        col_indices = torch.tensor([0, 1, 0, 1])
-        values = torch.tensor([1, 2, 3, 4])
+        crow_indices = torch.tensor([0, 3, 6])
+        col_indices = torch.tensor([0, 1, 2, 0, 1])
+        values = torch.tensor([1, 2, 1, 3, 4])
         csr = torch.sparse_csr_tensor(crow_indices, col_indices, 
                                       values, dtype=torch.double)
-        dense = torch.tensor([])
-        self.assertEqual(csr.to_dense(), )
+        dense = torch.tensor([[1, 2, 1], [0, 3, 4]])
+        self.assertEqual(csr.to_dense(), dense)
 
     def test_mkl_matvec_warnings(self):
         if torch.has_mkl:

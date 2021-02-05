@@ -158,15 +158,19 @@ Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
   AT_ASSERT(src.is_sparse_csr());
   AT_ASSERT(dense.device() == kCPU);
 
-  TORCH_CHECK(out.is_contiguous(), "out argument must be contiguous, but got: ", out.suggest_memory_format());
-  TORCH_CHECK(out.device() == kCPU, "add: expected 'out' to be CPU tensor, but got tensor on device: ", out.device());
-  TORCH_CHECK(src.device() == kCPU, "add: expected 'other' to be a CPU tensor, but got tensor on device: ", src.device());
+  TORCH_CHECK(out.is_contiguous(), "out argument must be contiguous, but got: ",
+              out.suggest_memory_format());
+  TORCH_CHECK(out.device() == kCPU, "add: expected 'out' to be CPU tensor, but got tensor on device: ",
+              out.device());
+  TORCH_CHECK(src.device() == kCPU,
+              "add: expected 'other' to be a CPU tensor, but got tensor on device: ",
+              src.device());
 
   TORCH_CHECK(dense.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
-    dense.sizes(), " while other has size ", src.sizes(), " (FYI: op2-sparse addition does not currently support broadcasting)");
+    dense.sizes(), " while other has size ", src.sizes(), 
+    " (FYI: op2-sparse addition does not currently support broadcasting)");
 
   auto commonDtype = promoteTypes(dense.scalar_type(), src.scalar_type());
-
   TORCH_CHECK(canCast(commonDtype, out.scalar_type()), "Can't convert result type ",
               commonDtype, " to output ", out.scalar_type(), " in add operation");
 

@@ -926,9 +926,10 @@ class Tensor(torch._C._TensorBase):
                 co.extend(torch.nonzero(selection).flatten().tolist())
                 vals.extend(select_nums.flatten().tolist())
 
-            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=torch.int32), torch.tensor(co, dtype=torch.int32),
+            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=torch.int32), 
+                                           torch.tensor(co, dtype=torch.int32),
                                            torch.tensor(vals, dtype=self.dtype),
-                                           shape, dtype=self.dtype)
+                                           size=shape, dtype=self.dtype)
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
