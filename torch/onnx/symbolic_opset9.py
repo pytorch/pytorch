@@ -120,7 +120,7 @@ def _div_rounding_mode(g, self, other, rounding_mode):
     elif rounding_mode == 'trunc':
         return _trunc_divide(g, self, other)
     else:
-        raise RuntimeError('Unsupported rounding mode: "{rounding_mode}". Expected "true", "floor" or "trunc"')
+        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected "true", "floor" or "trunc"')
 
 
 def _trunc_divide(g, self, other):
@@ -152,8 +152,12 @@ def _trunc_divide(g, self, other):
 
 
 def _floor_divide(g, self, other):
-    out = g.op('Div', self, other)
-    return g.op('Floor', out)
+    out = true_divide(g, self, other)
+    out = g.op('Floor', out)
+    if not sym_help._is_fp(self) and not sym_help._is_fp(other):
+        scalar_type = self.type().scalarType()
+        out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx[scalar_type])
+    return out
 
 
 def floor_divide(g, self, other):
