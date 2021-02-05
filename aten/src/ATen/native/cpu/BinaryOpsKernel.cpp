@@ -166,7 +166,7 @@ void div_floor_kernel(TensorIterator& iter) {
     // See NOTE: [Floor Division in Python]
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
       using vec_t = Vec256<scalar_t>;
-      cpu_kernel(iter,
+      cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
             auto mod = std::fmod(a, b);
             auto div = (a - mod) / b;
