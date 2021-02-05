@@ -1041,8 +1041,6 @@ void RemoveInplaceOpsForONNX(
     RegisterInplaceOpAsBlockOutputs(mr, model, graph);
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
-  if (model)
-    RegisterInplaceOpAsBlockOutputs(mr, model, graph);
 }
 
 } // namespace jit
