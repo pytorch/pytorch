@@ -399,13 +399,25 @@ method. The user must supply the row and column indices and values tensors separ
 The ``size`` argument is optional and will be deduced from the the ``crow_indices``
 and ``col_indices`` if it is not present.
 
+    >>> crow_indices = torch.tensor([0, 2, 4])
+    >>> col_indices = torch.tensor([0, 1, 0, 1])
+    >>> values = torch.tensor([1, 2, 3, 4])
+    >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.double)
+    >>> csr
+    tensor(crow_indices=tensor([0, 2, 4]),
+          col_indices=tensor([0, 1, 0, 1]),
+          values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+          dtype=torch.float64)
+    >>> csr.to_dense()
+    tensor([[1., 2.],
+            [3., 4.]], dtype=torch.float64)
+
 Operations on sparse CSR tensors
 --------------------------------
 
 The simplest way of constructing a sparse CSR tensor from a strided tensor
 is to use :meth:`tensor.to_sparse_csr`. Any zeros in the strided tensor will
 be interpreted as missing values in the sparse tensor:
-
 
 
 The sparse matrix-vector multiplication can be performed with the

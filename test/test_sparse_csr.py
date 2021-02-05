@@ -10,15 +10,11 @@ import torch
 # Sparse tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-import itertools
 import functools
 import random
-import unittest
 import operator
 import numpy as np
-import math
 import warnings
-from collections import defaultdict
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -36,20 +32,20 @@ class TestSparseCSR(TestCase):
         dense = torch.from_numpy(dense.reshape(shape))
 
         return dense.to_sparse_csr()
-    
+
     def setUp(self):
         # These parameters control the various ways we can run the test.
         # We will subclass and override this method to implement CUDA
         # tests
         self.is_cuda = False
         self.device = 'cpu'
-    
+
     def test_csr_layout(self):
         self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
         self.assertEqual(type(torch.sparse_csr), torch.layout)
 
     def test_sparse_csr_constructor_shape_inference(self):
-        crow_indices = [0, 3, 6, 9]
+        crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
         values = [1, 2, 3, 4]
         sparse = torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64), 
@@ -61,7 +57,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual((len(crow_indices) - 1, max(col_indices) + 1), sparse.shape)
 
     def test_sparse_csr_constructor(self):
-        crow_indices = [0, 3, 6, 9]
+        crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
         values = [1, 2, 3, 4]
 
@@ -81,7 +77,7 @@ class TestSparseCSR(TestCase):
         for shape, nnz in shape_nnz:
             values_shape = torch.Size((nnz,))
             col_indices_shape = torch.Size((nnz,))
-            crow_indices_shape = torch.Size((shape[0]+1,))
+            crow_indices_shape = torch.Size((shape[0] + 1,))
             printed.append("# shape: {}".format(torch.Size(shape)))
             printed.append("# nnz: {}".format(nnz))
             printed.append("# crow_indices shape: {}".format(crow_indices_shape))
@@ -99,7 +95,7 @@ class TestSparseCSR(TestCase):
             printed.append("# _values")
             printed.append(str(x.values()))
             printed.append('')
-        
+
             self.assertExpected('\n'.join(printed))
 
     def test_sparse_csr_from_dense(self):
@@ -131,17 +127,25 @@ class TestSparseCSR(TestCase):
         dense = torch.randn(size)
         sparse = dense.to_sparse_csr()
         self.assertEqual(sparse.to_dense(), dense)
-        
+
         size = (4, 6)
         dense = torch.randn(size)
         sparse = dense.to_sparse_csr()
         self.assertEqual(sparse.to_dense(), dense)
 
+        crow_indices = torch.tensor([0, 3, 6, 9])
+        col_indices = torch.tensor([0, 1, 0, 1])
+        values = torch.tensor([1, 2, 3, 4])
+        csr = torch.sparse_csr_tensor(crow_indices, col_indices, 
+                                      values, dtype=torch.double)
+        dense = torch.tensor([])
+        self.assertEqual(csr.to_dense(), )
+
     def test_mkl_matvec_warnings(self):
         if torch.has_mkl:
             sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
-                                        torch.tensor([0, 1, 0, 1]),
-                                        torch.tensor([1, 2, 3, 4], dtype=torch.double))
+                                         torch.tensor([0, 1, 0, 1]),
+                                         torch.tensor([1, 2, 3, 4], dtype=torch.double))
             vec = torch.randn((2, 1))
             with warnings.catch_warnings(record=True) as w:
                 sp.matmul(vec)

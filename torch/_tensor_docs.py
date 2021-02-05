@@ -4712,5 +4712,4 @@ Example::
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)
 
-"""
-)
+""")

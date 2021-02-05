@@ -26,8 +26,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     Scalar beta,
     Scalar alpha) {
   Tensor expand_self;
-  std::tie(expand_self) = expand_size(self, {op1.size(0), op2.size(1)}, 
-    "addmm_out_sparse_csr");
+  std::tie(expand_self) = expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
 
   AT_ASSERT(expand_self.device().type() == kCPU);
   TORCH_CHECK(out.device().type() == kCPU, "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -56,17 +55,16 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   auto crow_indices = op1.crow_indices();
   auto values   = op1.values();
     
-  AT_DISPATCH_FLOATING_TYPES(
-    values.scalar_type(), "addmm_sparse_csr_dense", [&] {
-      scalar_t cast_beta = beta.to<scalar_t>();
-        if (!is_same_tensor(out, expand_self)) {
-          out.copy_(expand_self);
-        }
-      if (cast_beta == 0) {
-        out.zero_();
-      } else {
-        at::mul_out(out, expand_self, scalar_to_tensor(beta));
-      }
+  AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_csr_dense", [&] {
+    scalar_t cast_beta = beta.to<scalar_t>();
+    if (!is_same_tensor(out, expand_self)) {
+      out.copy_(expand_self);
+    }
+    if (cast_beta == 0) {
+      out.zero_();
+    } else {
+      at::mul_out(out, expand_self, scalar_to_tensor(beta));
+    }
   });
 
   if (at::hasMKL()) {

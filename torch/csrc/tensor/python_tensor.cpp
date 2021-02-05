@@ -143,7 +143,7 @@ static struct PyGetSetDef metaclass_properties[] = {
   {"layout",       (getter)Tensor_layout, nullptr, nullptr, nullptr},
   {"is_cuda",      (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse",    (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
-  {"is_sparse_csr",(getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
+  {"is_sparse_csr",(getter)Tensor_is_sparse_csr, nullptr, nullptr, nullptr},
   {nullptr}
 };
 

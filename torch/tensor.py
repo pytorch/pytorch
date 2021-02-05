@@ -910,7 +910,7 @@ class Tensor(torch._C._TensorBase):
             raise RuntimeError("Only 2D tensors can be converted to the CSR format but got shape: ", shape)
 
         if self.is_sparse:
-            return self.to_dense().to_sparse_csr() # TODO: optimize this.
+            return self.to_dense().to_sparse_csr()  # TODO: optimize this.
         if self.is_sparse_csr:
             return self
         else:
@@ -927,9 +927,8 @@ class Tensor(torch._C._TensorBase):
                 vals.extend(select_nums.flatten().tolist())
 
             return torch.sparse_csr_tensor(torch.tensor(ro, dtype=torch.int32), torch.tensor(co, dtype=torch.int32),
-                                        torch.tensor(vals, dtype=self.dtype),
-                                        shape, dtype=self.dtype)
-
+                                           torch.tensor(vals, dtype=self.dtype),
+                                           shape, dtype=self.dtype)
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):

@@ -100,9 +100,9 @@ if __name__ == "__main__":
 
     if args.format == 'both':
         print("format=coo", " nnz_ratio=", nnz_ratio, " m=", m,
-            " n=", n, " k=", k, " time=", time_coo, file=outfile)
+              " n=", n, " k=", k, " time=", time_coo, file=outfile)
         print("format=csr", " nnz_ratio=", nnz_ratio, " m=", m,
-            " n=", n, " k=", k, " time=", time_csr, file=outfile)
+              " n=", n, " k=", k, " time=", time_csr, file=outfile)
     else:
         print("format=", args.format, " nnz_ratio=", nnz_ratio, " m=", m,
-            " n=", n, " k=", k, " time=", time, file=outfile)
+              " n=", n, " k=", k, " time=", time, file=outfile)

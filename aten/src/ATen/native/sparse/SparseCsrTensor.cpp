@@ -39,6 +39,9 @@ Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCsr, 
     "expected sparse CSR layout, but got layout ", options.layout());
 
+  auto crow_indices_accessor = crow_indices.accessor<int64_t, 1>();
+  TORCH_CHECK(crow_indices_accessor[crow_indices.numel() - 1] > col_indices.numel(),
+              "last value of crow_indices should be less than length of col_indices.");
   TORCH_CHECK(crow_indices.dim() == 1, "crow_indices must have dim=1 but got crow_indices.dim()=", 
               crow_indices.dim());
   TORCH_CHECK(col_indices.dim() == 1, "col_indices must have dim=1 but got col_indices.dim()=",
@@ -59,7 +62,6 @@ Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
                          const Tensor& values, const TensorOptions& options) {
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCsr, 
     "expected sparse CSR layout, but got layout ", options.layout());
-  
   std::vector<int64_t> size(2);
 
   if (crow_indices.numel() > 0 && col_indices.numel() > 0) {
