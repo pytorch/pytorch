@@ -39,9 +39,6 @@ class PowerSGDState(object):
     Although ``use_error_feedback`` and ``warm_start`` can also be tuned by the user,
     they are typically turned on for performance.
 
-    Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``]
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
     1. To tune ``matrix_approximation_rank``, the user can increase it from 1 by factors of 2,
     until a satisfying accuracy can be reached.
     The increase of ``matrix_approximation_rank`` can substantially increase the computation costs of the compression.
@@ -201,7 +198,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
-            To tune the compression configs, see Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``].
+            To tune the compression configs, mainly need to tune `matrix_approximation_rank`` and ``start_powerSGD_iter``.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
@@ -461,7 +458,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
-            To tune the compression configs, see Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``].
+            To tune the compression configs, mainly need to tune ``matrix_approximation_rank`` and ``start_powerSGD_iter``.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
