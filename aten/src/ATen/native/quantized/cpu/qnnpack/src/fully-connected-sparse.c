@@ -69,6 +69,12 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     goto error;
   }
 
+  if (kernel_row_block_size == 8 && kernel_col_block_size == 1) {
+    if (pytorch_qnnp_params.q8gemm_sparse_c8x1.packA == NULL) {
+      status = pytorch_qnnp_status_invalid_parameter;
+      goto error;
+    }
+  }
   fully_connected->sparse_matrix.col_indices = kernel_col_indices;
   fully_connected->sparse_matrix.row_values = kernel_row_values;
   fully_connected->sparse_matrix.values = kernel_values;
@@ -88,12 +94,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
   fully_connected->dynamic_conv_quantization_params.multipliers =
     requantization_scales;
 
-  if (use_prepack_kernel || (pytorch_qnnp_params.q8gemm_sparse.gemm_dq == NULL)) {
-    fully_connected->ukernel_type =
-      pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq;
-  } else {
-    fully_connected->ukernel_type = pytorch_qnnp_ukernel_type_gemm_sparse_dq;
-  }
+  // Always use prepacking based kernel
+  fully_connected->ukernel_type = pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq;
   fully_connected->format = pytorch_qnnp_format_quint8;
 
   *fully_connected_out = fully_connected;

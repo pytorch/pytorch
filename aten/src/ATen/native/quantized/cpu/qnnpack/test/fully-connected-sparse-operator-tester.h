@@ -167,6 +167,11 @@ class FullyConnectedSparseOperatorTester {
     return *this;
   }
 
+  inline FullyConnectedSparseOperatorTester& colBlockSize(size_t block_size) {
+    this->colBlockSize_ = block_size;
+    return *this;
+  }
+
   inline FullyConnectedSparseOperatorTester& sparsity(float s) {
     this->sparsity_ = s;
     return *this;
@@ -569,6 +574,7 @@ class FullyConnectedSparseOperatorTester {
                   requantization_scales[oc] + float(bias[oc]);
             }
           }
+
           for (size_t i = 0; i < batchSize(); i++) {
             for (size_t c = 0; c < outputChannels(); c++) {
               ASSERT_EQ(

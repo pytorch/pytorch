@@ -216,8 +216,17 @@ class Q8GEMM_Op : public Q8GEMM {
 
 class Q8GEMMSparse : public benchmark::Fixture {
  public:
-  inline Q8GEMMSparse(uint32_t mr, uint32_t nr, uint32_t kr)
-      : mr_(mr), nr_(nr), kr_(kr), mc_(mr), nc_(nr), kc_(kr) {}
+  inline Q8GEMMSparse(
+      uint32_t mr, uint32_t nr, uint32_t kr, uint32_t rbs, uint32_t cbs)
+      :
+        mr_(mr),
+        nr_(nr),
+        kr_(kr),
+        mc_(mr),
+        nc_(nr),
+        kc_(kr),
+        row_block_size_(rbs),
+        col_block_size_(cbs){}
 
   virtual void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
@@ -356,10 +365,10 @@ class Q8GEMMSparse : public benchmark::Fixture {
   pytorch_qnnp_conv_dynamic_quantization_params quantizationParams_;
 };
 
-template <uint32_t MR, uint32_t NR, uint32_t KR>
+template <uint32_t MR, uint32_t NR, uint32_t KR, uint32_t RBS, uint32_t CBS>
 class Q8GEMMSparse_Op : public Q8GEMMSparse {
  public:
-  inline Q8GEMMSparse_Op() : Q8GEMMSparse(MR, NR, KR) {}
+  inline Q8GEMMSparse_Op() : Q8GEMMSparse(MR, NR, KR, RBS, CBS) {}
 
   virtual void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
@@ -432,35 +441,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__aarch32_neon, 4, 8, 8, 1)
 BENCHMARK_REGISTER_F(Q8GEMM_Op, 4x8__aarch32_neon)
     ->Apply(SparseGEMMBenchGemmArguments);
 
-BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x4c1x4__aarch32_neon, 8, 4, 4)
-(benchmark::State& state) {
-  for (auto _ : state) {
-    for (uint32_t m = 0; m < mc(); m += mr()) {
-      const uint32_t mrr = min(mc() - m, mr());
-      for (uint32_t n = 0, channel_offset = 0; n < nc();
-          n += nr(), channel_offset += nr()) {
-        const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__aarch32_neon(
-            mrr,
-            nrr,
-            a() + m * kc(),
-            kc() * sizeof(uint8_t),
-            bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data() + n,
-            bcsr_matrix_->col_indices.data(),
-            b() + n,
-            c() + m * nc() + n,
-            nc(),
-            channel_offset,
-            quantizationParams());
-      }
-    }
-  }
-}
-BENCHMARK_REGISTER_F(Q8GEMMSparse_Op, 8x4c1x4__aarch32_neon)
-    ->Apply(SparseGEMMBenchGemmArguments);
-
-BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x4c1x4_prepacked__aarch32_neon, 8, 4, 4)
+BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x4c1x4_prepacked__aarch32_neon, 8, 4, 4, 1, 4)
 (benchmark::State& state) {
   for (auto _ : state) {
     auto m_blocks = (mc() + mr()  - 1) / mr();
@@ -490,7 +471,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x4c1x4_prepacked__aarch32_neon, 8,
             nrr,
             a_packed.data() + (m >> 3) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data(),
+            bcsr_matrix_->row_values.data() + n,
             bcsr_matrix_->col_indices.data(),
             b() + n,
             c() + m * nc() + n,
@@ -504,7 +485,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x4c1x4_prepacked__aarch32_neon, 8,
 BENCHMARK_REGISTER_F(Q8GEMMSparse_Op, 8x4c1x4_prepacked__aarch32_neon)
     ->Apply(SparseGEMMBenchGemmArguments);
 
-BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c1x4_prepacked__aarch32_neon, 4, 8, 4)
+BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c1x4_prepacked__aarch32_neon, 4, 8, 4, 1, 4)
 (benchmark::State& state) {
   for (auto _ : state) {
     auto m_blocks = (mc() + mr()  - 1) / mr();
@@ -534,7 +515,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c1x4_prepacked__aarch32_neon, 4,
             nrr,
             a_packed.data() + (m >> 2) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data(),
+            bcsr_matrix_->row_values.data() + n,
             bcsr_matrix_->col_indices.data(),
             b() + n,
             c() + m * nc() + n,
@@ -548,6 +529,51 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c1x4_prepacked__aarch32_neon, 4,
 BENCHMARK_REGISTER_F(Q8GEMMSparse_Op, 4x8c1x4_prepacked__aarch32_neon)
     ->Apply(SparseGEMMBenchGemmArguments);
 
+
+BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c8x1_prepacked__aarch32_neon, 4, 8, 1, 8, 1)
+(benchmark::State& state) {
+  for (auto _ : state) {
+    auto m_blocks = (mc() + mr()  - 1) / mr();
+    // Still use kr of 4 because we use 4x4 packing kernel
+    auto k_blocks = (kc() + 4  - 1) / 4;
+    std::vector<uint8_t> a_packed(m_blocks * k_blocks * mr() * 4 + 8);
+    for (uint32_t m = 0; m < mc(); m += mr()) {
+      const uint32_t mrr = min(mc() - m, mr());
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
+        const uint32_t nrr = min(nc() - n, nr());
+        pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon(
+            mrr,
+            kc(),
+            a() + m * kc(),
+            kc() * sizeof(uint8_t),
+            a_packed.data() + (m >> 2) * (k_blocks << 2) * mr()
+            );
+      }
+    }
+    for (uint32_t m = 0; m < mc(); m += mr()) {
+      const uint32_t mrr = min(mc() - m, mr());
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
+        const uint32_t nrr = min(nc() - n, nr());
+        pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon(
+            mrr,
+            nrr,
+            a_packed.data() + (m >> 2) * (k_blocks << 2) * mr(),
+            bcsr_matrix_->values.data(),
+            bcsr_matrix_->row_values.data() + (n >> 3),
+            bcsr_matrix_->col_indices.data(),
+            b() + n,
+            c() + m * nc() + n,
+            nc(),
+            channel_offset,
+            quantizationParams());
+      }
+    }
+  }
+}
+BENCHMARK_REGISTER_F(Q8GEMMSparse_Op, 4x8c8x1_prepacked__aarch32_neon)
+    ->Apply(SparseGEMMBenchGemmArguments);
 #endif
 
 #if CPUINFO_ARCH_ARM64
@@ -578,7 +604,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__aarch64_neon, 8, 8, 8, 1)
 BENCHMARK_REGISTER_F(Q8GEMM_Op, 8x8__aarch64_neon)
     ->Apply(SparseGEMMBenchGemmArguments);
 
-BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon, 8, 8, 4)
+BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon, 8, 8, 4, 1, 4)
 (benchmark::State& state) {
   for (auto _ : state) {
     auto m_blocks = (mc() + mr()  - 1) / mr();
