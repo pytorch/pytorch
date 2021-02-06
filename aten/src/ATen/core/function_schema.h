@@ -81,7 +81,12 @@ struct Argument {
         "' but instead found type '",
         actual_type,
         "'.\n",
-        inferred_type_hint);
+        inferred_type_hint,
+        "Consider assigning a value of type '",
+        type()->repr_str(),
+        "' for argument '",
+        name(),
+        "'.\n");
   }
 
   Argument cloneWithType(TypePtr new_type) const {
