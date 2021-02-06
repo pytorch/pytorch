@@ -4625,7 +4625,7 @@ def multi_head_attention_forward(
 
     if isinstance(embed_dim, torch.Tensor):
         # embed_dim can be a tensor when JIT tracing
-        head_dim = embed_dim.div(num_heads, rounding_mode='floor')
+        head_dim = embed_dim.div(num_heads, rounding_mode='trunc')
     else:
         head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
