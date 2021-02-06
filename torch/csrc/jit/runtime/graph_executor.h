@@ -21,9 +21,9 @@ struct ExecutionPlan {
   ExecutionPlan(
       std::shared_ptr<Graph> graph,
       std::string function_name,
-      size_t remaining_bailout_depth = 0, bool optimized_graph = false)
+      size_t remaining_bailout_depth = 0)
       : code(graph, std::move(function_name), remaining_bailout_depth),
-        graph(std::move(graph)), optimized(optimized_graph) {}
+        graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -31,7 +31,6 @@ struct ExecutionPlan {
 
   Code code;
   std::shared_ptr<Graph> graph;
-  bool optimized;
 };
 
 // Notice that those structs don't manage lifetime of their members.

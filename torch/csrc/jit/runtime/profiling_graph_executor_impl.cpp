@@ -610,7 +610,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   replaceFallbackGraphWithFallbackFunction(copy->block());
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
-      ExecutionPlan(copy, function_name_, *remaining_bailout_depth_, true);
+      ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
   return *optimized_plan_;
 }
 
@@ -622,7 +622,6 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
   // add any code above this.
   if (optimized_plan_) {
-    optimized_plan_->optimized = false;
     return *optimized_plan_;
   }
 

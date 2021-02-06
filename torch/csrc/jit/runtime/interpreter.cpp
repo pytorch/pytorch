@@ -1752,10 +1752,6 @@ size_t Code::register_size() const {
   return pImpl->register_size_;
 }
 
-std::shared_ptr<Graph> Code::optimized_graph() const {
-  return pImpl->graph_;
-}
-
 InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
     : pImpl(c10::make_intrusive<InterpreterStateImpl>(
           code,
