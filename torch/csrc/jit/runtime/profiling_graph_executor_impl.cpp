@@ -200,12 +200,40 @@ void RemoveDrop(Block* block) {
   }
 }
 
+void RemoveEnterMethodCall(Block* block) {
+  std::vector<Node*> enter_nodes;
+  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end; ++it) {
+    for (auto sub : it->blocks()) {
+      RemoveEnterMethodCall(sub);
+    }
+    if (it->kind() == prim::CallMethod && it->s(attr::name) == "__enter__") {
+      enter_nodes.emplace_back(*it);
+    }
+  }
+
+  for (auto& enter_node : enter_nodes) {
+    auto enter = enter_node->prev();
+    TORCH_INTERNAL_ASSERT(enter->input() == enter_node->input() && enter->kind() == prim::Enter, "prim::CallMethod['__enter__'] should follow prim::Enter");
+    enter_node->replaceAllUsesWith(enter);
+    enter_node->destroy();
+  }
+}
+
+void RemovePreprocess(Block* block) {
+  RemoveDrop(block);
+  RemoveEnterMethodCall(block);
+}
+
 void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG(
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
 
-  RemoveDrop(graph->block());
+  RemovePreprocess(graph->block());
+  GRAPH_DEBUG(
+      "After removing preprocess\n",
+      *graph);
+
 
   if (tensorExprFuserEnabled() || RegisterCudaFuseGraph::isRegistered()) {
     // With TE fuser or nvfuser, we don't generate bailouts
