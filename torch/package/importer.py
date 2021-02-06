@@ -1,10 +1,10 @@
 from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
-from types import ModuleType
 import builtins
 import importlib
 import inspect
 import io
 import linecache
+from weakref import WeakValueDictionary
 import pickle
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
@@ -85,7 +85,6 @@ class PackageImporter:
         self.modules['resources'] = self  # type: ignore
 
         self._mangler = PackageMangler()
-        self._loaded_storages: Dict[str, Any] = {}
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
@@ -133,13 +132,6 @@ class PackageImporter:
         data = self.load_binary(package, resource)
         return data.decode(encoding, errors)
 
-    def _load_tensor(self, data_type, size, key, location, restore_location):
-        name = f'data/{key}'
-        dtype = data_type(0).dtype
-
-        storage = self.zip_reader.get_storage_from_record(name, size, dtype).storage()
-        self._loaded_storages[key] = restore_location(storage, location)
-
     def load_pickle(self, package: str, resource: str, map_location=None) -> Any:
         """Unpickles the resource from the package, loading any modules that are needed to construct the objects
         using :meth:`import_module`
@@ -154,6 +146,14 @@ class PackageImporter:
         """
         pickle_file = self._zipfile_path(package, resource)
         restore_location = _get_restore_location(map_location)
+        loaded_storages = {}
+
+        def load_tensor(data_type, size, key, location, restore_location):
+            name = f'data/{key}'
+            dtype = data_type(0).dtype
+
+            storage = self.zip_reader.get_storage_from_record(name, size, dtype).storage()
+            loaded_storages[key] = restore_location(storage, location)
 
         def persistent_load(saved_id):
             assert isinstance(saved_id, tuple)
@@ -163,9 +163,9 @@ class PackageImporter:
             assert typename == 'storage', \
                 f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
             data_type, key, location, size = data
-            if key not in self._loaded_storages:
-                self._load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
-            storage = self._loaded_storages[key]
+            if key not in loaded_storages:
+                load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+            storage = loaded_storages[key]
             return storage
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
@@ -469,7 +469,7 @@ class _ExternNode(_PathNode):
     pass
 
 # A private global registry of all modules that have been package-imported.
-_package_imported_modules: Dict[str, ModuleType] = {}
+_package_imported_modules: WeakValueDictionary = WeakValueDictionary()
 
 # `inspect` by default only looks in `sys.modules` to find source files for classes.
 # Patch it to check our private registry of package-imported modules as well.

@@ -284,25 +284,9 @@ SROperator aten_stack(Node* n) {
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(inputs[0]);
     }
-#ifndef NDEBUG
-    at::IntArrayRef entry_shape = inputs[0].sizes();
-    for (auto i = 1; i < inputs.size(); i++) {
-      TORCH_CHECK(
-          inputs[i].sizes() == entry_shape,
-          "stack expects each tensor to be equal size, but got ",
-          entry_shape,
-          " at entry 0 and ",
-          inputs[i].sizes(),
-          " at entry ",
-          i);
-    }
-#endif
-    for (auto i = 0; i < inputs.size(); i++) {
-      inputs[i] = inputs[i].unsqueeze(dim);
-    }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::_cat_out_cpu(out_t, inputs, dim);
+    at::native::_stack_out_cpu(inputs, dim, out_t);
   };
 }
 
