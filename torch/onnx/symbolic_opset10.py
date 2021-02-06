@@ -32,7 +32,7 @@ def _div_rounding_mode(g, self, other, rounding_mode):
     if rounding_mode == 'floor':
         return _floor_divide(g, self, other)
     else:
-        return torch.onnx.symbolic_opset9._div_rounding_mode(g, self, other)
+        return torch.onnx.symbolic_opset9._div_rounding_mode(g, self, other, rounding_mode)
 
 
 def _floor_divide(g, self, other):
