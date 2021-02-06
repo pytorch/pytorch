@@ -161,9 +161,9 @@ class TestSortAndSelect(TestCase):
                 yield (x, 0)
 
                 # Generate tensors which are being filled at random locations
-                # with all the combinations of values from (inf, neg_inf, nan)
+                # with all the non-empty subsets of values from (inf, neg_inf, nan)
                 # for each dimension.
-                n_fill_vals = 3
+                n_fill_vals = 3  # cardinality of (inf, neg_inf, nan)
                 for dim in range(len(sizes)):
                     idxs = (torch.randint(high=size, size=(size // 10,)) for i in range(n_fill_vals))
                     vals = (inf, neg_inf, nan)
