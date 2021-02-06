@@ -571,7 +571,6 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             out=state.q_memory_dict[bucket_index],
         )
 
-
         # TODO: The above procedure does two matmul+allreduce steps per iteration --
         # one left multiplication and one right multiplication.
         # For warm-start, can take one such step at a time, and alternate between them.

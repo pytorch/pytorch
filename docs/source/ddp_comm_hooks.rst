@@ -51,8 +51,6 @@ PowerSGD State
 PowerSGD Hooks
 ^^^^^^^^^^^^^^^^
 
-
-
 .. warning ::
     PowerSGD typically requires extra memory of the same size as the model's
     gradients to enable error feedback, which can compensate for biased
