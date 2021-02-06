@@ -11580,17 +11580,22 @@ class TestNNDeviceType(NNTestCase):
     @onlyOnCPUAndCUDA
     def test_smooth_l1_loss_vs_huber_loss(self, device):
         def _make_test_tensor(shape, contiguous=True):
-            test_tensor = torch.randn(shape, device=device)
-            if not contiguous:
+            if contiguous:
+                test_tensor = torch.randn(shape, device=device)
+            else:
                 # Select every other element in the innermost dimension to
                 # make it non-contiguous.
+                doubled_shape = list(shape)
+                doubled_shape[-1] *= 2
+                test_tensor = torch.randn(doubled_shape, device=device)
                 test_tensor = test_tensor[..., ::2]
             return test_tensor
 
-        def _test_smooth_l1_loss_vs_huber_loss_helper(input, target, beta=1.0, require_equal=True):
+        def _test_smooth_l1_loss_vs_huber_loss_helper(input, target, beta, require_equal):
             for reduction in ['mean', 'sum', 'none']:
                 smooth_l1 = torch.nn.SmoothL1Loss(beta=beta, reduction=reduction)
-                huber = torch.nn.HuberLoss(beta=beta, reduction=reduction)
+                # beta hyper-parameter is called delta for Huber
+                huber = torch.nn.HuberLoss(delta=beta, reduction=reduction)
                 smooth_l1_loss = smooth_l1(input, target)
                 huber_loss = huber(input, target)
 
@@ -11600,7 +11605,7 @@ class TestNNDeviceType(NNTestCase):
                     # Huber loss should be larger than smooth L1 loss by a factor of beta.
                     self.assertEqual(smooth_l1_loss * beta, huber_loss)
 
-        def _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=1.0, require_equal=True):
+        def _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta, require_equal):
             # Test the non-vectorized case.
             shape = (2, 2)
             _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape),
