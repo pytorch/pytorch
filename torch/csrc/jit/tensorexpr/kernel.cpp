@@ -2154,7 +2154,7 @@ void TensorExprKernel::compile() {
       SubgraphUtils::generateNameForGraph(graph_));
 }
 
-TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
+TensorExprKernel::TensorExprKernel(std::shared_ptr<Graph> subgraph)
     : graph_(subgraph), code_(subgraph, "") {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {

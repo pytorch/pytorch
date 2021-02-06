@@ -189,10 +189,23 @@ void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
       "After EliminateDeadCode (end of runNooptPassPipeline)\n", *graph);
 }
 
+void RemoveDrop(Block* block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end; ++it) {
+    for (auto sub : it->blocks()) {
+      RemoveDrop(sub);
+    }
+    if (it->kind() == prim::Drop) {
+      it.destroyCurrent();
+    }
+  }
+}
+
 void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG(
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
+
+  RemoveDrop(graph->block());
 
   if (tensorExprFuserEnabled() || RegisterCudaFuseGraph::isRegistered()) {
     // With TE fuser or nvfuser, we don't generate bailouts
@@ -452,6 +465,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
+      // TODO: remove extra profiling nodes first!
+      RemoveProfileNodesAndSpecializeTypes(gradient.f);
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
       // just like inside autograd.Functions, the forward of a differentiable
@@ -593,12 +608,14 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
-    profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
+    profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_, 0, true);
     // fall-through
   }
 
   // profile until a graph is ready
   if (!pr_->ready()) {
+    GRAPH_DUMP("return profiling plan: ", profiling_plan_->graph);
+    GRAPH_DUMP("return profiling plan codeimpl graph: ", profiling_plan_->code.optimized_graph());
     return *profiling_plan_;
   }
 
@@ -622,7 +639,9 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
   // add any code above this.
   if (optimized_plan_) {
-    optimized_plan_->optimized = false;
+    GRAPH_DUMP("just run profiling plan: ", optimized_plan_->graph);
+    GRAPH_DUMP("just run profiling plan codeimpl graph: ", optimized_plan_->code.optimized_graph());
+    optimized_plan_->updated = false;
     return *optimized_plan_;
   }
 

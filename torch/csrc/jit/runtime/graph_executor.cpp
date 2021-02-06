@@ -387,7 +387,10 @@ struct DifferentiableGraphOp {
         grad_executor(this->grad.df, "<backward op>"),
         num_inputs(this->grad.f->inputs().size()),
         num_outputs(this->grad.f->outputs().size()),
-        node(n) {}
+        node(n) {
+    GRAPH_DEBUG("forward graph in diffgraphop", *(this->grad.f));
+    GRAPH_DEBUG("backward graph in diffgraphop", *(this->grad.df));
+  }
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   void operator()(Stack* stack) {
@@ -411,7 +414,7 @@ struct DifferentiableGraphOp {
     ExecutionPlan plan =
         f.getPlanFor(*stack, GraphExecutor::getDefaultNumBailOuts());
 
-    if (plan.optimized) {
+    if (plan.updated) {
       GRAPH_DUMP("dump updated graph here:", plan.graph);
       const_cast<Node*>(node)->g_(attr::Subgraph, plan.graph);
     }
@@ -528,7 +531,8 @@ void GraphExecutorImplBase::run(Stack& stack) {
   const ExecutionPlan& plan =
       getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
   InterpreterState(plan.code).run(stack);
-  GRAPH_DUMP("last executed graph in run: ", plan.code.optimized_graph());
+  GRAPH_DUMP("last executed graph: ", plan.graph);
+  GRAPH_DUMP("last executed graph in CodeImpl: ", plan.code.optimized_graph());
   last_executed_optimized_graph = plan.code.optimized_graph();
 }
 

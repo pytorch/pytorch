@@ -377,7 +377,7 @@ struct CanEmitInline {
 
 // pre-processing that happens once per graph
 struct PreprocessGraph {
-  PreprocessGraph(Graph& g) : graph(g.copy()) {
+  PreprocessGraph(std::shared_ptr<Graph>& g) : graph(g) {
     insertEnterMethodCalls(*graph);
     dropUnused(graph->block());
     // fill in move_flags by scanning blocks;
@@ -491,11 +491,11 @@ struct CodeImpl {
   size_t remaining_bailout_depth_;
 
   CodeImpl(
-      const std::shared_ptr<Graph>& graph,
+      std::shared_ptr<Graph>& graph,
       std::string function_name,
       size_t remaining_bailout_depth)
       : function_name_(std::move(function_name)),
-        preprocess_(*graph),
+        preprocess_(graph),
         current_node_(preprocess_.graph->return_node()),
         remaining_bailout_depth_(remaining_bailout_depth) {
     graph_ = preprocess_.graph;
@@ -1703,7 +1703,7 @@ std::ostream& operator<<(std::ostream& out, const Code& code) {
 }
 
 Code::Code(
-    const std::shared_ptr<Graph>& graph,
+    std::shared_ptr<Graph>& graph,
     std::string function_name,
     size_t remaining_bailout_depth)
     : pImpl(new CodeImpl(

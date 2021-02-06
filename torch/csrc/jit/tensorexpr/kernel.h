@@ -21,7 +21,7 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
 
 class TORCH_API TensorExprKernel {
  public:
-  explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
+  explicit TensorExprKernel(std::shared_ptr<Graph> subgraph);
 
   void run(Stack& stack);
 

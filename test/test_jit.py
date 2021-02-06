@@ -275,6 +275,8 @@ def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
                 pass
             elif len(nodes) == 2 and nodes[0].kind() == "prim::RequiresGradCheck" and nodes[1].kind() == "prim::If":
                 pass
+            elif len(nodes) == 3 and nodes[0].kind() == "prim::RequiresGradCheck" and nodes[1].kind() == "prim::If" and nodes[2].kind() == "prim::Drop":
+                pass
             else:
                 raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
     grad_executors = list(plan_state.code.grad_executor_states())

@@ -44,7 +44,7 @@ struct TORCH_API Code {
   // is directly created by `GraphExecutor` in which case it's likely to contain
   // `prim::BailOut`s to control the maximum depth of bailout chains
   explicit Code(
-      const std::shared_ptr<Graph>& graph,
+      std::shared_ptr<Graph>& graph,
       std::string function_name,
       size_t remaining_bailout_depth = 0);
   ~Code();
