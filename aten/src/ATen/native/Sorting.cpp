@@ -717,6 +717,7 @@ std::tuple<Tensor, Tensor> sort_cpu_stable(
     c10::optional<bool> stable,
     int64_t dim,
     bool descending) {
+  TORCH_CHECK(!self.is_complex(), "sort(): input tensor must be of non-complex type");
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   return sort_out_cpu_stable(values, indices, self, stable, dim, descending);
