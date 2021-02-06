@@ -4,6 +4,8 @@
 namespace torch {
 namespace jit {
 
+TORCH_CUDA_CU_API void RemovePreprocess(Block* block);
+
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,

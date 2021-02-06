@@ -45,6 +45,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -1796,6 +1797,7 @@ TEST(InsertBailOutsTest, Basic) {
   auto copy = pr->profiled_graph_->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
   InsertGuards(copy);
+  RemovePreprocess(copy->block());
   EliminateRedundantGuards(copy);
   auto nodes = copy->block()->nodes();
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
