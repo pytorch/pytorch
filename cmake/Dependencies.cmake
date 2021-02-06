@@ -554,11 +554,13 @@ endif()
 
 # ---[ Vulkan deps
 if(USE_VULKAN)
-  set(Vulkan_LIBS)
+  set(Vulkan_DEFINES)
   set(Vulkan_INCLUDES)
+  set(Vulkan_LIBS)
   include(${CMAKE_CURRENT_LIST_DIR}/VulkanDependencies.cmake)
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${Vulkan_LIBS})
+  string(APPEND CMAKE_CXX_FLAGS ${Vulkan_DEFINES})
   include_directories(SYSTEM ${Vulkan_INCLUDES})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${Vulkan_LIBS})
 endif()
 
 # ---[ gflags
@@ -1347,7 +1349,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    set(TP_ENABLE_SHM OFF CACHE BOOL "" FORCE)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
@@ -1565,9 +1566,14 @@ if(NOT INTERN_BUILD_MOBILE)
   set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
   find_package(MAGMA)
-  if(USE_CUDA AND MAGMA_FOUND)
+  if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
     include_directories(SYSTEM ${MAGMA_INCLUDE_DIR})
-    set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
+    if(USE_CUDA)
+      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
+    endif()
+    if(USE_ROCM)
+      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR}")
+    endif()
     include(CheckPrototypeDefinition)
     check_prototype_definition(magma_get_sgeqrf_nb
      "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
@@ -1851,4 +1857,3 @@ if(USE_KINETO)
     set(USE_KINETO OFF)
   endif()
 endif()
-

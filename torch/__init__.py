@@ -22,7 +22,11 @@ if sys.version_info < (3,):
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
-from .version import __version__
+# TODO(torch_deploy) figure out how to freeze version.py in fbcode build
+if sys.executable == 'torch_deploy':
+    __version__ = "torch-deploy-1.8"
+else:
+    from .version import __version__
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING
@@ -134,7 +138,7 @@ if sys.platform == 'win32':
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows':
+    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -349,6 +353,10 @@ def use_deterministic_algorithms(d):
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.__getitem__` backward when `self` is a CPU tensor and
+          ``indices`` is a list of tensors
+        * :func:`torch.index_put` with ``accumulate=True`` when called on a CPU
+          tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when `d=True`:
@@ -516,7 +524,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if platform.system() == 'Windows':
+    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -658,6 +666,6 @@ from ._vmap_internals import vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
-# class usage. We add these lines here to preserve backward compatbility.
+# class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru

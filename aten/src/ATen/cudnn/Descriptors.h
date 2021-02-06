@@ -80,7 +80,7 @@ struct DescriptorDeleter {
 // initialized the first time you call set() or any other initializing
 // function.
 template <typename T, cudnnStatus_t (*ctor)(T**), cudnnStatus_t (*dtor)(T*)>
-class TORCH_CUDA_CU_API Descriptor {
+class TORCH_CUDA_CPP_API Descriptor {
  public:
   // TODO: Figure out why const-correctness doesn't work here
 
@@ -108,7 +108,7 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
-class TORCH_CUDA_CU_API TensorDescriptor : public Descriptor<
+class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
                                                cudnnTensorStruct,
                                                &cudnnCreateTensorDescriptor,
                                                &cudnnDestroyTensorDescriptor> {
@@ -147,7 +147,7 @@ private:
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d);
 
-class TORCH_CUDA_CU_API FilterDescriptor : public Descriptor<
+class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
                                                cudnnFilterStruct,
                                                &cudnnCreateFilterDescriptor,
                                                &cudnnDestroyFilterDescriptor> {
@@ -163,7 +163,7 @@ private:
 
 std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
 
-struct TORCH_CUDA_CU_API ConvolutionDescriptor
+struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     : public Descriptor<
           cudnnConvolutionStruct,
           &cudnnCreateConvolutionDescriptor,
@@ -186,7 +186,7 @@ struct TORCH_CUDA_CU_API ConvolutionDescriptor
   }
 };
 
-struct TORCH_CUDA_CU_API SpatialTransformerDescriptor
+struct TORCH_CUDA_CPP_API SpatialTransformerDescriptor
     : public Descriptor<
           cudnnSpatialTransformerStruct,
           &cudnnCreateSpatialTransformerDescriptor,
@@ -196,7 +196,7 @@ struct TORCH_CUDA_CU_API SpatialTransformerDescriptor
   }
 };
 
-struct TORCH_CUDA_CU_API DropoutDescriptor
+struct TORCH_CUDA_CPP_API DropoutDescriptor
     : public Descriptor<
           cudnnDropoutStruct,
           &cudnnCreateDropoutDescriptor,
@@ -235,7 +235,7 @@ struct TORCH_CUDA_CU_API DropoutDescriptor
   }
 };
 
-struct TORCH_CUDA_CU_API RNNDescriptor : public Descriptor<
+struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
                                              cudnnRNNStruct,
                                              &cudnnCreateRNNDescriptor,
                                              &cudnnDestroyRNNDescriptor> {
@@ -282,7 +282,7 @@ struct TORCH_CUDA_CU_API RNNDescriptor : public Descriptor<
   }
 };
 
-struct TORCH_CUDA_CU_API CTCLossDescriptor
+struct TORCH_CUDA_CPP_API CTCLossDescriptor
     : public Descriptor<
           cudnnCTCLossStruct,
           &cudnnCreateCTCLossDescriptor,

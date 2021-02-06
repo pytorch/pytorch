@@ -44,6 +44,17 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 #define REGISTER_OPERATOR_FUNCTOR(name, id, ...) \
   REGISTER_OPERATOR_FUNCTOR_OPT(name, id, true, true, __VA_ARGS__)
 
+#define REGISTER_VIEW_OPERATOR_FUNCTOR(name, id, ...)        \
+  struct SROperatorFunctor_##id : public SROperatorFunctor { \
+    const SROpFunctor fn = __VA_ARGS__;                      \
+    SROperator Generate(Node* n) override {                  \
+      return fn(n);                                          \
+    }                                                        \
+  };                                                         \
+  C10_REGISTER_CLASS(SRViewOperatorRegistry, name, SROperatorFunctor_##id);
+
+C10_DECLARE_REGISTRY(SRViewOperatorRegistry, SROperatorFunctor);
+
 inline at::Tensor create_empty_from(const at::Tensor& t) {
   return at::empty({0}, t.options());
 }
@@ -60,8 +71,10 @@ inline void fastResizeToZero(at::Tensor& t) {
 }
 
 bool canRunOutOfPlace(Node* n);
+bool canReuseInputsOutputs(Node* n);
 bool canReuseInputs(Node* n);
 bool canReuseOutputs(Node* n);
+bool isViewOp(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 
