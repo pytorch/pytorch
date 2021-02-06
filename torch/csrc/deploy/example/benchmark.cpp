@@ -164,8 +164,8 @@ struct Benchmark {
       size_t n_seconds = 5)
       : manager_(manager),
         n_threads_(n_threads),
-        file_to_run_(file_to_run),
         strategy_(strategy),
+        file_to_run_(file_to_run),
         n_seconds_(n_seconds),
         should_run_(true),
         items_completed_(0),
