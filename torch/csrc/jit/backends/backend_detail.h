@@ -58,9 +58,10 @@ TORCH_API void registerBackendPreprocessFunction(
     const std::string& name,
     const BackendPreprocessFunction& preprocess);
 
-bool hasBackendPreprocessFunction(const std::string& name);
+TORCH_API bool hasBackendPreprocessFunction(const std::string& name);
 
-BackendPreprocessFunction getBackendPreprocessFunction(const std::string& name);
+TORCH_API BackendPreprocessFunction
+getBackendPreprocessFunction(const std::string& name);
 
 } // namespace detail
 } // namespace jit
