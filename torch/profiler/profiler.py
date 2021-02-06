@@ -17,16 +17,19 @@ class ProfilerAction(Enum):
     RECORD_AND_SAVE = 3
 
 
-def schedule(*, wait: int, warmup: int, active: int) -> Callable:
+def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0) -> Callable:
     """
     Returns a callable that can be used as profiler ``schedule`` argument. The profiler will wait for ``wait`` steps, then
     do the warmup for the next ``warmup`` steps, then
     do the active recording for the next ``active`` steps and then
-    repeat the cycle staring with the next step.
+    repeat the cycle starting with the next step. The number of cycles is specified by the ``repeat`` parameter.
+    When the parameter's value is zero, the cycles will continue until the profiling is finished.
     """
     def schedule_fn(step: int) -> ProfilerAction:
         assert step >= 0
         num_steps = wait + warmup + active
+        if repeat > 0 and step / num_steps >= repeat:
+            return ProfilerAction.NONE
         mod_step = step % num_steps
         if mod_step < wait:
             return ProfilerAction.NONE
@@ -89,7 +92,8 @@ class profile(object):
       during the profiling;
     - ``record_shapes`` - save information about operator's input shapes;
     - ``profile_memory`` - track tensor memory allocation/deallocation;
-    - ``with_stack`` - record source information (file and line number) for the ops.
+    - ``with_stack`` - record source information (file and line number) for the ops;
+    - ``with_flops`` - use formula to estimate the FLOPS of specific operators (matrix multiplication and 2D convolution);
     - ``use_cuda`` - (deprecated, use ``activities``).
 
     .. note::
@@ -99,6 +103,18 @@ class profile(object):
         of the training process.
         The default schedule simply records all the events continuously for the
         duration of the context manager.
+
+    .. note::
+        Use ``torch.profiler.tensorboard_trace_handler`` to generate result files for TensorBoard:
+
+        ``on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name)``
+
+        After profiling, result files can be found in the specified directory. Use the command:
+
+        ``tensorboard --log_dir=dir_name``
+
+        to see the results in TensorBoard.
+        For more information, see `Pytorch Profiler <https://github.com/pytorch/kineto/tree/master/tb_plugin>`__
 
     .. note::
         Enabling shape and stack tracing results in additional overhead.
@@ -146,7 +162,8 @@ class profile(object):
                 warmup=1,
                 active=2),
             on_trace_ready=trace_handler
-            # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log') # used when outputting for tensorboard
+            # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
+            # used when outputting for tensorboard
             ) as p:
                 for iter in range(N):
                     code_iteration_to_profile(iter)
@@ -162,6 +179,7 @@ class profile(object):
             record_shapes: bool = False,
             profile_memory: bool = False,
             with_stack: bool = False,
+            with_flops: bool = False,
             # deprecated:
             use_cuda: Optional[bool] = None):
         if activities:
@@ -191,6 +209,7 @@ class profile(object):
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
         self.record_shapes = record_shapes
+        self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.step_num = 0
@@ -337,6 +356,7 @@ class profile(object):
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             record_shapes=self.record_shapes,
+            with_flops=self.with_flops,
             profile_memory=self.profile_memory,
             with_stack=self.with_stack,
             use_kineto=True,
