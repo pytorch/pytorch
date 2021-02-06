@@ -1306,16 +1306,17 @@ class SiameseLoss(_Loss):
 
         Discriminative Learning of Deep Convolutional Feature Point Descriptors
         https://www.cv-foundation.org/openaccess/content_iccv_2015/papers/Simo-Serra_Discriminative_Learning_of_ICCV_2015_paper.pdf
-        """
-        __constants__ = ['margin', 'reduction']
-        margin: float
+    
+    """
+    __constants__ = ['margin', 'reduction']
+    margin: float
 
-        def __init__(self, margin: float=1.0, size_average = None, reduce = None, reduction: str = 'mean'):
-            super(SiameseLoss, self).__init__(size_average, reduce, reduction)
-            self.margin = margin
+    def __init__(self, margin: float=1.0, size_average = None, reduce = None, reduction: str = 'mean'):
+        super(SiameseLoss, self).__init__(size_average, reduce, reduction)
+        self.margin = margin
 
-        def forward(self, anchor: Tensor, positive: Tensor, label: Tensor) -> Tensor:
-            return F.siames_loss(anchor, positive, margin = self.margin, reduction = self.reduction)
+    def forward(self, anchor: Tensor, positive: Tensor, label: Tensor) -> Tensor:
+        return F.siames_loss(anchor, positive, margin = self.margin, reduction = self.reduction)
 
 
 class CTCLoss(_Loss):
