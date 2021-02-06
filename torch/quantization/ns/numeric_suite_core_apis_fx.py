@@ -184,7 +184,7 @@ def _get_node_io_type(node: Node, gm: GraphModule) -> NodeIOType:
                 'unknown node target %s' % mod
             return NodeIOType.INT8
 
-def _insert_domain_translation_after_node(
+def _insert_dtype_cast_after_node(
     node_a: Node,
     node_c: Node,
     prev_node_c: Node,
@@ -201,28 +201,28 @@ def _insert_domain_translation_after_node(
     translation node after prev_node_c to translate into the domain expected
     by node_a, resulting in:
 
-                          domain_translation
+                          dtype_cast
                         /
     ... -> prev_node_c -> node_c -> ...
 
     For example, if node_c is an int8 op and node_a is an fp32 op, this function
     will insert a dequant.
     """
-    domain_translation_op = None
+    dtype_cast_op = None
     node_io_type_a = _get_node_io_type(node_a, gm_a)
     node_io_type_c = _get_node_io_type(node_c, gm_b)
 
     if node_io_type_a == NodeIOType.FP32 and node_io_type_c == NodeIOType.INT8:
-        domain_translation_op = torch.dequantize
+        dtype_cast_op = torch.dequantize
     else:
         raise AssertionError(
             f"domain translation from {node_io_type_c} to {node_io_type_a} needs to be implemented")
 
-    new_domain_translation_name = \
+    new_dtype_cast_name = \
         get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
     return prev_node_c.graph.create_node(
-        'call_function', domain_translation_op, (prev_node_c,), {},
-        new_domain_translation_name)
+        'call_function', dtype_cast_op, (prev_node_c,), {},
+        new_dtype_cast_name)
 
 def _return_first_non_observer_node(
     node: Node,
@@ -449,25 +449,26 @@ def _create_a_shadows_b(
             #
             # node_c
 
-            # translate the inputs from domain of B to domain of A (dequant, etc)
-            domain_translation_node = _insert_domain_translation_after_node(
-                node_a, node_c, node_c.args[0], gm_a, gm_b, node_b.name + '_domain_translation_')
-            env_c[domain_translation_node.name] = domain_translation_node
+            # change dtype from the domain of node_c's input to the domain of
+            # node_a's input (dequant, etc)
+            dtype_cast_node = _insert_dtype_cast_after_node(
+                node_a, node_c, node_c.args[0], gm_a, gm_b, node_b.name + '_dtype_cast_')
+            env_c[dtype_cast_node.name] = dtype_cast_node
             # subgraph so far:
             #
-            #       domain_translation_node
+            #       dtype_cast_node
             #      /
             # node_c
 
             # hook up the new mod_a copy to be in the graph, receiving the
             # same inputs as mod_b does, with domain translated to match a
             node_a_shadows_c = _insert_copy_of_node_a_after_input_node_c(
-                env_c[domain_translation_node.name],
+                env_c[dtype_cast_node.name],
                 node_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
             env_c[node_a_shadows_c.name] = node_a_shadows_c
             # subgraph so far:
             #
-            #       domain_translation_node --> node_a_copy(args/kwargs not shown)
+            #       dtype_cast_node --> node_a_copy(args/kwargs not shown)
             #      /
             # node_c
 
@@ -476,7 +477,7 @@ def _create_a_shadows_b(
                 env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_')
             # subgraph so far:
             #
-            #       domain_translation_node --> node_a_copy --> logger_a
+            #       dtype_cast_node --> node_a_copy --> logger_a
             #      /
             # node_c
 
@@ -485,7 +486,7 @@ def _create_a_shadows_b(
                 env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_')
             # subgraph so far:
             #
-            #       domain_translation_node --> node_a_copy --> logger_a
+            #       dtype_cast_node --> node_a_copy --> logger_a
             #      /
             # node_c --> logger_c
 
