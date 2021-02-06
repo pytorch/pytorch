@@ -269,6 +269,7 @@ on them and append them to the :class:`Graph`.
         """
         graph : fx.Graph = tracer_class().trace(model)
         new_graph = fx.Graph()
+        env = {}
         for node in graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
                 # By wrapping the arguments with proxies,
