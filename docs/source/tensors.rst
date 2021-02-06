@@ -40,7 +40,7 @@ quantized 4-bit integer (unsigned) [3]_    ``torch.quint4x2``            :class:
   significand bits. Useful when range is important, since it has the same
   number of exponent bits as ``float32``
 .. [3]
-  quantized 4-bit integer is stored as a 8-bit signed integer. Currently it's only supported in Embedding and EmbeddingBag operator.
+  quantized 4-bit integer is stored as a 8-bit signed integer. Currently it's only supported in EmbeddingBag operator.
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
 
