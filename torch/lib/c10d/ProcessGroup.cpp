@@ -56,7 +56,7 @@ ProcessGroup::Work::Work(
     int rank,
     OpType opType,
     const char* profilingTitle,
-    const c10::optional<at::Tensor>& inputTensor)
+    const c10::optional<std::vector<at::Tensor>>& inputTensors)
     : rank_(rank), opType_(opType) {
   if (profilingTitle != nullptr) {
     auto recordingFunction =
@@ -64,9 +64,11 @@ ProcessGroup::Work::Work(
     if (recordingFunction->isActive()) {
       // Passing input tensor to recordFunction allows for shape information in
       // profiling output.
-      std::vector<c10::IValue> inputs = {};
-      if (inputTensor) {
-        inputs.push_back(*inputTensor);
+      std::vector<c10::IValue> inputs;
+      if (inputTensors) {
+        for (const auto& tensor : *inputTensors) {
+        inputs.push_back(tensor);
+        }
       }
       recordingFunction->before(profilingTitle, inputs);
       std::function<void()> end_handler = [this, recordingFunction]() {

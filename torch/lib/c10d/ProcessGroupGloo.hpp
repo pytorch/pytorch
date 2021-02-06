@@ -72,8 +72,8 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     AsyncWork(
         const char* profilingTitle = nullptr,
-        const c10::optional<at::Tensor>& inputTensor = c10::nullopt)
-        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensor) {
+        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors) {
     }
 
     static void execute(c10::intrusive_ptr<AsyncWork> work) {

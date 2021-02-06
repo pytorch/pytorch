@@ -678,10 +678,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
       int rootRank,
       int rootTensor,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(
-            "gloo:broadcast",
-            inputs.size() > 0 ? c10::optional<at::Tensor>(inputs[0])
-                              : c10::nullopt),
+      : ProcessGroupGloo::AsyncWork("gloo:broadcast", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -828,15 +825,11 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(
-            "gloo:all_reduce",
-            inputs.size() > 0 ? c10::optional<at::Tensor>(inputs[0])
-                              : c10::nullopt),
+      : ProcessGroupGloo::AsyncWork("gloo:all_reduce", inputs),
         context(context),
         inputs(inputs),
         reduceOp(reduceOp),
-        tag(tag) {
-  }
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs;
@@ -920,10 +913,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(
-            "gloo:sparse_all_reduce",
-            inputs.size() > 0 ? c10::optional<at::Tensor>(inputs[0])
-                              : c10::nullopt),
+      : ProcessGroupGloo::AsyncWork("gloo:sparse_all_reduce", inputs),
         context(context),
         inputs(inputs),
         tag(tag) {}
@@ -1449,10 +1439,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
       int rootTensor,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(
-            "gloo:reduce",
-            inputs.size() > 0 ? c10::optional<at::Tensor>(inputs[0])
-                              : c10::nullopt),
+      : ProcessGroupGloo::AsyncWork("gloo:reduce", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -1617,10 +1604,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(
-            "gloo:all_gather",
-            inputs.size() > 0 ? c10::optional<at::Tensor>(inputs[0])
-                              : c10::nullopt),
+      : ProcessGroupGloo::AsyncWork("gloo:all_gather", inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -1821,14 +1805,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(
-            "gloo:all_gather",
-            input_list.size() > 0
-                ? c10::optional<at::Tensor>(
-                      input_list[0]) // TODO: make this take in a vec of
-                                     // tensors, since there can be many input
-                                     // tensors here.
-                : c10::nullopt),
+      : ProcessGroupGloo::AsyncWork("gloo:all_gather", input_list),
         context(context),
         output_lists(output_lists),
         input_list(input_list),
@@ -1958,10 +1935,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(
-            "gloo:gather",
-            inputs.size() > 0 ? c10::optional<at::Tensor>(inputs[0])
-                              : c10::nullopt),
+      : ProcessGroupGloo::AsyncWork("gloo:gather", inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2168,10 +2142,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
             "gloo:scatter",
-            // Inputs is a single element input list with a list of tensors,
-            // TODO make the following arg take a vec of tensors.
-            inputs.size() > 0 && inputs[0].size() > 0
-                ? c10::optional<at::Tensor>(inputs[0][0])
+            inputs.size() > 0
+                ? c10::optional<std::vector<at::Tensor>>(inputs[0])
                 : c10::nullopt),
         context(context),
         outputs(outputs),
@@ -2367,7 +2339,9 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       std::vector<int64_t>& outputCounts,
       std::vector<int64_t>& inputCounts,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_to_all", inputTensor),
+      : ProcessGroupGloo::AsyncWork(
+            "gloo:all_to_all",
+            c10::optional<std::vector<at::Tensor>>({inputTensor})),
         context(context),
         outputTensor(outputTensor),
         inputTensor(inputTensor),
