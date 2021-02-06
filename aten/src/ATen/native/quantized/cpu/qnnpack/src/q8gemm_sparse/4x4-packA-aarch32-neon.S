@@ -55,6 +55,12 @@
 # data in packed A as we will not be writing those out.
 # This wil be taken care by just copying the appropriate valid data
 
+# Also note that this packing is same as taking for 4x1 pattern.
+# This is because all the adjacent k's are laid next to each other
+# in both 4x4 as well as 4x1 blocking (mrxkr)
+# So this packing kernel can be used by compute kernel that assumes
+# 8x1 sparsity pattern and has register blocking of 4x8
+
 # void pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon(
 #     size_t mr,
 #     size_t K,
