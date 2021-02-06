@@ -483,8 +483,8 @@ tensors <sparse-coo-docs>`:
 Sparse tensor functions
 +++++++++++++++++++++++
 
-   :noindex:
 .. autofunction:: torch.sparse_coo_tensor
+   :noindex:
 .. autofunction:: torch.sparse.sum
 .. autofunction:: torch.sparse.addmm
 .. autofunction:: torch.sparse.mm
