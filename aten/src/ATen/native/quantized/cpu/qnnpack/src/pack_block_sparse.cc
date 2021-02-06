@@ -74,6 +74,8 @@ block_scanned:
     }
     bcsr_mat.row_values.push_back(num_nnz_blocks);
   }
+  bcsr_mat.row_block_size = row_block_size;
+  bcsr_mat.col_block_size = col_block_size;
   return bcsr_mat_ptr;
 }
 } // namsepace qnnpack
