@@ -1353,9 +1353,6 @@ class DistributedTest:
                     for work in works:
                         work.wait()
 
-            if self.rank == 0:
-                print(prof.key_averages().table())
-
             def get_event(postfix):
                 return [event for event in prof.function_events if event.name.endswith(postfix)]
 
@@ -1365,6 +1362,7 @@ class DistributedTest:
                 for e in events:
                     self.assertEqual(e.count, 1)
                     self.assertGreaterEqual(e.cpu_time, 0)
+                    self.assertFalse(e.input_shapes == [])
 
         # ALL REDUCE
         def _test_all_reduce_helper(

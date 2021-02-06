@@ -76,7 +76,11 @@ class ProcessGroup : public torch::CustomClassHolder {
   // this will be bound using pybind.
   class Work : public torch::CustomClassHolder {
    public:
-    Work(int rank = -1, OpType opType = OpType::UNKNOWN, const char* profilingTitle = nullptr);
+    Work(
+        int rank = -1,
+        OpType opType = OpType::UNKNOWN,
+        const char* profilingTitle = nullptr,
+        const c10::optional<at::Tensor>& inputTensor = c10::nullopt);
 
     virtual ~Work();
 
