@@ -212,12 +212,17 @@ void pushProfilingCallbacks() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
+  if (shapes.empty()) {
+    return "[]";
+  }
   std::ostringstream oss;
   oss << "[";
   for (const auto& shape : shapes) {
     oss << "[";
-    std::copy(shape.begin(), shape.end(), std::ostream_iterator<int64_t>(oss, ", "));
-    oss.seekp(-2, std::ios_base::end);
+    if (!shape.empty()) {
+      std::copy(shape.begin(), shape.end(), std::ostream_iterator<int64_t>(oss, ", "));
+      oss.seekp(-2, std::ios_base::end);
+    }
     oss << "], ";
   }
   oss.seekp(-2, std::ios_base::end);
