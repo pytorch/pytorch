@@ -15,3 +15,29 @@ strategies for more advanced use cases.
 .. warning ::
     DDP communication hooks can only support single process single device mode
     on NCCL backend.
+
+How to Use a Communication Hook?
+--------------------------------
+
+To use a communication hook, the user just needs to let the DDP model register
+the hook before the training loop by calling
+:func:`torch.nn.parallel.DistributedDataParallel.register_comm_hook`.
+
+Default Communication Hooks
+---------------------------
+
+Default communication hooks are simple **stateless** hooks, so the input state
+in ``register_comm_hook`` is either a process group or ``None``.
+
+.. automodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
+    :members:
+
+PowerSGD Communication Hook
+---------------------------
+
+PowerSGD (`Vogels et al., NeurIPS 2019 <https://arxiv.org/abs/1905.13727>`_)
+is a gradient compression algorithm, which can provide very high compression
+rates and accelerate bandiwth-bound distributed training.
+This algorithm needs to maintain both some hyperparameters and the internal
+state. Therefore, PowerSGD communication hook is a **stateful** hook,
+and the user needs to provide a state object defined as below.
