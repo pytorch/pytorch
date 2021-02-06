@@ -416,7 +416,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
     This variant does not compress the gradients layer by layer,
-    but instead compresses to the flattened input tensor that batches all the gradients.
+    but instead compresses the flattened input tensor that batches all the gradients.
     Therefore, it is **faster** than :meth:`powerSGD_hook`,
     but usually results in a **much lower accuracy**, unless ``matrix_approximation_rank`` is 1.
 
