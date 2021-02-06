@@ -1,4 +1,4 @@
-import copy
+import collections
 import enum
 
 import torch
@@ -16,7 +16,7 @@ from torch.quantization.ns.graph_matcher import (
 from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 
-from typing import Dict, Tuple, Callable, List, Any
+from typing import Dict, Tuple, Callable, List, Any, Optional
 
 
 def _get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
@@ -121,7 +121,13 @@ def _remove_observers_add_loggers(
     gm: GraphModule,
     nodes_to_instrument: List[Node],
     logger_cls: Callable,
+    model_name: str,
 ) -> GraphModule:
+    """
+    Takes the graph of gm, removes all observers, adds loggers to the output
+    of each node in nodes_to_instrument. Returns a GraphModule with the new
+    graph.
+    """
 
     new_graph = Graph()
     env: Dict[str, Any] = {}
@@ -144,7 +150,7 @@ def _remove_observers_add_loggers(
             env[node.name] = new_graph.node_copy(node, load_arg)
             # add the logger after the base node
             env[node.name] = _insert_logger_after_node(
-                env[node.name], gm, logger_cls, '_ns_logger_')
+                env[node.name], gm, logger_cls, '_ns_logger_', model_name)
 
         else:
             env[node.name] = new_graph.node_copy(node, load_arg)
@@ -197,8 +203,8 @@ def _insert_dtype_cast_after_node(
 
     ... -> prev_node_c -> node_c -> ...
 
-    And a corresponding related node_a, inserts the correct domain
-    translation node after prev_node_c to translate into the domain expected
+    And a corresponding related node_a, inserts the correct dtype
+    cast node after prev_node_c to cast into the dtype expected
     by node_a, resulting in:
 
                           dtype_cast
@@ -216,7 +222,7 @@ def _insert_dtype_cast_after_node(
         dtype_cast_op = torch.dequantize
     else:
         raise AssertionError(
-            f"domain translation from {node_io_type_c} to {node_io_type_a} needs to be implemented")
+            f"dtype cast from {node_io_type_c} to {node_io_type_a} needs to be implemented")
 
     new_dtype_cast_name = \
         get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
@@ -257,6 +263,8 @@ def _insert_logger_after_node(
     gm: GraphModule,
     logger_cls: Callable,
     logger_node_name_suffix: str,
+    model_name: str,
+    other_node_name: Optional[str] = None,
 ) -> Node:
     """
     Given a starting graph of
@@ -272,7 +280,7 @@ def _insert_logger_after_node(
     logger_node_name = \
         get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
     # create the logger object
-    logger_obj = logger_cls(node.name)
+    logger_obj = logger_cls(node.name, model_name, other_node_name)
     # attach the logger object to the parent module
     setattr(gm, logger_node_name, logger_obj)
     logger_node = node.graph.create_node(
@@ -374,7 +382,9 @@ def _insert_copy_of_node_a_after_input_node_c(
         return node_a_shadows_c
 
 def _create_a_shadows_b(
+    name_a: str,
     gm_a: GraphModule,
+    name_b: str,
     gm_b: GraphModule,
     matched_node_pairs: Dict[str, Tuple[Node, Node]],
     logger_cls: Callable,
@@ -400,7 +410,7 @@ def _create_a_shadows_b(
     In a nutshell, this function does the following for each node pair:
     * copies the necessary attributes and modules from gm_a to gm_b,
       keeping names unique
-    * adds a domain translation op (dequant, quant, etc)
+    * adds a dtype cast op (dequant, quant, etc)
     * adds a copy of node_a in gm_b's graph
     * adds loggers to the outputs of node_a and node_b
     """
@@ -449,7 +459,7 @@ def _create_a_shadows_b(
             #
             # node_c
 
-            # change dtype from the domain of node_c's input to the domain of
+            # cast dtype from the dtype of node_c's input to the dtype of
             # node_a's input (dequant, etc)
             dtype_cast_node = _insert_dtype_cast_after_node(
                 node_a, node_c, node_c.args[0], gm_a, gm_b, node_b.name + '_dtype_cast_')
@@ -461,7 +471,7 @@ def _create_a_shadows_b(
             # node_c
 
             # hook up the new mod_a copy to be in the graph, receiving the
-            # same inputs as mod_b does, with domain translated to match a
+            # same inputs as mod_b does, with dtype cast to match a
             node_a_shadows_c = _insert_copy_of_node_a_after_input_node_c(
                 env_c[dtype_cast_node.name],
                 node_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
@@ -472,18 +482,20 @@ def _create_a_shadows_b(
             #      /
             # node_c
 
-            # hook up a logger to the mod_a copy
-            env_c[node_a_shadows_c.name] = _insert_logger_after_node(
-                env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_')
-            # subgraph so far:
-            #
-            #       dtype_cast_node --> node_a_copy --> logger_a
-            #      /
-            # node_c
-
             # hook up a logger to the mod_b copy
             env_c[node_b.name] = _insert_logger_after_node(
-                env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_')
+                env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_', name_b)
+            # subgraph so far:
+            #
+            #       dtype_cast_node --> node_a_copy
+            #      /
+            # node_c --> logger_c
+
+            # hook up a logger to the mod_a copy
+            # Note: we pass node_b.name to this logger, for easy matching later
+            env_c[node_a_shadows_c.name] = _insert_logger_after_node(
+                env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_', name_a,
+                node_b.name)
             # subgraph so far:
             #
             #       dtype_cast_node --> node_a_copy --> logger_a
@@ -496,18 +508,31 @@ def _create_a_shadows_b(
     gm_c = GraphModule(gm_b, graph_c)
     return gm_c
 
-# TODO(future PR): add name, etc to NS Loggers and reuse them
 class OutputLogger(nn.Module):
-    def __init__(self, name):
+    def __init__(
+        self,
+        node_name: str,
+        model_name: str,
+        other_node_name: Optional[str] = None,
+    ):
         super().__init__()
         self.stats = []
-        self.name = name
+        # name of the node whose output this Logger is capturing
+        self.node_name = node_name
+        # name of the model from which the node originated from
+        self.model_name = model_name
+        # name of the other node with a matching Logger
+        # used to link node_a_copy -> logger_a to node_c -> logger_c
+        # in a_shadows_b
+        self.other_node_name = other_node_name
 
     def forward(self, x):
         self.stats.append(x.detach())
         return x
 
-# TODO(future PR): consider calling this once for each input model (Haixin's suggestion)
+    def __repr__(self):
+        return f"OutputLogger(node_name={self.node_name}, model_name={self.model_name}, other_node_name={self.other_node_name})"
+
 def prepare_model_outputs(
     name_a: str,
     gm_a: GraphModule,
@@ -521,18 +546,71 @@ def prepare_model_outputs(
     nodes_to_instrument_a = []
     nodes_to_instrument_b = []
     for match_name, (node_a, node_b,) in matched_node_pairs.items():
-        print(match_name, node_a, node_b)
-
-        # TODO(before land): do not observe pairs of nodes we do not care
+        # TODO(future PR): do not observe pairs of nodes we do not care
         #   about (both fp32, denylist, etc)
-
         nodes_to_instrument_a.append(node_a)
         nodes_to_instrument_b.append(node_b)
 
-    gm_a = _remove_observers_add_loggers(gm_a, nodes_to_instrument_a, logger_cls)
-    gm_b = _remove_observers_add_loggers(gm_b, nodes_to_instrument_b, logger_cls)
-
+    gm_a = _remove_observers_add_loggers(gm_a, nodes_to_instrument_a, logger_cls, name_a)
+    gm_b = _remove_observers_add_loggers(gm_b, nodes_to_instrument_b, logger_cls, name_b)
     return (gm_a, gm_b)
+
+def get_matching_activations(
+    gm_a: GraphModule,
+    gm_b: GraphModule,
+    logger_cls: Callable,
+) -> Dict[str, Dict[str, List[torch.Tensor]]]:
+    """
+    Same thing as ns.get_matching_activations, but for FX models prepared with
+    this module.
+
+    TODO(before land): real docblock
+
+    Output format:
+
+    {
+        'layer1.stats': {
+            'name_a': [torch.Tensor(...), ...],
+            'name_b': [torch.Tensor(...), ...],
+        },
+        ...
+    }
+
+    Note, there are three differences from the output format of Eager NS:
+    1. `name_a` and `name_b` are used instead of hardcoding names
+       to `float` and `quantized`.
+    2. Lists of Tensors are returned instead of individual Tensors, to unify
+       the return type for calibrating with 1 input vs N inputs.
+    3. `logger_cls` is included in the API for easy result extraction
+
+    TODO(future PR): do we really need the ".stats" suffix?
+    """
+    results = collections.defaultdict(dict)
+    for gm in (gm_a, gm_b):
+        for gm_name, mod in gm.named_modules():
+            if isinstance(mod, logger_cls):
+                results[mod.node_name + '.stats'][mod.model_name] = mod.stats
+    return dict(results)
+
+def get_matching_activations_a_shadows_b(
+    name_a: str,
+    name_b: str,
+    gm_a_shadows_b: GraphModule,
+    logger_cls: Callable,
+) -> Dict[str, Dict[str, List[torch.Tensor]]]:
+    """
+    Same thing as get_matching_activations, but for an `a_shadows_b` model.
+    """
+    results = collections.defaultdict(dict)
+    for name, mod in gm_a_shadows_b.named_modules():
+        if isinstance(mod, logger_cls):
+            # If logger_obj.other_node_name is populated, then this logger
+            # is from model A, and other_node_name is the name from model B.
+            if mod.other_node_name is None:
+                results[mod.node_name + '.stats'][mod.model_name] = mod.stats
+            else:
+                results[mod.other_node_name + '.stats'][mod.model_name] = mod.stats
+    return dict(results)
 
 def prepare_model_with_stubs(
     name_a: str,
@@ -542,5 +620,6 @@ def prepare_model_with_stubs(
     logger_cls: Callable,
 ) -> GraphModule:
     matched_node_pairs = get_matching_node_pairs(gm_a, gm_b)
-    gm_a_shadows_b = _create_a_shadows_b(gm_a, gm_b, matched_node_pairs, logger_cls)
+    gm_a_shadows_b = _create_a_shadows_b(
+        name_a, gm_a, name_b, gm_b, matched_node_pairs, logger_cls)
     return gm_a_shadows_b

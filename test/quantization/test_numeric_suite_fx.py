@@ -29,6 +29,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     test_only_eval_fn,
 )
+from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import override_qengines
 from torch.quantization.ns.graph_matcher import (
     get_matching_node_pairs,
@@ -39,6 +40,8 @@ from torch.quantization.ns.numeric_suite_core_apis_fx import (
     prepare_model_outputs,
     OutputLogger,
     prepare_model_with_stubs,
+    get_matching_activations,
+    get_matching_activations_a_shadows_b,
 )
 
 
@@ -351,13 +354,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
-        # print(mp, mq)
-
         results = compare_weights('fp32_prepared', mp, 'int8', mq)
-
-        # human inspection - correct
-        # TODO(before land): real checks
-        print(results)
+        self.assertTrue(len(results) == 2)
+        self.assert_ns_weight_compare_dict_valid(results)
 
     def test_compare_weights_fun(self):
         class M(nn.Module):
@@ -376,13 +375,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
-        # print(mp, mq)
-
         results = compare_weights('fp32_prepared', mp, 'int8', mq)
-
-        # human inspection - correct
-        # TODO(before land): real checks
-        print(results)
+        self.assertTrue(len(results) == 1)
+        self.assert_ns_weight_compare_dict_valid(results)
 
     def test_match_activations_mod(self):
         m = nn.Sequential(
@@ -391,26 +386,32 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(4, 1, 4, 4))
+        mp(torch.randn(2, 1, 2, 2))
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_ns, mq_ns = prepare_model_outputs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+        mp_ns, mq_ns = prepare_model_outputs(
+            'fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        expected_occurrence = {
+            ns.call_module(OutputLogger): 2,
+        }
+        self.checkGraphModuleNodes(
+            mp_ns, expected_node_occurrence=expected_occurrence)
+        self.checkGraphModuleNodes(
+            mq_ns, expected_node_occurrence=expected_occurrence)
 
         # calibrate
-        input_fp32 = torch.randn(4, 1, 4, 4)
+        input_fp32 = torch.randn(2, 1, 2, 2)
         mp_ns(input_fp32)
         mq_ns(input_fp32)
 
-        # extract stats
-        # TODO(future PR): build an API for this
-        for model in (mp_ns, mq_ns):
-            for name, module in model.named_modules():
-                if isinstance(module, OutputLogger):
-                    # this is correct just need to wrap in an API
-                    print(module.name, module.stats)
+        # check activation result correctness
+        act_compare_dict = get_matching_activations(mp_ns, mq_ns, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 2)
+        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
     def test_match_activations_fun(self):
         class M(nn.Module):
@@ -434,20 +435,26 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_ns, mq_ns = prepare_model_outputs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+        mp_ns, mq_ns = prepare_model_outputs(
+            'fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        expected_occurrence = {
+            ns.call_module(OutputLogger): 2,
+        }
+        self.checkGraphModuleNodes(
+            mp_ns, expected_node_occurrence=expected_occurrence)
+        self.checkGraphModuleNodes(
+            mq_ns, expected_node_occurrence=expected_occurrence)
 
         # calibrate
         input_fp32 = torch.randn(2, 1)
         mp_ns(input_fp32)
         mq_ns(input_fp32)
 
-        # extract stats
-        # TODO(future PR): build an API for this
-        for model in (mp_ns, mq_ns):
-            for name, module in model.named_modules():
-                if isinstance(module, OutputLogger):
-                    # this is correct just need to wrap in an API
-                    print(module.name, module.stats)
+        # check activation result correctness
+        act_compare_dict = get_matching_activations(mp_ns, mq_ns, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 2)
+        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
     def test_prepare_model_with_stubs_mod(self):
         m = nn.Sequential(
@@ -455,7 +462,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(4, 1, 4, 4))
+        mp(torch.randn(1, 1, 4, 4))
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
@@ -464,15 +471,14 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
 
         # calibrate
-        input_fp32 = torch.randn(4, 1, 4, 4)
+        input_fp32 = torch.randn(1, 1, 4, 4)
         mp_shadows_mq(input_fp32)
 
-        # extract stats
-        # TODO(future PR): build an API for this
-        for name, module in mp_shadows_mq.named_modules():
-            if isinstance(module, OutputLogger):
-                # this is correct just need to wrap in an API
-                print(module.name, module.stats)
+        # check activation result correctness
+        act_compare_dict = get_matching_activations_a_shadows_b(
+            'fp32_prepared', 'int8', mp_shadows_mq, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 2)
+        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
     def test_prepare_model_with_stubs_fun(self):
         class M(nn.Module):
@@ -502,25 +508,8 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         input_fp32 = torch.randn(2, 1)
         mp_shadows_mq(input_fp32)
 
-        # extract stats
-        # TODO(future PR): build an API for this
-        for name, module in mp_shadows_mq.named_modules():
-            if isinstance(module, OutputLogger):
-                # this is correct just need to wrap in an API
-                print(module.name, module.stats)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        # check activation result correctness
+        act_compare_dict = get_matching_activations_a_shadows_b(
+            'fp32_prepared', 'int8', mp_shadows_mq, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 2)
+        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
