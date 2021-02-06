@@ -217,8 +217,6 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
 
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
-  // std::vector<int> shapes = {16, 16};
-  // c10::IntArrayRef shapes = {16, 16};
   std::vector<std::vector<long>> allShapes;
   c10::IntArrayRef shapes = {16, 16};
   for (auto i = 0; i < size; i++) {
