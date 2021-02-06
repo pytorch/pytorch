@@ -1276,7 +1276,7 @@ class SiameseLoss(_Loss):
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
@@ -1292,7 +1292,7 @@ class SiameseLoss(_Loss):
         - Output: scaler. if :attr: `reduction` is ``'none'``, then `(N)`.
 
     Examples::
-    
+
         >>> siamese_loss = nn.SiamesLoss(margin=1.0)
         >>> anchor = torch.randn(100,128, requires_grad=True)
         >>> positive = torch.randn(100,128, requires_grad=True)
