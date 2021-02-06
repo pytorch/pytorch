@@ -23,7 +23,6 @@ from torch.fx.experimental.partitioner_utils import (
 from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import normalize_functional_args
-from torch.testing._internal.common_nn import module_tests, new_module_tests
 
 try:
     from torchvision.models import resnet18
@@ -754,6 +753,7 @@ terrible spacing
     @skipIfNoTorchVision
     def test_normalize_functional(self):
         m = resnet18()
+
         class FunctionalTracer(torch.fx.Tracer):
             def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
                 leaves = set([torch.nn.BatchNorm2d])
