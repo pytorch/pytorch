@@ -37,8 +37,8 @@ def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
-def warmup_forward(f, *args):
-    profiling_count = 2
+def warmup_forward(f, *args, with_grad=False):
+    profiling_count = 2 if not with_grad else 3
     for i in range(profiling_count):
         results = f(*args)
 
@@ -690,7 +690,7 @@ class TestTEFuser(JitTestCase):
         scripted_f = torch.jit.script(test_fuse)
         x = torch.ones(1, requires_grad=True, device='cuda')
         y = torch.ones(1, requires_grad=True, device='cuda')
-        warmup_forward(scripted_f, x, y)
+        warmup_forward(scripted_f, x, y, with_grad=True)
         g = torch.jit.last_executed_optimized_graph()
         diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
@@ -814,6 +814,7 @@ class TestTEFuser(JitTestCase):
                 return p * (x * x + x)
 
             scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
+            out = scripted(x, p)
             out = scripted(x, p)
             self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                       "aten::_size_if_not_equal"))
@@ -946,7 +947,7 @@ class TestTEFuser(JitTestCase):
     def test_lstm(self):
         for device in self.devices:
             inputs = get_lstm_inputs(device, training=True)
-            module = self.checkScript(LSTMCellS, inputs)
+            module = self.checkScript(LSTMCellS, inputs, inputs_requires_grad=True)
             self.assertLastGraphAllFused()
 
     def test_lstm_concat(self):

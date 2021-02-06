@@ -463,6 +463,8 @@ class JitTestCase(JitCommonTestCase):
                     script_outputs = scripted_fn(*recording_inputs)
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
+                    if inputs_requires_grad:
+                        opt_script_outputs = scripted_fn(*recording_inputs)
                     if TEST_BAILOUTS:
                         self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
                     python_outputs = python_fn(*inputs)

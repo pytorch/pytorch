@@ -32,6 +32,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         nodes = list(filter(lambda n: (n.kind() != "prim::BailOut" and
                                        n.kind() != "prim::BailoutTemplate" and
                                        n.kind() != "prim::TypeCheck" and
+                                       n.kind() != "prim::Drop" and
                                        n.kind() != "prim::RequiresGradCheck"),
                             graph.nodes()))
         self.assertEqual(len(list(nodes)), size)
