@@ -59,25 +59,6 @@ static void init(void) {
       .nr = 8,
       .kr = 1,
   };
-  /*
-   * Current q8gemm-sparse-bench shows that for the shapes benchmarked
-   * 4x8 kernels are better than 8x4
-   * Without prepacking it always worse than dense
-   * all benchmarking at 70% sparsity
-   */
-  /*
-  pytorch_qnnp_params.q8gemm_sparse_c1x4 = (struct pytorch_q8gemm_sparse_parameters){
-      .gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__aarch32_neon,
-      .packedA_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon,
-      .packA = pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch32_neon,
-      .mr = 8,
-      .nr = 4,
-      .kr = 4,
-      .log2_mr = 3,
-      .row_block_size = 1,
-      .col_block_size = 4,
-  };
-  */
   pytorch_qnnp_params.q8gemm_sparse_c1x4 = (struct pytorch_q8gemm_sparse_parameters){
       .gemm_dq = NULL,
       .packedA_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon,
@@ -96,7 +77,7 @@ static void init(void) {
       .packA = pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon,
       .mr = 4,
       .nr = 8,
-      .kr = 1,
+      .kr = 4, // kr is really 1 but we set it to 4 because we resuse 4x4 prepacking kernel
       .log2_mr = 2,
       .log2_row_block_size = 3,
       .row_block_size = 8,
@@ -193,6 +174,18 @@ static void init(void) {
       .row_block_size = 1,
       .col_block_size = 4,
   };
+  pytorch_qnnp_params.q8gemm_sparse_c8x1 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_gemm_dq = pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon,
+      .packA = pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch64_neon,
+      .mr = 8,
+      .nr = 8,
+      .kr = 4, // kr is really 1 but we set it to 4 because we resuse 4x4 prepacking kernel
+      .log2_mr = 3,
+      .log2_row_block_size = 3,
+      .row_block_size = 8,
+      .col_block_size = 1,
+  };
   pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
       .gemm = pytorch_q8gemm_ukernel_8x8__aarch64_neon,
       .conv = pytorch_q8conv_ukernel_8x8__aarch64_neon,
@@ -262,7 +255,7 @@ static void init(void) {
       .kr = 2,
   };
   pytorch_qnnp_params.q8gemm_sparse_c1x4 = (struct pytorch_q8gemm_sparse_parameters){
-      .gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__sse2,
+      .gemm_dq = NULL,
       .packedA_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2,
       .packA = pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
       .mr = 8,
@@ -279,7 +272,7 @@ static void init(void) {
       .packA = NULL,
       .mr = 4,
       .nr = 8,
-      .kr = 4, // kr is really 1 but we set it to 4 because we resuse 4x4 prepacking kernel
+      .kr = 1,
       .log2_mr = 2,
       .log2_row_block_size = 3,
       .row_block_size = 8,

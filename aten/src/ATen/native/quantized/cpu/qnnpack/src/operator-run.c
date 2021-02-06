@@ -71,6 +71,10 @@ static void compute_q8gemm(
       &context->quantization_params);
 }
 
+// At the moment we opt to remove sparse kernels that
+// dont require prepacking as their perf was always
+// worse.
+#ifdef NO_PREPACK_SPARSE_KERNEL
 struct q8gemm_sparse_dq_context {
   const uint8_t* a;
   size_t a_stride;
@@ -114,6 +118,7 @@ static void compute_q8gemm_sparse_dq(
       output_channel_index,
       &context->quantization_params);
 }
+#endif
 
 struct q8gemm_prepackA_sparse_dq_context {
   size_t k;
@@ -966,6 +971,7 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           nr);
       break;
     }
+#ifdef NO_PREPACK_SPARSE_KERNEL
     case pytorch_qnnp_ukernel_type_gemm_sparse_dq: {
       const size_t batch_size = op->batch_size;
       const size_t groups = op->groups;
@@ -1001,6 +1007,7 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           nr);
       break;
     }
+#endif
     case pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq: {
       const size_t batch_size = op->batch_size;
       const size_t groups = op->groups;
