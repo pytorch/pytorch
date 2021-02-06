@@ -40,7 +40,7 @@ std::string stacksToStr(const std::vector<std::string>& stacks);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
-  virtual ~KinetoThreadLocalState() override = default;
+  ~KinetoThreadLocalState() override = default;
 
   void reportClientActivity(
       const at::RecordFunction& fn,
@@ -126,7 +126,7 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
 
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
-    for (auto idx = 0; idx < cpu_trace->activities.size(); ++idx) {
+    for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
       if (kineto_events_[idx].hasShapes()) {
         cpu_trace->activities[idx].inputDims = shapesToStr(kineto_events_[idx].shapes());
       } else {
@@ -214,21 +214,17 @@ void pushProfilingCallbacks() {
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   std::ostringstream oss;
   oss << "[";
-  for (auto t_idx = 0; t_idx < shapes.size(); ++t_idx) {
-    if (t_idx > 0) {
-      oss << ", ";
-    }
+  for (const auto& shape : shapes) {
     oss << "[";
-    for (auto s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
-      if (s_idx > 0) {
-        oss << ", ";
-      }
-      oss << shapes[t_idx][s_idx];
-    }
-    oss << "]";
+    std::copy(shape.begin(), shape.end(), std::ostream_iterator<int64_t>(oss, ", "));
+    oss.seekp(-2, std::ios_base::end);
+    oss << "], ";
   }
+  oss.seekp(-2, std::ios_base::end);
   oss << "]";
-  return oss.str();
+  auto rc = oss.str();
+  rc.pop_back();
+  return rc;
 }
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
@@ -355,21 +351,19 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
 }
 
 c10::DeviceType KinetoEvent::deviceType() const {
-  switch (activity_type_) {
-    case (uint8_t)libkineto::ActivityType::CPU_OP:
-      return c10::DeviceType::CPU;
-    case (uint8_t)libkineto::ActivityType::GPU_MEMCPY:
+  using namespace libkineto;
+  switch (static_cast<ActivityType>(libactivity_type_)) {
+    case ActivityType::GPU_MEMCPY:
+    case ActivityType::GPU_MEMSET:
+    case ActivityType::CONCURRENT_KERNEL:
       return c10::DeviceType::CUDA;
-    case (uint8_t)libkineto::ActivityType::GPU_MEMSET:
-      return c10::DeviceType::CUDA;
-    case (uint8_t)libkineto::ActivityType::CONCURRENT_KERNEL:
-      return c10::DeviceType::CUDA;
-    case (uint8_t)libkineto::ActivityType::EXTERNAL_CORRELATION:
+    case ActivityType::CPU_OP:
+    case ActivityType::EXTERNAL_CORRELATION:
+    case ActivityType::CUDA_RUNTIME:
       return c10::DeviceType::CPU;
-    case (uint8_t)libkineto::ActivityType::CUDA_RUNTIME:
-      return c10::DeviceType::CPU;
+    default:
+      TORCH_CHECK(false, "Unknown activity type");
   }
-  TORCH_CHECK(false, "Unknown activity type");
 }
 
 KinetoEvent::KinetoEvent() : activity_type_((uint8_t)libkineto::ActivityType::CPU_OP) {}
