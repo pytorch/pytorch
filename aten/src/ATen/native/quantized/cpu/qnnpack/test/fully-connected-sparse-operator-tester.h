@@ -29,17 +29,20 @@ namespace {
       uint8_t* b,
       size_t N,
       size_t K,
-      size_t block_size,
+      size_t row_block_size,
+      size_t col_block_size,
       float sparsity,
       const uint8_t* zero_points) {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     std::bernoulli_distribution dist{sparsity};
-    for (uint32_t n = 0; n < N ; ++n) {
-      for (uint32_t k = 0; k < K; k += block_size) {
+    for (uint32_t n = 0; n < N ; n += row_block_size) {
+      for (uint32_t k = 0; k < K; k += col_block_size) {
         if (dist(rng)) {
-          for (uint32_t l = 0; (l < block_size) && (k + l < K); ++l) {
-            *(b + n * K + k + l) = zero_points[n];
+          for (uint32_t nb = 0; (nb < row_block_size) && (n + nb < N); ++nb) {
+            for (uint32_t kb = 0; (kb < col_block_size) && (k + kb < K); ++kb) {
+              *(b + (n + nb) * K + k + kb) = zero_points[n];
+            }
           }
         }
       }
@@ -159,8 +162,8 @@ class FullyConnectedSparseOperatorTester {
     return this->iterations_;
   }
 
-  inline FullyConnectedSparseOperatorTester& blockSize(size_t block_size) {
-    this->blockSize_ = block_size;
+  inline FullyConnectedSparseOperatorTester& rowBlockSize(size_t block_size) {
+    this->rowBlockSize_ = block_size;
     return *this;
   }
 
@@ -169,8 +172,12 @@ class FullyConnectedSparseOperatorTester {
     return *this;
   }
 
-  inline size_t blockSize() const {
-    return this->blockSize_;
+  inline size_t rowBlockSize() const {
+    return this->rowBlockSize_;
+  }
+
+  inline size_t colBlockSize() const {
+    return this->colBlockSize_;
   }
 
   inline float sparsity() const {
@@ -220,7 +227,8 @@ class FullyConnectedSparseOperatorTester {
             kernel.data(),
             outputChannels(),
             inputChannels(),
-            blockSize(),
+            rowBlockSize(),
+            colBlockSize(),
             sparsity(),
             kernelZeroPoints.data());
         max_elem = *std::max_element(kernel.cbegin(), kernel.cend());
@@ -232,7 +240,8 @@ class FullyConnectedSparseOperatorTester {
             kernel.data(),
             outputChannels(),
             inputChannels(),
-            blockSize(),
+            rowBlockSize(),
+            colBlockSize(),
             kernelZeroPoints.data());
 
       std::fill(output.begin(), output.end(), 0xA5);
@@ -309,6 +318,7 @@ class FullyConnectedSparseOperatorTester {
                     bcsr_matrix->col_indices.data(),
                     bcsr_matrix->row_values.data(),
                     bcsr_matrix->values.data(),
+                    bcsr_matrix->row_block_size,
                     bcsr_matrix->col_block_size,
                     outputZeroPoint,
                     qmin(),
@@ -418,7 +428,8 @@ class FullyConnectedSparseOperatorTester {
             kernel.data(),
             outputChannels(),
             inputChannels(),
-            blockSize(),
+            rowBlockSize(),
+            colBlockSize(),
             sparsity(),
             kernelZeroPoints.data());
         max_elem = *std::max_element(kernel.cbegin(), kernel.cend());
@@ -429,7 +440,8 @@ class FullyConnectedSparseOperatorTester {
             kernel.data(),
             outputChannels(),
             inputChannels(),
-            blockSize(),
+            rowBlockSize(),
+            colBlockSize(),
             kernelZeroPoints.data());
 
       std::fill(output.begin(), output.end(), 0xA5);
@@ -506,6 +518,7 @@ class FullyConnectedSparseOperatorTester {
                     bcsr_matrix->col_indices.data(),
                     bcsr_matrix->row_values.data(),
                     bcsr_matrix->values.data(),
+                    bcsr_matrix->row_block_size,
                     bcsr_matrix->col_block_size,
                     outputZeroPoint,
                     qmin(),
@@ -587,5 +600,6 @@ class FullyConnectedSparseOperatorTester {
   uint8_t qmax_{255};
   size_t iterations_{1};
   float sparsity_{0.7f};
-  size_t blockSize_{4};
+  size_t rowBlockSize_{1};
+  size_t colBlockSize_{4};
 };

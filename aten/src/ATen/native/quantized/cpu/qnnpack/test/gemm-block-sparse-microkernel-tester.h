@@ -31,17 +31,20 @@ namespace {
       uint8_t* b,
       size_t N,
       size_t K,
-      size_t block_size,
+      size_t row_block_size,
+      size_t col_block_size,
       float sparsity,
       const uint8_t* zero_points) {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     std::bernoulli_distribution dist{sparsity};
-    for (uint32_t n = 0; n < N ; ++n) {
-      for (uint32_t k = 0; k < K; k += block_size) {
+    for (uint32_t n = 0; n < N ; n += row_block_size) {
+      for (uint32_t k = 0; k < K; k += col_block_size) {
         if (dist(rng)) {
-          for (uint32_t l = 0; (l < block_size) && (k + l < K); ++l) {
-            *(b + n * K + k + l) = zero_points[n];
+          for (uint32_t nb = 0; (nb < row_block_size) && (n + nb < N); ++nb) {
+            for (uint32_t kb = 0; (kb < col_block_size) && (k + kb < K); ++kb) {
+              *(b + (n + nb) * K + k + kb) = zero_points[n];
+            }
           }
         }
       }
@@ -125,8 +128,13 @@ class GemmBlockSparseMicrokernelTester {
     return *this;
   }
 
-  inline GemmBlockSparseMicrokernelTester& blockSize(size_t block_size) {
-    this->blockSize_ = block_size;
+  inline GemmBlockSparseMicrokernelTester& rowBlockSize(size_t block_size) {
+    this->rowBlockSize_ = block_size;
+    return *this;
+  }
+
+  inline GemmBlockSparseMicrokernelTester& colBlockSize(size_t block_size) {
+    this->colBlockSize_ = block_size;
     return *this;
   }
 
@@ -139,8 +147,12 @@ class GemmBlockSparseMicrokernelTester {
     return this->ks_;
   }
 
-  inline size_t blockSize() const {
-    return this->blockSize_;
+  inline size_t rowBlockSize() const {
+    return this->rowBlockSize_;
+  }
+
+  inline size_t colBlockSize() const {
+    return this->colBlockSize_;
   }
 
   inline float sparsity() const {
@@ -255,14 +267,25 @@ class GemmBlockSparseMicrokernelTester {
       do {
         std::generate(b.begin(), b.end(), std::ref(u8rng));
         fillBlockSparseWeights(
-            b.data(), n(), k(), blockSize(), sparsity(), kernel_zero_points.data());
+            b.data(),
+            n(),
+            k(),
+            rowBlockSize(),
+            colBlockSize(),
+            sparsity(),
+            kernel_zero_points.data());
         max_elem = *std::max_element(b.cbegin(), b.cend());
         min_elem = *std::min_element(b.cbegin(), b.cend());
       } while (max_elem == min_elem);
 
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
-        qnnpack::generateBlockCSRMatrix(
-            b.data(), n(), k(), blockSize(), kernel_zero_points.data());
+          qnnpack::generateBlockCSRMatrix(
+              b.data(),
+              n(),
+              k(),
+              rowBlockSize(),
+              colBlockSize(),
+              kernel_zero_points.data());
 
       ASSERT_NE(
           *std::max_element(a.cbegin(), a.cend()),
@@ -350,8 +373,8 @@ class GemmBlockSparseMicrokernelTester {
     std::vector<float> c((m() - 1) * cStride() + n());
     std::vector<float> acc(m() * n());
     auto m_blocks = (m() + mr()  - 1) / mr();
-    auto k_blocks = (k() + 4  - 1) / 4;
-    std::vector<uint8_t> a_packed(m_blocks * k_blocks * mr() * 4 + 8, 0);
+    auto k_blocks = (k() + colBlockSize()  - 1) / colBlockSize();
+    std::vector<uint8_t> a_packed(m_blocks * k_blocks * mr() * colBlockSize() + 8, 0);
 
     const uint8_t* aPtr = a.data();
 
@@ -368,13 +391,24 @@ class GemmBlockSparseMicrokernelTester {
       do {
         std::generate(b.begin(), b.end(), std::ref(u8rng));
         fillBlockSparseWeights(
-            b.data(), n(), k(), blockSize(), sparsity(), kernel_zero_points.data());
+            b.data(),
+            n(),
+            k(),
+            rowBlockSize(),
+            colBlockSize(),
+            sparsity(),
+            kernel_zero_points.data());
         max_elem = *std::max_element(b.cbegin(), b.cend());
         min_elem = *std::min_element(b.cbegin(), b.cend());
       } while (max_elem == min_elem);
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
         qnnpack::generateBlockCSRMatrix(
-            b.data(), n(), k(), blockSize(), kernel_zero_points.data());
+            b.data(),
+            n(),
+            k(),
+            rowBlockSize(),
+            colBlockSize(),
+            kernel_zero_points.data());
 
       ASSERT_NE(
           *std::max_element(a.cbegin(), a.cend()),
@@ -460,7 +494,8 @@ class GemmBlockSparseMicrokernelTester {
   size_t ks_{1};
   size_t aStride_{0};
   size_t cStride_{0};
-  size_t blockSize_{4};
+  size_t rowBlockSize_{1};
+  size_t colBlockSize_{4};
   uint8_t aZeroPoint_{0};
   uint8_t bZeroPoint_{0};
   uint8_t qmin_{0};
