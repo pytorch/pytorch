@@ -926,8 +926,6 @@ class Tensor(torch._C._TensorBase):
                 co.extend(torch.nonzero(selection).flatten().tolist())
                 vals.extend(select_nums.flatten().tolist())
 
-            print(ro[0])
-
             return torch.sparse_csr_tensor(torch.tensor(ro, dtype=torch.int32), 
                                            torch.tensor(co, dtype=torch.int32),
                                            torch.tensor(vals, dtype=self.dtype),
