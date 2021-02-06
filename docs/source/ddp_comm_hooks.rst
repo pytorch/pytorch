@@ -35,10 +35,12 @@ in ``register_comm_hook`` is either a process group or ``None``.
 PowerSGD Communication Hook
 ---------------------------
 
-PowerSGD communication hook is a **stateful** hook used for gradient
-compression, and the user needs to provide a state defined as below.
-The performance is `on par with <https://observablehq.com/@tvogels/powersgd-benchmark>`_
-the implementation in the original `paper <https://arxiv.org/abs/1905.13727>`_.
+PowerSGD (`Vogels et al., NeurIPS 2019 <https://arxiv.org/abs/1905.13727>`_)
+is a gradient compression algorithm, which can provide very high compression
+rates and accelerate bandiwth-bound distributed training.
+This algorithm needs to maintain both some hyperparameters and the internal
+state. Therefore, PowerSGD communication hook is a **stateful** hook,
+and the user needs to provide a state object defined as below.
 
 PowerSGD State
 ^^^^^^^^^^^^^^^^
@@ -50,9 +52,9 @@ PowerSGD Hooks
 ^^^^^^^^^^^^^^^^
 
 .. warning ::
-    As a biased compressor, PowerSGD requires an extra copy of gradients to
-    enable error feedback for a higher accuracy.
-    This may be infeasible for the use cases that have a memory constraint.
+    PowerSGD typically requires extra memory of the same size as the model's
+    gradients to enable error feedback, which can compensate for biased
+    compressed communication and improve accuracy.
 
 .. warning ::
     The current implementation may cause gradient overflow for FP16 input.
@@ -64,5 +66,7 @@ Acknowledgements
 ----------------
 
 Many thanks to PowerSGD paper author **Thijs Vogels** for the code review on
-PowerSGD communication hook and the
-`comparison experiments <https://observablehq.com/@tvogels/powersgd-benchmark>`_.
+PowerSGD communication hook, as well as the
+`comparison experiments <https://observablehq.com/@tvogels/powersgd-benchmark>`_,
+which show that the performance of PowerSGD communication hook is on par with
+the implementation in the original `paper <https://arxiv.org/abs/1905.13727>`_.
