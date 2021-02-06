@@ -65,7 +65,7 @@ struct Shader final {
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(DescriptorSetLayout) Deleter;
-      typedef Handle<VkDescriptorSetLayout, Deleter> Handle;
+      typedef api::Handle<VkDescriptorSetLayout, Deleter> Handle;
 
       struct Hasher {
         size_t operator()(const Descriptor& descriptor) const;
@@ -156,7 +156,7 @@ struct Shader final {
 
     typedef Shader::Descriptor Descriptor;
     typedef VK_DELETER(ShaderModule) Deleter;
-    typedef Handle<VkShaderModule, Deleter> Handle;
+    typedef api::Handle<VkShaderModule, Deleter> Handle;
 
     struct Hasher {
       size_t operator()(const Descriptor& descriptor) const;

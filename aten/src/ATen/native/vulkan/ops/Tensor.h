@@ -389,6 +389,8 @@ class vTensor final {
   std::shared_ptr<View> view_;
 
  private:
+  friend class View::State;
+
   // Debug
   friend std::ostream& operator<<(
       std::ostream&,
