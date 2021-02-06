@@ -2111,8 +2111,8 @@ TEST_F(ModulesTest, SmoothL1LossBeta) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-TEST_F(ModulesTest, HuberLossBeta) {
-  auto options = HuberLossOptions().beta(0.2);
+TEST_F(ModulesTest, HuberLossDelta) {
+  auto options = HuberLossOptions().delta(0.2);
   HuberLoss loss(options);
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);

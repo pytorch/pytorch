@@ -282,10 +282,10 @@ TEST_F(FunctionalTest, HuberLossDefaultOptions) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
-TEST_F(FunctionalTest, HuberLossBeta) {
+TEST_F(FunctionalTest, HuberLossDelta) {
   auto input = torch::tensor({0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
-  auto options = F::HuberLossFuncOptions().reduction(torch::kMean).beta(0.5);
+  auto options = F::HuberLossFuncOptions().reduction(torch::kMean).delta(0.5);
   auto output = F::huber_loss(input, target, options);
   auto expected = torch::tensor(1.67 * 0.5, torch::kFloat);
   auto s = output.sum();

@@ -42,16 +42,16 @@ void smooth_l1_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double be
   });
 }
 
-void huber_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double beta) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "huber_backward_cuda", [&iter, &norm, beta] {
-    auto norm_val = norm.to<scalar_t>();
-    scalar_t beta_val(beta);
-    gpu_kernel(iter, [norm_val, beta_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
+void huber_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double delta) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_backward_cuda", [&iter, &norm, delta] {
+    scalar_t norm_val = norm;
+    scalar_t delta_val(delta);
+    gpu_kernel(iter, [norm_val, delta_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
       const auto x = input - target;
-      if (x < -beta_val) {
-        return -norm_val * grad_output * beta_val;
-      } else if (x > beta_val) {
-        return norm_val * grad_output * beta_val;
+      if (x < -delta_val) {
+        return -norm_val * grad_output * delta_val;
+      } else if (x > delta_val) {
+        return norm_val * grad_output * delta_val;
       } else {
         return norm_val * x * grad_output;
       }

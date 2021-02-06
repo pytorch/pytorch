@@ -7802,21 +7802,21 @@ class TestNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
 
-    def test_huber_loss_invalid_beta(self):
-        def _test_huber_loss_beta_error_helper(beta=1.0):
+    def test_huber_loss_invalid_delta(self):
+        def _test_huber_loss_delta_error_helper(delta):
             input, target = torch.randn(2, 2), torch.randn(2, 2)
-            loss = torch.nn.HuberLoss(beta=beta)
+            loss = torch.nn.HuberLoss(delta=delta)
             with self.assertRaises(RuntimeError):
                 loss(input, target)
 
-        def test_huber_loss_negative_beta():
-            _test_huber_loss_beta_error_helper(beta=-0.5)
+        def test_huber_loss_negative_delta():
+            _test_huber_loss_delta_error_helper(delta=-0.5)
 
-        def test_huber_loss_zero_beta():
-            _test_huber_loss_beta_error_helper(beta=0.0)
+        def test_huber_loss_zero_delta():
+            _test_huber_loss_delta_error_helper(delta=0.0)
 
-        test_huber_loss_negative_beta()
-        test_huber_loss_zero_beta()
+        test_huber_loss_negative_delta()
+        test_huber_loss_zero_delta()
 
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)

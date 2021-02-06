@@ -917,18 +917,18 @@ def smoothl1loss_zero_beta_test():
         pickle=False)
 
 
-def huberloss_beta_test():
+def huberloss_delta_test():
     t = torch.randn(2, 3, 4)
     return dict(
-        fullname='HuberLoss_beta',
+        fullname='HuberLoss_delta',
         constructor=wrap_functional(
-            lambda i: F.huber_loss(i, t.type_as(i), reduction='none', beta=0.5)),
+            lambda i: F.huber_loss(i, t.type_as(i), reduction='none', delta=0.5)),
         cpp_function_call='''F::huber_loss(
-            i, t.to(i.options()), F::HuberLossFuncOptions().reduction(torch::kNone).beta(0.5))''',
+            i, t.to(i.options()), F::HuberLossFuncOptions().reduction(torch::kNone).delta(0.5))''',
         input_fn=lambda: torch.randn(2, 3, 4),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['HuberLoss'](i, t.type_as(i), reduction='none', beta=0.5),
+            loss_reference_fns['HuberLoss'](i, t.type_as(i), reduction='none', delta=0.5),
         pickle=False)
 
 
@@ -1308,7 +1308,7 @@ new_module_tests = [
     smoothl1loss_no_reduce_scalar_test(),
     smoothl1loss_beta_test(),
     smoothl1loss_zero_beta_test(),
-    huberloss_beta_test(),
+    huberloss_delta_test(),
     multilabelmarginloss_0d_no_reduce_test(),
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
@@ -3879,11 +3879,11 @@ def smoothl1loss_reference(input, target, reduction='mean', beta=1.0):
     return output
 
 
-def huberloss_reference(input, target, reduction='mean', beta=1.0):
+def huberloss_reference(input, target, reduction='mean', delta=1.0):
     abs_diff = (input - target).abs()
-    ge_beta_mask = (abs_diff >= beta).type_as(abs_diff)
-    lt_beta_mask = (abs_diff < beta).type_as(abs_diff)
-    output = ge_beta_mask * beta * (abs_diff - 0.5 * beta) + lt_beta_mask * 0.5 * (abs_diff ** 2)
+    ge_delta_mask = (abs_diff >= delta)
+    lt_delta_mask = (abs_diff < delta)
+    output = ge_delta_mask * delta * (abs_diff - 0.5 * delta) + lt_delta_mask * 0.5 * (abs_diff ** 2)
     if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
@@ -4391,6 +4391,8 @@ criterion_tests = [
         input_size=(5, 10),
         target_fn=lambda: torch.randn((5, 10), requires_grad=True),
         check_sum_reduction=True,
+        check_half=True,
+        check_bfloat16=True,
         reference_fn=lambda i, t, m:
             huberloss_reference(i, t, reduction=get_reduction(m)),
     ),

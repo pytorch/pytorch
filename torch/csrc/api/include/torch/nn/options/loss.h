@@ -508,7 +508,7 @@ using SmoothL1LossFuncOptions = SmoothL1LossOptions;
 ///
 /// Example:
 /// ```
-/// HuberLoss model(HuberLossOptions().reduction(torch::kNone).beta(0.5));
+/// HuberLoss model(HuberLossOptions().reduction(torch::kNone).delta(0.5));
 /// ```
 struct TORCH_API HuberLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
@@ -521,7 +521,7 @@ struct TORCH_API HuberLossOptions {
   /// be summed. Default: 'mean'
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
   /// Specifies the threshold at which to change between L1 and L2 loss. Default: 1.0
-  TORCH_ARG(double, beta) = 1.0;
+  TORCH_ARG(double, delta) = 1.0;
 };
 
 namespace functional {

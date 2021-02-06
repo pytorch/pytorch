@@ -342,38 +342,32 @@ Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, c
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
 }
 
-Tensor huber_loss(const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
-  TORCH_CHECK(beta > 0, "huber_loss does not support non-positive values for beta.")
-  Tensor loss;
+Tensor huber_loss(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
+  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
+  Tensor loss = at::empty_like(input);
   auto iter = TensorIterator::binary_op(loss, input, target);
-  huber_stub(iter.device_type(), iter, beta);
-  return apply_loss_reduction(iter.output(), reduction);
+  huber_stub(iter.device_type(), iter, delta);
+  return apply_loss_reduction(loss, reduction);
 }
 
-Tensor& huber_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& result) {
-  TORCH_CHECK(beta > 0, "huber_loss does not support non-positive values for beta.")
+Tensor& huber_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& result) {
+  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
+  auto iter = TensorIterator::binary_op(result, input, target);
+  huber_stub(iter.device_type(), iter, delta);
   if (reduction != Reduction::None) {
-    Tensor loss;
-    auto iter = TensorIterator::binary_op(loss, input, target);
-    huber_stub(iter.device_type(), iter, beta);
-    if (reduction == Reduction::Mean) {
-      at::mean_out(result, iter.output(), 0);
-    } else {
-      at::sum_out(result, iter.output(), 0);
-    }
-  } else {
-    auto iter = TensorIterator::binary_op(result, input, target);
-    huber_stub(iter.device_type(), iter, beta);
+    auto reduced = apply_loss_reduction(result, reduction);
+    result.resize_({});
+    result.copy_(reduced);
   }
   return result;
 }
 
-Tensor huber_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
+Tensor huber_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
   auto grad_input = at::zeros_like(input, MemoryFormat::Contiguous);
-  return at::huber_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
+  return at::huber_loss_backward_out(grad_input, grad_output, input, target, reduction, delta);
 }
 
-Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& grad_input) {
+Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& grad_input) {
   auto norm = (reduction == Reduction::Mean) ? (1. / input.numel()) : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
@@ -381,7 +375,7 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
     .add_input(target)
     .add_input(grad_output)
     .build();
-  huber_backward_stub(iter.device_type(), iter, norm, beta);
+  huber_backward_stub(iter.device_type(), iter, norm, delta);
   return grad_input;
 }
 

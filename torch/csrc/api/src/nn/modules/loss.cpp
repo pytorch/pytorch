@@ -263,7 +263,7 @@ void HuberLossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor HuberLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::detail::huber_loss(input, target, options.reduction(), options.beta());
+  return F::detail::huber_loss(input, target, options.reduction(), options.delta());
 }
 
 // ============================================================================

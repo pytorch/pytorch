@@ -310,7 +310,7 @@ TORCH_MODULE(SmoothL1Loss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ HuberLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that uses a squared term if the absolute
-/// element-wise error falls below beta and a beta-scaled L1 term otherwise.
+/// element-wise error falls below delta and a delta-scaled L1 term otherwise.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.HuberLoss to learn
 /// about the exact behavior of this module.
 ///
@@ -319,7 +319,7 @@ TORCH_MODULE(SmoothL1Loss);
 ///
 /// Example:
 /// ```
-/// HuberLoss model(HuberLossOptions().reduction(torch::kNone).beta(0.5));
+/// HuberLoss model(HuberLossOptions().reduction(torch::kNone).delta(0.5));
 /// ```
 struct TORCH_API HuberLossImpl : public Cloneable<HuberLossImpl> {
   explicit HuberLossImpl(const HuberLossOptions& options_ = {});

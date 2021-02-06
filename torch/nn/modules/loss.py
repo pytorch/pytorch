@@ -876,8 +876,8 @@ class SmoothL1Loss(_Loss):
 
     .. note::
         Smooth L1 loss is closely related to :class:`HuberLoss`, being
-        equivalent to :math:`huber(x, y) / beta`. This leads to the following
-        differences:
+        equivalent to :math:`huber(x, y) / beta` (note that Smooth L1's beta hyper-parameter is
+        also known as delta for Huber). This leads to the following differences:
 
         * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
           converges to a constant 0 loss.
@@ -924,10 +924,11 @@ class SmoothL1Loss(_Loss):
 
 class HuberLoss(_Loss):
     r"""Creates a criterion that uses a squared term if the absolute
-    element-wise error falls below beta and a beta-scaled L1 term otherwise.
+    element-wise error falls below delta and a delta-scaled L1 term otherwise.
     This loss combines advantages of both :class:`L1Loss` and :class:`MSELoss`; the
-    beta-scaled L1 region makes the loss less sensitive to outliers than :class:`MSELoss`,
-    while the L2 region provides smoothness over :class:`L1Loss` near 0.
+    delta-scaled L1 region makes the loss less sensitive to outliers than :class:`MSELoss`,
+    while the L2 region provides smoothness over :class:`L1Loss` near 0. See
+    `Huber loss <https://en.wikipedia.org/wiki/Huber_loss>`_ for more information.
 
     For a batch of size :math:`N`, the unreduced loss can be described as:
 
@@ -938,8 +939,8 @@ class HuberLoss(_Loss):
 
     .. math::
         l_n = \begin{cases}
-        0.5 (x_n - y_n)^2, & \text{if } |x_n - y_n| < beta \\
-        beta * (|x_n - y_n| - 0.5 * beta), & \text{otherwise }
+        0.5 (x_n - y_n)^2, & \text{if } |x_n - y_n| < delta \\
+        delta * (|x_n - y_n| - 0.5 * delta), & \text{otherwise }
         \end{cases}
 
     If `reduction` is not `none`, then:
@@ -952,8 +953,9 @@ class HuberLoss(_Loss):
         \end{cases}
 
     .. note::
-        When beta is set to 1, this loss is equivalent to :class:`SmoothL1Loss`.
-        In general, this loss differs from :class:`SmoothL1Loss` by a factor of beta.
+        When delta is set to 1, this loss is equivalent to :class:`SmoothL1Loss`.
+        In general, this loss differs from :class:`SmoothL1Loss` by a factor of delta (AKA beta
+        in Smooth L1).
         See :class:`SmoothL1Loss` for additional discussion on the differences in behavior
         between the two losses.
 
@@ -962,7 +964,7 @@ class HuberLoss(_Loss):
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
-        beta (float, optional): Specifies the threshold at which to change between beta-scaled L1 and L2 loss.
+        delta (float, optional): Specifies the threshold at which to change between delta-scaled L1 and L2 loss.
             The value must be positive.  Default: 1.0
 
     Shape:
@@ -970,14 +972,14 @@ class HuberLoss(_Loss):
         - Target: :math:`(N, *)`; same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`; same shape as the input
     """
-    __constants__ = ['reduction', 'beta']
+    __constants__ = ['reduction', 'delta']
 
-    def __init__(self, reduction: str = 'mean', beta: float = 1.0) -> None:
+    def __init__(self, reduction: str = 'mean', delta: float = 1.0) -> None:
         super().__init__(reduction=reduction)
-        self.beta = beta
+        self.delta = delta
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.huber_loss(input, target, reduction=self.reduction, beta=self.beta)
+        return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
 
 
 class SoftMarginLoss(_Loss):
