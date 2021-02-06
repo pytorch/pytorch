@@ -1,4 +1,5 @@
 import copy
+import enum
 
 import torch
 import torch.nn as nn
@@ -15,7 +16,7 @@ from torch.quantization.ns.graph_matcher import (
 from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 
-from typing import Dict, Tuple, Callable, List
+from typing import Dict, Tuple, Callable, List, Any
 
 
 def _get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
@@ -151,6 +152,38 @@ def _remove_observers_add_loggers(
     new_gm = GraphModule(gm, new_graph)
     return new_gm
 
+
+class NodeIOType(enum.Enum):
+    FP32 = enum.auto()  # all inputs and outputs fp32
+    INT8 = enum.auto()  # all inputs and outputs int8
+    # TODO(future PRs): dynamic quant, fake quant, etc
+
+
+def _get_node_io_type(node: Node, gm: GraphModule) -> NodeIOType:
+    if node.op == 'call_function':
+        fp32_fun_target_names = ('torch.nn.functional', 'torch.nn')
+        int8_fun_target_names = ('torch._ops.quantized',)
+        # For now, hacky check to see which op is in which namespace
+        # TODO(future PR): use a real mapping
+        if node.target.__module__ in fp32_fun_target_names:
+            return NodeIOType.FP32
+        else:
+            assert node.target.__module__ in int8_fun_target_names, \
+                'unknown node target %s' % node.target
+            return NodeIOType.INT8
+    else:
+        assert node.op == 'call_module'
+        assert isinstance(node.target, str)
+        mod = _getattr_from_fqn(gm, node.target)
+        # For now, hacky check to see which mod is in which namespace
+        # TODO(future PR): use a real mapping
+        if mod.__module__.startswith('torch.nn.modules'):
+            return NodeIOType.FP32
+        else:
+            assert mod.__module__.startswith('torch.nn.q'), \
+                'unknown node target %s' % mod
+            return NodeIOType.INT8
+
 def _insert_domain_translation_after_node(
     node_a: Node,
     node_c: Node,
@@ -175,20 +208,48 @@ def _insert_domain_translation_after_node(
     For example, if node_c is an int8 op and node_a is an fp32 op, this function
     will insert a dequant.
     """
+    domain_translation_op = None
+    node_io_type_a = _get_node_io_type(node_a, gm_a)
+    node_io_type_c = _get_node_io_type(node_c, gm_b)
 
-    # look up what node A and node B represent
-    # TODO(implement)
-
-    # translate the inputs from domain of B to domain of A
-    # i.e. add a dequant, etc
-    # TODO(before land): make this generic with a mapping
-    domain_translation_op = torch.dequantize
+    if node_io_type_a == NodeIOType.FP32 and node_io_type_c == NodeIOType.INT8:
+        domain_translation_op = torch.dequantize
+    else:
+        raise AssertionError(
+            f"domain translation from {node_io_type_c} to {node_io_type_a} needs to be implemented")
 
     new_domain_translation_name = \
         get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
     return prev_node_c.graph.create_node(
         'call_function', domain_translation_op, (prev_node_c,), {},
         new_domain_translation_name)
+
+def _return_first_non_observer_node(
+    node: Node,
+    gm: GraphModule,
+) -> Node:
+    """
+    If node is not an observer, returns it.  If node is an observer,
+    navigates up the graph and returns the first parent which is not an
+    observer.  For example,
+
+    graph: (node_non_obs), node = node_non_obs : returns node_non_obs
+    graph: (node_non_obs -> obs0), node = obs0 : returns node_non_obs
+    graph: (node_non_obs -> obs0 -> fq0), node = fq0 : returns node_non_obs
+    """
+    node_obj = _getattr_from_fqn(gm, node.target)  # type: ignore
+    if is_activation_post_process(node_obj):
+        assert len(node.args) == 1
+        assert isinstance(node.args[0], Node)
+        node = node.args[0]
+        # code duplication intended, not worth refactoring
+        assert isinstance(node.target, str)
+        node_obj = _getattr_from_fqn(gm, node.target)
+        if is_activation_post_process(node_obj):
+            assert len(node.args) == 1
+            assert isinstance(node.args[0], Node)
+            node = node.args[0]
+    return node
 
 
 def _insert_logger_after_node(
@@ -218,83 +279,98 @@ def _insert_logger_after_node(
         'call_module', logger_node_name, (node,), {})
     return logger_node
 
-def _insert_copy_of_node_a_after_domain_translation_node_in_graph_c(
-    domain_translation_node: Node,
+def _insert_copy_of_node_a_after_input_node_c(
+    input_node_c: Node,
     node_a: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
-    graph_c: Graph,
     node_name_prefix: str,
 ) -> Node:
     """
-    Input subgraphs from A and C (derived from B):
+    Assume that node_a from graph_a has
+      args (input, arg1, ...), and
+      kwargs {kw0: kwarg0, ...}
 
-    ... -> node_a -> ...
+    Copies the underlying values of arg1..argn and kwarg0..kwargn into gm_b,
+    and creates the corresponding nodes in graph_c. Note: observers are ignored,
+    so if an arg is an observer we navigate up until we find a non-observer parent.
 
-          domain_translation
-        /
-    ... -> node_c -> ...
+    If node_a is a call_module, points the module pointed to by node_a to gm_b.
 
-    Output subgraph of C:
+    Creates the copy of node_a in graph_c, with input as the first arg,
+    and all other args and kwargs pointing to the copies of the objects
+    in gm_b created above.
 
-          domain_translation -> node_a_copy
-        /
-    ... -> node_c -> ...
+    An example in pictures:
 
-    Copies the module pointed to by node_a to gm_b. Creates a new node in gm_b
-    corresponding to applying node_a to the output of domain_translation.
-    Returns the newly created node.
+    graph A:
+    ========
+
+    input -------------> node_a
+                         / /
+    weight -> weight_obs  /
+                         /
+    bias ----------------
+
+    graph C (derived from B):
+    =========================
+
+    input_node_c --> node_a_copy
+                     / /
+    weight_copy ----/ /
+                     /
+    bias_copy ------/
     """
-    if node_a.op == 'call_module':
+    graph_c = input_node_c.graph
 
-        assert node_a.op == 'call_module'
+    # generically handle all args and kwargs except for the input
+    # Note: this hasn't been tested with many ops, logic may change.
+    new_args = []
+    # assumes that the first arg is the input
+    for node_a_arg in node_a.args[1:]:
+        if isinstance(node_a_arg, Node):
+            arg_a = _return_first_non_observer_node(node_a_arg, gm_a)
+            arg_a_copy_name = \
+                get_new_attr_name_with_prefix(arg_a.name + '_shadow_copy_')(gm_b)  # type: ignore
+            arg_a_obj = _getattr_from_fqn(gm_a, arg_a.target)  # type: ignore
+            setattr(gm_b, arg_a_copy_name, arg_a_obj.detach())
+            node_a_arg_copy = graph_c.create_node(
+                'get_attr', arg_a_copy_name, (), {}, arg_a_copy_name)
+            new_args.append(node_a_arg_copy)
+        else:
+            raise AssertionError(
+                f"handling for arg of type {type(node_a_arg)} is not implemented")
+
+    new_kwargs = {}
+    for node_a_k, node_a_kwarg in node_a.kwargs.items():
+        kwarg_a_copy_name = \
+            get_new_attr_name_with_prefix(node_a_kwarg.name + '_shadow_copy_')(gm_b)  # type: ignore
+        kwarg_a_obj = _getattr_from_fqn(gm_a, node_a_kwarg.target)  # type: ignore
+        setattr(gm_b, kwarg_a_copy_name, kwarg_a_obj.detach())
+        node_a_kwarg_copy = graph_c.create_node(
+            'get_attr', kwarg_a_copy_name, (), {}, kwarg_a_copy_name)
+        new_kwargs[node_a_k] = node_a_kwarg_copy
+
+    node_a_shadows_c_name = \
+        get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+
+    if node_a.op == 'call_module':
+        # if target is a module, we point to the module from gm_b
         new_mod_copy_name = \
             get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
         # fetch the corresponding module from gm_a
         assert isinstance(node_a.target, str)
         mod_a = _getattr_from_fqn(gm_a, node_a.target)
-        # TODO(future PR): stop using copy.deepcopy, keep just a single
-        # instance of each tensor around
-        setattr(gm_b, new_mod_copy_name, copy.deepcopy(mod_a))
-        new_node = graph_c.create_node(
-            'call_module', new_mod_copy_name, (domain_translation_node,), {})
-        return new_node
-
-    else:
-
-        assert node_a.op == 'call_function'
-
-        # copy bias
-        # _print_node(node_a.kwargs['bias'])
-        bias_a_copy_name = \
-            get_new_attr_name_with_prefix(node_a.kwargs['bias'].name + '_shadow_copy_')(gm_b)
-        bias_a_obj = _getattr_from_fqn(gm_a, node_a.kwargs['bias'].target)
-        setattr(gm_b, bias_a_copy_name, bias_a_obj.detach())
-        bias_copy_node = graph_c.create_node(
-            'get_attr', bias_a_copy_name, (), {}, bias_a_copy_name)
-
-        # copy weight
-        # for now, assume F.linear and observed
-        # TODO(before land): handle generically for all types of F.linear
-        # and other ops
-        weight_a_obs = node_a.args[1]
-        weight_a = weight_a_obs.args[0]
-        weight_a_copy_name = \
-            get_new_attr_name_with_prefix(weight_a.name + '_shadow_copy_')(gm_b)
-        weight_a_obj = _getattr_from_fqn(gm_a, weight_a.target)
-        setattr(gm_b, weight_a_copy_name, weight_a_obj)
-        weight_copy_node = graph_c.create_node(
-            'get_attr', weight_a_copy_name, (), {}, weight_a_copy_name)
-
-        # create the copy of node_a in B
-        node_a_shadows_c_name = \
-            get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+        setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, node_a.target,
-            (domain_translation_node, weight_copy_node,),
-            {'bias': bias_copy_node},
-            node_a_shadows_c_name)
-
+            node_a.op, new_mod_copy_name, (input_node_c, *new_args),
+            new_kwargs, node_a_shadows_c_name)  # type: ignore
+        return node_a_shadows_c
+    else:
+        assert node_a.op == 'call_function'
+        node_a_shadows_c = graph_c.create_node(
+            node_a.op, node_a.target, (input_node_c, *new_args),
+            new_kwargs, node_a_shadows_c_name)  # type: ignore
         return node_a_shadows_c
 
 def _create_a_shadows_b(
@@ -349,7 +425,7 @@ def _create_a_shadows_b(
 
         if node_b.op == 'call_module' and is_activation_post_process(modules[node_b.target]):
             # remove activation post process node
-            env_c[node_b.name] = env_c[node_b.args[0].name]
+            env_c[node_b.name] = env_c[node_b.args[0].name]  # type: ignore
 
         elif node_b in nodes_to_instrument_b_to_a:
             node_a = nodes_to_instrument_b_to_a[node_b]
@@ -362,32 +438,56 @@ def _create_a_shadows_b(
             # ensure env_c is populated with base node
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
             node_c = env_c[node_b.name]
+
             # after this point,
+            #
             # node_a is the original node from graph_a, with parent module gm_a
             # node_b is the original node from graph_b, with parent module gm_b
             # node_c is the copy of node_b in graph_c
+            #
+            # subgraph so far:
+            #
+            # node_c
 
             # translate the inputs from domain of B to domain of A (dequant, etc)
             domain_translation_node = _insert_domain_translation_after_node(
                 node_a, node_c, node_c.args[0], gm_a, gm_b, node_b.name + '_domain_translation_')
             env_c[domain_translation_node.name] = domain_translation_node
+            # subgraph so far:
+            #
+            #       domain_translation_node
+            #      /
+            # node_c
 
             # hook up the new mod_a copy to be in the graph, receiving the
             # same inputs as mod_b does, with domain translated to match a
-            # TODO(before land): handle args and kwargs generically
-            node_a_shadows_c = \
-                _insert_copy_of_node_a_after_domain_translation_node_in_graph_c(
-                    env_c[domain_translation_node.name],
-                    node_a, gm_a, gm_b, graph_c, node_c.name + '_shadow_copy_')
+            node_a_shadows_c = _insert_copy_of_node_a_after_input_node_c(
+                env_c[domain_translation_node.name],
+                node_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
             env_c[node_a_shadows_c.name] = node_a_shadows_c
+            # subgraph so far:
+            #
+            #       domain_translation_node --> node_a_copy(args/kwargs not shown)
+            #      /
+            # node_c
 
             # hook up a logger to the mod_a copy
             env_c[node_a_shadows_c.name] = _insert_logger_after_node(
                 env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_')
+            # subgraph so far:
+            #
+            #       domain_translation_node --> node_a_copy --> logger_a
+            #      /
+            # node_c
 
             # hook up a logger to the mod_b copy
             env_c[node_b.name] = _insert_logger_after_node(
                 env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_')
+            # subgraph so far:
+            #
+            #       domain_translation_node --> node_a_copy --> logger_a
+            #      /
+            # node_c --> logger_c
 
         else:
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
