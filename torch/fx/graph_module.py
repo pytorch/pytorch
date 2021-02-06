@@ -74,7 +74,7 @@ def _deserialize_graph_module(importer: Optional[PackageImporter], body: dict) -
         # If we are unpickling this module from a torch.package, we can
         # retrieve the serialized forward directly from the package.
         module_id = body['_fx_generated_id']
-        CodeOnlyModule.forward = importer.import_module(f"fx-generated.{module_id}").forward
+        CodeOnlyModule.forward = importer.import_module(f"fx-generated._{module_id}").forward
     else:
         # Otherwise, we're unpickling from a regular pickle file. Retrieve the
         # serialized forward that is stashed in the object state.
@@ -339,7 +339,7 @@ class {module_name}(torch.nn.Module):
 
     def __reduce_package__(self, exporter: PackageExporter):
         module_id = exporter.get_unique_id()
-        exporter.save_source_string(f'fx-generated.{module_id}', self.code)
+        exporter.save_source_string(f'fx-generated._{module_id}', self.code)
         self._fx_generated_id = module_id
 
         dict_without_graph = self.__dict__.copy()
