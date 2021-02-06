@@ -44,7 +44,7 @@ void smooth_l1_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double be
 
 void huber_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double delta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_backward_cuda", [&iter, &norm, delta] {
-    scalar_t norm_val = norm;
+    auto norm_val = norm.to<scalar_t>();
     scalar_t delta_val(delta);
     gpu_kernel(iter, [norm_val, delta_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
       const auto x = input - target;
