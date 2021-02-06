@@ -419,10 +419,21 @@ The simplest way of constructing a sparse CSR tensor from a strided tensor
 is to use :meth:`tensor.to_sparse_csr`. Any zeros in the strided tensor will
 be interpreted as missing values in the sparse tensor:
 
+    >>> a = torch.tensor([[0, 0, 1, 0], [1, 2, 0, 0], [0, 0, 0, 0]], dtype = torch.float64)
+    >>> sp = a.to_sparse_csr()
+    >>> sp
+    tensor(crow_indices=tensor([0, 1, 3, 3]),
+          col_indices=tensor([2, 0, 1]),
+          values=tensor([1., 1., 2.]), size=(3, 4), nnz=3, dtype=torch.float64)
 
 The sparse matrix-vector multiplication can be performed with the
-:meth:`tensor.matvec` method:
+:meth:`tensor.matmul` method:
 
+    >>> vec = torch.randn(4, 1, dtype=torch.float64)
+    >>> sp.matmul(vec)
+    tensor([[0.9078],
+            [1.3180],
+            [0.0000]], dtype=torch.float64)
 
 Supported Linear Algebra operations
 +++++++++++++++++++++++++++++++++++
