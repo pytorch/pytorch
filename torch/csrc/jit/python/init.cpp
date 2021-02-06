@@ -966,6 +966,10 @@ void initJITBindings(PyObject* module) {
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init<std::string, std::string>())
+      .def(py::init([](const py::object& buffer) {
+        auto adapter = std::make_unique<BufferAdapter>(buffer);
+        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
+      }))
       .def(py::init([](const py::object& buffer, std::string version_location) {
         auto adapter = std::make_unique<BufferAdapter>(buffer);
         return std::make_unique<PyTorchStreamReader>(
