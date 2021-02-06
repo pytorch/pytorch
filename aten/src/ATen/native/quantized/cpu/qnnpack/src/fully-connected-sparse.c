@@ -29,6 +29,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     const uint32_t* kernel_col_indices,
     const uint32_t* kernel_row_values,
     const uint8_t* kernel_values,
+    const uint32_t kernel_row_block_size,
     const uint32_t kernel_col_block_size,
     uint8_t output_zero_point,
     uint8_t output_min,
@@ -71,6 +72,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
   fully_connected->sparse_matrix.col_indices = kernel_col_indices;
   fully_connected->sparse_matrix.row_values = kernel_row_values;
   fully_connected->sparse_matrix.values = kernel_values;
+  fully_connected->sparse_matrix.row_block_size = kernel_row_block_size;
   fully_connected->sparse_matrix.col_block_size = kernel_col_block_size;
 
   fully_connected->groups = 1;

@@ -1033,9 +1033,12 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           .prepack_ukernel = pytorch_qnnp_params.q8gemm_sparse.packA,
       };
 
+      // This batch size is not the actual batch size of the op
+      // The batch size is modified in fully-connected-sparse.c
       if (groups != 1 || batch_size != 1) {
         pytorch_qnnp_log_error("pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq "
             "works with group size = 1, batch_size = 1.\n");
+        return pytorch_qnnp_status_invalid_parameter;
       }
 
       pthreadpool_compute_4d_tiled(
