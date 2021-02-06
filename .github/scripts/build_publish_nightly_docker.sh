@@ -2,18 +2,24 @@
 
 set -xeuo pipefail
 
-git fetch origin nightly
-PYTORCH_NIGHTLY_COMMIT=$(git log -1 --pretty=%B origin/nightly | head -1 | \
-                             sed 's,.*(\([[:xdigit:]]*\)),\1,' | head -c 7)
+PYTORCH_DOCKER_TAG=$(git describe --tags)-devel
 
 # Build PyTorch Nightly Docker
-# Full name: ghcr.io/pytorch/pytorch-nightly:${PYTORCH_NIGHTLY_COMMIT}
+# Full name: ghcr.io/pytorch/pytorch-nightly:${PYTORCH_DOCKER_TAG}
 make -f docker.Makefile \
      DOCKER_REGISTRY=ghcr.io \
      DOCKER_ORG=pytorch \
      DOCKER_IMAGE=pytorch-nightly \
-     DOCKER_TAG=${PYTORCH_NIGHTLY_COMMIT} \
+     DOCKER_TAG=${PYTORCH_DOCKER_TAG} \
      INSTALL_CHANNEL=pytorch-nightly BUILD_TYPE=official devel-image
+
+# Get the PYTORCH_NIGHTLY_COMMIT from docker build
+PYTORCH_NIGHTLY_COMMIT=$(docker run \
+       pytorch/pytorch-nightly:${PYTORCH_DOCKER_TAG} \
+       python -c 'import torch; print(torch.version.git_version)')
+
+docker tag pytorch/pytorch-nightly:${PYTORCH_DOCKER_TAG} \
+       pytorch/pytorch-nightly:${PYTORCH_NIGHTLY_COMMIT}
 
 # Push the nightly docker to GitHub Container Registry
 echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
