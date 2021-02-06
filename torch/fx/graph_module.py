@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.overrides
 from torch.nn.modules.module import _addindent
-from torch.package import PackageImporter, PackageExporter, ImporterProxy
+from torch.package import PackageImporter, PackageExporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional
 from .graph import Graph
@@ -48,17 +48,21 @@ def _forward_from_src(src: str, importer: Optional[PackageImporter]):
     return gbls['forward']
 
 
-def deserialize_graphmodule(_importer: Union[ImporterProxy, PackageImporter], body: dict) -> torch.nn.Module:
+def reduce_graph_module(body: dict) -> torch.nn.Module:
+    return _deserialize_graph_module(None, body)
+
+
+def reduce_package_graph_module(importer: PackageImporter, body: dict) -> torch.nn.Module:
+    return _deserialize_graph_module(importer, body)
+
+
+def _deserialize_graph_module(importer: Optional[PackageImporter], body: dict) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
     saving the dictionary so that changes to the in-memory graph format do not
     get serialized.
     """
-    importer: Optional[PackageImporter] = None
-    if isinstance(_importer, PackageImporter):
-        importer = _importer
-
     # We create a dummy class here because symbolic_trace pulls the forward()
     # function off of the class, rather than the instance
     class CodeOnlyModule(torch.nn.Module):
@@ -66,12 +70,20 @@ def deserialize_graphmodule(_importer: Union[ImporterProxy, PackageImporter], bo
             super().__init__()
             self.__dict__ = body
 
-    try:
-        CodeOnlyModule.forward = _forward_from_src(body['_code'], importer)
-    except KeyError:
-        # BC: attribute name was changed from `code` to `_code` to facilitate
-        # making `code` into a property and adding a docstring to it
-        CodeOnlyModule.forward = _forward_from_src(body['code'], importer)
+    if importer is not None:
+        # If we are unpickling this module from a torch.package, we can
+        # retrieve the serialized forward directly from the package.
+        module_id = body['_fx_generated_id']
+        CodeOnlyModule.forward = importer.import_module(f"fx-generated.{module_id}").forward
+    else:
+        # Otherwise, we're unpickling from a regular pickle file. Retrieve the
+        # serialized forward that is stashed in the object state.
+        try:
+            CodeOnlyModule.forward = _forward_from_src(body['_code'], importer)
+        except KeyError:
+            # BC: attribute name was changed from `code` to `_code` to facilitate
+            # making `code` into a property and adding a docstring to it
+            CodeOnlyModule.forward = _forward_from_src(body['code'], importer)
 
     from .symbolic_trace import Tracer
 
@@ -325,25 +337,14 @@ class {module_name}(torch.nn.Module):
                 sys.excepthook = old_excepthook
         cls.__call__ = wrapped_call
 
-    def __torch_package_persist__(self, exporter: PackageExporter):
-        # HACK: Here we take advantage of the fact that `persistent_id` is
-        # called on every object in pickle.save() to add a side-effect to
-        # GraphModule pickling.
-        #
-        # GraphModule needs to register its dependencies in PackageExporter, so
-        # do it here.
-        for import_ in self._graph._imports:
-            if isinstance(import_, tuple):
-                # Of the form 'from base import attr'
-                base, _attr = import_
-                exporter.require_module_if_not_provided(base)
-            else:
-                # Of the form 'import import_'
-                exporter.require_module_if_not_provided(import_)
+    def __reduce_package__(self, exporter: PackageExporter):
+        module_id = exporter.get_unique_id()
+        exporter.save_source_string(f'fx-generated.{module_id}', self.code)
+        self._fx_generated_id = module_id
 
-        # Return `None` so that the pickler continues on and pickles
-        # `GraphModule` as normal after this.
-        return None
+        dict_without_graph = self.__dict__.copy()
+        del dict_without_graph['_graph']
+        return (reduce_package_graph_module, (dict_without_graph,))
 
     def __reduce__(self):
         """
@@ -355,7 +356,7 @@ class {module_name}(torch.nn.Module):
         """
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
-        return (deserialize_graphmodule, (ImporterProxy(), dict_without_graph,))
+        return (reduce_graph_module, (dict_without_graph,))
 
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__

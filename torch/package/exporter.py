@@ -82,6 +82,7 @@ class PackageExporter:
         self.importers = [importlib.import_module]
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
+        self._unique_id = 0
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -124,6 +125,12 @@ class PackageExporter:
         else:
             is_package = path.name == '__init__.py'
             self.save_source_string(module_name, _read_file(file_or_directory), is_package, dependencies, file_or_directory)
+
+    def get_unique_id(self) -> str:
+        """Get an id. This id is guaranteed to only be handed out once for this package."""
+        ret = str(self._unique_id)
+        self._unique_id += 1
+        return ret
 
     def save_source_string(self, module_name: str, src: str, is_package: bool = False,
                            dependencies: bool = True, orig_file_name: str = None):
@@ -395,10 +402,8 @@ node [shape=box];
                     obj_key,
                     location,
                     obj.size())
-        elif isinstance(obj, ImporterProxy):
-            return ('package-importer', )
-        if hasattr(obj, '__torch_package_persist__'):
-            return obj.__torch_package_persist__(self)
+        if hasattr(obj, '__reduce_package__'):
+            return ('reduce_package', *obj.__reduce_package__(self))
 
         return None
 
@@ -518,28 +523,3 @@ class _GlobGroup:
 
         result = ''.join(component_to_re(c) for c in pattern.split('.'))
         return re.compile(result)
-
-
-class ImporterProxy():
-    """An object that represents the current PackageImporter during the import process.
-
-    When pickled by PackageExporter and then unpickled by PackageImporter,
-    this class will come back as the PackageImporter instance doing the
-    unpickling. This can be used as an argument to __reduce__() to access the
-    current importer in the reduction function.
-
-    e.g.
-
-    class Foo:
-        def __reduce__(self):
-            return my_function, (ImporterProxy(),)
-
-    def my_function(importer: Union[PackageImporter, ImporterProxy]):
-        if isinstance(importer, PackageImporter):
-            # This object is being loaded from a PackageImporter.
-            # Now you can do something with that importer.
-        else:
-            # This object is being unpickled by the default unpickler.
-            # `importer` is just be a regular ImporterProxy.
-    """
-    pass
