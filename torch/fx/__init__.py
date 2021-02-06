@@ -48,28 +48,24 @@ demonstration of these components in action:
         return clamp_1
     """
 
-The **symbolic tracer** performs “abstract interpretation” of the Python
+The **symbolic tracer** performs “symbolic execution” of the Python
 code. It feeds fake values, called Proxies, through the code. Operations
 on theses Proxies are recorded. More information about symbolic tracing
-can be found in the
-`symbolic\_trace <https://pytorch.org/docs/master/fx.html#torch.fx.symbolic_trace>`__
-and `Tracer <https://pytorch.org/docs/master/fx.html#torch.fx.Tracer>`__
+can be found in the :func:`symbolic_trace` and :class:`Tracer`
 documentation.
 
 The **intermediate representation** is the container for the operations
 that were recorded during symbolic tracing. It consists of a list of
 Nodes that represent function inputs, callsites (to functions, methods,
-or ``nn.Module`` instances), and return values. More information about
-the IR can be found in the documentation for
-`Graph <https://pytorch.org/docs/master/fx.html#torch.fx.Graph>`__. The
+or :class:`torch.nn.Module` instances), and return values. More information
+about the IR can be found in the documentation for :class:`Graph`. The
 IR is the format on which transformations are applied.
 
 **Python code generation** is what makes FX a Python-to-Python (or
 Module-to-Module) transformation toolkit. For each Graph IR, we can
 create valid Python code matching the Graph’s semantics. This
-functionality is wrapped up in
-`GraphModule <https://pytorch.org/docs/master/fx.html#torch.fx.GraphModule>`__,
-which is an ``nn.Module`` instance that holds a ``Graph`` as well as a
+functionality is wrapped up in :class:`GraphModule`, which is a
+:class:`torch.nn.Module` instance that holds a :class:`Graph` as well as a
 ``forward`` method generated from the Graph.
 
 Taken together, this pipeline of components (symbolic tracing →
@@ -80,6 +76,10 @@ symbolic tracing can be used in isolation to capture a form of
 the code for analysis (and not transformation) purposes. Code
 generation can be used for programmatically generating models, for
 example from a config file. There are many uses for FX!
+
+Several example transformations can be found at the
+`examples <https://github.com/pytorch/examples/tree/master/fx>`__
+repository.
 '''
 
 from .graph_module import GraphModule
