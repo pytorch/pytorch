@@ -31,16 +31,21 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
     currentDevice_ = c10::cuda::current_device();
   }
 
- protected:
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override {
     return c10::make_intrusive<CUDAFuture>(std::move(type));
   }
 
-  void postMarkCompletedHook(const at::IValue& value) override {
+ protected:
+
+  void postMarkCompletedHook(
+      const at::IValue& value,
+      c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
+          dataPtrs) override {
     currentDevice_ = c10::cuda::current_device();
 
     // Extract them once and cache them for later uses.
-    dataPtrs_ = extractDataPtrs(value);
+    dataPtrs_ = dataPtrs.has_value() ?
+        std::move(*dataPtrs): extractDataPtrs(value);
 
     std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
     for (const at::DataPtr& data_ptr : dataPtrs_) {
