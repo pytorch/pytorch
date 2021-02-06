@@ -1347,11 +1347,14 @@ class DistributedTest:
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
-            with torch.autograd.profiler.profile(use_cuda=profile_cuda) as prof:
+            with torch.autograd.profiler.profile(use_cuda=profile_cuda, record_shapes=True) as prof:
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
                         work.wait()
+
+            if self.rank == 0:
+                print(prof.key_averages().table())
 
             def get_event(postfix):
                 return [event for event in prof.function_events if event.name.endswith(postfix)]
