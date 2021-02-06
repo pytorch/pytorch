@@ -41,7 +41,7 @@ namespace {
         if (dist(rng)) {
           for (uint32_t nb = 0; (nb < row_block_size) && (n + nb < N); ++nb) {
             for (uint32_t kb = 0; (kb < col_block_size) && (k + kb < K); ++kb) {
-              *(b + (n + nb) * K + k + kb) = zero_points[n];
+              *(b + (n + nb) * K + k + kb) = zero_points[n + nb];
             }
           }
         }

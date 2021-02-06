@@ -43,7 +43,7 @@ namespace {
         if (dist(rng)) {
           for (uint32_t nb = 0; (nb < row_block_size) && (n + nb < N); ++nb) {
             for (uint32_t kb = 0; (kb < col_block_size) && (k + kb < K); ++kb) {
-              *(b + (n + nb) * K + k + kb) = zero_points[n];
+              *(b + (n + nb) * K + k + kb) = zero_points[n + nb];
             }
           }
         }
@@ -373,8 +373,11 @@ class GemmBlockSparseMicrokernelTester {
     std::vector<float> c((m() - 1) * cStride() + n());
     std::vector<float> acc(m() * n());
     auto m_blocks = (m() + mr()  - 1) / mr();
-    auto k_blocks = (k() + colBlockSize()  - 1) / colBlockSize();
-    std::vector<uint8_t> a_packed(m_blocks * k_blocks * mr() * colBlockSize() + 8, 0);
+    // While colBlockSize() is what kr is, we reuse 8x4/4x4 packing kernels
+    // and thus a_packed has to be allocated accordingly.
+    const uint32_t kr_value = 4;
+    auto k_blocks = (k() + kr_value  - 1) / kr_value;
+    std::vector<uint8_t> a_packed((m_blocks * k_blocks * mr() * kr_value) + 8, 0);
 
     const uint8_t* aPtr = a.data();
 
