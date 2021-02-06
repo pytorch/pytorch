@@ -8,6 +8,7 @@
 #endif
 
 #include <ATen/Context.h>
+#include <ATen/Exceptions.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
 
