@@ -2785,9 +2785,12 @@
 - func: silu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
 
-- func: siamese_loss(Tensor input1, Tensor input2, Tensor label, float margin=1.0, int reduction=Mean)
-  use_C10_dispatcher: full
+- func: siamese_loss(Tensor input1, Tensor input2, Tensor label, float margin=1.0, int reduction=Mean) -> Tensor
+  use_c10_dispatcher: fill
   python_module: nn
+  dispatch:
+    CPU: siamese_loss
+    CUDA: legacy::cuda::siamese_loss
 
 - func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
