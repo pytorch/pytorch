@@ -1041,14 +1041,13 @@ void Reducer::prepare_for_backward(
   // Warn user about unnecessary perf hit if all parameters were used.
   if (unused_parameters_.empty()) {
     TORCH_WARN_ONCE(
-      "find_unused_parameters=True was specified in DDP constructor, "
-      "but did not find any unused parameters. This flag results in an extra "
-      "traversal of the autograd graph every iteration, which can adversely "
-      "affect performance. If your model indeed never has any unused "
-      "parameters, consider turning this flag off. Note that this warning may "
-      "be a false positive your model has flow control causing later iterations "
-      "to have unused parameters."
-    );
+        "find_unused_parameters=True was specified in DDP constructor, "
+        "but did not find any unused parameters. This flag results in an extra "
+        "traversal of the autograd graph every iteration, which can adversely "
+        "affect performance. If your model indeed never has any unused "
+        "parameters, consider turning this flag off. Note that this warning may "
+        "be a false positive your model has flow control causing later iterations "
+        "to have unused parameters.");
   }
 }
 
@@ -1403,8 +1402,8 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_comm_hook or register_builtin_comm_hook can only be called once.");
-  // TODO(@sinannasir): Single-process multiple-device mode support for DDP
-  // communication hook. Related to GH Issue #42542.
+  // TODO(#42542): Single-process multiple-device mode support for DDP
+  // communication hook.
   TORCH_CHECK(
       replicas_.size() == 1,
       "Communication hook does not support single-process multiple-device mode.");
@@ -1421,6 +1420,11 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       replicas_.size() == 1,
       "Communication hook does not support single-process multiple-device mode.");
+  // TODO: Support GLOO and MPI backends for DDP communication hook.
+  TORCH_CHECK(
+      process_group_->getBackendName() == "nccl",
+      "register_builtin_comm_hook currently can only support NCCL backend, but the current backend is %s.",
+      process_group_->getBackendName());
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:
@@ -1467,11 +1471,10 @@ void Reducer::ensure_prior_reduction_finished() {
 }
 
 void Reducer::set_construction_logging_data(
-  const std::string& module_name,
-  const std::vector<int>& device_ids,
-  int output_device,
-  bool broadcast_buffers
-) {
+    const std::string& module_name,
+    const std::vector<int>& device_ids,
+    int output_device,
+    bool broadcast_buffers) {
   ddp_logging_data_->module_name = module_name;
   ddp_logging_data_->device_ids = device_ids;
   ddp_logging_data_->output_device = output_device;

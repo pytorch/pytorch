@@ -860,6 +860,16 @@ void initJITBindings(PyObject* module) {
         };
         return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
       }))
+      .def(py::init<std::string, std::string>())
+      .def(py::init([](const py::object& buffer, std::string version_location) {
+        auto writer_func = [=](const void* data, size_t size) {
+          auto bytes = py::bytes(reinterpret_cast<const char*>(data), size);
+          buffer.attr("write")(std::move(bytes));
+          return size;
+        };
+        return std::make_unique<PyTorchStreamWriter>(
+            std::move(writer_func), std ::move(version_location));
+      }))
       .def(py::init<const std::function<size_t(const void*, size_t)>&>())
       .def(
           "write_record",
@@ -955,9 +965,11 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def(py::init([](const py::object& buffer) {
+      .def(py::init<std::string, std::string>())
+      .def(py::init([](const py::object& buffer, std::string version_location) {
         auto adapter = std::make_unique<BufferAdapter>(buffer);
-        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
+        return std::make_unique<PyTorchStreamReader>(
+            std::move(adapter), std::move(version_location));
       }))
       .def(
           "get_record",

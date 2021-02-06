@@ -93,9 +93,15 @@ namespace serialize {
 
 class TORCH_API PyTorchStreamReader final {
  public:
-  explicit PyTorchStreamReader(const std::string& file_name);
-  explicit PyTorchStreamReader(std::istream* in);
-  explicit PyTorchStreamReader(std::shared_ptr<ReadAdapterInterface> in);
+  explicit PyTorchStreamReader(
+      const std::string& file_name,
+      std::string version_location = "version");
+  explicit PyTorchStreamReader(
+      std::istream* in,
+      std::string version_location = "version");
+  explicit PyTorchStreamReader(
+      std::shared_ptr<ReadAdapterInterface> in,
+      std::string version_location = "version");
 
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
@@ -121,13 +127,17 @@ class TORCH_API PyTorchStreamReader final {
   std::string archive_name_plus_slash_;
   std::shared_ptr<ReadAdapterInterface> in_;
   int64_t version_;
+  std::string version_location_;
 };
 
 class TORCH_API PyTorchStreamWriter final {
  public:
-  explicit PyTorchStreamWriter(std::string archive_name);
   explicit PyTorchStreamWriter(
-      const std::function<size_t(const void*, size_t)>& writer_func);
+      std::string archive_name,
+      std::string version_location = "version");
+  explicit PyTorchStreamWriter(
+      const std::function<size_t(const void*, size_t)>& writer_func,
+      std::string version_location = "version");
 
   void setMinVersion(const uint64_t version);
 
@@ -154,6 +164,7 @@ class TORCH_API PyTorchStreamWriter final {
   size_t current_pos_ = 0;
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
+  std::string version_location_;
   std::string archive_name_plus_slash_;
   std::string padding_;
   std::ofstream file_stream_;
