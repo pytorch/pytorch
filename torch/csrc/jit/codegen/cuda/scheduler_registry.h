@@ -22,6 +22,8 @@ class TORCH_CUDA_API SchedulerEntry {
       Fusion* fusion,
       ExpressionEvaluator& ee);
 
+  virtual ~SchedulerEntry() = default;
+
   //! Fusion segmenter facing API,
   //!   returns a schedule that applies in the given fusion, returns a nullopt
   //!   if no schedule in the registry can handle.

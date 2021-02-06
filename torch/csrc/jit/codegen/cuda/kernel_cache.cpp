@@ -463,7 +463,6 @@ FusionSegmentRuntime::FusionSegmentRuntime(
     size_t input_id)
     : executors_(segmented_fusion->groups().size()),
       heuristics_(std::move(heuristics)),
-      cache_id_(input_id),
       segmented_fusion_(segmented_fusion) {}
 
 // Largely duplicated from FusionExecutorCache

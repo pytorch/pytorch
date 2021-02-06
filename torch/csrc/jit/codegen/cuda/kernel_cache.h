@@ -97,7 +97,6 @@ class TORCH_CUDA_API FusionSegmentRuntime {
   std::unique_ptr<SegmentHeuristics> heuristics_;
 
   // States
-  size_t cache_id_ = -1;
   SegmentedFusion* segmented_fusion_;
 };
 

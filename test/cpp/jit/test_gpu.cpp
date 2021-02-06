@@ -11472,7 +11472,7 @@ TEST(NVFuserTest, FusionSegmentReducePointwise_CUDA) {
   at::Tensor t2 = at::randn({128, 65}, options);
 
   auto t3 = t0.add(1.0);
-  auto t4 = std::get<0>(at::max(t3, {0}));
+  auto t4 = std::get<0>(at::max(t3, 0));
   auto t5 = t4.add(t1);
   auto t6 = t5.add(t2);
 
