@@ -5991,7 +5991,8 @@ class TestONNXRuntime(unittest.TestCase):
                 super(GRUWithStateModel, self).__init__()
 
                 self.batch_first = batch_first
-                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers, bidirectional=bidirectional, dropout=dropout,
+                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers, 
+                                                bidirectional=bidirectional, dropout=dropout,
                                                 batch_first=batch_first)
 
             def forward(self, input, hx):
@@ -6001,7 +6002,8 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self, layers, bidirect, dropout, batch_first):
                 super(GRUWithoutStateModel, self).__init__()
                 self.batch_first = batch_first
-                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers, bidirectional=bidirectional, dropout=dropout,
+                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers, 
+                                                bidirectional=bidirectional, dropout=dropout,
                                                 batch_first=batch_first)
 
             def forward(self, input):
@@ -6998,7 +7000,7 @@ def setup_rnn_tests():
                 TestONNXRuntime.disable_rnn_script_test = False
 
             make_test(name, base, layer, bidirectional, initial_state,
-                      variable_length, dropout, 
+                      variable_length, dropout,
                       **extra_kwargs)
             test_count += 1
 

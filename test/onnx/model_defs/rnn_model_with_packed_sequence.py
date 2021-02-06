@@ -21,4 +21,4 @@ class RnnModelWithPackedSequence(nn.Module):
         rets = self.model(input)
         ret, rets = rets[0], rets[1:]
         ret, _ = rnn_utils.pad_packed_sequence(ret, self.batch_first)
-        return tuple([ret] + list(rets))    
+        return tuple([ret] + list(rets))
