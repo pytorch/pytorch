@@ -1,0 +1,23 @@
+{
+  "binary": "/private/home/suo/.conda/envs/py3/bin/pyre.bin",
+  "source_directories": [
+    "torch", "test"
+  ],
+  "ignore_all_errors": [
+    "torch/_torch_docs.py",
+    "torch/backends/_nnapi/",
+    "torch/testing/_internal/hypothesis_utils/",
+    "torch/testing/_internal/common_quantization/",
+    "torch/testing/_internal/generated/",
+    "torch/testing/_internal/distributed/",
+    "torch/nn/modules/pooling.py",
+    "torch/nn/parallel/_functions.py",
+    "torch/multiprocessing/pool.py",
+    "torch/overrides.py"
+  ],
+  "search_path": [
+    ".stubs"
+  ],
+  "taint_models_path": "/raid/suo/.conda/envs/py3/lib",
+  "typeshed": "/raid/suo/.conda/envs/py3/lib/pyre_check/typeshed"
+}
