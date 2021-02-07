@@ -900,9 +900,10 @@ class Tensor(torch._C._TensorBase):
         Examples::
 
             >>> dense = torch.randn(5, 5)
-            >>> sparse = dense.to_sparse_csr(-999)
+            >>> sparse = dense.to_sparse_csr()
             >>> sparse._nnz()
             3125
+
         """
         shape = self.size()
         fill_value = 0
