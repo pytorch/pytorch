@@ -31,7 +31,12 @@ void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {
 // optimization passes here, we convert op aliases into a standard form
 bool normalizeOpAliases(graph_node_list_iterator& iter) {
   auto alias = getOperatorAliasMap().find(iter->kind());
-  if (alias != getOperatorAliasMap().end()) {
+  // for ops like aten::degrees which has overloads for
+  // builtin ops, before replacing the node we also verify
+  // that first input to the node is a Tensor.
+  if (alias != getOperatorAliasMap().end() &&
+      (iter->inputs().size() > 0 &&
+       iter->input(0)->type().get()->kind() == TypeKind::TensorType)) {
     replaceNodeWithNewSymbol(*iter, alias->second);
     iter.destroyCurrent();
     return true;
