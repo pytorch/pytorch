@@ -27,7 +27,8 @@ const auto add_script = R"JIT(
 
 const auto reshape_script_1 = R"JIT(
   def forward(self, a: Tensor, shape: List[int]):
-      return a.reshape(shape)
+      b = a.reshape(shape)
+      return b + b
 )JIT";
 
 const auto reshape_script_2 = R"JIT(
@@ -38,7 +39,8 @@ const auto reshape_script_2 = R"JIT(
 
 const auto flatten_script_1 = R"JIT(
   def forward(self, a: Tensor, start_dim: int, end_dim: int):
-      return torch.flatten(a, start_dim, end_dim)
+      b = torch.flatten(a, start_dim, end_dim)
+      return b + b
 )JIT";
 
 const auto flatten_script_2 = R"JIT(
