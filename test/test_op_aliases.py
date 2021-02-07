@@ -163,6 +163,14 @@ alias_infos = (
               lambda d: ((torch.randn(20, device=d), torch.randn(20, device=d)))),
     AliasInfo('moveaxis', torch.moveaxis, 'movedim', torch.movedim,
               lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
+    AliasInfo('degrees', torch.degrees, 'rad2deg', torch.rad2deg,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('degrees_', torch.Tensor.degrees_, 'rad2deg', torch.Tensor.rad2deg_,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('radians', torch.radians, 'deg2rad', torch.deg2rad,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('radians_', torch.Tensor.radians_, 'deg2rad', torch.Tensor.deg2rad_,
+              lambda d: torch.randn(20, device=d)),
 )
 
 # Placeholder test class for validating that aliases are correctly
