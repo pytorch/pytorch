@@ -261,6 +261,8 @@ struct vectorized {
 
 template <typename data_t, typename inp_calc_t, typename out_calc_t, int num_outputs>
 struct multi_outputs_unroll {
+  //multi_outputs_unroll struct members and check_inbounds and load methods are copypasted from unroll struct
+  //we don't use inheritance because of compiler bug in cuda 10.2+
   data_t data;
   int remaining;
   inp_calc_t input_offset_calculator;
