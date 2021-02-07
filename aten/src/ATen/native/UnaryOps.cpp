@@ -147,6 +147,11 @@ Tensor rad2deg(const Tensor& self) {
 }
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
+// degrees, alias for rad2deg
+Tensor& degrees_out(Tensor& result, const Tensor& self) { return at::rad2deg_out(result, self); }
+Tensor degrees(const Tensor& self) { return self.rad2deg(); }
+Tensor& degrees_(Tensor& self) { return self.rad2deg_(); }
+
 Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
@@ -164,6 +169,11 @@ Tensor deg2rad(const Tensor& self) {
   return result;
 }
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
+
+// radians, alias for rad2deg
+Tensor& radians_out(Tensor& result, const Tensor& self) { return at::deg2rad_out(result, self); }
+Tensor radians(const Tensor& self) { return self.deg2rad(); }
+Tensor& radians_(Tensor& self) { return self.deg2rad_(); }
 
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, asin_stub); }
 Tensor asin(const Tensor& self) { return unary_op_impl_float(self, asin_stub); }

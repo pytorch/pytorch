@@ -3028,6 +3028,21 @@
   dispatch:
     DefaultBackend: rad2deg_out
 
+- func: degrees(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    DefaultBackend: degrees
+
+- func: degrees_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    DefaultBackend: degrees_
+
+- func: degrees.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    DefaultBackend: degrees_out
+
 - func: deg2rad(Tensor self) -> Tensor
   variants: function, method
   dispatch:
@@ -3042,6 +3057,21 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: deg2rad_out
+
+- func: radians(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    DefaultBackend: radians
+
+- func: radians_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    DefaultBackend: radians_
+
+- func: radians.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    DefaultBackend: radians_out
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures

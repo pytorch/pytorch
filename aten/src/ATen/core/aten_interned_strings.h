@@ -282,7 +282,6 @@ _(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
-_(aten, deg2rad) \
 _(aten, detach) \
 _(aten, diag) \
 _(aten, diag_embed) \
@@ -568,7 +567,6 @@ _(aten, put) \
 _(aten, qr) \
 _(aten, quantile) \
 _(aten, nanquantile) \
-_(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
 _(aten, randint) \

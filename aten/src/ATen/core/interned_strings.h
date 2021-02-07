@@ -243,6 +243,14 @@ namespace c10 {
   _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
+  _(aten, rad2deg)                   \
+  _(aten, rad2deg_)                  \
+  _(aten, degrees)                   \
+  _(aten, degrees_)                  \
+  _(aten, deg2rad)                   \
+  _(aten, deg2rad_)                  \
+  _(aten, radians)                   \
+  _(aten, radians_)                  \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
   _(aten, manual_seed)               \
