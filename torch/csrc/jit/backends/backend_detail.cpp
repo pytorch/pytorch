@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 
+#include <unordered_map>
+
 namespace torch {
 namespace jit {
 namespace detail {
@@ -52,6 +54,40 @@ c10::FunctionSchema getExecuteSchema() {
       /*returns=*/{output});
 }
 
+namespace {
+std::unordered_map<std::string, BackendPreprocessFunction>&
+backendPreprocessFunctions() {
+  static std::unordered_map<std::string, BackendPreprocessFunction>
+      preprocess_functions;
+  return preprocess_functions;
+}
+} // namespace
+
+bool hasBackendPreprocessFunction(const std::string& name) {
+  return backendPreprocessFunctions().count(name);
+}
+
+void registerBackendPreprocessFunction(
+    const std::string& name,
+    const BackendPreprocessFunction& preprocess) {
+  TORCH_CHECK(
+      !detail::hasBackendPreprocessFunction(name),
+      "Preprocessing function for backend ",
+      name,
+      " is already registered. Ensure that registration is only called once.");
+  detail::backendPreprocessFunctions()[name] = preprocess;
+}
+
+BackendPreprocessFunction getBackendPreprocessFunction(
+    const std::string& name) {
+  TORCH_CHECK(
+      hasBackendPreprocessFunction(name),
+      "Preprocessing function for backend ",
+      name,
+      " is not registered.");
+  return backendPreprocessFunctions()[name];
+}
+
 Module codegen_backend_module(const std::string& backend_name,
                               const Module& orig_module,
                               const c10::Dict<IValue, IValue>& method_compile_spec,
@@ -75,11 +111,18 @@ Module codegen_backend_module(const std::string& backend_name,
       /*shouldMangle=*/true);
 
   // Generate attributes.
-  // This is the original cloned and preprocessed module.
+  // This is the preprocessed module.
+  // For backwards compatibility, for backends that implement preprocessing in
+  // the backend interface rather than as a separate function, we just pass
+  // the cloned original Module.
   loweredModule.register_attribute(
       "__processed_module",
       AnyType::get(),
-      cloned_module._ivalue(),
+      detail::hasBackendPreprocessFunction(backend_name)
+      ? detail::getBackendPreprocessFunction(backend_name)(
+          cloned_module,
+          method_compile_spec)
+      : cloned_module._ivalue(),
       /*is_param=*/false);
 
   // This is for the method_compile_spec passed in to to_<backend> or
@@ -139,17 +182,30 @@ Module codegen_backend_module(const std::string& backend_name,
             )",
       loweredModuleResolver());
 
-  // This is never called during compilation or execution, but is
-  // needed to generate the LoweredModule because we don't have access
-  // to an instance of the backend as a C++ object with which to call
-  // preprocess.
-  loweredModule.define(
-      R"(
-            def __preprocess(self, mod: Any, method_compile_spec: Dict[str, Any]):
-                self.__create_backend()
-                self.__processed_module = self.__backend.preprocess(mod, method_compile_spec)
-          )",
-      loweredModuleResolver());
+  // Only add preprocess method to the LoweredModule if there is no
+  // standalone BackendPreprocessFunction for this backend.
+  // Kept for backwards compatibility for backends that implement
+  // preprocessing in the backend interface rather than as a separate
+  // function.
+  if (!detail::hasBackendPreprocessFunction(backend_name)) {
+    // This is never called during compilation or execution, but is
+    // needed to generate the LoweredModule because we don't have access
+    // to an instance of the backend as a C++ object with which to call
+    // preprocess.
+    loweredModule.define(
+        R"(
+                def __preprocess(self, mod: Any, method_compile_spec: Dict[str, Any]):
+                    self.__create_backend()
+                    self.__processed_module = self.__backend.preprocess(mod, method_compile_spec)
+              )",
+        loweredModuleResolver());
+    // Run preprocess so that __processed_module is set correctly before
+    // compilation.
+    loweredModule.run_method(
+        "__preprocess",
+        cloned_module._ivalue(),
+        method_compile_spec);
+  }
 
   // This loop generates one method on the LoweredModule for every key
   // in method_compile_spec.
@@ -250,13 +306,6 @@ Module codegen_backend_module(const std::string& backend_name,
     loweredModule.define(
         method_ct.format(method_te), loweredModuleResolver());
   }
-
-  // Run preprocess so that __processed_module is set correctly before
-  // compilation.
-  loweredModule.run_method(
-      "__preprocess",
-      cloned_module._ivalue(),
-      method_compile_spec);
 
   // Call __setstate__ to ensure that the returned Module is ready to
   // run.
