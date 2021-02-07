@@ -6,10 +6,7 @@ from . import Sampler, Dataset
 import torch.distributed as dist
 
 
-T_co = TypeVar('T_co', covariant=True)
-
-
-class DistributedSampler(Sampler[T_co]):
+class DistributedSampler(Sampler[int]):
     r"""Sampler that restricts data loading to a subset of the dataset.
 
     It is especially useful in conjunction with
@@ -84,18 +81,19 @@ class DistributedSampler(Sampler[T_co]):
         self.shuffle = shuffle
         self.seed = seed
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[int]:
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
             indices = torch.randperm(len(self.dataset), generator=g)  # type: ignore
         else:
-            indices = torch.arange(len(self.dataset))  # type: ignore
+            indices = range(len(self.dataset))  # type: ignore
 
         offset = 0
         while (offset + self.num_replicas) <= len(indices):
-            yield indices[offset + self.rank].item()
+            if self.shuffle:
+                yield int(indices[offset + self.rank])
             offset += self.num_replicas
 
         if not self.drop_last:
@@ -103,10 +101,10 @@ class DistributedSampler(Sampler[T_co]):
             num_rem = len(indices) % self.num_replicas
             if num_rem:
                 if self.rank < num_rem:
-                    yield indices[offset + self.rank].item()
+                    yield int(indices[offset + self.rank])
                 else:
                     # wraparound, but mod in the case of self.rank >= len(indices)
-                    yield indices[self.rank % len(indices)].item()
+                    yield int(indices[self.rank % len(indices)])
 
     def __len__(self) -> int:
         return self.num_samples
