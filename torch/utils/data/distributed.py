@@ -92,8 +92,7 @@ class DistributedSampler(Sampler[int]):
 
         offset = 0
         while (offset + self.num_replicas) <= len(indices):
-            if self.shuffle:
-                yield int(indices[offset + self.rank])
+            yield int(indices[offset + self.rank])
             offset += self.num_replicas
 
         if not self.drop_last:
