@@ -34,40 +34,37 @@ def _orthogonalize(matrix, epsilon=1e-8):
 
 class PowerSGDState(object):
     r"""
-    Stores both the gradient compression configs and the internal states for all the gradients during the training.
-    Particularly, ``matrix_approximation_rank`` and ``start_powerSGD_iter`` are the main configs that need to be tuned by the user.
-    Although ``use_error_feedback`` and ``warm_start`` can also be tuned by the user,
-    they are typically turned on for performance.
+    Stores both the algorithm's hyperparameters and the internal state for all the gradients during the training.
+    Particularly, ``matrix_approximation_rank`` and ``start_powerSGD_iter`` are the main hyperparameters that should be tuned by the user.
+    For performance, we suggest to keep binary hyperparameters ``use_error_feedback`` and ``warm_start`` on.
 
-    Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``]
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    1. ``matrix_approximation_rank`` controls the size of compressed low-rank tensors, which determines the compression rate. The lower the rank, the stronger the compression.
 
-    1. To tune ``matrix_approximation_rank``, the user can increase it from 1 by factors of 2,
-    until a satisfying accuracy can be reached.
-    The increase of ``matrix_approximation_rank`` can substantially increase the computation costs of the compression.
-    However, the accuracy may not be futher improved beyond a certain ``matrix_approximation_rank`` value.
+        1.1. If ``matrix_approximation_rank`` is too low, the full model quality will need more training steps to reach or will never reach and yield loss in accuracy.
 
-    2. To tune ``start_powerSGD_iter``, the user can typically start with 10% of total training steps,
-    and increase it until a satisfying accuracy can be reached.
-    Deferrring PowerSGD can effectively improve the accuracy,
-    even a relatively small ``matrix_approximation_rank`` is used.
-    This is because that, the beginning of training phase is usually very sensitive to inaccurate gradients,
-    and compressing gradients too early may make the training quickly take a suboptimal trajectory,
-    which can result in an irrecoverable impact on the accuracy.
-    The minimum value allowed in DDP is 2, if error feedback or warm-up is enabled.
-    This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
-    and this can conflict with any tensor memorized before the rebuild process.
-    """
+        1.2. The increase of ``matrix_approximation_rank`` can substantially increase the computation costs of the compression, and the accuracy may not be futher improved beyond a certain ``matrix_approximation_rank`` threshold.
+
+    To tune ``matrix_approximation_rank``, we suggest to start from 1 and increase by factors of 2 (like an expoential grid search, 1, 2, 4, ...), until a satisfactory accuracy is reached. Typically only a small value 1-4 is used. For some NLP tasks (as shown in Appendix D of the original paper), this value has been increased to 32.
+
+    2. ``start_powerSGD_iter`` defers PowerSGD compression util step ``start_powerSGD_iter``, and vanilla allreduce runs prior to step ``start_powerSGD_iter``. This hybrid scheme of **vanilla allreduce + PowerSGD** can effectively improve the accuracy, even a relatively small ``matrix_approximation_rank`` is used. This is because that, the beginning of training phase is usually very sensitive to inaccurate gradients, and compressing gradients too early may make the training quickly take a suboptimal trajectory, which can result in an irrecoverable impact on the accuracy.
+
+    To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached.
+
+    .. warning ::
+        If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
+        This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
+        and this can conflict with any tensor memorized before the rebuild process.
+    """  # noqa
 
     __slots__ = [
         "process_group",
-        # The two fields below are the configs that usually need to be tuned by the user.
+        # The two fields below are the hyperparameters that should be tuned by the user.
         "matrix_approximation_rank",
         "start_powerSGD_iter",
-        # The two fields below are the configs that usually need to be turned on for performance.
+        # The two fields below are the binary hyperparameters recommended to be turned on for performance.
         "use_error_feedback",
         "warm_start",
-        # The fields below are not configs.
+        # The fields below are internal state.
         "rng",
         "error_dict",
         "p_memory_dict",
@@ -95,21 +92,12 @@ class PowerSGDState(object):
         )
 
         self.process_group = process_group
-        # The low rank for matrix approximation controls the size of compressed low-rank tensors,
-        # which determines the computation ratio.
-        # Typically only a small value 1-4 is used.
-        # For some NLP tasks (as shown in Appendix D of the original paper
-        # https://arxiv.org/pdf/1905.13727.pdf, the rank value has been increased to 32.
-        # A high rank value will increase the computation costs of compression exponentially.
-        # A good choice depends on how much extra computation can be hidden by the dominating communication costs.
         self.matrix_approximation_rank = matrix_approximation_rank
-        # This defers PowerSGD compression util step 'start_powerSGD_iter',
-        # and vanilla allreduce runs before step 'start_powerSGD_iter'.
-        # This hybrid scheme of vanilla allreduce + PowerSGD can have two advantages:
+        # Deferring PowerSGD compression util step 'start_powerSGD_iter' can have two advantages:
         # 1) It turns out that PowerSGD may lead to a non-trivial accuracy loss,
         # even if the matrix approximation rank is increased to a large value.
         # To mitigate the accuracy loss, a simple yet effective way is mixing vanilla allreduce
-        # (or a more convervative compression such as FP16 compression) with PowerSGD.
+        # (or a more conservative compression such as FP16 compression) with PowerSGD.
         # 2) There is an internal optimization of rebuilding buckets process in DDP,
         # in order to save the memory space.
         # This step takes place after the first iteration.
@@ -165,8 +153,8 @@ class PowerSGDState(object):
 
 def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     r"""
-    This DDP communication hook implements the original PowerSGD gradient compression
-    algorithm described in https://arxiv.org/abs/1905.13727.
+    This DDP communication hook implements PowerSGD gradient compression
+    algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
     Once gradient tensors are aggregated across all workers, this hook applies
     compression as follows:
 
@@ -196,12 +184,12 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         3.7. Computes each M among all the high-rank tensors, which is approximately equal to PQ^T.
 
     Note that this communication hook enforces vanilla allreduce for the first ``state.start_powerSGD_iter`` iterations.
-    This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
-    but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
+    This not only gives the user more control over the tradeoff between speedup and accuracy,
+    but also helps abstract away some complexity of the internal optimization of DDP for future communication hook developers.
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
-            To tune the compression configs, see Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``].
+            To tune the compression configs, mainly need to tune `matrix_approximation_rank`` and ``start_powerSGD_iter``.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
@@ -426,9 +414,20 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     r"""
     This DDP communication hook implements a simplified PowerSGD gradient compression
-    algorithm described in https://arxiv.org/abs/1905.13727.
+    algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
+    This variant does not compress the gradients layer by layer,
+    but instead compresses the flattened input tensor that batches all the gradients.
+    Therefore, it is **faster** than :meth:`powerSGD_hook`,
+    but usually results in a **much lower accuracy**, unless ``matrix_approximation_rank`` is 1.
+
+    .. warning ::
+        Increasing ``matrix_approximation_rank`` here may not necessarily increase the accuracy,
+        because batching per-parameter tensors without column/row alignment can destroy low-rank structure.
+        Therefore, the user should always consider :meth:`powerSGD_hook` first,
+        and only consider this variant when a satisfactory accuracy can be achieved when ``matrix_approximation_rank`` is 1.
+
     Once gradient tensors are aggregated across all workers, this hook applies
-    compression to the flattened input tensor that batches per-parameter tensors as follows:
+    compression as follows:
 
     1. Views the input flattened 1D gradient tensor as a square-shaped tensor M with 0 paddings;
 
@@ -448,20 +447,13 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     9. Truncates the input tensor to the original length.
 
-    This variant is faster than :meth:`powerSGD_hook` that runs layer-wise gradient compression,
-    but it usually results in a much lower accuracy, unless ``matrix_approximation_rank`` in the state is 1.
-    Increasing ``matrix_approximation_rank`` may not necessarily increase the accuracy,
-    because batching per-parameter tensors without column/row alignment can destroy low-rank structure.
-    Therefore, the user should always consider :meth:`powerSGD_hook` first,
-    and only consider this variant when a satisfying accuracy can be achieved when ``matrix_approximation_rank`` is 1.
-
     Note that this communication hook enforces vanilla allreduce for the first ``state.start_powerSGD_iter`` iterations.
-    This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
-    but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
+    This not only gives the user more control over the tradeoff between speedup and accuracy,
+    but also helps abstract away some complexity of the internal optimization of DDP for future communication hook developers.
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
-            To tune the compression configs, see Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``].
+            To tune the compression configs, mainly need to tune ``matrix_approximation_rank`` and ``start_powerSGD_iter``.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
@@ -578,7 +570,6 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             state.p_memory_dict[bucket_index],
             out=state.q_memory_dict[bucket_index],
         )
-
 
         # TODO: The above procedure does two matmul+allreduce steps per iteration --
         # one left multiplication and one right multiplication.

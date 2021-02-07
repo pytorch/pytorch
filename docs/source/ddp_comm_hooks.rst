@@ -16,13 +16,12 @@ strategies for more advanced use cases.
     DDP communication hooks can only support single process single device mode
     on NCCL backend.
 
-How to Use A Communication Hook?
+How to Use a Communication Hook?
 --------------------------------
 
 To use a communication hook, the user just needs to let the DDP model register
-the hook before the training loop.
-
-.. automethod:: torch.nn.parallel.DistributedDataParallel.register_comm_hook
+the hook before the training loop by calling
+:func:`torch.nn.parallel.DistributedDataParallel.register_comm_hook`.
 
 Default Communication Hooks
 ---------------------------
@@ -36,10 +35,12 @@ in ``register_comm_hook`` is either a process group or ``None``.
 PowerSGD Communication Hook
 ---------------------------
 
-PowerSGD communication hook is a **stateful** hook used for gradient
-compression, and the user needs to provide a state defined as below.
-The performance is `on par with <https://observablehq.com/@tvogels/powersgd-benchmark>`_
-the implementation in the original `paper <https://arxiv.org/abs/1905.13727>`_.
+PowerSGD (`Vogels et al., NeurIPS 2019 <https://arxiv.org/abs/1905.13727>`_)
+is a gradient compression algorithm, which can provide very high compression
+rates and accelerate bandiwth-bound distributed training.
+This algorithm needs to maintain both some hyperparameters and the internal
+state. Therefore, PowerSGD communication hook is a **stateful** hook,
+and the user needs to provide a state object defined as below.
 
 PowerSGD State
 ^^^^^^^^^^^^^^^^
@@ -51,8 +52,9 @@ PowerSGD Hooks
 ^^^^^^^^^^^^^^^^
 
 .. warning ::
-    PowerSGD requires an extra copy of gradients for error feedback,
-    which may be infeasible for use cases that have a memory constraint.
+    PowerSGD typically requires extra memory of the same size as the model's
+    gradients to enable error feedback, which can compensate for biased
+    compressed communication and improve accuracy.
 
 .. warning ::
     The current implementation may cause gradient overflow for FP16 input.
@@ -63,6 +65,8 @@ PowerSGD Hooks
 Acknowledgements
 ----------------
 
-Thanks PowerSGD paper author Thijs Vogels for the code review on PowerSGD
-communication hook and the
-`comparison experiments <https://observablehq.com/@tvogels/powersgd-benchmark>`_.
+Many thanks to PowerSGD paper author **Thijs Vogels** for the code review on
+PowerSGD communication hook, as well as the
+`comparison experiments <https://observablehq.com/@tvogels/powersgd-benchmark>`_,
+which show that the performance of PowerSGD communication hook is on par with
+the implementation in the original `paper <https://arxiv.org/abs/1905.13727>`_.
