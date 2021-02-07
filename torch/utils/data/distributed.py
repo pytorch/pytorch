@@ -1,5 +1,5 @@
 import math
-from typing import TypeVar, Optional, Iterator
+from typing import Optional, Iterator
 
 import torch
 from . import Sampler, Dataset
