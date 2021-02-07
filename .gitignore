@@ -109,6 +109,7 @@ torch/version.py
 # E.g., see .circleci/config.yaml
 env
 .circleci/scripts/COMMIT_MSG
+scripts/release_notes/*.json
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
