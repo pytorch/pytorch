@@ -1744,6 +1744,21 @@ op_db: List[OpInfo] = [
            decorators=[_wrap_maybe_warns("floor_divide is deprecated, and will be removed")],
            supports_autograd=False,
            ),
+    OpInfo('linalg.eig',
+           aten_name='linalg_eig',
+           op=torch.linalg.eig,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor,
+           #  not torch.return_types.linalg_eig
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_linalg_inv,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # TODO: RuntimeError: derivative for linalg_eig is not implemented
+               SkipInfo('TestGradients'),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'))),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),

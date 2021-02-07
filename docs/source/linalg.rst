@@ -20,6 +20,7 @@ Functions
 .. autofunction:: cond
 .. autofunction:: det
 .. autofunction:: slogdet
+.. autofunction:: eig
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
 .. autofunction:: matrix_rank
