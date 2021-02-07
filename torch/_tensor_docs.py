@@ -2807,6 +2807,21 @@ rad2deg_() -> Tensor
 In-place version of :meth:`~Tensor.rad2deg`
 """)
 
+add_docstr_all('degrees',
+               r"""
+degrees() -> Tensor
+
+Alias for :func:`rad2deg`
+""")
+
+add_docstr_all('degrees_',
+               r"""
+degrees_() -> Tensor
+
+In-place version of :meth:`~Tensor.degrees`
+Alias for :func:`rad2deg_`
+""")
+
 add_docstr_all('deg2rad',
                r"""
 deg2rad() -> Tensor
@@ -2819,6 +2834,21 @@ add_docstr_all('deg2rad_',
 deg2rad_() -> Tensor
 
 In-place version of :meth:`~Tensor.deg2rad`
+""")
+
+add_docstr_all('radians',
+               r"""
+radians() -> Tensor
+
+Alias for :func:`deg2rad`
+""")
+
+add_docstr_all('radians_',
+               r"""
+radians_() -> Tensor
+
+In-place version of :meth:`~Tensor.radians`
+Alias for :func:`deg2rad_`
 """)
 
 add_docstr_all('ravel',

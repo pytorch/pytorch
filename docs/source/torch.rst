@@ -289,6 +289,7 @@ Pointwise Ops
     cos
     cosh
     deg2rad
+    degrees
     div
     divide
     digamma
@@ -335,6 +336,7 @@ Pointwise Ops
     polygamma
     pow
     rad2deg
+    radians
     real
     reciprocal
     remainder

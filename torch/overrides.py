@@ -355,6 +355,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cumsum: lambda input, dim, out=None, dtype=None: -1,
         torch.logcumsumexp: lambda input, dim, out=None: -1,
         torch.deg2rad: lambda input, out=None: -1,
+        torch.degrees: lambda input, out=None: -1,
         torch.dequantize: lambda input: -1,
         torch.det: lambda input: -1,
         torch.linalg.det: lambda input: -1,  # alias for torch.det  # type: ignore[attr-defined]
@@ -756,6 +757,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.quantized_rnn_tanh_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                         col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
         torch.rad2deg: lambda input, out=None: -1,
+        torch.radians: lambda input, out=None: -1,
         torch.rand_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.randint_like: lambda input, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
