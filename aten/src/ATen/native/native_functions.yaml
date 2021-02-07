@@ -3039,7 +3039,6 @@
     DefaultBackend: degrees_
 
 - func: degrees.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: degrees_out
 
@@ -3069,7 +3068,6 @@
     DefaultBackend: radians_
 
 - func: radians.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: radians_out
 

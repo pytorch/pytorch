@@ -148,7 +148,7 @@ Tensor rad2deg(const Tensor& self) {
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
 // degrees, alias for rad2deg
-Tensor& degrees_out(Tensor& result, const Tensor& self) { return at::rad2deg_out(result, self); }
+Tensor& degrees_out(const Tensor& self, Tensor& result) { return at::rad2deg_out(result, self); }
 Tensor degrees(const Tensor& self) { return self.rad2deg(); }
 Tensor& degrees_(Tensor& self) { return self.rad2deg_(); }
 
@@ -171,7 +171,7 @@ Tensor deg2rad(const Tensor& self) {
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
 // radians, alias for rad2deg
-Tensor& radians_out(Tensor& result, const Tensor& self) { return at::deg2rad_out(result, self); }
+Tensor& radians_out(const Tensor& self, Tensor& result) { return at::deg2rad_out(result, self); }
 Tensor radians(const Tensor& self) { return self.deg2rad(); }
 Tensor& radians_(Tensor& self) { return self.deg2rad_(); }
 
