@@ -1,6 +1,5 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 
-from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set, Union
 from torch.package._mangling import demangle as _demangle
 import torch
