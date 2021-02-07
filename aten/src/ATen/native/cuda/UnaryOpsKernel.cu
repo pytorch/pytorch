@@ -259,8 +259,23 @@ void frexp_kernel_cuda(TensorIterator& iter) {
       using T_ACC = acc_type<scalar_t, true>;
       gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, scalar_t> {
         int exponent;
-        scalar_t mantissa = std::frexp(a, &exponent);
+        #if defined(__HIP_PLATFORM_HCC__)
+        // Reference: https://rocmdocs.amd.com/en/latest/Programming_Guides/HIP-GUIDE.html
+        //            https://en.cppreference.com/w/cpp/numeric/math/frexp
+        // The frexp functions on ROCM platform are different from cpp std library,
+        // the return types of frexp are always double regardless of the input type.
+        // ROCM:
+        //   double frexp ( float x, int *nptr )
+        //   float frexpf ( float x, int *nptr )
+        // CPP:
+        //   float       frexp ( float arg, int* exp );
+        //   double      frexp ( double arg, int* exp );
+        double mantissa = ::frexp(a, &exponent);
+        return {static_cast<T_ACC>(mantissa), static_cast<T_ACC>(exponent)};
+        #else
+        scalar_t mantissa = ::frexp(a, &exponent);
         return {mantissa, static_cast<T_ACC>(exponent)};
+        #endif
       });
   });
 }
