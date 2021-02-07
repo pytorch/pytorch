@@ -154,6 +154,43 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 // size to avoid redundant kernels for different types of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
+template <typename scalar_t>
+void index_fill_kernel_impl(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
+  scalar_t fill_val) {
+  if (0 == iter.numel()) {
+    return;
+  }
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      index_fill_kernel_impl(sub_iter, dim, self_dim_size, self_dim_stride, fill_val);
+    }
+    return;
+  }
+
+  char* __restrict__ self_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  char* __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
+
+  auto offset_calc = make_offset_calculator<2>(iter);
+
+  auto loop = [=]C10_DEVICE(int i) {
+    auto offsets = offset_calc.get(i);
+
+    auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
+    auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
+    CUDA_KERNEL_ASSERT(idx >= -self_dim_size && idx < self_dim_size && "index out of bounds");
+    if (idx < 0) {
+      idx += self_dim_size;
+    }
+
+    self_data[idx * self_dim_stride] = fill_val;
+  };
+  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
+}
 
 template <typename scalar_t>
 void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
@@ -173,6 +210,22 @@ static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayR
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_kernel_impl<dtype>(iter, index_size, index_stride);
+  });
+}
+
+static void index_fill_kernel(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
+  Scalar source) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+    iter.dtype(), "index_fill_cuda", [&] {
+    using dtype = OpaqueType<sizeof(scalar_t)>;
+    auto fill_val = source.to<scalar_t>();
+    auto fill_val_opaque = *reinterpret_cast<dtype*>(&fill_val);
+    index_fill_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride, fill_val_opaque);
   });
 }
 
@@ -282,11 +335,14 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   thrust::device_ptr<int64_t> maskPrefixSumData(
       maskPrefixSum.data_ptr<int64_t>());
 
+  // Reference for using static_cast on `init_value`:
+  // https://github.com/NVIDIA/thrust/issues/1379
   thrust::exclusive_scan(
       thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
       maskData,
       maskData + mask_cont.numel(),
-      maskPrefixSumData);
+      maskPrefixSumData,
+      static_cast<int64_t>(0));
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
@@ -302,7 +358,7 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
       .add_input(maskPrefixSum)
       .build();
 
-  AT_DISPATCH_ALL_TYPES_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool,
       ScalarType::BFloat16,
       ScalarType::Half,
@@ -356,6 +412,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
 }
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 
 }} // namespace at::native
