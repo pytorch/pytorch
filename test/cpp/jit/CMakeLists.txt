@@ -8,7 +8,7 @@ add_library(torchbind_test SHARED
 )
 target_link_libraries(torchbind_test torch)
 
-add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend.cpp)
+add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend_lib.cpp)
 target_link_libraries(jitbackend_test torch)
 
 if(INSTALL_TEST)
@@ -22,6 +22,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
+  ${JIT_TEST_ROOT}/test_backend.cpp
   ${JIT_TEST_ROOT}/test_class_import.cpp
   ${JIT_TEST_ROOT}/test_class_parser.cpp
   ${JIT_TEST_ROOT}/test_class_type.cpp
@@ -74,7 +75,7 @@ if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
 endif()
 
-set(JIT_TEST_DEPENDENCIES torch gtest)
+set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test)
 
 if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)
