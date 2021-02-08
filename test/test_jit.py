@@ -1275,6 +1275,15 @@ graph(%Ra, %Rb):
         torch._C._jit_pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
         FileCheck().run(input_str, graph)
 
+    def test_script_tensor_type(self):
+        def foo(x, t: torch.dtype):
+            return x.type(t)
+        scr = torch.jit.script(foo)
+        x = torch.rand(3, 4)
+        for t in [torch.int8, torch.float64, torch.float32,
+                  torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
+            self.assertEqual(scr(x, t), foo(x, t))
+
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
           %1 : Bool()):
