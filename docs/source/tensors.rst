@@ -10,27 +10,27 @@ a single data type.
 
 Torch defines 10 tensor types with CPU and GPU variants which are as follows:
 
-========================== ===========================================   ============================= ================================
-Data type                  dtype                                         CPU tensor                    GPU tensor
-========================== ===========================================   ============================= ================================
-32-bit floating point      ``torch.float32`` or ``torch.float``          :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
-64-bit floating point      ``torch.float64`` or ``torch.double``         :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
-16-bit floating point [1]_ ``torch.float16`` or ``torch.half``           :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
-16-bit floating point [2]_ ``torch.bfloat16``                            :class:`torch.BFloat16Tensor` :class:`torch.cuda.BFloat16Tensor`
-32-bit complex             ``torch.complex32``
-64-bit complex             ``torch.complex64``
-128-bit complex            ``torch.complex128`` or ``torch.cdouble``
-8-bit integer (unsigned)   ``torch.uint8``                               :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
-8-bit integer (signed)     ``torch.int8``                                :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
-16-bit integer (signed)    ``torch.int16`` or ``torch.short``            :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
-32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
-64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
-Boolean                    ``torch.bool``                                :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
-quantized 8-bit integer (unsigned)   ``torch.quint8``                    :class:`torch.ByteTensor`     /
-quantized 8-bit integer (signed)     ``torch.qint8``                     :class:`torch.CharTensor`     /
-quantized 32-bit integer (signed)   ``torch.qfint32``                    :class:`torch.IntTensor`      /
-quantized 4-bit integer (unsigned) [3]_    ``torch.quint4x2``            :class:`torch.ByteTensor`     /
-========================== ===========================================   ============================= ================================
+======================================= =========================================== ============================= ================================
+Data type                               dtype                                       CPU tensor                    GPU tensor
+======================================= =========================================== ============================= ================================
+32-bit floating point                   ``torch.float32`` or ``torch.float``        :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
+64-bit floating point                   ``torch.float64`` or ``torch.double``       :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
+16-bit floating point [1]_              ``torch.float16`` or ``torch.half``         :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
+16-bit floating point [2]_              ``torch.bfloat16``                          :class:`torch.BFloat16Tensor` :class:`torch.cuda.BFloat16Tensor`
+32-bit complex                          ``torch.complex32``
+64-bit complex                          ``torch.complex64``
+128-bit complex                         ``torch.complex128`` or ``torch.cdouble``
+8-bit integer (unsigned)                ``torch.uint8``                             :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
+8-bit integer (signed)                  ``torch.int8``                              :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
+16-bit integer (signed)                 ``torch.int16`` or ``torch.short``          :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
+32-bit integer (signed)                 ``torch.int32`` or ``torch.int``            :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
+64-bit integer (signed)                 ``torch.int64`` or ``torch.long``           :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
+Boolean                                 ``torch.bool``                              :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
+quantized 8-bit integer (unsigned)      ``torch.quint8``                            :class:`torch.ByteTensor`     /
+quantized 8-bit integer (signed)        ``torch.qint8``                             :class:`torch.CharTensor`     /
+quantized 32-bit integer (signed)       ``torch.qfint32``                           :class:`torch.IntTensor`      /
+quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``                          :class:`torch.ByteTensor`     /
+======================================= =========================================== ============================= ================================
 
 .. [1]
   Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
