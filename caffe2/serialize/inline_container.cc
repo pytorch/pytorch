@@ -115,11 +115,11 @@ void PyTorchStreamReader::init() {
   // version check
   at::DataPtr version_ptr;
   size_t version_size;
-  if (hasRecord("version")) {
-    std::tie(version_ptr, version_size) = getRecord("version");
-  } else {
-    TORCH_CHECK(hasRecord(".data/version"))
+  if (hasRecord(".data/version")) {
     std::tie(version_ptr, version_size) = getRecord(".data/version");
+  } else {
+    TORCH_CHECK(hasRecord("version"))
+    std::tie(version_ptr, version_size) = getRecord("version");
   }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
