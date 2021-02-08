@@ -166,7 +166,7 @@ at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writable/*=true*/) 
 
   // warn_if_not_writable is true when a copy of numpy variable is created.
   // the warning is suppressed when a copy is being created.
-  if (!PyArray_ISWRITEABLE(array) && warn_if_not_writable) {
+  if (!PyArray_ISWRITABLE(array) && warn_if_not_writable) {
     TORCH_WARN_ONCE(
       "The given NumPy array is not writable, and PyTorch does "
       "not support non-writable tensors. This means writing to this tensor"
