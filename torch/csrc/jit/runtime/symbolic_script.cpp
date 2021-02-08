@@ -403,6 +403,23 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return torch.matmul(self, other), backward
+
+        def linear(input : Tensor,
+                   weight : Tensor,
+                   bias : Optional[Tensor]):
+            result = torch.linear(input, weight, bias)
+ 
+            def backward(grad_output):
+                if bias is not None:
+                   grad_bias = grad_output._grad_sum_to_size(bias.size())
+                else:
+                   grad_bias = None
+
+                weight_size = weight.size()
+                grad_input = torch.matmul(grad_output, weight)
+                grad_weight = torch.matmul(grad_output.reshape(-1, weight_size[0]).t(), input.reshape(-1, weight_size[1]))
+                return grad_input, grad_weight, grad_bias
+            return result, backward
     )",
     R"(
         def addcmul(self,
