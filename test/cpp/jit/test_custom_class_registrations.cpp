@@ -226,20 +226,19 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 
 TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<DefaultArgs>("_DefaultArgs")
-      .def(torch::init<int64_t>(), "", torch::arg("start") = 3)
-      .def("increment", &DefaultArgs::increment, "", torch::arg("val") = 1)
-      .def("decrement", &DefaultArgs::decrement, "", torch::arg("val") = 1)
+      .def(torch::init<int64_t>(), "", {torch::arg("start") = 3})
+      .def("increment", &DefaultArgs::increment, "", {torch::arg("val") = 1})
+      .def("decrement", &DefaultArgs::decrement, "", {torch::arg("val") = 1})
       .def(
           "scale_add",
           &DefaultArgs::scale_add,
           "",
-          torch::arg("add"),
-          torch::arg("scale") = 1)
+          {torch::arg("add"), torch::arg("scale") = 1})
       .def(
           "divide",
           &DefaultArgs::divide,
           "",
-          torch::arg("factor") = torch::arg::none());
+          {torch::arg("factor") = torch::arg::none()});
 
   m.class_<Foo>("_Foo")
       .def(torch::init<int64_t, int64_t>())
