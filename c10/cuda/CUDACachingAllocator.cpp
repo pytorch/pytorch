@@ -221,21 +221,21 @@ private:
         std::regex exp("[:]+");
         std::sregex_token_iterator it(option.begin(), option.end(), exp, -1);
         std::sregex_token_iterator end;
-	std::vector<std::string> kv(it, end);
-	if (kv.size() >= 2) {
+        std::vector<std::string> kv(it, end);
+        if (kv.size() >= 2) {
           /* Maximum split size in MB.  Limited to large size blocks */
           if (kv[0].compare("max_split_size_mb") == 0) {
             size_t val = stoi(kv[1]);
-	    TORCH_CHECK(val > kLargeBuffer/(1024*1024), "CachingAllocator option max_split_size_mb too small, must be >= ",
+            TORCH_CHECK(val > kLargeBuffer/(1024*1024), "CachingAllocator option max_split_size_mb too small, must be >= ",
               kLargeBuffer/(1024*1024), "");
-	    val = std::max(val, kLargeBuffer/(1024*1024));
-	    val = std::min(val, (std::numeric_limits<size_t>::max() / (1024*1024)));
+            val = std::max(val, kLargeBuffer/(1024*1024));
+            val = std::min(val, (std::numeric_limits<size_t>::max() / (1024*1024)));
             m_max_split_size = val * 1024 * 1024;
           }
-	  else {
+          else {
             TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
           }
-	}
+        }
       }
     }
   }
@@ -798,14 +798,14 @@ class DeviceCachingAllocator {
               && ((*it)->stream == p.stream())) {
           auto cur = it;
           totalReleased += (*it)->size;
-	  if (it != pool.begin()) {
+          if (it != pool.begin()) {
             --it;
             release_block(*cur);
-	  }
-	  else {
+          }
+          else {
             release_block(*cur);
-	    break;
-	  }
+            break;
+          }
       }
       if (totalReleased < key.size)
         return false;
