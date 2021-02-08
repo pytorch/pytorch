@@ -59,12 +59,12 @@ class PackageImporter:
         elif isinstance(file_or_buffer, (Path, str)):
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                self.zip_reader = torch._C.PyTorchFileReader(self.filename, '.data/version')
+                self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
                 self.zip_reader = MockZipReader(self.filename)
         else:
             self.filename = '<binary>'
-            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer, '.data/version')
+            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
 
         self.root = _PackageNode(None)
         self.modules = {}
@@ -174,6 +174,10 @@ class PackageImporter:
         unpickler.persistent_load = persistent_load
         result = unpickler.load()
 
+        # TODO from zdevito:
+        #   This stateful weird function will need to be removed in our efforts
+        #   to unify the format. It has a race condition if multiple python
+        #   threads try to read independent files
         torch._utils._validate_loaded_sparse_tensors()
 
         return result
