@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 from typing import List, Optional
 
-# TODO: use foreach API in optim.functional to do all the computation
+# TODO: use foreach API in optim._functional to do all the computation
 
 def _make_sparse(grad, grad_indices, values):
     size = grad.size()
