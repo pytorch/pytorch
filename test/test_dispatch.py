@@ -1,5 +1,6 @@
 import torch._C as C
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
 import itertools
@@ -138,6 +139,7 @@ class TestDispatch(TestCase):
                 if not expect_raises:
                     raise
                 actual = str(e).replace(test_namespace, "test")
+                actual = actual.split("\nException raised from ")[0]
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
                     Result(actual, "", "error after running ctors {}".format(ctor_order[:i + 1]))
@@ -751,6 +753,138 @@ Math[alias]: fn2 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Math[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 '''
         )
+
+class TestPythonDispatcher(TestCase):
+    def test_basic(self):
+        dispatcher = PythonDispatcher()
+        dispatcher.register(["CPU", "XLA", "Math"])
+        self.assertExpectedInline(
+            dispatcher.dispatchTable(),
+            '''\
+
+Computed Dispatch Table
+key             kernel
+---------------------------
+CPU             fn_CPU [kernel]
+XLA             fn_XLA [kernel]
+QuantizedCPU    fn_Math [math kernel]
+AutogradOther   fn_Math [math kernel]
+AutogradCPU     fallthrough [backend fallback]
+AutogradXLA     fallthrough [backend fallback]
+'''
+        )
+
+    def test_math_autogradcpu(self):
+        dispatcher = PythonDispatcher()
+        dispatcher.register(["CPU", "XLA", "Math", "AutogradCPU"])
+        self.assertExpectedInline(
+            dispatcher.dispatchTable(),
+            '''\
+
+Computed Dispatch Table
+key             kernel
+---------------------------
+CPU             fn_CPU [kernel]
+XLA             fn_XLA [kernel]
+QuantizedCPU    fn_Math [math kernel]
+AutogradOther   fn_Math [math kernel]
+AutogradCPU     fn_AutogradCPU [kernel]
+AutogradXLA     fallthrough [backend fallback]
+'''
+        )
+        self.assertExpectedInline(
+            dispatcher.registrations(),
+            '''\
+
+Registered Kernels
+key             kernel
+---------------------------
+CPU             fn_CPU
+XLA             fn_XLA
+AutogradCPU     fn_AutogradCPU
+Math[alias]     fn_Math
+'''
+        )
+
+    def test_defaultbackend_autogradcpu(self):
+        dispatcher = PythonDispatcher()
+        dispatcher.register(["CPU", "XLA", "DefaultBackend", "AutogradCPU"])
+        self.assertExpectedInline(
+            dispatcher.dispatchTable(),
+            '''\
+
+Computed Dispatch Table
+key             kernel
+---------------------------
+CPU             fn_CPU [kernel]
+XLA             fn_XLA [kernel]
+QuantizedCPU    fn_DefaultBackend [default backend kernel]
+AutogradOther   fallthrough [backend fallback]
+AutogradCPU     fn_AutogradCPU [kernel]
+AutogradXLA     fallthrough [backend fallback]
+'''
+        )
+
+        self.assertExpectedInline(
+            dispatcher.registrations(),
+            '''\
+
+Registered Kernels
+key             kernel
+---------------------------
+CPU             fn_CPU
+XLA             fn_XLA
+AutogradCPU     fn_AutogradCPU
+DefaultBackend[alias] fn_DefaultBackend
+'''
+        )
+
+    def test_autogradother(self):
+        dispatcher = PythonDispatcher()
+        dispatcher.register(["CPU", "QuantizedCPU", "Math"])
+        self.assertExpectedInline(
+            dispatcher.dispatchTable(),
+            '''\
+
+Computed Dispatch Table
+key             kernel
+---------------------------
+CPU             fn_CPU [kernel]
+XLA             fn_Math [math kernel]
+QuantizedCPU    fn_QuantizedCPU [kernel]
+AutogradOther   ambiguous_autogradother [ambiguous autogradother]
+AutogradCPU     fallthrough [backend fallback]
+AutogradXLA     fn_Math [math kernel]
+'''
+        )
+
+        self.assertExpectedInline(
+            dispatcher.registrations(),
+            '''\
+
+Registered Kernels
+key             kernel
+---------------------------
+CPU             fn_CPU
+QuantizedCPU    fn_QuantizedCPU
+Math[alias]     fn_Math
+'''
+        )
+
+    def test_duplicate_registrations(self):
+        dispatcher = PythonDispatcher()
+
+        with self.assertRaisesRegex(RuntimeError, r"Overriden is not allowed"):
+            dispatcher.register(["CPU", "CPU"])
+
+    def test_defaultbackend_math(self):
+        dispatcher = PythonDispatcher()
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"Registration to both Math and DefaultBackend is not allowed"):
+            dispatcher.register(["DefaultBackend", "Math"])
+
 
 if __name__ == '__main__':
     run_tests()
