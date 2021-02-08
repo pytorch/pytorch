@@ -1,4 +1,5 @@
 from unittest import skipIf
+import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
@@ -506,6 +507,24 @@ def load():
         hi = PackageImporter(filename)
         with self.assertRaises(NotImplementedError):
             hi.load_pickle('obj', 'obj.pkl')
+
+    def test_inspect_class(self):
+        """Should be able to retrieve source for a packaged class."""
+        import package_a.subpackage
+        buffer = BytesIO()
+        obj = package_a.subpackage.PackageASubpackageObject()
+
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_pickle('obj', 'obj.pkl', obj)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        packaged_class = pi.import_module('package_a.subpackage').PackageASubpackageObject
+        regular_class = package_a.subpackage.PackageASubpackageObject
+
+        packaged_src = inspect.getsourcelines(packaged_class)
+        regular_src = inspect.getsourcelines(regular_class)
+        self.assertEqual(packaged_src, regular_src)
 
 
 class ManglingTest(TestCase):

@@ -1,4 +1,4 @@
-from functools import reduce, wraps
+from functools import reduce, wraps, partial
 from itertools import product, combinations_with_replacement
 from operator import mul, itemgetter
 import collections

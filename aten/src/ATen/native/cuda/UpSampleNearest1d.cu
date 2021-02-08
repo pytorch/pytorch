@@ -81,7 +81,7 @@ __global__ void upsample_nearest1d_backward_out_frame(
 }
 
 static void upsample_nearest1d_out_cuda_template(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
     c10::optional<double> scales) {
@@ -135,7 +135,7 @@ static void upsample_nearest1d_out_cuda_template(
 }
 
 static void upsample_nearest1d_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
@@ -202,7 +202,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales,
-    Tensor& output
+    const Tensor& output
 ) {
   upsample_nearest1d_out_cuda_template(output, input, output_size, scales);
 }
@@ -212,7 +212,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<double> scales,
-    Tensor& grad_input
+    const Tensor& grad_input
 ) {
   upsample_nearest1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales);
