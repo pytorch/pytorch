@@ -12,8 +12,8 @@ def default_fn(data):
     return data
 
 
-class CallableIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`CallableIterDataPipe`.
+class MapIterDataPipe(IterDataPipe[T_co]):
+    r""" :class:`MapIterDataPipe`.
 
     Iterable DataPipe to run a function over each item from the source DataPipe.
     args:
@@ -48,7 +48,7 @@ class CallableIterDataPipe(IterDataPipe[T_co]):
         raise NotImplementedError
 
 
-class CollateIterDataPipe(CallableIterDataPipe):
+class CollateIterDataPipe(MapIterDataPipe):
     r""" :class:`CollateIterDataPipe`.
 
     Iterable DataPipe to collate samples from datapipe to Tensor(s) by `util_.collate.default_collate`,

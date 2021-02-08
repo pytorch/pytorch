@@ -188,8 +188,8 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_picklable(self):
         arr = range(10)
         picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, List, Dict[str, Any]]] = [
-            (dp.iter.Callable, IDP(arr), [], {}),
-            (dp.iter.Callable, IDP(arr), [0], {'fn': _fake_fn, 'test': True}),
+            (dp.iter.Map, IDP(arr), [], {}),
+            (dp.iter.Map, IDP(arr), [0], {'fn': _fake_fn, 'test': True}),
             (dp.iter.Collate, IDP(arr), [], {}),
             (dp.iter.Collate, IDP(arr), [0], {'collate_fn': _fake_fn, 'test': True}),
             (dp.iter.Filter, IDP(arr), [0], {'filter_fn': _fake_filter_fn, 'test': True}),
@@ -198,7 +198,7 @@ class TestFunctionalIterDataPipe(TestCase):
             p = pickle.dumps(dpipe(input_dp, *args, **kargs))  # type: ignore
 
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, List, Dict[str, Any]]] = [
-            (dp.iter.Callable, IDP(arr), [], {'fn': lambda x: x}),
+            (dp.iter.Map, IDP(arr), [], {'fn': lambda x: x}),
             (dp.iter.Collate, IDP(arr), [], {'collate_fn': lambda x: x}),
             (dp.iter.Filter, IDP(arr), [], {'filter_fn': lambda x: x >= 5}),
         ]
@@ -206,7 +206,7 @@ class TestFunctionalIterDataPipe(TestCase):
             with self.assertRaises(AttributeError):
                 p = pickle.dumps(dpipe(input_dp, *args, **kargs))  # type: ignore
 
-    def test_callable_datapipe(self):
+    def test_map_datapipe(self):
         arr = range(10)
         input_dp = IDP(arr)
         input_dp_nl = IDP_NoLen(arr)
@@ -215,20 +215,20 @@ class TestFunctionalIterDataPipe(TestCase):
             data = torch.tensor(item, dtype=dtype)
             return data if not sum else data.sum()
 
-        callable_dp = dp.iter.Callable(input_dp, fn=fn)  # type: ignore
-        self.assertEqual(len(input_dp), len(callable_dp))
-        for x, y in zip(callable_dp, input_dp):
+        map_dp = dp.iter.Map(input_dp, fn=fn)  # type: ignore
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
-        callable_dp = dp.iter.Callable(input_dp, torch.int, fn=fn, sum=True)  # type: ignore
-        self.assertEqual(len(input_dp), len(callable_dp))
-        for x, y in zip(callable_dp, input_dp):
+        map_dp = dp.iter.Map(input_dp, torch.int, fn=fn, sum=True)  # type: ignore
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
 
-        callable_dp_nl = dp.iter.Callable(input_dp_nl)  # type: ignore
+        map_dp_nl = dp.iter.Map(input_dp_nl)  # type: ignore
         with self.assertRaises(NotImplementedError):
-            len(callable_dp_nl)
-        for x, y in zip(callable_dp_nl, input_dp_nl):
+            len(map_dp_nl)
+        for x, y in zip(map_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
     def test_collate_datapipe(self):
