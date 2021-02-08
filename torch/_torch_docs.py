@@ -3850,8 +3850,7 @@ Example::
             [-1.1734,  0.7230]])
 """.format(**common_args))
 
-add_docstr(torch.inverse,
-           r"""
+add_docstr(torch.inverse, r"""
 inverse(input, *, out=None) -> Tensor
 
 Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batches
@@ -3859,6 +3858,8 @@ of 2D square tensors, in which case this function would return a tensor composed
 individual inverses.
 
 Supports real and complex input.
+
+.. note:: :func:`torch.inverse` is deprecated. Please use :func:`torch.linalg.inv` instead.
 
 .. note::
 
@@ -4974,9 +4975,8 @@ Example::
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """.format(**common_args))
 
-add_docstr(torch.matrix_rank,
-           r"""
-matrix_rank(input, tol=None, symmetric=False) -> Tensor
+add_docstr(torch.matrix_rank, r"""
+matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
@@ -4989,11 +4989,17 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
+.. note:: :func:`torch.matrix_rank` is deprecated. Please use :func:`torch.linalg.matrix_rank` instead.
+          The parameter :attr:`symmetric` was renamed in :func:`torch.linalg.matrix_rank` to ``hermitian``.
+
 Args:
     input (Tensor): the input 2-D tensor
     tol (float, optional): the tolerance value. Default: ``None``
     symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
                                Default: ``False``
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -5004,7 +5010,7 @@ Example::
     >>> b[0, 0] = 0
     >>> torch.matrix_rank(b)
     tensor(9)
-""")
+""".format(**common_args))
 
 add_docstr(torch.matrix_power,
            r"""
@@ -8482,8 +8488,7 @@ Example::
 .. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
-add_docstr(torch.symeig,
-           r"""
+add_docstr(torch.symeig, r"""
 symeig(input, eigenvectors=False, upper=True, *, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
@@ -9227,6 +9232,91 @@ Example::
     tensor([ 3.,  0., -0., -0.])
 """.format(**common_args))
 
+add_docstr(torch.fake_quantize_per_tensor_affine,
+           r"""
+fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+
+Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`scale`,
+:attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`.
+
+.. math::
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
+
+Args:
+    input (Tensor): the input value(s), in ``torch.float32``.
+    scale (double): quantization scale
+    zero_point (int64): quantization zero_point
+    quant_min (int64): lower bound of the quantized domain
+    quant_max (int64): upper bound of the quantized domain
+
+Returns:
+    Tensor: A newly fake_quantized tensor
+
+Example::
+
+    >>> x = torch.randn(4)
+    >>> x
+    tensor([ 0.0552,  0.9730,  0.3973, -1.0780])
+    >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
+    tensor([0.1000, 1.0000, 0.4000, 0.0000])
+""")
+
+add_docstr(torch.fake_quantize_per_channel_affine,
+           r"""
+fake_quantize_per_channel_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+
+Returns a new tensor with the data in :attr:`input` fake quantized per channel using :attr:`scale`,
+:attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`, across the channel specified by :attr:`axis`.
+
+.. math::
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
+
+Args:
+    input (Tensor): the input value(s), in ``torch.float32``.
+    scale (Tensor): quantization scale, per channel
+    zero_point (Tensor): quantization zero_point, per channel
+    axis (int32): channel axis
+    quant_min (int64): lower bound of the quantized domain
+    quant_max (int64): upper bound of the quantized domain
+
+Returns:
+    Tensor: A newly fake_quantized per channel tensor
+
+Example::
+
+    >>> x = torch.randn(2, 2, 2)
+    >>> x
+    tensor([[[-0.2525, -0.0466],
+             [ 0.3491, -0.2168]],
+
+            [[-0.5906,  1.6258],
+             [ 0.6444, -0.0542]]])
+    >>> scales = (torch.randn(2) + 1) * 0.05
+    >>> scales
+    tensor([0.0475, 0.0486])
+    >>> zero_points = torch.zeros(2).to(torch.long)
+    >>> zero_points
+    tensor([0, 0])
+    >>> torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
+    tensor([[[0.0000, 0.0000],
+             [0.3405, 0.0000]],
+
+            [[0.0000, 1.6134],
+            [0.6323, 0.0000]]])
+""")
+
 add_docstr(torch.fix,
            r"""
 fix(input, *, out=None) -> Tensor
@@ -9561,21 +9651,22 @@ Keyword args:
     {memory_format}
 """.format(**factory_like_common_args))
 
-add_docstr(torch.det,
-           r"""
+add_docstr(torch.det, r"""
 det(input) -> Tensor
 
 Calculates determinant of a square matrix or batches of square matrices.
 
+.. note:: :func:`torch.det` is deprecated. Please use :func:`torch.linalg.det` instead.
+
 .. note::
-    Backward through :meth:`det` internally uses SVD results when :attr:`input` is
-    not invertible. In this case, double backward through :meth:`det` will be
-    unstable in when :attr:`input` doesn't have distinct singular values. See
-    :meth:`~torch.svd` for details.
+    Backward through :math:`det` internally uses SVD results when :attr:`input` is
+    not invertible. In this case, double backward through :math:`det` will be
+    unstable when :attr:`input` doesn't have distinct singular values. See
+    :math:`~torch.svd` for details.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
-                batch dimensions.
+                    batch dimensions.
 
 Example::
 
@@ -9740,12 +9831,14 @@ Example::
     torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
-add_docstr(torch.pinverse,
-           r"""
+add_docstr(torch.pinverse, r"""
 pinverse(input, rcond=1e-15) -> Tensor
 
 Calculates the pseudo-inverse (also known as the Moore-Penrose inverse) of a 2D tensor.
 Please look at `Moore-Penrose inverse`_ for more details
+
+.. note:: :func:`torch.pinverse` is deprecated. Please use :func:`torch.linalg.pinv` instead
+          which includes new parameters :attr:`hermitian` and :attr:`out`.
 
 .. note::
     This method is implemented using the Singular Value Decomposition.

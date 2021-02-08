@@ -82,7 +82,10 @@ class GroupByKeyIterDataPipe(IterDataPipe):
         else:
             for data in self.datapipe:
                 key = self.group_key_fn(data)
-                res = self.stream_buffer.get(key, []) + [data]
+                if key not in self.stream_buffer:
+                    self.stream_buffer[key] = []
+                res = self.stream_buffer[key]
+                res.append(data)
                 if len(res) == self.group_size:
                     yield self.sort_data_fn(res)
                     del self.stream_buffer[key]
@@ -92,7 +95,6 @@ class GroupByKeyIterDataPipe(IterDataPipe):
                         raise OverflowError(
                             "stream_buffer is overflow, please adjust the order of data "
                             "in the input datapipe or increase the buffer size!")
-                    self.stream_buffer[key] = res
                     self.curr_buffer_size = self.curr_buffer_size + 1
 
             if self.curr_buffer_size > 0:
