@@ -31,8 +31,9 @@ Default Communication Hooks
 Default communication hooks are simple **stateless** hooks, so the input state
 in ``register_comm_hook`` is either a process group or ``None``.
 
-.. automodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
-    :members:
+.. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
+.. autofunction:: allreduce_hook
+.. autofunction:: fp16_compress_hook
 
 PowerSGD Communication Hook
 ---------------------------
