@@ -3258,6 +3258,7 @@ and ``numpy.bool``.
 
 .. warning::     
     Writing to a tensor created from a read-only NumPy array is not supported and will result in undefined behavior.
+    
 Example::
 
     >>> a = numpy.array([1, 2, 3])
