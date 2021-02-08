@@ -1,14 +1,14 @@
 #include <gtest/gtest.h>
 
-#include "test/cpp/tensorexpr/test_base.h"
+#include <test/cpp/tensorexpr/test_base.h>
 
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <test/cpp/tensorexpr/padded_buffer.h>
+#include <test/cpp/tensorexpr/test_utils.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <cmath>
 #include <sstream>
@@ -73,7 +73,7 @@ TEST(Expr, LetStmtTest01) {
   Stmt* store_b = b_buf.store({0}, var);
   Block* block = Block::make({let_store, store_b});
 
-  SimpleIREvaluator eval(block, a_buf, b_buf);
+  SimpleIREvaluator eval(block, {a_buf, b_buf});
 
   PaddedBuffer<float> a_v(1);
   PaddedBuffer<float> b_v(1);
@@ -209,7 +209,7 @@ TEST(Expr, VectorAdd01) {
     b_v(i) = i * i * 4;
     c_ref(i) = a_v(i) + b_v(i);
   }
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
@@ -235,7 +235,7 @@ TEST(Expr, CompareSelectEQ) {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kEQ)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   ASSERT_EQ(a_buffer.size(), N);
@@ -280,7 +280,7 @@ TEST(Expr, CompareSelectDtypes) {
               FloatImm::make(2.78f),
               CompareSelectOperation::kEQ)));
 
-  SimpleIREvaluator ir_eval(select_expr, a, b, c);
+  SimpleIREvaluator ir_eval(select_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   ASSERT_EQ(a_buffer.size(), N);
@@ -302,9 +302,9 @@ TEST(Expr, IntrinsicsDtypes) {
   std::vector<double> b_ref(N, 10.0);
 
   VarHandle i("i", kInt);
-  auto fabs_expr = For::make(i, 0, N, b.store({i}, fabs(a.load(i))));
+  auto abs_expr = For::make(i, 0, N, b.store({i}, tensorexpr::abs(a.load(i))));
 
-  SimpleIREvaluator ir_eval(fabs_expr, a, b);
+  SimpleIREvaluator ir_eval(abs_expr, {a, b});
   ir_eval(a_buffer, b_buffer);
 
   ASSERT_EQ(a_buffer.size(), N);
@@ -377,7 +377,7 @@ TEST(Expr, UnaryMath01) {
        [](float v) { return std::tanh(v); }},
       {[](const ExprHandle& v) { return exp(v); },
        [](float v) { return std::exp(v); }},
-      {[](const ExprHandle& v) { return fabs(v); },
+      {[](const ExprHandle& v) { return tensorexpr::abs(v); },
        [](float v) { return std::fabs(v); }},
       {[](const ExprHandle& v) { return log(v); },
        [](float v) { return std::log(v); }},
@@ -407,6 +407,12 @@ TEST(Expr, UnaryMath01) {
     float v_ref = test_config.ref_func(input_v);
     SimpleIRExprEval eval(v);
     ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
+  }
+
+  for (float input_v : {std::nan("1"), 0., .5}) {
+    ExprHandle v = FloatImm::make(input_v);
+    SimpleIRExprEval eval(Intrinsics::make(kIsNan, v));
+    ASSERT_NEAR(eval.value<int>(), std::isnan(input_v), 0);
   }
 }
 
@@ -458,7 +464,7 @@ TEST(Expr, DynamicShapeAdd) {
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
-    SimpleIREvaluator(s, a, b, c, n)(aData, bData, cData, size);
+    SimpleIREvaluator(s, {a, b, c, n})(aData, bData, cData, size);
     ExpectAllNear(cData, std::vector<float>(size, 3.0f), 1e-7);
   };
   testWithSize(1);
@@ -477,7 +483,7 @@ void testCond01() {
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
   Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
   Stmt* for_stmt = For::make(index, 0, N, assign);
-  SimpleIREvaluator(for_stmt, a_buf)(a_v);
+  SimpleIREvaluator(for_stmt, {a_buf})(a_v);
 
   PaddedBuffer<float> a_ref(N);
   for (int i = 0; i < N; i++) {
@@ -539,8 +545,8 @@ void testStmtClone() {
   Stmt* cloned_loop = Stmt::clone(loop);
   std::vector<int> orig_loop_results(N);
   std::vector<int> cloned_loop_results(N);
-  SimpleIREvaluator(loop, a_buf)(orig_loop_results);
-  SimpleIREvaluator(cloned_loop, a_buf)(cloned_loop_results);
+  SimpleIREvaluator(loop, {a_buf})(orig_loop_results);
+  SimpleIREvaluator(cloned_loop, {a_buf})(cloned_loop_results);
 
   assertAllEqual(orig_loop_results, 5);
   assertAllEqual(cloned_loop_results, 5);
@@ -554,8 +560,8 @@ void testStmtClone() {
 
   std::vector<int> orig_loop_results_after_mutation(N);
   std::vector<int> cloned_loop_results_after_mutation(N);
-  SimpleIREvaluator(loop, a_buf)(orig_loop_results_after_mutation);
-  SimpleIREvaluator(cloned_loop, a_buf)(cloned_loop_results_after_mutation);
+  SimpleIREvaluator(loop, {a_buf})(orig_loop_results_after_mutation);
+  SimpleIREvaluator(cloned_loop, {a_buf})(cloned_loop_results_after_mutation);
 
   assertAllEqual(orig_loop_results_after_mutation, 5);
   assertAllEqual(cloned_loop_results_after_mutation, 33);

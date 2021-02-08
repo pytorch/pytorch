@@ -19,8 +19,6 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
-SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when saving or loading the scheduler."
-
 class _LRScheduler(object):
 
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
@@ -89,7 +87,7 @@ class _LRScheduler(object):
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
 
-        Arguments:
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
@@ -211,9 +209,10 @@ class LambdaLR(_LRScheduler):
         is not the optimizer.
         The learning rate lambda functions will only be saved if they are callable objects
         and not if they are functions or lambdas.
+
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
         """
 
-        warnings.warn(SAVE_STATE_WARNING, UserWarning)
         state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'lr_lambdas')}
         state_dict['lr_lambdas'] = [None] * len(self.lr_lambdas)
 
@@ -226,12 +225,13 @@ class LambdaLR(_LRScheduler):
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
 
-        Arguments:
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
+
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
 
-        warnings.warn(SAVE_STATE_WARNING, UserWarning)
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
         # Restore state_dict keys in order to prevent side effects
@@ -305,7 +305,7 @@ class MultiplicativeLR(_LRScheduler):
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
 
-        Arguments:
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """

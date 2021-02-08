@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
+#include <ATen/core/ivalue.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -28,6 +30,7 @@ inline int getPrecedence(IRNodeType ty) {
     case kPrimitive:
       return 0;
     case kCast:
+    case kBitCast:
       return 2;
     case kAdd:
     case kSub:
@@ -79,6 +82,34 @@ class Cast : public ExprNode<Cast> {
 template <typename T>
 ExprHandle cast(const ExprHandle& src_value) {
   return Cast::make(Dtype(ToDtype<T>(), src_value.dtype().lanes()), src_value);
+}
+
+// This is a bitwise cast, akin to bitcast in LLVM
+class BitCast : public ExprNode<BitCast> {
+ public:
+  const Expr* src_value() const {
+    return src_value_;
+  }
+  static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
+    return ExprHandle(new BitCast(dtype, src_value.node()));
+  }
+  BitCast(Dtype dtype, const Expr* src_value)
+      : ExprNodeBase(dtype, kBitCast), src_value_(src_value) {
+    TORCH_CHECK(src_value_->dtype().byte_size() == dtype.byte_size());
+  }
+
+  bool isConstant() const override {
+    return src_value_->isConstant();
+  }
+
+ private:
+  const Expr* src_value_;
+};
+
+template <typename T>
+ExprHandle bitcast(const ExprHandle& src_value) {
+  return BitCast::make(
+      Dtype(ToDtype<T>(), src_value.dtype().lanes()), src_value);
 }
 
 // Represent the expression node for binary operators.
@@ -150,69 +181,51 @@ class Mod : public BinaryOpNode<Mod> {
       : BinaryOpNode(lhs, rhs, IRNodeType::kMod) {}
 };
 
-class And : public BinaryOpNode<And> {
+template <typename Op>
+class BitwiseOpNode : public BinaryOpNode<Op> {
+ public:
+  BitwiseOpNode(const Expr* lhs, const Expr* rhs, IRNodeType type)
+      : BinaryOpNode<Op>(lhs, rhs, type) {}
+
+  static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
+    if (!lhs.dtype().is_integral()) {
+      throw unsupported_dtype();
+    }
+    if (lhs.dtype() != rhs.dtype()) {
+      throw malformed_input("lhs/rhs dtype mismatch");
+    }
+    return BinaryOpNode<Op>::make(lhs, rhs);
+  }
+};
+
+class And : public BitwiseOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
-    if (!lhs->dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in And");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kAnd) {}
 };
 
-class Or : public BinaryOpNode<Or> {
+class Or : public BitwiseOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
-    if (!lhs->dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in Or");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kOr) {}
 };
 
-class Xor : public BinaryOpNode<Xor> {
+class Xor : public BitwiseOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
-    if (!lhs->dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in Xor");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kXor) {}
 };
 
-class Lshift : public BinaryOpNode<Lshift> {
+class Lshift : public BitwiseOpNode<Lshift> {
  public:
   Lshift(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kLshift) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in Lshift");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kLshift) {}
 };
 
-class Rshift : public BinaryOpNode<Rshift> {
+class Rshift : public BitwiseOpNode<Rshift> {
  public:
   Rshift(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kRshift) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in Rshift");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kRshift) {}
 };
 
 class Max : public BinaryOpNode<Max> {
@@ -626,7 +639,7 @@ enum IntrinsicsOp {
   kSigmoid,
   kExp,
   kExpm1,
-  kFabs,
+  kAbs,
   kLog,
   kLog2,
   kLog10,
@@ -644,6 +657,7 @@ enum IntrinsicsOp {
   kRemainder,
   kLgamma,
   kFrac,
+  kIsNan,
   kRand, // We need more discussions on this. Should we consider stateful?
 };
 
@@ -704,8 +718,8 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "sigmoid";
       case kExp:
         return "exp";
-      case kFabs:
-        return "fabs";
+      case kAbs:
+        return "abs";
       case kLog:
         return "log";
       case kLog2:
@@ -744,6 +758,8 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "erfc";
       case kFrac:
         return "frac";
+      case kIsNan:
+        return "isnan";
       default:
         throw std::runtime_error(
             "invalid op_type: " + c10::to_string(op_type()));

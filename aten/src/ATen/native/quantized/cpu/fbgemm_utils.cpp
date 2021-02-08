@@ -237,8 +237,8 @@ template <>
 Tensor TransposeConvTensorUnpackConversion<2>(const Tensor& src, int groups) {
   // OC IC/G HW -> IC OC/G HW logically
   auto oc_g_ic_g_hw_tensors = src.chunk(groups);
-  auto fused_tensor =
-      at::cat(oc_g_ic_g_hw_tensors, 1).set_quantizer_(src.quantizer());
+  auto fused_tensor = at::cat(oc_g_ic_g_hw_tensors, 1);
+  set_quantizer_(fused_tensor, src.quantizer());
   return fused_tensor.permute({1, 0, 2, 3});
 }
 
@@ -284,8 +284,8 @@ template <>
 Tensor TransposeConvTensorUnpackConversion<3>(const Tensor& src, int groups) {
   // OC IC/G DHW -> IC OC/G DHW logically
   auto oc_g_ic_g_hw_tensors = src.chunk(groups);
-  auto fused_tensor =
-      at::cat(oc_g_ic_g_hw_tensors, 1).set_quantizer_(src.quantizer());
+  auto fused_tensor = at::cat(oc_g_ic_g_hw_tensors, 1);
+  set_quantizer_(fused_tensor, src.quantizer());
   return fused_tensor.permute({1, 0, 2, 3, 4});
 }
 
@@ -302,8 +302,8 @@ Tensor ConvertConvWeightsToChannelLastTensor<2>(
         for (auto& tensor : ic_g_oc_g_hw_tensors) {
           tensor = tensor.unsqueeze(0);
         }
-        auto fused_tensor =
-            at::cat(ic_g_oc_g_hw_tensors).set_quantizer_(src.quantizer());
+        auto fused_tensor = at::cat(ic_g_oc_g_hw_tensors);
+        set_quantizer_(fused_tensor, src.quantizer());
         return fused_tensor.permute({0, 2, 3, 4, 1})
             .contiguous(c10::MemoryFormat::Contiguous);
       }()
@@ -357,7 +357,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 #endif // USE_FBGEMM
 
     template <int kSpatialDim = 2>
-    CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
+    TORCH_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
     register_conv_params() {
   static auto register_conv_params =
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
@@ -397,9 +397,9 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 }
 
 template
-CAFFE2_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
-CAFFE2_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
 torch::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;

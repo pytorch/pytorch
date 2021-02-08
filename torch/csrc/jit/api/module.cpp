@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/api/module.h>
+
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -75,7 +76,7 @@ void Module::to(at::Device device, bool non_blocking) {
 }
 
 void module_state_to(
-    autograd::Variable variable,
+    const autograd::Variable& variable,
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
@@ -107,15 +108,57 @@ Module Method::owner() const {
   return Module(owner_);
 }
 void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner()._ivalue());
+  stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   function_->run(stack);
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
-  stack.insert(stack.begin(), owner()._ivalue());
+  stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
+    std::vector<IValue> stack,
+    const Kwargs& kwargs,
+    TaskLauncher taskLauncher) {
+  stack.insert(stack.begin(), owner()._ivalue());
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
+
+  function_->getSchema().checkAndNormalizeInputs(stack, kwargs);
+  return function_->runAsync(stack, std::move(taskLauncher));
+}
+
+IValue Module::operator()(std::vector<IValue> inputs) {
+  const auto& pre_forward_hooks = type()->getForwardPreHooks();
+  const auto& forward_hooks = type()->getForwardHooks();
+
+  // call forward pre_hooks
+  for (const auto& pre_hook : pre_forward_hooks) {
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    IValue result = Method(_ivalue(), pre_hook)({tuple_input});
+    if (!result.isNone()) {
+      if (result.isTuple()) {
+        inputs = result.toTuple()->elements();
+      } else {
+        inputs = {result};
+      }
+    }
+  }
+
+  // call forward
+  auto outputs = forward(inputs);
+
+  // call forward hooks
+  for (const auto& hook : forward_hooks) {
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    auto hook_result = Method(_ivalue(), hook)({tuple_input, outputs});
+    if (!hook_result.isNone()) {
+      outputs = hook_result;
+    }
+  }
+  return outputs;
 }
 
 void Module::clone_method(

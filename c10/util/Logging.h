@@ -284,7 +284,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
  * Very lightweight logging for the first time API usage. It's beneficial for
  * tracking of individual functionality usage in larger applications.
  *
- * In order to ensure light-weightness of logging, we utilize static variable
+ * In order to ensure light-weightedness of logging, we utilize static variable
  * trick - LogAPIUsage will be invoked only once and further invocations will
  * just do an atomic check.
  *
@@ -299,6 +299,31 @@ BINARY_COMP_HELPER(LessEquals, <=)
 // API usage logging capabilities
 C10_API void SetAPIUsageLogger(std::function<void(const std::string&)> logger);
 C10_API void LogAPIUsage(const std::string& context);
+
+// PyTorch ddp usage logging capabilities
+// DDPLoggingData holds data that can be logged in applications
+// for analysis and debugging. Data structure is defined in
+// c10 directory so that it can be easily imported by both c10
+// and torch files.
+// TODO -- right now starting with logging a small set of straightforward
+// fields, will add more fields as follow ups such as performance stats,
+// internal states and env variables and etc.
+struct DDPLoggingData {
+  // Data that can be got during DistributedDataParallel construction time
+  int world_size;
+  int rank;
+  std::string module_name;
+  std::vector<int> device_ids;
+  int output_device;
+  bool broadcast_buffers;
+  int bucket_cap_mb;
+  bool find_unused_parameters;
+  bool gradient_as_bucket_view;
+  std::string backend_name;
+};
+
+C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
+C10_API void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData);
 
 namespace detail {
 // Return value is needed to do the static variable initialization trick

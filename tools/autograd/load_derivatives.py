@@ -10,7 +10,8 @@ import yaml
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
-from tools.codegen.gen import parse_native_yaml, with_native_function
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.context import with_native_function
 from tools.codegen.model import *
 from tools.codegen.utils import *
 
@@ -61,8 +62,8 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         for info, op_name in zip(infos, op_names)]
 
 @with_native_function
-def cpp_arguments(f: NativeFunction) -> Sequence[CppArgument]:
-    return CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
+    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
     arguments = cpp_arguments(f)
@@ -146,7 +147,7 @@ def create_differentiability_info(
     @with_native_function
     def set_up_derivatives(f: NativeFunction) -> Tuple[
         Sequence[Derivative],
-        Sequence[CppArgument],
+        Sequence[Binding],
         Sequence[str],
     ]:
         # Set up the derivative information
@@ -278,6 +279,11 @@ def saved_variables(
         (r'to_args_sizes\({}\)', {
             'suffix': '_args_sizes',
             'type': 'std::vector<std::vector<int64_t>>',
+        }),
+        # replace to_args_scalartypes(self) with self_args_scalartypes
+        (r'to_args_scalartypes\({}\)', {
+            'suffix': '_args_scalartypes',
+            'type': 'std::vector<ScalarType>',
         }),
         # replace TensorGeometry(self) with self_geometry
         (r'TensorGeometry\({}\)', {

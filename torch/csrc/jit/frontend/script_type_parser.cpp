@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
@@ -69,6 +70,30 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return RRefType::create(elem_type);
+  } else if (typeName == "Union") {
+    // In Python 3.9+, Union[NoneType, T] or Union[T, NoneType] are
+    // treated as Optional[T]. Adding the same support for Union in Torchscript.
+    const char* const err =
+        "General Union types are not currently supported."
+        " Only Union[T, NoneType] (i.e. Optional[T]) is "
+        "supported.";
+    if (subscript.subscript_exprs().size() != 2) {
+      throw ErrorReport(subscript) << (err);
+    }
+    auto first_type = parseTypeFromExprImpl(subscript.subscript_exprs()[0]);
+    auto second_type = parseTypeFromExprImpl(subscript.subscript_exprs()[1]);
+
+    bool first_none = first_type == NoneType::get();
+    bool second_none = second_type == NoneType::get();
+
+    if (first_none && !second_none) {
+      return OptionalType::create(second_type);
+    } else if (!first_none && second_none) {
+      return OptionalType::create(first_type);
+    } else {
+      throw ErrorReport(subscript.range()) << err;
+    }
+
   } else if (typeName == "Dict") {
     if (subscript.subscript_exprs().size() != 2) {
       throw ErrorReport(subscript)
@@ -209,6 +234,13 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       if (auto typePtr = resolver_->resolveType(type_name, expr.range())) {
         return typePtr;
       }
+    }
+
+    // Check if the type is a custom class. This is done by checking
+    // if type_name starts with "torch.classes."
+    if (type_name.find("torch.classes.") == 0) {
+      auto custom_class_type = getCustomClass("__torch__." + type_name);
+      return custom_class_type;
     }
 
     throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";

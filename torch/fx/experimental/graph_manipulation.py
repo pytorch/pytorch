@@ -1,10 +1,11 @@
-import json
 from typing import Dict, List, NamedTuple, Any
 
 import torch
-from torch.fx.experimental.shape_prop import ShapeProp
-from torch.fx.graph import Graph, get_qualified_name
+from torch.fx.passes.shape_prop import ShapeProp
+from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.node import _get_qualified_name
 from torch.fx.graph_module import GraphModule
+from torch.fx.graph import Graph
 from torch.fx.node import Node, Target, map_arg
 
 
@@ -122,19 +123,17 @@ def serialize_weight(tensor: torch.Tensor) -> Dict:
 
 
 def serialize_leaf_module(
-    mod: torch.nn.Module, weights_metadata: Dict, weights: Dict, name_prefix: str
+    node: Node, weights_metadata: Dict, weights: Dict, name_prefix: str
 ) -> Dict:
     parameters: Dict[str, Any] = {}
-    parameters["name"] = type(mod).__name__
-    for name, buffer in mod.named_buffers():
-        weights_metadata[f"{name_prefix}.{name}"] = serialize_weight(buffer)
-        weights[f"{name_prefix}.{name}"] = buffer
-    for name, parameter in mod.named_parameters():
-        weights_metadata[f"{name_prefix}.{name}"] = serialize_weight(parameter)
-        weights[f"{name_prefix}.{name}"] = parameter
-    if isinstance(mod.__constants__, List):
-        for constant in mod.__constants__:
-            parameters[constant] = str(getattr(mod, constant))
+
+    for p_name, p_value in node.attrs_for_lowering.items():  # type: ignore
+        if isinstance(p_value, torch.Tensor):
+            weights_metadata[f"{name_prefix}.{p_name}"] = serialize_weight(p_value)
+            weights[f"{name_prefix}.{p_name}"] = p_value
+        else:
+            parameters[p_name] = str(p_value)
+
     return parameters
 
 
@@ -187,6 +186,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
             weight = serialize_weight(p)
             serialized_dict["weights"][prefix + name] = weight
             weights[prefix + name] = p
+    lift_lowering_attrs_to_nodes(fx_module)
     for node in fx_module.graph.nodes:
         node_rep: Dict[str, Any] = {}
         # Get shape/type info, currently not needed for call_module.
@@ -217,14 +217,14 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 serialized_dict["modules"][node.target] = serialized_module
             else:
                 node_rep["parameters"] = serialize_leaf_module(
-                    submodules[node.target],
+                    node,
                     serialized_dict["weights"],
                     weights,
                     prefix + node.target,
                 )
 
         if node.op == "call_function":
-            node_rep["target"] = get_qualified_name(node.target)
+            node_rep["target"] = _get_qualified_name(node.target)
         else:
             node_rep["target"] = str(node.target)
 
@@ -248,11 +248,3 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         serialized_dict["nodes"] += [node_rep]
 
     return serialized_dict
-
-
-class AcceleratedGraphModule:
-    def __init__(self, fx_module: GraphModule):
-        """Creates the needed data structures to pass to the glow runtime"""
-        self.weights: Dict[str, Any] = {}
-        self.serialized_graph = serialize_module(fx_module, self.weights)
-        self.serialized_graph_json = json.dumps(self.serialized_graph, indent=4)

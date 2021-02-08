@@ -1,40 +1,43 @@
 # Table of Contents
 
-- [Contributing to PyTorch](#contributing-to-pytorch)
-- [Developing PyTorch](#developing-pytorch)
+- [Table of Contents](#table-of-contents)
+  - [Contributing to PyTorch](#contributing-to-pytorch)
+  - [Developing PyTorch](#developing-pytorch)
+    - [Tips and Debugging](#tips-and-debugging)
   - [Nightly Checkout & Pull](#nightly-checkout--pull)
-- [Codebase structure](#codebase-structure)
-- [Unit testing](#unit-testing)
-  - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
-- [Writing documentation](#writing-documentation)
-  - [Building documentation](#building-documentation)
-    - [Tips](#tips)
-    - [Building C++ Documentation](#building-c-documentation)
-  - [Previewing changes](#previewing-changes)
-    - [Submitting changes for review](#submitting-changes-for-review)
-  - [Adding documentation tests](#adding-documentation-tests)
-- [Profiling with `py-spy`](#profiling-with-py-spy)
-- [Managing multiple build trees](#managing-multiple-build-trees)
-- [C++ development tips](#c-development-tips)
-  - [Build only what you need](#build-only-what-you-need)
-  - [Code completion and IDE support](#code-completion-and-ide-support)
-  - [Make no-op build fast](#make-no-op-build-fast)
-    - [Use Ninja](#use-ninja)
-    - [Use CCache](#use-ccache)
-    - [Use a faster linker](#use-a-faster-linker)
-  - [C++ frontend development tips](#c-frontend-development-tips)
-- [CUDA development tips](#cuda-development-tips)
-- [Windows development tips](#windows-development-tips)
-  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
-- [Running clang-tidy](#running-clang-tidy)
-- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
-- [Building PyTorch with ASAN](#building-pytorch-with-asan)
-  - [Getting `ccache` to work](#getting-ccache-to-work)
-  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
-  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
-  - [Why no leak detection?](#why-no-leak-detection)
-- [Caffe2 notes](#caffe2-notes)
-- [CI failure tips](#ci-failure-tips)
+  - [Codebase structure](#codebase-structure)
+  - [Unit testing](#unit-testing)
+    - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+    - [Running `mypy`](#running-mypy)
+  - [Writing documentation](#writing-documentation)
+    - [Building documentation](#building-documentation)
+      - [Tips](#tips)
+      - [Building C++ Documentation](#building-c-documentation)
+    - [Previewing changes](#previewing-changes)
+      - [Submitting changes for review](#submitting-changes-for-review)
+    - [Adding documentation tests](#adding-documentation-tests)
+  - [Profiling with `py-spy`](#profiling-with-py-spy)
+  - [Managing multiple build trees](#managing-multiple-build-trees)
+  - [C++ development tips](#c-development-tips)
+    - [Build only what you need](#build-only-what-you-need)
+    - [Code completion and IDE support](#code-completion-and-ide-support)
+    - [Make no-op build fast](#make-no-op-build-fast)
+      - [Use Ninja](#use-ninja)
+      - [Use CCache](#use-ccache)
+      - [Use a faster linker](#use-a-faster-linker)
+    - [C++ frontend development tips](#c-frontend-development-tips)
+  - [CUDA development tips](#cuda-development-tips)
+  - [Windows development tips](#windows-development-tips)
+    - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+  - [Running clang-tidy](#running-clang-tidy)
+  - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+  - [Building PyTorch with ASAN](#building-pytorch-with-asan)
+    - [Getting `ccache` to work](#getting-ccache-to-work)
+    - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
+    - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+    - [Why no leak detection?](#why-no-leak-detection)
+  - [Caffe2 notes](#caffe2-notes)
+  - [CI failure tips](#ci-failure-tips)
 
 ## Contributing to PyTorch
 
@@ -148,6 +151,29 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   ```bash
   ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
+* If you run into issue running `git submodule update --init --recursive`. Please try the following:
+  - If you encountered error such as
+    ```
+    error: Submodule 'third_party/pybind11' could not be updated
+    ```
+    check whether your Git local or global config file contains any `submodule.*` settings. If yes, remove them and try again.
+    (please reference [this doc](https://git-scm.com/docs/git-config#Documentation/git-config.txt-submoduleltnamegturl) for more info).
+
+  - If you encountered error such as 
+    ```
+    fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
+    ```
+    this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
+    `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
+    ```
+    openssl x509 -noout -in <cert_file> -dates
+    ```
+
+  - If you encountered error that some third_party modules are not checkout correctly, such as 
+    ```
+    Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
+    ```
+    remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.  
 
 ## Nightly Checkout & Pull
 
@@ -290,6 +316,17 @@ pytest test/test_nn.py -k Loss -v
 
 The above is an example of testing a change to Loss functions: this command runs tests such as
 `TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
+
+### Running `mypy`
+
+One of the test suites runs `mypy` on the codebase:
+```bash
+python test/test_type_hints.py
+```
+See [Guide for adding type annotations to
+PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
+for more information on how to set up `mypy` and tackle type annotation
+tasks, as well as other ways to run `mypy` besides running that test suite.
 
 ## Writing documentation
 
@@ -674,7 +711,7 @@ ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build.
+build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
 
 
 #### Use a faster linker
@@ -754,7 +791,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`. We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   which follow the convention `*_API`, e.g., `TORCH_API` inside Caffe2, Aten and Torch.
    (Every separate shared library needs a unique macro name, because symbol visibility
    is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
@@ -891,7 +928,7 @@ which is in PyTorch's `requirements.txt`.
 ## Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
+flake8-comprehensions, flake8-pyi, and others) to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
@@ -902,6 +939,16 @@ performing these checks, before a commit is created:
 You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
+
+If you haven't set up the pre-commit hook and have already committed files and
+CI reports `flake8` errors, you can run the check locally in your PR branch with:
+
+  ```bash
+  flake8 $(git diff --name-only $(git merge-base --fork-point master))
+  ```
+
+fix the code so that no errors are reported when you re-run the above check again,
+and then commit the fix.
 
 ## Building PyTorch with ASAN
 
@@ -1055,3 +1102,7 @@ following steps:
 4. Now you can find the pytorch working directory, which could be
    `~/workspace` or `~/project`, and run commands locally to debug
    the failure.
+
+For certain Windows failures, it may be useful to have a full [Remote
+Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
+for how to set that up after rerunning the job.

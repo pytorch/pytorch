@@ -27,9 +27,8 @@ Tensor empty_cpu(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
-  Device device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::CPU);
 
-  TORCH_CHECK(device.type() == DeviceType::CPU);
   check_size_nonnegative(size);
 
   bool pin_memory = pinned_memory_or_default(pin_memory_opt);
@@ -57,8 +56,12 @@ Tensor empty_cpu(
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  if (memory_format_opt.has_value()) {
+    // Restriding a just-created empty contiguous tensor does nothing.
+    if (*memory_format_opt != MemoryFormat::Contiguous) {
+      tensor.unsafeGetTensorImpl()->empty_tensor_restride(*memory_format_opt);
+    }
+  }
 
   return tensor;
 }

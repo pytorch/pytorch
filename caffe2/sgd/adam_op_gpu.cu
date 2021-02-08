@@ -47,7 +47,7 @@ void adam_update<CUDAContext>(
       0,
       context->cuda_stream()>>>(
       N, g, m, v, ng, nm, nv, beta1, beta2, eps_hat, correction, lr);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 __global__ void AdamCompute(
@@ -95,7 +95,7 @@ void adam_compute<CUDAContext>(
       0,
       context->cuda_stream()>>>(
       N, w, g, m, v, nw, nm, nv, beta1, beta2, eps_hat, correction, lr);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 __global__ void AdamComputeOutputGrad(
@@ -145,7 +145,7 @@ void adam_compute_output_grad<CUDAContext>(
       0,
       context->cuda_stream()>>>(
       N, w, g, m, v, nw, nm, nv, ng, beta1, beta2, eps_hat, correction, lr);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename SIndex>
@@ -336,7 +336,7 @@ bool SparseAdamOp<float, CUDAContext>::DoRunWithType() {
             correction,
             Input(LR).template data<float>(),
             iter);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
     SparseAdamOutputGradKernel<SIndex>
@@ -358,7 +358,7 @@ bool SparseAdamOp<float, CUDAContext>::DoRunWithType() {
             correction,
             Input(LR).template data<float>(),
             iter);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   return true;
@@ -403,7 +403,7 @@ bool RowWiseSparseAdamOp<float, CUDAContext>::DoRunWithType() {
             Input(GRAD).template data<float>(),
             correction,
             Input(LR).template data<float>());
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
     RowWiseSparseAdamOutputGradKernel<SIndex>
@@ -424,7 +424,7 @@ bool RowWiseSparseAdamOp<float, CUDAContext>::DoRunWithType() {
             Input(GRAD).template data<float>(),
             correction,
             Input(LR).template data<float>());
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   return true;

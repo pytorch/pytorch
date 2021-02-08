@@ -16,7 +16,7 @@
 
 namespace c10 {
 
-class CAFFE2_API OperatorHandle;
+class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
 
 /**
@@ -27,7 +27,7 @@ template<class FuncType> class TypedOperatorHandle;
  * NB: registration events only occur when a 'def' occurs; we don't trigger
  * on 'impl' or 'fallback' calls.
  */
-class CAFFE2_API OpRegistrationListener {
+class TORCH_API OpRegistrationListener {
 public:
   virtual ~OpRegistrationListener();
 
@@ -45,7 +45,7 @@ class SchemaRegistrationHandleRAII;
  * Most end users shouldn't use this directly; if you're trying to register
  * ops look in op_registration
  */
-class CAFFE2_API Dispatcher final {
+class TORCH_API Dispatcher final {
 private:
   // For direct access to backend fallback information
   friend class impl::OperatorEntry;
@@ -78,8 +78,17 @@ public:
   // Implementation note: this class abstracts over the fact that we have per-operator
   // dispatch tables.  This could be easily adjusted to have a single global hash
   // table.
+  static Dispatcher& realSingleton();
 
-  static Dispatcher& singleton();
+  C10_ALWAYS_INLINE static Dispatcher& singleton() {
+    // Implemented inline so that steady-state code needn't incur
+    // function-call overhead. We can't just inline `realSingleton`
+    // because the function-local static would get duplicated across
+    // all DSOs that include & use this header, leading to multiple
+    // singleton instances.
+    static Dispatcher& s = realSingleton();
+    return s;
+  }
 
   // ------------------------------------------------------------------------
   //
@@ -124,7 +133,11 @@ public:
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
+  C10_ALWAYS_INLINE
   Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
+
+  template<class Return, class... Args>
+  static Return callWithDispatchKeySlowPath(const TypedOperatorHandle<Return (Args...)>& op, bool pre_sampled, DispatchKey dispatchKey, const KernelFunction& kernel, Args... args);
 
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
@@ -182,12 +195,6 @@ public:
    */
   RegistrationHandleRAII registerLibrary(std::string ns, std::string debug);
 
-  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setBoxedKernelFor_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func);
-
   // ------------------------------------------------------------------------
   //
   // Listeners on registrations
@@ -207,7 +214,7 @@ public:
   /* Check if operator calls with a given dispatch key
    * need to be observed with RecordFunction.
    */
-  inline bool shouldRecord(DispatchKey dispatch_key) const {
+  inline static bool shouldRecord(DispatchKey dispatch_key) {
     return dispatch_key != DispatchKey::BackendSelect;
   }
 
@@ -235,6 +242,11 @@ public:
 
 private:
   Dispatcher();
+
+  static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey);
+  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey);
+  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, torch::jit::Stack &&stack);
+  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, const torch::jit::Stack &stack);
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
@@ -267,7 +279,7 @@ private:
  * This handle can be used to register kernels with the dispatcher or
  * to lookup a kernel for a certain set of arguments.
  */
-class CAFFE2_API OperatorHandle {
+class TORCH_API OperatorHandle {
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
@@ -310,7 +322,9 @@ public:
     // smuggle in a kernel that is typed incorrectly).  For everything
     // in core library this won't happen, because all the static registrations
     // will be done by the time a typed() handle is acquired.
+#if !defined C10_MOBILE
     operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
+#endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 
@@ -345,11 +359,11 @@ public:
   TypedOperatorHandle(const TypedOperatorHandle&) = default;
   TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
 
-  Return call(Args... args) const {
+  C10_ALWAYS_INLINE Return call(Args... args) const {
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
+  C10_ALWAYS_INLINE Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
     return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
@@ -371,30 +385,39 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  // Check if we need to run callbacks registered with RecordFunction
-  // If true and callbacks need inputs, we box the arguments and pass
-  // them into the callbacks and also into the kernel call
+  // By default, when there're no high-frequency or non-sampled callbacks,
+  // RecordFunction is pre-sampled as a perf optimization;
+  // shouldRunRecordFunction checks whether RecordFunction should be executed,
+  // and sets pre_sampled boolean argument value to whether pre-sampling was used -
+  // this boolean is passed into RecordFunction to adjust the sampling rates of
+  // the callbacks
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    return callWithDispatchKeySlowPath<Return, Args...>(op, pre_sampled, dispatchKey, kernel, std::forward<Args>(args)...);
+  }
+#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
+  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
+}
 
-  // Note: for perf reasons we wouldn't want to pass arguments into
-  // the function call or prematurely box them
-  at::RecordFunction guard(at::RecordScope::FUNCTION);
+template<class Return, class... Args>
+inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<Return(Args...)>& op, bool pre_sampled, DispatchKey dispatchKey, const KernelFunction& kernel, Args... args) {
+    // Check if we need to run callbacks registered with RecordFunction
+    // If true and callbacks need inputs, we box the arguments and pass
+    // them into the callbacks and also into the kernel call
+
+    // Note: for perf reasons we wouldn't want to pass arguments into
+    // the function call or prematurely box them
+  at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
   if (C10_UNLIKELY(guard.isActive())) {
     if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
-      int64_t seq_num = -1;
-      // Setting sequence number in the Autograd case to associate
-      // the forward range with the coresponding Autograd's node
-      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-        seq_num = at::sequence_number::peek();
-      }
-      if (guard.needs_inputs) {
-        torch::jit::Stack stack = impl::boxArgs(args...);
-        guard.before(op, stack, seq_num);
+      if (guard.needsInputs()) {
+        runRecordFunction(guard, op, dispatchKey, impl::boxArgs(args...));
       } else {
-        guard.before(op, seq_num);
+        runRecordFunction(guard, op, dispatchKey);
       }
     }
   }
-#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
+  // keeping the guard alive while executing the kernel
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
@@ -429,20 +452,22 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& kernel = entry.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  // using already existing stack to record function execution in observers
-  at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(guard.isActive())) {
-    if (shouldRecord(dispatchKey) && entry.isObserved()) {
-      int64_t seq_num = -1;
-      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-        seq_num = at::sequence_number::peek();
-      }
-      if (guard.needs_inputs) {
-        guard.before(op, *stack, seq_num);
-      } else {
-        guard.before(op, seq_num);
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    // using already existing stack to record function execution in observers
+    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+    if (C10_UNLIKELY(guard.isActive())) {
+      if (shouldRecord(dispatchKey) && entry.isObserved()) {
+        if (guard.needsInputs()) {
+          runRecordFunction(guard, op, dispatchKey, *stack);
+        } else {
+          runRecordFunction(guard, op, dispatchKey);
+        }
       }
     }
+    // keeping the guard alive while executing the kernel
+    kernel.callBoxed(op, stack);
+    return;
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   kernel.callBoxed(op, stack);

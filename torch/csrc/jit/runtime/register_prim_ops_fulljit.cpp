@@ -29,7 +29,6 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -37,9 +36,8 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::profile_optional,
+         prim::profile_ivalue,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOptionalOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -57,8 +55,35 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::RequiresGradCheck /* (...)  -> (..., bool) */,
+         [](const Node* node) -> Operation {
+           std::vector<bool> rg_props =
+               fmap(node->tys(attr::types), [](const TypePtr& t) {
+                 // if an rg property changes we assume a tensor does require
+                 // gradients which is set in `guardDifferentiableGraph`
+                 TORCH_INTERNAL_ASSERT(
+                     t->castRaw<TensorType>()->requiresGrad().has_value());
+                 return *t->castRaw<TensorType>()->requiresGrad();
+               });
+           return [rg_props](Stack* stack) {
+             auto num_inputs = rg_props.size();
+             // Check every input's shape against profiled (expected) shape.
+             for (size_t i = 0; i < num_inputs; i++) {
+               auto& input = peek(stack, i, num_inputs);
+               const auto& t = input.toTensor();
+               if (rg_props[i] != t.requires_grad()) {
+                 push(stack, false);
+                 return;
+               }
+             }
+
+             push(stack, true);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::TypeCheck /* (...)  -> (..., bool) */,
-         [](const Node * /* node */) -> Operation {
+         [](const Node* /* node */) -> Operation {
            return [](Stack* /* stack */) {
              AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
            };
@@ -338,6 +363,34 @@ RegisterOperators reg(
          [](Stack* stack) { stack->emplace_back(at::Tensor()); },
          aliasAnalysisSpecialCase()),
      Operator(
+         "prim::ReductionSizes(int[] size, int[] red_axes, bool keepdim = False) -> int[]",
+         [](Stack* stack) {
+           bool keepdim = pop(stack).toBool();
+           c10::List<int64_t> axes = pop(stack).toIntList();
+           c10::List<int64_t> size = pop(stack).toIntList();
+           if (keepdim) {
+             for (const auto& axis : axes) {
+               size.set(axis, 1);
+             }
+           } else {
+             int64_t index = 0;
+             auto iter = size.begin();
+             std::sort(axes.begin(), axes.end());
+             for (const auto& axis : axes) {
+               // move iter to the next axis
+               iter += axis - index;
+
+               // input iter points to axis and is updated to axis + 1
+               iter = size.erase(iter);
+
+               // update current index for iter
+               index = axis + 1;
+             }
+           }
+           push(stack, IValue(std::move(size)));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::BroadcastSizes(...) -> int[]",
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
@@ -348,7 +401,7 @@ RegisterOperators reg(
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
            drop(stack, num_inputs);
-           push(stack, IValue(std::move(size)));
+           push(stack, IValue(size));
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -683,10 +736,6 @@ RegisterOperators reg2({
 
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
-    Operator(
-        "aten::__contains__.int_list(int[] l, int item) -> bool",
-        listContains<int64_t>,
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,

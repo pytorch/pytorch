@@ -607,6 +607,12 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             }
             return DispatchKey::CUDA;
           }
+          case DeviceType::XPU: {
+            if (isQIntType(dtype_)) {
+              return DispatchKey::QuantizedXPU;
+            }
+            return DispatchKey::XPU;
+          }
           case DeviceType::MKLDNN:
             return DispatchKey::MKLDNN;
           case DeviceType::OPENGL:
@@ -639,6 +645,8 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::SparseCUDA;
           case DeviceType::HIP:
             return DispatchKey::SparseHIP;
+          case DeviceType::XPU:
+            return DispatchKey::SparseXPU;
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", device_.type());
         }
@@ -691,8 +699,16 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::Vulkan;
   } else if (tid == DispatchKey::Metal) {
     return DeviceType::Metal;
+  } else if (tid == DispatchKey::QuantizedCPU) {
+    return DeviceType::CPU;
+  } else if (tid == DispatchKey::XPU) {
+    return DeviceType::XPU;
+  } else if (tid == DispatchKey::SparseXPU) {
+    return DeviceType::XPU;
+  } else if (tid == DispatchKey::QuantizedXPU) {
+    return DeviceType::XPU;
   } else {
-    AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
+    TORCH_INTERNAL_ASSERT(false, "Unknown DispatchKey: ", tid);
   }
 }
 

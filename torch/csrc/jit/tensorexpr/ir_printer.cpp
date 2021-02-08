@@ -506,6 +506,30 @@ void IRPrinter::visit(const SyncThreads* v) {
   os() << "__syncthreads();\n";
 }
 
+void IRPrinter::visit(const ExternalCall* v) {
+  emitIndent();
+  os() << *v->buf() << " = " << v->func_name() << "(";
+
+  os() << "buf_args={";
+  int i = 0;
+  for (const Buf* buf_arg : v->buf_args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf_arg;
+  }
+
+  os() << "}, args={";
+  i = 0;
+  for (const Expr* arg : v->args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *arg;
+  }
+  os() << "})" << std::endl;
+}
+
 void IRPrinter::emitIndent() {
   os() << std::setw(2 * indent_) << "";
 }
@@ -596,14 +620,15 @@ std::string to_string(const Tensor* t) {
     return "(null tensor)\n";
   }
   std::ostringstream oss;
-  oss << "Tensor " << t->buf()->name_hint() << "(";
-  for (size_t i = 0; i < t->ndim(); i++) {
+  // TODO: move this to Buf printer
+  oss << "Tensor " << t->buf()->name_hint() << "[";
+  for (size_t i = 0; i < t->buf()->ndim(); i++) {
     if (i != 0) {
       oss << ", ";
     }
-    oss << *t->arg(i) << "[" << *t->dim(i) << "]";
+    oss << *t->buf()->dim(i);
   }
-  oss << ") = " << *t->body() << "\n";
+  oss << "]:\n" << *t->stmt() << "\n";
   return oss.str();
 }
 } // namespace std

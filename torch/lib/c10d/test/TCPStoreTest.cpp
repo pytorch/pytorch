@@ -77,7 +77,7 @@ void testHelper(const std::string& prefix = "") {
 
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(
-        std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes] {
+        std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes, &numIterations, &numThreads] {
           for (auto j = 0; j < numIterations; j++) {
             clientStores[i]->add("counter", 1);
           }

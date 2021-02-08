@@ -12,6 +12,7 @@
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
@@ -27,6 +28,7 @@ class Tensor;
 }
 namespace c10{
 struct TensorOptions;
+template<class T> class List;
 }
 namespace at {
 struct Generator;
@@ -82,7 +84,7 @@ inline bool variable_excluded_from_dispatch() {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-class CAFFE2_API Tensor {
+class TORCH_API Tensor {
  public:
   Tensor(){};
   // This constructor should not be used by end users and is an implementation
@@ -115,6 +117,26 @@ class CAFFE2_API Tensor {
     return impl_->storage_offset();
   }
 
+  Tensor contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const {
+    if (is_contiguous(memory_format)) {
+      return *this;
+    } else {
+      return __dispatch_contiguous(memory_format);
+    }
+  }
+
+  int64_t size(int64_t dim) const {
+    // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
+    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
+    return sizes()[dim];
+  }
+
+  int64_t stride(int64_t dim) const {
+    // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
+    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
+    return strides()[dim];
+  }
+
   TensorImpl * unsafeGetTensorImpl() const {
     return impl_.get();
   }
@@ -123,6 +145,10 @@ class CAFFE2_API Tensor {
   }
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr() const {
     return impl_;
+  }
+
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> unsafeReleaseIntrusivePtr()  {
+    return std::move(impl_);
   }
 
   bool defined() const {
@@ -185,10 +211,6 @@ class CAFFE2_API Tensor {
   Tensor& operator=(Scalar v) &&;
   Tensor& operator=(const Tensor&) &&;
   Tensor& operator=(Tensor&&) &&;
-
-  #ifdef _MSC_VER
-  #pragma warning( pop )
-  #endif
 
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;
@@ -320,6 +342,9 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
+
+  /// Returns if a `Tensor` has XPU backend.
+  bool is_xpu() const;
 
   /// Returns if a `Tensor` has HIP backend.
   bool is_hip() const;
@@ -578,6 +603,23 @@ class CAFFE2_API Tensor {
     return impl_->grad();
   }
 
+  // The Forward AD API functions below are low level and are not to be used by end
+  // users who should use the API provided in torch/csrc/autograd.h
+
+  /// This function returns the forward gradient for this Tensor at the given level.
+  const Tensor& fw_grad(uint64_t level) const {
+    return impl_->fw_grad(level, *this);
+  }
+
+  /// This function can be used to set the value of the forward grad.
+  /// Note that the given new_grad might not be used directly if it has different
+  /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
+  /// new_grad content will be copied into a new Tensor
+  void set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
+    impl_->set_fw_grad(new_grad, *this, level, is_inplace_op);
+  }
+
+
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
@@ -721,6 +763,12 @@ protected:
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
+
+// For "multiple ... operators specified" warnings, closing brace of class
+// declaration must be included between pragma push & pop
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 
 int64_t get_device(Tensor self);
 

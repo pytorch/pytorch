@@ -44,7 +44,7 @@ void adagrad_update<CUDAContext>(
       0,
       context->cuda_stream()>>>(
       N, w, g, h, nw, nh, epsilon, decay, lr, weight_decay);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename SIndex, typename THalf>
@@ -189,7 +189,7 @@ class CUDASparseAdagradOp final : public Operator<Context> {
             Input(GRAD).template data<float>(),
             Input(LR).template data<float>(),
             weight_decay_);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     return true;
   }
 
@@ -233,7 +233,7 @@ bool RowWiseSparseAdagradOp<CUDAContext>::DoRunWithType() {
       Input(GRAD).template data<float>(),
       Input(LR).template data<float>(),
       weight_decay_);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
 }
 

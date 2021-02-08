@@ -67,7 +67,7 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dims_physical = self_physical.getPhysicalDims(dims);
   auto result = at::sum(self_physical.tensor(), dims_physical, keepdim, dtype);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 bool isPhysicalScalarTensor(const Tensor& logical_tensor) {
@@ -87,17 +87,17 @@ Tensor binary_pointwise_batching_rule(
   if (self.dim() > 0 && other.dim() > 0) {
     auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
     auto result = Func(physical_args[0].tensor(), physical_args[1].tensor(), args...);
-    return physical_args[0].newLogicalFromPhysical(result);
+    return physical_args[0].getPhysicalToLogicalMap().apply(result);
   }
   if (isPhysicalScalarTensor(self)) {
     auto other_physical = MultiBatchVmapTransform::logicalToPhysical(other);
     auto result = Func(self, other_physical.tensor(), args...);
-    return other_physical.newLogicalFromPhysical(result);
+    return other_physical.getPhysicalToLogicalMap().apply(result);
   }
   if (isPhysicalScalarTensor(other)) {
     auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
     auto result = Func(self_physical.tensor(), other, args...);
-    return self_physical.newLogicalFromPhysical(result);
+    return self_physical.getPhysicalToLogicalMap().apply(result);
   }
 
   // At this point, we know at least one of the operands is a logical Scalar tensor.
@@ -138,7 +138,7 @@ Tensor binary_pointwise_batching_rule(
   auto physical_args = BroadcastingVmapTransform::logicalToPhysical(
       {logical_self, logical_other});
   auto result = Func(physical_args[0].tensor(), physical_args[1].tensor(), args...);
-  return physical_args[0].newLogicalFromPhysical(result);
+  return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit) {
@@ -153,7 +153,7 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
 
   if (self_physical_dim == size_physical.size()) {
     auto result = self_physical.tensor().expand(size_physical, implicit);
-    return self_physical.newLogicalFromPhysical(result);
+    return self_physical.getPhysicalToLogicalMap().apply(result);
   }
 
   TORCH_INTERNAL_ASSERT(self_physical_dim < size_physical.size());
@@ -176,40 +176,40 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
             self_physical_size.end(),
             view_shape.begin() + self_physical.numBatchDims() + extra_dims);
   auto result = self_physical.tensor().view(view_shape).expand(size_physical, implicit);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = at::chunk(self_physical.tensor(), chunks, dim_physical);
-  self_physical.makeLogicalFromPhysicalListInplace(result);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
 
 Tensor clamp_batching_rule(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::clamp(self_physical.tensor(), min, max);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor clamp_min_batching_rule(const Tensor& self, Scalar min) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::clamp_min(self_physical.tensor(), min);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor clamp_max_batching_rule(const Tensor& self, Scalar max) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::clamp_max(self_physical.tensor(), max);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int64_t sections, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = at::tensor_split(self_physical.tensor(), sections, dim_physical);
-  self_physical.makeLogicalFromPhysicalListInplace(result);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
 
@@ -217,7 +217,7 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = at::tensor_split(self_physical.tensor(), indices, dim_physical);
-  self_physical.makeLogicalFromPhysicalListInplace(result);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
 
@@ -230,7 +230,33 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   auto dim_physical =
       self_physical.numBatchDims() + maybe_wrap_dim(dim, /*logical_dim*/self.dim() + 1);
   auto result = self_physical.tensor().unsqueeze(dim_physical);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
+Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  self_physical.tensor().fill_(value);
+  return self;
+}
+
+Tensor& fill_inplace_tensor_batching_rule(Tensor& self, const Tensor& value) {
+  auto value_batched = isBatchedTensor(value);
+
+  if (value_batched) {
+    auto physical_args =
+      BroadcastingVmapTransform::logicalToPhysical({self, value});
+    physical_args[0].tensor().copy_(physical_args[1].tensor());
+  } else {
+    auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+    self_physical.tensor().fill_(value);
+  }
+  return self;
+}
+
+Tensor& zero_inplace_batching_rule(Tensor &self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  self_physical.tensor().zero_();
+  return self;
 }
 
 Tensor squeeze_batching_rule(const Tensor& self) {
@@ -251,14 +277,33 @@ Tensor squeeze_batching_rule(const Tensor& self) {
   }
 
   auto result = self_physical.tensor().view(squeezed_sizes);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().squeeze(dim_physical);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
+Tensor trace_batching_rule(const Tensor& self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  // Batched Diagonal View
+  auto self_diag = at::diagonal(self_physical.tensor(), /*offset*/0, /*dim1*/-2, /*dim2*/-1);
+  auto result =  at::sum(self_diag, -1);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
+Tensor trace_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes) {
+  auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
+  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
+  // Batched Diagonal View
+  auto grad_input_diag = at::diagonal(grad_input, /*offset*/0, /*dim1*/-2, /*dim2*/-1);
+  // Append a dimension of size one to the grad output 
+  auto grad_physical_tensor = grad_physical.tensor().unsqueeze(-1);
+  grad_input_diag.copy_(grad_physical_tensor);
+  return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }
 
 Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
@@ -275,7 +320,7 @@ Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim
   auto dim0_physical = self_physical.getPhysicalDim(dim0);
   auto dim1_physical = self_physical.getPhysicalDim(dim1);
   auto result = self_physical.tensor().transpose(dim0_physical, dim1_physical);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
@@ -292,14 +337,14 @@ Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
       dims_physical.begin(),
       dims_physical.end());
   auto result = self_physical.tensor().permute(all_dims_physical);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor select_batching_rule(const Tensor& self, int64_t dim, int64_t index) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().select(dim_physical, index);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 static int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int64_t num_batch_dims) {
@@ -311,14 +356,19 @@ Tensor select_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes
   auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
   auto physical_dim = getGradInputPhysicalDim(dim, input_sizes, grad_physical.numBatchDims());
   grad_input.select(physical_dim, index).copy_(grad_physical.tensor());
-  return grad_physical.newLogicalFromPhysical(grad_input);
+  return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }
 
-Tensor slice_batching_rule(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+Tensor slice_batching_rule(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().slice(dim_physical, start, end, step);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor slice_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
@@ -326,7 +376,7 @@ Tensor slice_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes,
   auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
   auto physical_dim = getGradInputPhysicalDim(dim, input_sizes, grad_physical.numBatchDims());
   grad_input.slice(physical_dim, start, end, step).copy_(grad_physical.tensor());
-  return grad_physical.newLogicalFromPhysical(grad_input);
+  return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }
 
 Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -334,7 +384,7 @@ Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, 
   auto dim1_physical = self_physical.getPhysicalDim(dim1);
   auto dim2_physical = self_physical.getPhysicalDim(dim2);
   auto result = at::diagonal(self_physical.tensor(), offset, dim1_physical, dim2_physical);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor diagonal_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -343,7 +393,7 @@ Tensor diagonal_backward_batching_rule(const Tensor& grad, IntArrayRef input_siz
   auto dim1_physical = getGradInputPhysicalDim(dim1, input_sizes, grad_physical.numBatchDims());
   auto dim2_physical = getGradInputPhysicalDim(dim2, input_sizes, grad_physical.numBatchDims());
   grad_input.diagonal(offset, dim1_physical, dim2_physical).copy_(grad_physical.tensor());
-  return grad_physical.newLogicalFromPhysical(grad_input);
+  return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }
 
 Tensor movedim_batching_rule(const Tensor& self, IntArrayRef source, IntArrayRef destination) {
@@ -351,21 +401,21 @@ Tensor movedim_batching_rule(const Tensor& self, IntArrayRef source, IntArrayRef
   auto source_physical = self_physical.getPhysicalDims(source);
   auto destination_physical = self_physical.getPhysicalDims(destination);
   auto result = at::movedim(self_physical.tensor(), source_physical, destination_physical);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto shape_physical = self_physical.getPhysicalShape(shape);
   auto result = self_physical.tensor().reshape(shape_physical);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = at::split(self_physical.tensor(), split_size, dim_physical);
-  self_physical.makeLogicalFromPhysicalListInplace(result);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
 
@@ -373,7 +423,7 @@ std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, IntArrayR
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = at::split_with_sizes(self_physical.tensor(), split_sizes, dim_physical);
-  self_physical.makeLogicalFromPhysicalListInplace(result);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
 
@@ -381,7 +431,7 @@ std::vector<Tensor> unbind_batching_rule(const Tensor& self, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = at::unbind(self_physical.tensor(), dim_physical);
-  self_physical.makeLogicalFromPhysicalListInplace(result);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
 
@@ -389,7 +439,7 @@ Tensor unfold_batching_rule(const Tensor& self, int64_t dim, int64_t size, int64
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().unfold(dim_physical, size, step);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor contiguous_batching_rule(const Tensor& self, MemoryFormat memory_format) {
@@ -398,14 +448,14 @@ Tensor contiguous_batching_rule(const Tensor& self, MemoryFormat memory_format) 
       "than torch.contiguous_format");
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = physical_view.tensor().contiguous(memory_format);
-  return physical_view.newLogicalFromPhysical(result);
+  return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto size_physical = self_physical.getPhysicalShape(size);
   auto result = self_physical.tensor().view(size_physical);
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor view_as_complex_batching_rule(const Tensor& self) {
@@ -414,7 +464,7 @@ Tensor view_as_complex_batching_rule(const Tensor& self) {
   TORCH_CHECK(self.sizes().size() != 0, "Input tensor must have one or more dimensions");
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::view_as_complex(self_physical.tensor());
-  return self_physical.newLogicalFromPhysical(result);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 // Checks that the smallest batch stride is greater than the largest example
@@ -554,7 +604,7 @@ Tensor as_strided_batching_rule(
   // locations as zi. See NOTE: [When will the as_strided batching rule fail?]
   auto result = physical_view.tensor().as_strided(
       physical_sizes, physical_strides, storage_offset);
-  return physical_view.newLogicalFromPhysical(result);
+  return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
 // NOTE: [When will the as_strided batching rule fail?]
@@ -691,7 +741,7 @@ Tensor clone_batching_rule(const Tensor& self, optional<MemoryFormat> memory_for
     // philosophically vmap hides the batch dims and operates on a per-sample level.
     auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
     auto output_physical = at::clone(physical_view.tensor(), memory_format);
-    return physical_view.newLogicalFromPhysical(output_physical);
+    return physical_view.getPhysicalToLogicalMap().apply(output_physical);
   }
 
   TORCH_INTERNAL_ASSERT(!memory_format.has_value() || memory_format == MemoryFormat::Preserve);
@@ -721,7 +771,7 @@ Tensor mv_batching_rule(const Tensor& self, const Tensor& other) {
   if (self_batched && !other_batched) {
     auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
     auto result = at::matmul(self_physical.tensor(), other);
-    return self_physical.newLogicalFromPhysical(result);
+    return self_physical.getPhysicalToLogicalMap().apply(result);
   }
   if (!self_batched && other_batched) {
     // self_physical: [L, K], other_physical: [..., K]
@@ -729,7 +779,7 @@ Tensor mv_batching_rule(const Tensor& self, const Tensor& other) {
     // a tensor of size [..., L, 1], and unsqueeze the last dim.
     auto other_physical = MultiBatchVmapTransform::logicalToPhysical(other);
     auto result = at::matmul(self, other_physical.tensor().unsqueeze(-1));
-    return other_physical.newLogicalFromPhysical(result.squeeze(-1));
+    return other_physical.getPhysicalToLogicalMap().apply(result.squeeze(-1));
   }
   if (self_batched && other_batched) {
     // self_physical: [..., L, K], other_physical: [..., K]
@@ -739,7 +789,7 @@ Tensor mv_batching_rule(const Tensor& self, const Tensor& other) {
     auto result = at::matmul(
         physical_args[0].tensor(),
         physical_args[1].tensor().unsqueeze(-1));
-    return physical_args[0].newLogicalFromPhysical(result.squeeze(-1));
+    return physical_args[0].getPhysicalToLogicalMap().apply(result.squeeze(-1));
   }
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
@@ -759,14 +809,14 @@ Tensor dot_batching_rule(const Tensor& self, const Tensor& other) {
     // View the tensors as [..., 1, K] and [K], perform matmul, and unsqueeze.
     auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
     auto result = at::matmul(self_physical.tensor().unsqueeze(-2), other);
-    return self_physical.newLogicalFromPhysical(result.squeeze(-1));
+    return self_physical.getPhysicalToLogicalMap().apply(result.squeeze(-1));
   }
   if (!self_batched && other_batched) {
     // self_physical: [K], other_physical: [..., K]
     // View the tensors as [K] and [..., K, 1], perform matmul, and unsqueeze.
     auto other_physical = MultiBatchVmapTransform::logicalToPhysical(other);
     auto result = at::matmul(self, other_physical.tensor().unsqueeze(-1));
-    return other_physical.newLogicalFromPhysical(result.squeeze(-1));
+    return other_physical.getPhysicalToLogicalMap().apply(result.squeeze(-1));
   }
   if (self_batched && other_batched) {
     // self_physical: [..., K], other_physical: [..., K]
@@ -775,7 +825,7 @@ Tensor dot_batching_rule(const Tensor& self, const Tensor& other) {
     auto result = at::matmul(
         physical_args[0].tensor().unsqueeze(-2),
         physical_args[1].tensor().unsqueeze(-1));
-    return physical_args[0].newLogicalFromPhysical(result.squeeze(-1).squeeze(-1));
+    return physical_args[0].getPhysicalToLogicalMap().apply(result.squeeze(-1).squeeze(-1));
   }
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
@@ -788,7 +838,7 @@ Tensor bmm_batching_rule(const Tensor& self, const Tensor& other) {
 
   auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
   auto result = at::matmul(physical_args[0].tensor(), physical_args[1].tensor());
-  return physical_args[0].newLogicalFromPhysical(result);
+  return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
@@ -804,17 +854,17 @@ Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
   if (self_batched && !other_batched) {
     auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
     auto result = at::matmul(self_physical.tensor(), other);
-    return self_physical.newLogicalFromPhysical(result);
+    return self_physical.getPhysicalToLogicalMap().apply(result);
   }
   if (!self_batched && other_batched) {
     auto other_physical = MultiBatchVmapTransform::logicalToPhysical(other);
     auto result = at::matmul(self, other_physical.tensor());
-    return other_physical.newLogicalFromPhysical(result);
+    return other_physical.getPhysicalToLogicalMap().apply(result);
   }
   if (self_batched && other_batched) {
     auto physical_args = MultiBatchVmapTransform::logicalToPhysical({self, other});
     auto result = at::matmul(physical_args[0].tensor(), physical_args[1].tensor());
-    return physical_args[0].newLogicalFromPhysical(result.squeeze(-1).squeeze(-1));
+    return physical_args[0].getPhysicalToLogicalMap().apply(result.squeeze(-1).squeeze(-1));
   }
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
@@ -826,7 +876,7 @@ Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
   TORCH_INTERNAL_ASSERT(
       tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
   auto result = at::cat(physical_tensors, physical_views[0].getPhysicalDim(dim));
-  return physical_views[0].newLogicalFromPhysical(result);
+  return physical_views[0].getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
@@ -840,7 +890,7 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
   auto dim_physical =
       physical_views[0].numBatchDims() + maybe_wrap_dim(dim, /*logical*/tensors[0].dim() + 1);
   auto result = at::stack(physical_tensors, dim_physical);
-  return physical_views[0].newLogicalFromPhysical(result);
+  return physical_views[0].getPhysicalToLogicalMap().apply(result);
 }
 
 // I am quite sad that we need to register operators with exploded TensorOptions,
@@ -881,7 +931,7 @@ Tensor new_zeros_batching_rule(
     .device(device)
     .pinned_memory(pin_memory);
   auto result = physical_view.tensor().new_zeros(physical_size, options);
-  return physical_view.newLogicalFromPhysical(result);
+  return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor new_empty_batching_rule(
@@ -894,14 +944,17 @@ Tensor new_empty_batching_rule(
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
   auto result = physical_view.tensor().new_empty(physical_size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
-  return physical_view.newLogicalFromPhysical(result);
+  return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor new_empty_strided_batching_rule(
     const Tensor& self,
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions& options) {
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory) {
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
 
@@ -941,18 +994,24 @@ Tensor new_empty_strided_batching_rule(
         size.size(), ") must match dimensionality of strides (",
         stride.size(), ")");
   auto storage_size = native::storage_size_for(size, stride);
-  for (int64_t idx = 0; idx < physical_strides.size(); ++idx) {
-    physical_strides[idx] *= storage_size;
+  for (auto& physical_stride : physical_strides) {
+    physical_stride *= storage_size;
   }
 
   // physical_strides = [B1 * B2 * S, B2 * S, S] + strides
   physical_strides.insert(physical_strides.end(), stride.begin(), stride.end());
 
   auto result = physical_view.tensor().new_empty_strided(
-      physical_size, physical_strides, options);
-  return physical_view.newLogicalFromPhysical(result);
+      physical_size, physical_strides, dtype, layout, device, pin_memory);
+  return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+template <typename F, F Func>
+Tensor comparison_pointwise_batching_rule(const Tensor& self, const Tensor& other) {
+  auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
+  auto result = Func(physical_args[0].tensor(), physical_args[1].tensor());
+  return physical_args[0].getPhysicalToLogicalMap().apply(result);
+}
 
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
@@ -967,9 +1026,14 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
-  m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
+  m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
+
+  // inplace operations
+  m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
+  m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
+  m.impl("zero_", zero_inplace_batching_rule);
 
   // view operations
   m.impl("as_strided", as_strided_batching_rule);
@@ -995,6 +1059,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
+  m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
@@ -1055,6 +1120,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 #undef TO_BATCHING_RULE
   m.impl("clone", clone_batching_rule);
 
+  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
 
@@ -1074,6 +1140,12 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE_VA(rsub, Scalar);
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
+  {
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, std::string);
+    using Unop = Tensor (*)(const Tensor&, Scalar, std::string);
+    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, std::string>);
+    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, Scalar, std::string>);
+  }
 
   // at::pow has three out-of-place overloads
   m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);
@@ -1081,6 +1153,12 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
 
   m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
+  m.impl(
+      "threshold_backward",
+      binary_pointwise_batching_rule<
+          TensorTensorScalarType,
+          at::threshold_backward,
+          Scalar>);
 
   // for at::result_type, call the native::result_type implementation.
   // We don't have to do anything special because native::result_type operates
@@ -1116,14 +1194,29 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // backward operators
   m.impl("select_backward", select_backward_batching_rule);
   m.impl("slice_backward", slice_backward_batching_rule);
+  m.impl("trace_backward", trace_backward_batching_rule);
   m.impl("diagonal_backward", diagonal_backward_batching_rule);
 
   // Tensor.new_* operators
-  m.impl_UNBOXED("new_empty", new_empty_batching_rule);
-  m.impl_UNBOXED("new_empty_strided", new_empty_strided_batching_rule);
+  m.impl("new_empty", new_empty_batching_rule);
+  m.impl("new_empty_strided", new_empty_strided_batching_rule);
   m.impl("new_zeros", new_zeros_batching_rule);
 
   m.impl("contiguous", contiguous_batching_rule);
+
+  // Comparison ops
+#define COMPARISON_POINTWISE(op) \
+  m.impl(#op".Tensor", comparison_pointwise_batching_rule<TensorTensorType, at::op>); \
+  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
+
+  COMPARISON_POINTWISE(eq);
+  COMPARISON_POINTWISE(gt);
+  COMPARISON_POINTWISE(ge);
+  COMPARISON_POINTWISE(le);
+  COMPARISON_POINTWISE(lt);
+  COMPARISON_POINTWISE(ne);
+
+#undef COMPARISON_POINTWISE
 }
 
 } // namespace at

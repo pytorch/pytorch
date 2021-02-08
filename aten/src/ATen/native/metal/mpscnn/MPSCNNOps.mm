@@ -253,6 +253,35 @@ Tensor sigmoid(const Tensor& input) {
   return neuronKernel(input, [MPSCNNNeuronOp sigmoid]);
 }
 
+API_AVAILABLE(ios(11.0), macos(10.13))
+Tensor& hardsigmoid_(Tensor& input) {
+  MPSImage* X = imageFromTensor(input);
+  std::vector<int64_t> outputSize = input.sizes().vec();
+  std::vector<int64_t> textureSize = outputSize;
+  if (input.dim() == 2) {
+    textureSize = {outputSize[0], outputSize[1], 1, 1};
+  }
+  MetalTensor mt{outputSize};
+  MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
+  mt.texture()->allocateTemporaryTextureStorage(textureSize, commandBuffer);
+  MPSImage* Y = imageFromMetalTensor(mt);
+  static dispatch_once_t onceToken;
+  static MPSCNNNeuronHardSigmoid* neuron = nil;
+  dispatch_once(&onceToken, ^{
+    neuron = [[MPSCNNNeuronHardSigmoid alloc]
+        initWithDevice:[MPSCNNContext sharedInstance].device
+                     a:1.0/6.0
+                     b:0.5];
+  });
+  [neuron encodeToCommandBuffer:commandBuffer.buffer
+                    sourceImage:X
+               destinationImage:Y];
+  MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
+  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
+  metalTensor.texture()->copyFromTexture(Y);
+  return input;
+}
+
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor tanh(const Tensor& input) {
   return neuronKernel(input, [MPSCNNNeuronOp tanh]);
@@ -269,6 +298,42 @@ Tensor& hardtanh_(Tensor& input, Scalar min_val, Scalar max_val) {
   MPSCNNClampOp* clampOp = [MPSCNNClampOp newWithTextures:@[ X, Y ]
                                                      Args:@[ @(min), @(max) ]];
   [clampOp encode:commandBuffer.buffer];
+  MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
+  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
+  metalTensor.texture()->copyFromTexture(Y);
+  return input;
+}
+
+Tensor& hardswish_(Tensor& input) {
+  MPSImage* X = imageFromTensor(input);
+  MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
+  std::vector<int64_t> outputSize = input.sizes().vec();
+  std::vector<int64_t> textureSize = outputSize;
+  if (input.dim() == 2) {
+    textureSize = {outputSize[0], outputSize[1], 1, 1};
+  }
+  MPSImage* Y = [MPSImage temporaryImageFromSize:textureSize commandBuffer:commandBuffer];
+  id<MTLComputeCommandEncoder> encoder =
+      [commandBuffer.buffer computeCommandEncoder];
+  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+      specializedPipelineState:metal::mpscnn::kernelFor(
+                                   X, @"hardswish", @"hardswish_nonarray")
+                     Constants:@[
+                       @(X.featureChannels),
+                       @(X.height),
+                       @(X.width)
+                     ]];
+
+  [encoder setComputePipelineState:state];
+  [encoder setTexture:[X texture] atIndex:0];
+  [encoder setTexture:[Y texture] atIndex:1];
+
+  const auto& launchParams =
+      metal::mpscnn::spatialPointwiseKernelLaunchParams(state, X);
+  [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+          threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+  [encoder endEncoding];
+  [X markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensor& metalTensor = impl->unsafe_opaque_handle();
   metalTensor.texture()->copyFromTexture(Y);
@@ -351,8 +416,18 @@ Tensor addmm(const Tensor& bias, const Tensor& input, const Tensor& weight) {
   return output;
 }
 
+bool broadCastFirstInput(const Tensor& input1, const Tensor& input2) {
+  if (
+    (input2.sizes()[2] > 1 && input1.sizes()[2] == 1) ||
+    (input2.sizes()[3] > 1 && input1.sizes()[3] == 1)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 API_AVAILABLE(ios(10.0), macos(10.13))
-Tensor binaryElementwiseKernel(
+Tensor binaryElementwiseShaderKernel(
     const Tensor& input1,
     const Tensor& input2,
     NSString* arrayKernel,
@@ -360,6 +435,9 @@ Tensor binaryElementwiseKernel(
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
+  if (broadCastFirstInput(input1, input2)) {
+    outputSize = input2.sizes().vec();
+  }
   MetalTensor mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
@@ -384,7 +462,7 @@ Tensor binaryElementwiseKernel(
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
-Tensor& binaryElementwiseKernel_(
+Tensor& binaryElementwiseShaderKernel_(
     Tensor& input1,
     const Tensor& input2,
     NSString* arrayKernel,
@@ -392,6 +470,9 @@ Tensor& binaryElementwiseKernel_(
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
+  if (broadCastFirstInput(input1, input2)) {
+    outputSize = input2.sizes().vec();
+  }
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
   TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
@@ -415,27 +496,99 @@ Tensor& binaryElementwiseKernel_(
   return input1;
 }
 
+template <typename T>
+API_AVAILABLE(ios(11.3), macos(10.13))
+Tensor binaryElementwiseMPSCNNKernel(
+    const Tensor& input1,
+    const Tensor& input2) {
+  MPSImage* X1 = imageFromTensor(input1);
+  MPSImage* X2 = imageFromTensor(input2);
+  std::vector<int64_t> outputSize = input1.sizes().vec();
+  if (broadCastFirstInput(input1, input2)) {
+    outputSize = input2.sizes().vec();
+  }
+  MetalTensor mt{outputSize};
+  MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
+  MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
+  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
+  mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
+  MPSImage* Y = imageFromMetalTensor(mt);
+  T* kernel = [[T alloc]
+      initWithDevice:[MPSCNNContext sharedInstance].device];
+  kernel.primaryStrideInPixelsY = (NSUInteger)(input1.sizes()[2] == 1 ? 0 : 1);
+  kernel.primaryStrideInPixelsX = (NSUInteger)(input1.sizes()[3] == 1 ? 0 : 1);
+  kernel.secondaryStrideInPixelsY = (NSUInteger)(input2.sizes()[2] == 1 ? 0 : 1);
+  kernel.secondaryStrideInPixelsX = (NSUInteger)(input2.sizes()[3] == 1 ? 0 : 1);
+  [kernel encodeToCommandBuffer:cb1.buffer
+      primaryImage:X1
+      secondaryImage:X2
+      destinationImage:Y];
+  auto output = MetalTensor::toTensor(std::move(mt), input1.options());
+  return output;
+}
+
+template <typename T>
+API_AVAILABLE(ios(11.3), macos(10.13))
+Tensor& binaryElementwiseMPSCNNKernel_(
+    Tensor& input1,
+    const Tensor& input2) {
+  MPSImage* X1 = imageFromTensor(input1);
+  MPSImage* X2 = imageFromTensor(input2);
+  std::vector<int64_t> outputSize = input1.sizes().vec();
+  if (broadCastFirstInput(input1, input2)) {
+    outputSize = input2.sizes().vec();
+  }
+  MetalTensor mt{outputSize};
+  MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
+  MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
+  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
+  mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
+  MPSImage* Y = imageFromMetalTensor(mt);
+  T* kernel = [[T alloc]
+      initWithDevice:[MPSCNNContext sharedInstance].device];
+  [kernel encodeToCommandBuffer:cb1.buffer
+      primaryImage:X1
+      secondaryImage:X2
+      destinationImage:Y];
+  MetalTensorImpl* impl = (MetalTensorImpl*)input1.unsafeGetTensorImpl();
+  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
+  metalTensor.texture()->copyFromTexture(Y);
+  return input1;
+}
+
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor add(const Tensor& input1, const Tensor& input2) {
-  return binaryElementwiseKernel(
+  if (@available(iOS 11.3, *)) {
+    return binaryElementwiseMPSCNNKernel<MPSCNNAdd>(input1, input2);
+  }
+  return binaryElementwiseShaderKernel(
       input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor& add_(Tensor& input1, const Tensor& input2) {
-  return binaryElementwiseKernel_(
+  if (@available(iOS 11.3, *)) {
+    return binaryElementwiseMPSCNNKernel_<MPSCNNAdd>(input1, input2);
+  }
+  return binaryElementwiseShaderKernel_(
       input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor sub(const Tensor& input1, const Tensor& input2) {
-  return binaryElementwiseKernel(
+  if (@available(iOS 11.3, *)) {
+    return binaryElementwiseMPSCNNKernel<MPSCNNSubtract>(input1, input2);
+  }
+  return binaryElementwiseShaderKernel(
       input1, input2, @"elementwise_sub", @"elementwise_sub_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor mul(const Tensor& input1, const Tensor& input2) {
-  return binaryElementwiseKernel(
+  if (@available(iOS 11.3, *)) {
+    return binaryElementwiseMPSCNNKernel<MPSCNNMultiply>(input1, input2);
+  }
+  return binaryElementwiseShaderKernel(
       input1, input2, @"elementwise_mul", @"elementwise_mul_nonarray");
 }
 
@@ -446,7 +599,7 @@ Tensor t(const Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   TORCH_CHECK(X.numberOfImages == 1);
   TORCH_CHECK(X.featureChannels == 1);
-  MetalTensor mt({sizes[1], sizes[0]}, {strides[1], strides[0]});
+  MetalTensor mt({sizes[1], sizes[0]});
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(
       {1, 1, sizes[1], sizes[0]}, commandBuffer);
@@ -456,7 +609,6 @@ Tensor t(const Tensor& input) {
   [transpose encodeToCommandBuffer:commandBuffer.buffer
                        sourceImage:X
                   destinationImage:Y];
-
   auto output = MetalTensor::toTensor(std::move(mt), input.options());
   return output;
 }
@@ -539,7 +691,7 @@ Tensor upsample_nearest2d_vec(
   MPSImage* Y = imageFromMetalTensor(mt);
   if (@available(iOS 11.0, *)) {
     MPSCNNUpsamplingNearest* kernel = [[MPSCNNUpsamplingNearest alloc]
-             initWithDevice:[MPSCNNContext sharedInstance].device
+        initWithDevice:[MPSCNNContext sharedInstance].device
         integerScaleFactorX:(NSUInteger)scale_w.value()
         integerScaleFactorY:(NSUInteger)scale_h.value()];
     [kernel encodeToCommandBuffer:commandBuffer.buffer

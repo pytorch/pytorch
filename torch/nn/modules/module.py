@@ -1,14 +1,14 @@
 from collections import OrderedDict, namedtuple
-import functools
 import itertools
 import warnings
+import functools
 
 import torch
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
@@ -26,14 +26,6 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
     __str__ = __repr__
 
 
-class ModuleAttributeError(AttributeError):
-    """ When `__getattr__` raises AttributeError inside a property,
-    AttributeError is raised with the property name instead of the
-    attribute that initially raised AttributeError, making the error
-    message uninformative. Using `ModuleAttributeError` instead
-    fixes this issue."""
-
-
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
     # don't do anything for single-line stuff
@@ -49,9 +41,10 @@ def _addindent(s_, numSpaces):
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
-_global_backward_hooks = OrderedDict()
-_global_forward_pre_hooks = OrderedDict()
-_global_forward_hooks = OrderedDict()
+_global_backward_hooks: Dict[int, Callable] = OrderedDict()
+_global_is_full_backward_hook: Optional[bool] = None
+_global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
+_global_forward_hooks: Dict[int, Callable] = OrderedDict()
 
 
 def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
@@ -122,6 +115,31 @@ def register_module_backward_hook(
 ) -> RemovableHandle:
     r"""Registers a backward hook common to all the modules.
 
+    This function is deprecated in favor of :meth:`nn.module.register_module_full_backward_hook`
+    and the behavior of this function will change in future versions.
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+
+    """
+    global _global_is_full_backward_hook
+    if _global_is_full_backward_hook is True:
+        raise RuntimeError("Cannot use both regular backward hooks and full backward hooks as a "
+                           "global Module hook. Please use only one of them.")
+
+    _global_is_full_backward_hook = False
+
+    handle = hooks.RemovableHandle(_global_backward_hooks)
+    _global_backward_hooks[handle.id] = hook
+    return handle
+
+def register_module_full_backward_hook(
+    hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+) -> RemovableHandle:
+    r"""Registers a backward hook common to all the modules.
+
     .. warning ::
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
@@ -138,12 +156,13 @@ def register_module_backward_hook(
 
         hook(module, grad_input, grad_output) -> Tensor or None
 
-    The :attr:`grad_input` and :attr:`grad_output` may be tuples if the
-    module has multiple inputs or outputs. The hook should not modify its
-    arguments, but it can optionally return a new gradient with respect to
-    input that will be used in place of :attr:`grad_input` in subsequent
-    computations. :attr:`grad_input` will only correspond to the inputs given
-    as positional arguments.
+    The :attr:`grad_input` and :attr:`grad_output` are tuples. The hook should
+    not modify its arguments, but it can optionally return a new gradient with
+    respect to the input that will be used in place of :attr:`grad_input` in
+    subsequent computations. :attr:`grad_input` will only correspond to the inputs given
+    as positional arguments and all kwarg arguments will not appear in the hook. Entries
+    in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
+    arguments.
 
     Global hooks are called before hooks registered with `register_backward_hook`
 
@@ -153,6 +172,13 @@ def register_module_backward_hook(
             ``handle.remove()``
 
     """
+    global _global_is_full_backward_hook
+    if _global_is_full_backward_hook is False:
+        raise RuntimeError("Cannot use both regular backward hooks and full backward hooks as a "
+                           "global Module hook. Please use only one of them.")
+
+    _global_is_full_backward_hook = True
+
     handle = hooks.RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
@@ -219,6 +245,7 @@ class Module:
     _version: int = 1
 
     training: bool
+    _is_full_backward_hook: Optional[bool]
 
     def __init__(self):
         """
@@ -231,6 +258,7 @@ class Module:
         self._buffers = OrderedDict()
         self._non_persistent_buffers_set = set()
         self._backward_hooks = OrderedDict()
+        self._is_full_backward_hook = None
         self._forward_hooks = OrderedDict()
         self._forward_pre_hooks = OrderedDict()
         self._state_dict_hooks = OrderedDict()
@@ -453,7 +481,7 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on GPU while being optimized.
 
-        Arguments:
+        Args:
             device (int, optional): if specified, all parameters will be
                 copied to that device
 
@@ -461,6 +489,22 @@ class Module:
             Module: self
         """
         return self._apply(lambda t: t.cuda(device))
+
+    def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:
+        r"""Moves all model parameters and buffers to the XPU.
+
+        This also makes associated parameters and buffers different objects. So
+        it should be called before constructing optimizer if the module will
+        live on XPU while being optimized.
+
+        Arguments:
+            device (int, optional): if specified, all parameters will be
+                copied to that device
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: t.xpu(device))
 
     def cpu(self: T) -> T:
         r"""Moves all model parameters and buffers to the CPU.
@@ -473,7 +517,7 @@ class Module:
     def type(self: T, dst_type: Union[dtype, str]) -> T:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
-        Arguments:
+        Args:
             dst_type (type or string): the desired type
 
         Returns:
@@ -633,26 +677,8 @@ class Module:
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
-        .. warning ::
-
-            The current implementation will not have the presented behavior
-            for complex :class:`Module` that perform many operations.
-            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
-            contain the gradients for a subset of the inputs and outputs.
-            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
-            directly on a specific input or output to get the required gradients.
-
-        The hook will be called every time the gradients with respect to module
-        inputs are computed. The hook should have the following signature::
-
-            hook(module, grad_input, grad_output) -> Tensor or None
-
-        The :attr:`grad_input` and :attr:`grad_output` may be tuples if the
-        module has multiple inputs or outputs. The hook should not modify its
-        arguments, but it can optionally return a new gradient with respect to
-        input that will be used in place of :attr:`grad_input` in subsequent
-        computations. :attr:`grad_input` will only correspond to the inputs given
-        as positional arguments.
+        This function is deprecated in favor of :meth:`nn.Module.register_full_backward_hook` and
+        the behavior of this function will change in future versions.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -660,9 +686,116 @@ class Module:
                 ``handle.remove()``
 
         """
+        if self._is_full_backward_hook is True:
+            raise RuntimeError("Cannot use both regular backward hooks and full backward hooks on a "
+                               "single Module. Please use only one of them.")
+
+        self._is_full_backward_hook = False
+
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
+
+    def register_full_backward_hook(
+        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+    ) -> RemovableHandle:
+        r"""Registers a backward hook on the module.
+
+        The hook will be called every time the gradients with respect to module
+        inputs are computed. The hook should have the following signature::
+
+            hook(module, grad_input, grad_output) -> tuple(Tensor) or None
+
+        The :attr:`grad_input` and :attr:`grad_output` are tuples that contain the gradients
+        with respect to the inputs and outputs respectively. The hook should
+        not modify its arguments, but it can optionally return a new gradient with
+        respect to the input that will be used in place of :attr:`grad_input` in
+        subsequent computations. :attr:`grad_input` will only correspond to the inputs given
+        as positional arguments and all kwarg arguments are ignored. Entries
+        in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
+        arguments.
+
+        .. warning ::
+            Modifying inputs or outputs inplace is not allowed when using backward hooks and
+            will raise an error.
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+
+        """
+        if self._is_full_backward_hook is False:
+            raise RuntimeError("Cannot use both regular backward hooks and full backward hooks on a "
+                               "single Module. Please use only one of them.")
+
+        self._is_full_backward_hook = True
+
+        handle = hooks.RemovableHandle(self._backward_hooks)
+        self._backward_hooks[handle.id] = hook
+        return handle
+
+    def _get_backward_hooks(self):
+        r"""Returns the backward hooks for use in the call function.
+        It returns two lists, one with the full backward hooks and one with the non-full
+        backward hooks.
+        """
+        full_backward_hooks: List[Callable] = []
+        if (_global_is_full_backward_hook is True):
+            full_backward_hooks += _global_backward_hooks.values()
+        if (self._is_full_backward_hook is True):
+            full_backward_hooks += self._backward_hooks.values()
+
+        non_full_backward_hooks: List[Callable] = []
+        if (_global_is_full_backward_hook is False):
+            non_full_backward_hooks += _global_backward_hooks.values()
+        if (self._is_full_backward_hook is False):
+            non_full_backward_hooks += self._backward_hooks.values()
+
+        return full_backward_hooks, non_full_backward_hooks
+
+    def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
+        if not isinstance(result, torch.Tensor):
+            if not (isinstance(result, tuple) and all([isinstance(r, torch.Tensor) for r in result])):
+                warnings.warn("Using non-full backward hooks on a Module that does not return a "
+                              "single Tensor or a tuple of Tensors is deprecated and will be removed "
+                              "in future versions. This hook will be missing some of the grad_output. "
+                              "Please use register_full_backward_hook to get the documented behavior.")
+                return
+        else:
+            result = (result,)
+
+        if not isinstance(inputs, torch.Tensor):
+            if not (isinstance(inputs, tuple) and all([isinstance(i, torch.Tensor) for i in inputs])):
+                warnings.warn("Using non-full backward hooks on a Module that does not take as input a "
+                              "single Tensor or a tuple of Tensors is deprecated and will be removed "
+                              "in future versions. This hook will be missing some of the grad_input. "
+                              "Please use register_full_backward_hook to get the documented behavior.")
+                return
+        else:
+            inputs = (inputs,)
+
+        # At this point we are sure that inputs and result are tuple of Tensors
+        out_grad_fn = set([r.grad_fn for r in result if r.grad_fn is not None])
+        if len(out_grad_fn) == 0 or (len(out_grad_fn) == 1 and grad_fn not in out_grad_fn):
+            warnings.warn("Using a non-full backward hook when outputs are nested in python data structure "
+                          "is deprecated and will be removed in future versions. This hook will be missing "
+                          "some grad_output.")
+        elif len(out_grad_fn) > 1:
+            warnings.warn("Using a non-full backward hook when outputs are generated by different autograd Nodes "
+                          "is deprecated and will be removed in future versions. This hook will be missing "
+                          "some grad_output. Please use register_full_backward_hook to get the documented behavior.")
+        else:
+            # At this point the grad_ouput part of the hook will most likely be correct
+            inputs_grad_fn = set([i.grad_fn for i in inputs if i.grad_fn is not None])
+
+            next_functions = set([n[0] for n in grad_fn.next_functions])
+
+            if inputs_grad_fn != next_functions:
+                warnings.warn("Using a non-full backward hook when the forward contains multiple autograd Nodes "
+                              "is deprecated and will be removed in future versions. This hook will be missing "
+                              "some grad_input. Please use register_full_backward_hook to get the documented "
+                              "behavior.")
 
     def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
@@ -716,9 +849,10 @@ class Module:
             return self.forward(*input, **kwargs)
         recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
-            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None
+            # type ignore was added because at this point one knows that
+            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
+            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
-                cur_scope_name = tracing_state.current_scope()
                 tracing_state.push_scope(name)
             else:
                 recording_scopes = False
@@ -730,6 +864,11 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
+        # Do not call functions when jit is used
+        full_backward_hooks, non_full_backward_hooks = [], []
+        if len(self._backward_hooks) > 0 or len(_global_backward_hooks) > 0:
+            full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
+
         for hook in itertools.chain(
                 _global_forward_pre_hooks.values(),
                 self._forward_pre_hooks.values()):
@@ -738,6 +877,12 @@ class Module:
                 if not isinstance(result, tuple):
                     result = (result,)
                 input = result
+
+        bw_hook = None
+        if len(full_backward_hooks) > 0:
+            bw_hook = hooks.BackwardHook(self, full_backward_hooks)
+            input = bw_hook.setup_input_hook(input)
+
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
@@ -748,7 +893,12 @@ class Module:
             hook_result = hook(self, input, result)
             if hook_result is not None:
                 result = hook_result
-        if (len(self._backward_hooks) > 0) or (len(_global_backward_hooks) > 0):
+
+        if bw_hook:
+            result = bw_hook.setup_output_hook(result)
+
+        # Handle the non-full backward hooks
+        if len(non_full_backward_hooks) > 0:
             var = result
             while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
@@ -757,12 +907,12 @@ class Module:
                     var = var[0]
             grad_fn = var.grad_fn
             if grad_fn is not None:
-                for hook in itertools.chain(
-                        _global_backward_hooks.values(),
-                        self._backward_hooks.values()):
+                for hook in non_full_backward_hooks:
                     wrapper = functools.partial(hook, self)
                     functools.update_wrapper(wrapper, hook)
                     grad_fn.register_hook(wrapper)
+                self._maybe_warn_non_full_backward_hook(input, result, grad_fn)
+
         return result
 
     __call__ : Callable[..., Any] = _call_impl
@@ -778,6 +928,8 @@ class Module:
             self._load_state_dict_pre_hooks = OrderedDict()
         if '_non_persistent_buffers_set' not in self.__dict__:
             self._non_persistent_buffers_set = set()
+        if '_is_full_backward_hook' not in self.__dict__:
+            self._is_full_backward_hook = None
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
@@ -792,7 +944,7 @@ class Module:
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        raise ModuleAttributeError("'{}' object has no attribute '{}'".format(
+        raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
@@ -872,7 +1024,7 @@ class Module:
         In rare cases, subclasses can achieve class-specific behavior by
         overriding this method with custom logic.
 
-        Arguments:
+        Args:
             destination (dict): a dict where state will be stored
             prefix (str): the prefix for parameters and buffers used in this
                 module
@@ -953,7 +1105,7 @@ class Module:
             :attr:`state_dict` to :meth:`~torch.nn.Module.load_state_dict`. So
             it can be modified.
 
-        Arguments:
+        Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
             prefix (str): the prefix for parameters and buffers used in this
@@ -1016,14 +1168,14 @@ class Module:
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
-    def load_state_dict(self, state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
+    def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
                         strict: bool = True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
         by this module's :meth:`~torch.nn.Module.state_dict` function.
 
-        Arguments:
+        Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
             strict (bool, optional): whether to strictly enforce that the keys
@@ -1035,15 +1187,16 @@ class Module:
                 * **missing_keys** is a list of str containing the missing keys
                 * **unexpected_keys** is a list of str containing the unexpected keys
         """
-        missing_keys = []
-        unexpected_keys = []
-        error_msgs = []
+        missing_keys: List[str] = []
+        unexpected_keys: List[str] = []
+        error_msgs: List[str] = []
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)
         state_dict = state_dict.copy()
         if metadata is not None:
-            state_dict._metadata = metadata
+            # mypy isn't aware that "_metadata" exists in state_dict
+            state_dict._metadata = metadata  # type: ignore[attr-defined]
 
         def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
@@ -1054,7 +1207,7 @@ class Module:
                     load(child, prefix + name + '.')
 
         load(self)
-        load = None  # break load->load reference cycle
+        del load
 
         if strict:
             if len(unexpected_keys) > 0:
@@ -1108,7 +1261,7 @@ class Module:
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
+    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
         r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself.
 
@@ -1336,7 +1489,7 @@ class Module:
         r"""Sets gradients of all model parameters to zero. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 
-        Arguments:
+        Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
                 See :meth:`torch.optim.Optimizer.zero_grad` for details.
         """

@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
@@ -58,6 +59,15 @@ void testStaticRuntime(
   script::Module module("module");
   module.define(jit_script);
 
+  std::vector<IValue> args_tensors, args_copy;
+  for (const auto& ival : args) {
+    if (ival.isTensor()) {
+      args_tensors.emplace_back(ival);
+      const at::Tensor& t = ival.toTensor();
+      args_copy.emplace_back(t.clone());
+    }
+  }
+
   auto expect = module.forward(args);
 
   StaticRuntime runtime(module);
@@ -67,11 +77,12 @@ void testStaticRuntime(
     compareTensorLists(
         expect.toTuple()->elements(), actual.toTuple()->elements());
   } else if (expect.isList()) {
-    compareTensorLists(
-        expect.toTensorVector(), actual.toTensorVector());
+    compareTensorLists(expect.toTensorVector(), actual.toTensorVector());
   } else {
     EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
   }
+  // make sure inputs were not modified
+  compareTensorLists(args_tensors, args_copy);
 }
 } // namespace
 
@@ -85,6 +96,33 @@ TEST(StaticRuntime, IndividualOps_Binary) {
   testStaticRuntime(list_construct_script, args);
   testStaticRuntime(list_unpack_script, args);
   testStaticRuntime(tuple_construct_script, args);
+}
+
+TEST(StaticRuntime, IndividualOps_Reshape) {
+  auto a = at::randn({2, 3});
+  auto b = std::vector<int64_t>({3, 2});
+  std::vector<IValue> args{a, b};
+
+  testStaticRuntime(reshape_script_1, args);
+  testStaticRuntime(reshape_script_2, args);
+}
+
+TEST(StaticRuntime, IndividualOps_flatten) {
+  auto test_flatten =
+      [](std::vector<int64_t> shape, int64_t start_dim, int64_t end_dim) {
+        auto a = at::randn(shape);
+        std::vector<IValue> args{a, start_dim, end_dim};
+        testStaticRuntime(flatten_script_1, args);
+        if (shape.size() > 2) {
+          testStaticRuntime(flatten_script_2, args);
+        }
+      };
+
+  test_flatten({2, 3}, 0, 1);
+  test_flatten({2, 1, 3}, 1, 2);
+  test_flatten({0, 1, 3, 0}, 1, 2);
+  test_flatten({2, 3}, 1, 1);
+  test_flatten({}, 0, 0);
 }
 
 TEST(StaticRuntime, LongModel) {
@@ -246,6 +284,36 @@ TEST(StaticRuntime, CleanUpMemory) {
           EXPECT_TRUE(output_1.equal(output_2));
         }
       }
+    }
+  }
+}
+
+TEST(StaticRuntime, FusionPass) {
+  const int embedding_size = 32;
+  const int num_features = 50;
+  for (int batch_size : {1, 8, 32}) {
+    for (int i = 0; i < 2; ++i) {
+      torch::jit::Module module = getDeepAndWideSciptModel();
+      auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
+      auto user_emb = torch::randn({batch_size, 1, embedding_size});
+      auto wide = torch::randn({batch_size, num_features});
+
+      // run jit graph executor
+      std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
+      auto output_1 = getTensor(module.forward(inputs));
+
+      Method method = module.get_method("forward");
+      auto graph = method.graph();
+      fuseStaticSubgraphs(graph);
+      bool hit = false;
+      for (const auto& n : module.get_method("forward").graph()->nodes()) {
+        if (n->kind() == torch::jit::prim::StaticSubgraph) {
+          hit = true;
+        }
+      }
+      EXPECT_TRUE(hit);
+      auto output_2 = getTensor(module.forward(inputs));
+      EXPECT_TRUE(output_1.equal(output_2));
     }
   }
 }

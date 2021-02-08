@@ -47,10 +47,8 @@ class TestNumPyInterop(TestCase):
             else:
                 # can't directly use min and max, because for int64_t, max - min
                 # is greater than int64_t range and triggers UB.
-                dtype_info = torch.iinfo(dtype)
-                low = max(dtype_info.min, int(-1e10))
-                high = min(dtype_info.max, int(1e10))
-                dtype_info = torch.iinfo(dtype)
+                low = max(torch.iinfo(dtype).min, int(-1e10))
+                high = min(torch.iinfo(dtype).max, int(1e10))
                 t = torch.empty(shape, dtype=torch.int64).random_(low, high)
             return t.to(dtype)
 
@@ -272,10 +270,12 @@ class TestNumPyInterop(TestCase):
         ]
         for tp, dtype in zip(types, dtypes):
             if np.dtype(dtype).kind == 'u':
-                x = torch.Tensor([1, 2, 3, 4]).type(tp)
+                # .type expects a XxxTensor, which have no type hints on
+                # purpose, so ignore during mypy type checking
+                x = torch.Tensor([1, 2, 3, 4]).type(tp)  # type: ignore
                 array = np.array([1, 2, 3, 4], dtype=dtype)
             else:
-                x = torch.Tensor([1, -2, 3, -4]).type(tp)
+                x = torch.Tensor([1, -2, 3, -4]).type(tp)  # type: ignore
                 array = np.array([1, -2, 3, -4], dtype=dtype)
 
             # Test __array__ w/o dtype argument
@@ -309,7 +309,7 @@ class TestNumPyInterop(TestCase):
         float_types = [torch.DoubleTensor, torch.FloatTensor]
         float_dtypes = [np.float64, np.float32]
         for tp, dtype in zip(float_types, float_dtypes):
-            x = torch.Tensor([1, 2, 3, 4]).type(tp)
+            x = torch.Tensor([1, 2, 3, 4]).type(tp)  # type: ignore
             array = np.array([1, 2, 3, 4], dtype=dtype)
             for func in ['sin', 'sqrt', 'ceil']:
                 ufunc = getattr(np, func)
@@ -321,7 +321,7 @@ class TestNumPyInterop(TestCase):
 
         # Test functions with boolean return value
         for tp, dtype in zip(types, dtypes):
-            x = torch.Tensor([1, 2, 3, 4]).type(tp)
+            x = torch.Tensor([1, 2, 3, 4]).type(tp)  # type: ignore
             array = np.array([1, 2, 3, 4], dtype=dtype)
             geq2_x = np.greater_equal(x, 2)
             geq2_array = np.greater_equal(array, 2).astype('uint8')
@@ -360,7 +360,7 @@ class TestNumPyInterop(TestCase):
             self.assertEqual(torch.ones([2, 2, 2, 2]).mean(scalar), torch.ones([2, 2, 2, 2]).mean(np_val))
 
             # numpy integral type parses like a python int in custom python bindings:
-            self.assertEqual(torch.Storage(np_val).size(), scalar)
+            self.assertEqual(torch.Storage(np_val).size(), scalar)  # type: ignore
 
             tensor = torch.tensor([2], dtype=torch.int)
             tensor[0] = np_val

@@ -360,7 +360,8 @@ class QuantizationTestCase(TestCase):
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
             and type(module) in propagate_qconfig_list) or
-           type(module) in float_to_observed_module_class_mapping.keys()):
+           type(module) in float_to_observed_module_class_mapping.keys()) and \
+           not isinstance(module, torch.quantization.DeQuantStub):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
@@ -609,7 +610,11 @@ class QuantizationTestCase(TestCase):
                                expected_node_list=None,
                                debug=False,
                                print_debug_info=False,
-                               custom_qconfig=None):
+                               custom_qconfig=None,
+                               prepare_expected_node=None,
+                               prepare_expected_node_occurrence=None,
+                               prepare_expected_node_list=None,
+                               prepare_custom_config_dict=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -628,6 +633,14 @@ class QuantizationTestCase(TestCase):
                                 NodeSpec.call_module(nnq.Conv2d),
                                 NodeSpec.call_function(F.hardtanh_),
                                 NodeSpec.call_method('dequantize')]
+                    debug: if True, enables debug mode
+                    print_debug_info: if True, prints debug info
+                    custom_qconfig: overrides default qconfig
+                    prepare_expected_node: same as expected_node, but for prepare
+                    prepare_expected_node_occurrence: same as
+                        expected_node_occurrence, but for prepare
+                    prepare_expected_node_list: same as expected_node_list, but
+                        for prepare
             """
             # TODO: make img_data a single example instead of a list
             if type(inputs) == list:
@@ -653,9 +666,23 @@ class QuantizationTestCase(TestCase):
                 prepare = prepare_fx
 
             qconfig_dict = {'': qconfig}
-            prepared = prepare(model, qconfig_dict)
+            prepared = prepare(
+                model, qconfig_dict,
+                prepare_custom_config_dict=prepare_custom_config_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
+
+            if print_debug_info:
+                print()
+                print('quant type:\n', quant_type)
+                print('original model:\n', model)
+                print()
+                print('prepared model:\n', prepared)
+
+            self.checkGraphModuleNodes(
+                prepared, prepare_expected_node,
+                prepare_expected_node_occurrence, prepare_expected_node_list)
+
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
             qgraph_debug = convert_fx(prepared_copy, debug=True)
@@ -665,10 +692,7 @@ class QuantizationTestCase(TestCase):
             qgraph_to_check = qgraph_debug if debug else qgraph
             if print_debug_info:
                 print()
-                print('quant type:', quant_type)
-                print('original model:', model)
-                print()
-                print('quantized model:', qgraph_to_check)
+                print('quantized model:\n', qgraph_to_check)
                 self.printGraphModule(qgraph_to_check)
                 print()
             self.checkGraphModuleNodes(
@@ -742,8 +766,8 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(expected_name in str(q_embeddingbag))
 
 
-# Below are a series of neural net models to use in testing quantization
-# Single layer models
+# Below are a series of toy models to use in testing quantization
+
 class SingleLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -884,6 +908,19 @@ class AnnotatedConvBnModel(torch.nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         x = self.dequant(x)
+        return x
+
+class ConvBnReLUModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
         return x
 
 class AnnotatedConvBnReLUModel(torch.nn.Module):
@@ -1308,6 +1345,17 @@ class ModelForFusionWithBias(nn.Module):
         x = self.dequant(x)
         return x
 
+class ModelForLinearBNFusion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(20, 10)
+        self.bn = nn.BatchNorm1d(10)
+        nn.init.uniform_(self.bn.weight)
+        nn.init.uniform_(self.bn.bias)
+
+    def forward(self, x):
+        return self.bn(self.fc(x))
+
 class DummyObserver(torch.nn.Module):
     def calculate_qparams(self):
         return 1.0, 0
@@ -1350,7 +1398,7 @@ class ResNetBase(torch.nn.Module):
         self.downsample = torch.nn.Identity()
         self.myop = nn.quantized.FloatFunctional()
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-
+        self.fc = torch.nn.Linear(inplanes, 1)
 
     def forward(self, x):
         out = self.conv1(x)
@@ -1360,7 +1408,12 @@ class ResNetBase(torch.nn.Module):
         out = self.myop.add(out, identity)
         out = self.relu2(out)
         out = self.avgpool(out)
+        out = torch.flatten(out, 1)
+        out = self.fc(out)
         return out
+
+    def fuse_model(self):
+        torch.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
 
 class ModelMultipleOps(torch.nn.Module):
     def __init__(self):

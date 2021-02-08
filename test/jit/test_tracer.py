@@ -15,18 +15,16 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings, \
     skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, IS_WINDOWS
+    IS_SANDCASTLE, TemporaryFileName
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, RUN_CUDA_MULTI_GPU
 from torch.testing._internal.common_cuda import with_tf32_off
-from typing import List, Tuple
 from torch import Tensor
 
 # Standard library
 from collections import namedtuple
 from itertools import chain
-import tempfile
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 import warnings
 
 if __name__ == '__main__':
@@ -150,6 +148,28 @@ class TestTracer(JitTestCase):
         p = Point(torch.randn(1), torch.randn(1))
         traced = torch.jit.trace(f, (p,))
         self.assertEqual(f(p), traced(p))
+
+    def test_trace_topk(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x.topk(y, dim=1)[1]
+
+        mod = M()
+        inputs = (torch.randint(0, 10, (20, 20)), torch.tensor(17))
+        traced_func = torch.jit.trace(mod, inputs)
+
+        test_inputs = (torch.randint(0, 9, (9, 9)), torch.tensor(8))
+        eager_out = mod(*test_inputs)
+        traced_out = traced_func(*test_inputs)
+        self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
+        self.assertTrue(torch.allclose(eager_out, traced_out))
+
+        test_inputs = (torch.randint(0, 50, (50, 50)), torch.tensor(12))
+        eager_out = mod(*test_inputs)
+        traced_out = traced_func(*test_inputs)
+        self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
+        self.assertTrue(torch.allclose(eager_out, traced_out))
+
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
@@ -484,11 +504,11 @@ class TestTracer(JitTestCase):
             if y:   # Warning 2.
                 pass
             q = [x, x * 4]
-            z = q[y]  # Warning 3.
-            float(z)  # Warning 4.
-            z.tolist()  # Warning 5.
-            z.numpy()  # Warning 6.
-            for _ in torch.ones(4, 4):  # Warning 7.
+            z = q[y]
+            float(z)  # Warning 3.
+            z.tolist()  # Warning 4.
+            z.numpy()  # Warning 5.
+            for _ in torch.ones(4, 4):  # Warning 6.
                 pass
             return z + 4
 
@@ -497,11 +517,10 @@ class TestTracer(JitTestCase):
         warns = [str(w.message) for w in warns]
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
-        self.assertIn('a Python index', warns[2])
-        self.assertIn('a Python float', warns[3])
-        self.assertIn('a Python list', warns[4])
-        self.assertIn('a NumPy array', warns[5])
-        self.assertIn('Iterating over', warns[6])
+        self.assertIn('a Python float', warns[2])
+        self.assertIn('a Python list', warns[3])
+        self.assertIn('a NumPy array', warns[4])
+        self.assertIn('Iterating over', warns[5])
 
     def test_trace_tuple(self):
         def fn(x, y):
@@ -1215,15 +1234,14 @@ class TestTracer(JitTestCase):
         self.run_pass('inline', traced_tensor_size.graph)
         FileCheck().check("prim::device").run(traced_tensor_size.graph)
 
-    @unittest.skipIf(IS_WINDOWS, "temp file name on windows")
     def test_trace_save(self):
         def fn(x):
             return x + 2
 
         def check(func):
-            with tempfile.NamedTemporaryFile() as f:
-                func.save(f.name)
-                loaded = torch.jit.load(f.name)
+            with TemporaryFileName() as fname:
+                func.save(fname)
+                loaded = torch.jit.load(fname)
                 input = torch.randn(2, 2)
                 self.assertEqual(func(input), loaded(input))
 
@@ -1407,8 +1425,7 @@ class TestTracer(JitTestCase):
     @_tmp_donotuse_dont_inline_everything
     def test_trace_optional(self):
         @torch.jit.script
-        def test(x):
-            # type: (Optional[Tensor])
+        def test(x: Optional[Tensor]):
             if x is None:
                 return torch.zeros(1)
             else:
@@ -1846,17 +1863,47 @@ class TestTracer(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"):
             torch.jit.trace(f, (1,))
 
+    def test_trace_skip_none_submodule(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = torch.nn.Linear(3, 4)
+                self.submod = None
+
+            def forward(self, inputs):
+                return inputs
+
+        m = TestModule()
+        tm = torch.jit.trace(m, torch.tensor(1.))
+        self.assertFalse(hasattr(tm, "submod"))
+
+    def test_trace_with_conditional_property(self):
+        class Net(nn.Module):
+            def __init__(self, attr=None):
+                super(Net, self).__init__()
+                if attr is not None:
+                    self._attr = attr
+                self.attr_name = '_attr'
+
+            @property
+            def attr(self):
+                return getattr(self, self.attr_name)
+
+            def forward(self, x):
+                return x
+
+        x = torch.ones(1)
+        torch.jit.trace(Net(), x)
+
 
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
         @torch.jit.script
-        def func1(x):
-            # type: (Tuple[Tensor, Tensor]) -> Tensor
+        def func1(x: Tuple[Tensor, Tensor]) -> Tensor:
             return x[0] + x[1]
 
         @torch.jit.script
-        def func2(x):
-            # type: (List[Tensor]) -> Tensor
+        def func2(x: List[Tensor]) -> Tensor:
             return x[0] + x[1]
 
         a = torch.randn(5)
@@ -1866,8 +1913,7 @@ class TestMixTracingScripting(JitTestCase):
         self.checkTrace(func2, ((a, b),))
 
         @torch.jit.script
-        def func3(x, method='bilinear', align_corners=True):
-            # type: (Tensor, str, bool) -> Tensor
+        def func3(x: Tensor, method: str = 'bilinear', align_corners: bool = True) -> Tensor:
             hw = x.shape[2:4]
             return F.interpolate(x, hw, mode=method, align_corners=align_corners)
 
@@ -1875,8 +1921,7 @@ class TestMixTracingScripting(JitTestCase):
         self.checkTrace(func3, (inp,))
 
         @torch.jit.script
-        def func4(x, a):
-            # type: (Tensor, List[Optional[str]]) -> Tensor
+        def func4(x: Tensor, a: List[Optional[str]]) -> Tensor:
             if len(a) == 2:
                 return x + 2
             else:
@@ -2279,3 +2324,46 @@ class TestMixTracingScripting(JitTestCase):
         traced_module = torch.jit.trace(eager_module, input1)
         self.assertEqual(traced_module(input1), eager_module(input1))
         self.assertEqual(traced_module(input2), eager_module(input2))
+
+    def test_trace_returning_dict_with_tensor_tuples(self):
+        """Tracing over a module returning a dictionary whose values are tuples of tensors
+        should work.
+        """
+        class ReturnsDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self, k: torch.Tensor, v: torch.Tensor
+            ) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
+                x = 2 * k
+                y = 3 * v
+                result = {
+                    "imakey": (x, y)
+                }
+                return result
+
+        class ReturnsBadDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self, k: torch.Tensor, v: torch.Tensor
+            ) -> Dict[str, Tuple[torch.Tensor, float]]:
+                x = 2 * k
+                result = {
+                    "imakey": (x, 1)
+                }
+                return result
+
+        mod = ReturnsDict()
+        traced_module = torch.jit.trace(mod, [torch.ones(1), torch.ones(1)], strict=False)
+        out = traced_module(torch.ones(1), torch.ones(1))
+        expected = {
+            "imakey": (torch.tensor([2.]), torch.tensor([3.]))
+        }
+        self.assertEqual(out, expected)
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be understood by the tracer, only outputs matching"):
+            mod = ReturnsBadDict()
+            traced_module = torch.jit.trace(mod, [torch.ones(1), torch.ones(1)], strict=False)

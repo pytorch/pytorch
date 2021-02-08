@@ -638,7 +638,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
              0,
              context_.cuda_stream()>>>(
               grad, lengths, grad_buffer_data, block_size);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     if (block_size <= maxThreads) {
@@ -661,7 +661,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
           is_mean ? grad_buffer_data : grad,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // calling cuda kernel with ExactBlock = false
       sparse_adagrad_fused_length_sum_gradient_kernel<
@@ -680,7 +680,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
           is_mean ? grad_buffer_data : grad,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     return true;
   }
@@ -822,7 +822,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (block_size > 64) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -842,7 +842,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (block_size > 32) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -862,7 +862,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -882,7 +882,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     return true;
   }
@@ -1012,7 +1012,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
              0,
              context_.cuda_stream()>>>(
               grad, lengths, grad_buffer_data, block_size);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     // 0: nearest rounding
@@ -1045,7 +1045,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
             lr,
             seed,
             weight_decay_);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
             IndexType,
@@ -1065,7 +1065,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
             lr,
             seed,
             weight_decay_);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
       if (round_option_) {
@@ -1091,7 +1091,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
                 lr,
                 seed,
                 weight_decay_);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
             IndexType,
@@ -1115,7 +1115,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
                 lr,
                 seed,
                 weight_decay_);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
     return true;
@@ -1253,7 +1253,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
              0,
              context_.cuda_stream()>>>(
               grad, lengths, grad_buffer_data, block_size);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     sorted_linear_ind_buffer_.ResizeLike(indicesInput);
@@ -1265,7 +1265,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
             indices,
             prefix_sum_length_data,
             seg_id_buffer_.template mutable_data<int>());
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     sort_pairs_wrapper<IndexType>(
         num_indices,
@@ -1330,7 +1330,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 lr,
                 seed,
                 weight_decay_);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
             IndexType,
@@ -1357,7 +1357,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 lr,
                 seed,
                 weight_decay_);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
       const int sm_size = block_size * sizeof(float);
@@ -1392,7 +1392,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 lr,
                 seed,
                 weight_decay_);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
             IndexType,
@@ -1419,7 +1419,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 lr,
                 seed,
                 weight_decay_);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
 
@@ -1569,7 +1569,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (block_size > 64) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1589,7 +1589,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (block_size > 32) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1609,7 +1609,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1629,7 +1629,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     return true;

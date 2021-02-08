@@ -220,6 +220,7 @@ _(aten, blackman_window) \
 _(aten, block_diag) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
+_(aten, broadcast_to) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
@@ -288,6 +289,7 @@ _(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, fill_diagonal_) \
+_(aten, diff) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
@@ -330,6 +332,8 @@ _(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
 _(aten, fmod_) \
+_(aten, fmax) \
+_(aten, fmin) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \
@@ -383,6 +387,7 @@ _(aten, index_fill) \
 _(aten, index_put) \
 _(aten, index_select) \
 _(aten, indices) \
+_(aten, inner) \
 _(aten, instance_norm) \
 _(aten, inverse) \
 _(aten, irfft) \
@@ -434,6 +439,7 @@ _(aten, logdet) \
 _(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
+_(aten, xlogy) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -496,6 +502,7 @@ _(aten, mode) \
 _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
+_(aten, msort) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -546,10 +553,10 @@ _(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
-_(aten, movedim) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
 _(aten, pixel_shuffle) \
+_(aten, pixel_unshuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, pow) \
@@ -621,6 +628,7 @@ _(aten, signbit) \
 _(aten, silu) \
 _(aten, sgn) \
 _(aten, sin) \
+_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \

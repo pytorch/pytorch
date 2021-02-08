@@ -1,6 +1,8 @@
+#include <ATen/Context.h>
 #include <ATen/BatchedFallback.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/VmapTransforms.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/llvmMathExtras.h>
 
 namespace at {
@@ -63,6 +65,9 @@ static bool isInplaceOp(const c10::FunctionSchema& schema) {
 }
 
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
+  if (!globalContext().areVmapFallbackWarningsEnabled()) {
+    return;
+  }
   auto uses_stack = is_inplace ? "" : " and stack";
   TORCH_WARN("Batching rule not implemented for ", schema.operator_name(), " falling back "
              "to slow (for loop", uses_stack, ") implementation");
@@ -361,7 +366,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
         flat_output.sizes().end());
     torch::jit::push(
         stack,
-        input_physical_views.front().newLogicalFromPhysical(flat_output.view(output_sizes)));
+        input_physical_views.front().getPhysicalToLogicalMap().apply(flat_output.view(output_sizes)));
   }
 }
 

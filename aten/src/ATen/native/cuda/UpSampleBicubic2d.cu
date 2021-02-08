@@ -228,7 +228,7 @@ static void upsample_bicubic2d_out_cuda_template(
                 align_corners,
                 idata,
                 odata);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
@@ -302,7 +302,7 @@ static void upsample_bicubic2d_backward_out_cuda_template(
                0,
                stream>>>(
                 num_kernels, rheight, rwidth, align_corners, idata, odata);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 

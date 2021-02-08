@@ -1,11 +1,14 @@
 import torch
 
 import math
+from pathlib import PurePosixPath
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, make_tensor)
+    (TestCase, make_tensor, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyOnCPUAndCUDA, dtypes)
+    (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
+from torch.testing._internal import mypy_wrapper
+from torch.testing._internal import print_test_stats
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -432,7 +435,567 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    def test_assert_messages(self, device):
+        self.assertIsNone(self._get_assert_msg(msg=None))
+        self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
+        self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
+        self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
+
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_stop_test_suite(self, device):
+        # This test is slow because it spawn another process to run another test suite.
+
+        # Test running of cuda assert test suite should early terminate.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python
+
+import torch
+
+from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+# This test is added to ensure that test suite terminates early when
+# CUDA assert was thrown since all subsequent test will fail.
+# See: https://github.com/pytorch/pytorch/issues/49019
+# This test file should be invoked from test_testing.py
+class TestThatContainsCUDAAssertFailure(TestCase):
+
+    @slowTest
+    def test_throw_unrecoverable_cuda_exception(self, device):
+        x = torch.rand(10, device=device)
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    @slowTest
+    def test_trivial_passing_test_case_on_cpu_cuda(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+instantiate_device_type_tests(
+    TestThatContainsCUDAAssertFailure,
+    globals(),
+    only_for='cuda'
+)
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # should capture CUDA error
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # should run only 1 test because it throws unrecoverable error.
+        self.assertIn('Ran 1 test', stderr)
+
+
 instantiate_device_type_tests(TestTesting, globals())
+
+
+class TestMypyWrapper(TestCase):
+    def test_glob(self):
+        # can match individual files
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='test/test_torch.py',
+            filename=PurePosixPath('test/test_torch.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='test/test_torch.py',
+            filename=PurePosixPath('test/test_testing.py'),
+        ))
+
+        # dir matters
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='tools/codegen/utils.py',
+            filename=PurePosixPath('torch/nn/modules.py'),
+        ))
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='setup.py',
+            filename=PurePosixPath('setup.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='setup.py',
+            filename=PurePosixPath('foo/setup.py'),
+        ))
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='foo/setup.py',
+            filename=PurePosixPath('foo/setup.py'),
+        ))
+
+        # can match dirs
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='torch',
+            filename=PurePosixPath('torch/random.py'),
+        ))
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='torch',
+            filename=PurePosixPath('torch/nn/cpp.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='torch',
+            filename=PurePosixPath('tools/fast_nvcc/fast_nvcc.py'),
+        ))
+
+        # can match wildcards
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='tools/autograd/*.py',
+            filename=PurePosixPath('tools/autograd/gen_autograd.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='tools/autograd/*.py',
+            filename=PurePosixPath('tools/autograd/deprecated.yaml'),
+        ))
+
+
+def fakehash(char):
+    return char * 40
+
+
+def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
+    return {
+        'name': name,
+        'seconds': seconds,
+        'errored': errored,
+        'failed': failed,
+        'skipped': skipped,
+    }
+
+
+def makereport(tests):
+    suites = {
+        suite_name: {
+            'total_seconds': sum(case['seconds'] for case in cases),
+            'cases': cases,
+        }
+        for suite_name, cases in tests.items()
+    }
+    return {
+        'total_seconds': sum(s['total_seconds'] for s in suites.values()),
+        'suites': suites,
+    }
+
+
+class TestPrintTestStats(TestCase):
+    maxDiff = None
+
+    def test_analysis(self):
+        head_report = makereport({
+            # input ordering of the suites is ignored
+            'Grault': [
+                # not printed: status same and time similar
+                makecase('test_grault0', 4.78, failed=True),
+                # status same, but time increased a lot
+                makecase('test_grault2', 1.473, errored=True),
+            ],
+            # individual tests times changed, not overall suite
+            'Qux': [
+                # input ordering of the test cases is ignored
+                makecase('test_qux1', 0.001, skipped=True),
+                makecase('test_qux6', 0.002, skipped=True),
+                # time in bounds, but status changed
+                makecase('test_qux4', 7.158, failed=True),
+                # not printed because it's the same as before
+                makecase('test_qux7', 0.003, skipped=True),
+                makecase('test_qux5', 11.968),
+                makecase('test_qux3', 23.496),
+            ],
+            # new test suite
+            'Bar': [
+                makecase('test_bar2', 3.742, failed=True),
+                makecase('test_bar1', 50.447),
+            ],
+            # overall suite time changed but no individual tests
+            'Norf': [
+                makecase('test_norf1', 3),
+                makecase('test_norf2', 3),
+                makecase('test_norf3', 3),
+                makecase('test_norf4', 3),
+            ],
+            # suite doesn't show up if it doesn't change enough
+            'Foo': [
+                makecase('test_foo1', 42),
+                makecase('test_foo2', 56),
+            ],
+        })
+
+        base_reports = {
+            # bbbb has no reports, so base is cccc instead
+            fakehash('b'): [],
+            fakehash('c'): [
+                makereport({
+                    'Baz': [
+                        makecase('test_baz2', 13.605),
+                        # no recent suites have & skip this test
+                        makecase('test_baz1', 0.004, skipped=True),
+                    ],
+                    'Foo': [
+                        makecase('test_foo1', 43),
+                        # test added since dddd
+                        makecase('test_foo2', 57),
+                    ],
+                    'Grault': [
+                        makecase('test_grault0', 4.88, failed=True),
+                        makecase('test_grault1', 11.967, failed=True),
+                        makecase('test_grault2', 0.395, errored=True),
+                        makecase('test_grault3', 30.460),
+                    ],
+                    'Norf': [
+                        makecase('test_norf1', 2),
+                        makecase('test_norf2', 2),
+                        makecase('test_norf3', 2),
+                        makecase('test_norf4', 2),
+                    ],
+                    'Qux': [
+                        makecase('test_qux3', 4.978, errored=True),
+                        makecase('test_qux7', 0.002, skipped=True),
+                        makecase('test_qux2', 5.618),
+                        makecase('test_qux4', 7.766, errored=True),
+                        makecase('test_qux6', 23.589, failed=True),
+                    ],
+                }),
+            ],
+            fakehash('d'): [
+                makereport({
+                    'Foo': [
+                        makecase('test_foo1', 40),
+                        # removed in cccc
+                        makecase('test_foo3', 17),
+                    ],
+                    'Baz': [
+                        # not skipped, so not included in stdev
+                        makecase('test_baz1', 3.14),
+                    ],
+                    'Qux': [
+                        makecase('test_qux7', 0.004, skipped=True),
+                        makecase('test_qux2', 6.02),
+                        makecase('test_qux4', 20.932),
+                    ],
+                    'Norf': [
+                        makecase('test_norf1', 3),
+                        makecase('test_norf2', 3),
+                        makecase('test_norf3', 3),
+                        makecase('test_norf4', 3),
+                    ],
+                    'Grault': [
+                        makecase('test_grault0', 5, failed=True),
+                        makecase('test_grault1', 14.325, failed=True),
+                        makecase('test_grault2', 0.31, errored=True),
+                    ],
+                }),
+            ],
+            fakehash('e'): [],
+            fakehash('f'): [
+                makereport({
+                    'Foo': [
+                        makecase('test_foo3', 24),
+                        makecase('test_foo1', 43),
+                    ],
+                    'Baz': [
+                        makecase('test_baz2', 16.857),
+                    ],
+                    'Qux': [
+                        makecase('test_qux2', 6.422),
+                        makecase('test_qux4', 6.382, errored=True),
+                    ],
+                    'Norf': [
+                        makecase('test_norf1', 0.9),
+                        makecase('test_norf3', 0.9),
+                        makecase('test_norf2', 0.9),
+                        makecase('test_norf4', 0.9),
+                    ],
+                    'Grault': [
+                        makecase('test_grault0', 4.7, failed=True),
+                        makecase('test_grault1', 13.146, failed=True),
+                        makecase('test_grault2', 0.48, errored=True),
+                    ],
+                }),
+            ],
+        }
+
+        simpler_head = print_test_stats.simplify(head_report)
+        simpler_base = {}
+        for commit, reports in base_reports.items():
+            simpler_base[commit] = [print_test_stats.simplify(r) for r in reports]
+        analysis = print_test_stats.analyze(
+            head_report=simpler_head,
+            base_reports=simpler_base,
+        )
+
+        self.assertEqual(
+            '''\
+
+- class Baz:
+-     # was   15.23s ±   2.30s
+-
+-     def test_baz1: ...
+-         # was   0.004s           (skipped)
+-
+-     def test_baz2: ...
+-         # was  15.231s ±  2.300s
+
+
+  class Grault:
+      # was   48.86s ±   1.19s
+      # now    6.25s
+
+    - def test_grault1: ...
+    -     # was  13.146s ±  1.179s (failed)
+
+    - def test_grault3: ...
+    -     # was  30.460s
+
+
+  class Qux:
+      # was   41.66s ±   1.06s
+      # now   42.63s
+
+    - def test_qux2: ...
+    -     # was   6.020s ±  0.402s
+
+    ! def test_qux3: ...
+    !     # was   4.978s           (errored)
+    !     # now  23.496s
+
+    ! def test_qux4: ...
+    !     # was   7.074s ±  0.979s (errored)
+    !     # now   7.158s           (failed)
+
+    ! def test_qux6: ...
+    !     # was  23.589s           (failed)
+    !     # now   0.002s           (skipped)
+
+    + def test_qux1: ...
+    +     # now   0.001s           (skipped)
+
+    + def test_qux5: ...
+    +     # now  11.968s
+
+
++ class Bar:
++     # now   54.19s
++
++     def test_bar1: ...
++         # now  50.447s
++
++     def test_bar2: ...
++         # now   3.742s           (failed)
+
+''',
+            print_test_stats.anomalies(analysis),
+        )
+
+    def test_graph(self):
+        # HEAD is on master
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    * aaaaaaaaaa (HEAD)              total time   502.99s
+    * bbbbbbbbbb (base)   1 report,  total time    47.84s
+    * cccccccccc          1 report,  total time   332.50s
+    * dddddddddd          0 reports
+    |
+    :
+''',
+            print_test_stats.graph(
+                head_sha=fakehash('a'),
+                head_seconds=502.99,
+                base_seconds={
+                    fakehash('b'): [47.84],
+                    fakehash('c'): [332.50],
+                    fakehash('d'): [],
+                },
+                on_master=True,
+            )
+        )
+
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time  9988.77s
+    |/
+    * bbbbbbbbbb (base) 121 reports, total time  7654.32s ±   55.55s
+    * cccccccccc         20 reports, total time  5555.55s ±  253.19s
+    * dddddddddd          1 report,  total time  1234.56s
+    |
+    :
+''',
+            print_test_stats.graph(
+                head_sha=fakehash('a'),
+                head_seconds=9988.77,
+                base_seconds={
+                    fakehash('b'): [7598.77] * 60 + [7654.32] + [7709.87] * 60,
+                    fakehash('c'): [5308.77] * 10 + [5802.33] * 10,
+                    fakehash('d'): [1234.56],
+                },
+                on_master=False,
+            )
+        )
+
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time    25.52s
+    | |
+    | : (5 commits)
+    |/
+    * bbbbbbbbbb          0 reports
+    * cccccccccc          0 reports
+    * dddddddddd (base)  15 reports, total time    58.92s ±   25.82s
+    |
+    :
+''',
+            print_test_stats.graph(
+                head_sha=fakehash('a'),
+                head_seconds=25.52,
+                base_seconds={
+                    fakehash('b'): [],
+                    fakehash('c'): [],
+                    fakehash('d'): [52.25] * 14 + [152.26],
+                },
+                on_master=False,
+                ancestry_path=5,
+            )
+        )
+
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time     0.08s
+    |/|
+    | : (1 commit)
+    |
+    * bbbbbbbbbb          0 reports
+    * cccccccccc (base)   1 report,  total time     0.09s
+    * dddddddddd          3 reports, total time     0.10s ±    0.05s
+    |
+    :
+''',
+            print_test_stats.graph(
+                head_sha=fakehash('a'),
+                head_seconds=0.08,
+                base_seconds={
+                    fakehash('b'): [],
+                    fakehash('c'): [0.09],
+                    fakehash('d'): [0.05, 0.10, 0.15],
+                },
+                on_master=False,
+                other_ancestors=1,
+            )
+        )
+
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time     5.98s
+    | |
+    | : (1 commit)
+    |/|
+    | : (7 commits)
+    |
+    * bbbbbbbbbb (base)   2 reports, total time     6.02s ±    1.71s
+    * cccccccccc          0 reports
+    * dddddddddd         10 reports, total time     5.84s ±    0.92s
+    |
+    :
+''',
+            print_test_stats.graph(
+                head_sha=fakehash('a'),
+                head_seconds=5.98,
+                base_seconds={
+                    fakehash('b'): [4.81, 7.23],
+                    fakehash('c'): [],
+                    fakehash('d'): [4.97] * 5 + [6.71] * 5,
+                },
+                on_master=False,
+                ancestry_path=1,
+                other_ancestors=7,
+            )
+        )
+
+    def test_regression_info(self):
+        self.assertEqual(
+            '''\
+----- Historic stats comparison result ------
+
+    job: foo_job
+    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+
+  class Foo:
+      # was   42.50s ±   2.12s
+      # now    3.02s
+
+    - def test_bar: ...
+    -     # was   1.000s
+
+    ! def test_foo: ...
+    !     # was  41.500s ±  2.121s
+    !     # now   0.020s           (skipped)
+
+    + def test_baz: ...
+    +     # now   3.000s
+
+
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time     3.02s
+    |/
+    * bbbbbbbbbb (base)   1 report,  total time    41.00s
+    * cccccccccc          1 report,  total time    43.00s
+    |
+    :
+
+Removed  (across    1 suite)      1 test,  totaling -   1.00s
+Modified (across    1 suite)      1 test,  totaling -  41.48s ±   2.12s
+Added    (across    1 suite)      1 test,  totaling +   3.00s
+''',
+            print_test_stats.regression_info(
+                head_sha=fakehash('a'),
+                head_report=makereport({
+                    'Foo': [
+                        makecase('test_foo', 0.02, skipped=True),
+                        makecase('test_baz', 3),
+                    ]}),
+                base_reports={
+                    fakehash('b'): [
+                        makereport({
+                            'Foo': [
+                                makecase('test_foo', 40),
+                                makecase('test_bar', 1),
+                            ],
+                        }),
+                    ],
+                    fakehash('c'): [
+                        makereport({
+                            'Foo': [
+                                makecase('test_foo', 43),
+                            ],
+                        }),
+                    ],
+                },
+                job_name='foo_job',
+                on_master=False,
+                ancestry_path=0,
+                other_ancestors=0,
+            )
+        )
+
 
 if __name__ == '__main__':
     run_tests()
