@@ -159,7 +159,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.deviceType();
       })
       // correlation id of a linked event
-      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId);
+      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId)
+      // compute flops
+      .def("flops", [](const KinetoEvent& e) {
+        return e.flops();
+      });
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
     .def("events", &ProfilerResult::events)
