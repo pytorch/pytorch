@@ -148,26 +148,21 @@ bool isNonBroadcastElementWise(const Node* n) {
     return false;
   }
 
-  // This check might not be needed since we are handling Elementwise operations
-  // only. We can blindly just take output(0) for shape check. I'm putting it
-  // here just to be on the safe side. TORCH_INTERNAL_ASSERT(n->outputs().size()
-  // == 1, "ElementWise Operation expects to have single tensor output");
-  if (n->outputs().size() != 1) {
-    return false;
-  }
-  auto n_output_type = n->output(0)->type()->cast<TensorType>();
+  for (const auto output : n->outputs()) {
+    const auto& n_output_type = output->type()->cast<TensorType>();
 
-  // TODO: we need to stay on safer side instead of "default to return true when
-  // shape information is not available.", Change that when we enable profiling
-  // on autodiff FW execution.
-  if (n_output_type != nullptr && n_output_type->sizes().sizes()) {
-    std::vector<c10::optional<int64_t>> n_output_shape =
-        n_output_type->sizes().sizes().value();
+    // TODO: we need to stay on safer side instead of "default to return true
+    // when shape information is not available.", Change that when we enable
+    // profiling on autodiff FW execution.
+    if (n_output_type != nullptr && n_output_type->sizes().sizes()) {
+      const std::vector<c10::optional<int64_t>>& n_output_shape =
+          n_output_type->sizes().sizes().value();
 
-    for (auto input : n->inputs()) {
-      if (auto t_type = input->type()->cast<TensorType>()) {
-        if (maybeBroadcast(t_type, n_output_shape)) {
-          return false;
+      for (auto input : n->inputs()) {
+        if (auto t_type = input->type()->cast<TensorType>()) {
+          if (maybeBroadcast(t_type, n_output_shape)) {
+            return false;
+          }
         }
       }
     }

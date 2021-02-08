@@ -1750,6 +1750,18 @@ class TestCudaFuser(JitTestCase):
         # numbers between eager mode and the jit is different
         self._run_training_helper(t_jit, t, grads, x, 0.0, True)
 
+        def t2(x: torch.Tensor, p: float, train: bool):
+            o = torch.nn.functional.softmax(x, dim=-1)
+            o = torch.nn.functional.dropout(o, p, training=train)
+            return o
+
+        t2_jit = torch.jit.script(t2)
+
+        # The drop probability needs to be set to zero given that the order of picking random
+        # numbers between eager mode and the jit is different
+        self._run_training_helper(t2_jit, t2, grads, x, 0.0, True)
+        print(t2_jit.graph_for(x, 0.0, True))
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
