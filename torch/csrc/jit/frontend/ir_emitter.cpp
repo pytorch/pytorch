@@ -1261,11 +1261,11 @@ struct to_ir {
     // If the cond expr is a static value, then we metacompile the `if`
     // statemement and only emit true or false branch
     if (cond_value.staticIf()) {
-        if (*cond_value.staticIf()) {
-            return emitExpr(expr.true_expr(), type_hint);
-        } else {
-            return emitExpr(expr.false_expr(), type_hint);
-        }
+      if (*cond_value.staticIf()) {
+        return emitExpr(expr.true_expr(), type_hint);
+      } else {
+        return emitExpr(expr.false_expr(), type_hint);
+      }
     }
     auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
     auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
