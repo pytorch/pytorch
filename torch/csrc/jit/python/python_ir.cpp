@@ -396,7 +396,7 @@ void initPythonIRBindings(PyObject* module_) {
 #undef GS
 
 #define VS(name) def(#name, &Value ::name)
-  py::class_<Value, std::unique_ptr<Value, py::nodelete>>(m, "Value")
+  py::class_<Value, unwrapping_shared_ptr<Value>>(m, "Value")
       .def(
           "__repr__",
           [](Value& n) {
@@ -439,7 +439,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
 
-  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
+  py::class_<Block, unwrapping_shared_ptr<Block>>(m, "Block")
       .def(
           "nodes",
           [](Block& b) {
@@ -484,7 +484,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
 
 #define NS(name) def(#name, &Node ::name)
-  py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
+  py::class_<Node, unwrapping_shared_ptr<Node>>(m, "Node")
       .def(
           "__repr__",
           [](Node& n) {
@@ -769,9 +769,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
-  py::class_<ComplexDoubleType, Type, std::shared_ptr<ComplexDoubleType>>(
-      m, "ComplexDoubleType")
-      .def_static("get", &ComplexDoubleType::get);
+  py::class_<ComplexType, Type, std::shared_ptr<ComplexType>>(m, "ComplexType")
+      .def_static("get", &ComplexType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get)
       .def_static("getInferred", &TensorType::getInferred);
