@@ -162,9 +162,6 @@ at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writable/*=true*/) 
   if (!is_numpy_available()) {
     throw std::runtime_error("Numpy is not available");
   }
-  if (!PyArray_Check(obj)) {
-    throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
-  }
   auto array = (PyArrayObject*)obj;
 
   // warn_if_not_writable is true when a copy of numpy variable is created.
