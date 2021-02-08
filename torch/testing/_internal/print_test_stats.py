@@ -688,14 +688,7 @@ def send_report_to_s3(head_report: Report) -> None:
     now = datetime.datetime.utcnow().isoformat()
     key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
     s3 = boto3.resource('s3')
-    try:
-        s3.get_bucket_acl(Bucket='ossci-metrics')
-    except Exception as e:
-        print(f"AWS ACL failed: {e}")
-    print("AWS credential found, uploading to S3...")
-
     obj = s3.Object('ossci-metrics', key)
-    print("")
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
     # input files of a few megabytes in size like these JSON files, and
