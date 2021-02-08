@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/torch.h>
 
@@ -38,6 +38,5 @@ TEST(BackendTest, ToBackend) {
   AT_ASSERT(res[0].toTensor().equal(ref[0].toTensor()));
   AT_ASSERT(res[1].toTensor().equal(ref[1].toTensor()));
 }
-}
-}
-
+} // namespace jit
+} // namespace torch

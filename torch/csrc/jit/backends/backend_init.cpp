@@ -118,13 +118,17 @@ void toBackendSelectiveImpl(
   }
 }
 
-Module codegen_lambda(const std::string& backend_name,
-                          const Module& orig_module,
-                          const py::dict& method_compile_spec) {
+Module codegen_lambda(
+    const std::string& backend_name,
+    const Module& orig_module,
+    const py::dict& method_compile_spec) {
   // Represents of a Type of Dict[str, Any].
   auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
-  return detail::codegen_backend_module(backend_name, orig_module,
-        toIValue(method_compile_spec, any_dict_ty).toGenericDict(), any_dict_ty);
+  return detail::codegen_backend_module(
+      backend_name,
+      orig_module,
+      toIValue(method_compile_spec, any_dict_ty).toGenericDict(),
+      any_dict_ty);
 };
 
 void initJitBackendBindings(PyObject* module) {

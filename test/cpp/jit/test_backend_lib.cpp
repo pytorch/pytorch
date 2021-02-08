@@ -74,7 +74,8 @@ c10::IValue preprocess(
 }
 
 namespace {
-TORCH_API static auto cls = torch::jit::backend<TestBackend>("test_backend", preprocess);
+TORCH_API static auto cls =
+    torch::jit::backend<TestBackend>("test_backend", preprocess);
 }
 
 } // namespace jit

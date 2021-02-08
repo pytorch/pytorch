@@ -2,8 +2,8 @@
 
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 
 #include <unordered_map>
 
@@ -88,10 +88,11 @@ BackendPreprocessFunction getBackendPreprocessFunction(
   return backendPreprocessFunctions()[name];
 }
 
-Module codegen_backend_module(const std::string& backend_name,
-                              const Module& orig_module,
-                              const c10::Dict<IValue, IValue>& method_compile_spec,
-                              const c10::DictTypePtr& any_dict_ty) {
+Module codegen_backend_module(
+    const std::string& backend_name,
+    const Module& orig_module,
+    const c10::Dict<IValue, IValue>& method_compile_spec,
+    const c10::DictTypePtr& any_dict_ty) {
   const c10::QualifiedName qual_backend_name(
       {"__torch__",
        "torch",
@@ -119,10 +120,9 @@ Module codegen_backend_module(const std::string& backend_name,
       "__processed_module",
       AnyType::get(),
       detail::hasBackendPreprocessFunction(backend_name)
-      ? detail::getBackendPreprocessFunction(backend_name)(
-          cloned_module,
-          method_compile_spec)
-      : cloned_module._ivalue(),
+          ? detail::getBackendPreprocessFunction(backend_name)(
+                cloned_module, method_compile_spec)
+          : cloned_module._ivalue(),
       /*is_param=*/false);
 
   // This is for the method_compile_spec passed in to to_<backend> or
@@ -202,9 +202,7 @@ Module codegen_backend_module(const std::string& backend_name,
     // Run preprocess so that __processed_module is set correctly before
     // compilation.
     loweredModule.run_method(
-        "__preprocess",
-        cloned_module._ivalue(),
-        method_compile_spec);
+        "__preprocess", cloned_module._ivalue(), method_compile_spec);
   }
 
   // This loop generates one method on the LoweredModule for every key
@@ -247,9 +245,8 @@ Module codegen_backend_module(const std::string& backend_name,
         std::stringstream def_ss, fwd_ss;
         def_ss << name << "=";
         fwd_ss << name << "=" << name;
-        default_value->repr(def_ss, [](std::ostream&, const IValue&) -> bool {
-          return false;
-        });
+        default_value->repr(
+            def_ss, [](std::ostream&, const IValue&) -> bool { return false; });
         def_inputs.emplace_back(def_ss.str());
         fwd_inputs.emplace_back(fwd_ss.str());
       } else {
@@ -303,15 +300,13 @@ Module codegen_backend_module(const std::string& backend_name,
 
     method_te.s("ret", out_ss.str());
 
-    loweredModule.define(
-        method_ct.format(method_te), loweredModuleResolver());
+    loweredModule.define(method_ct.format(method_te), loweredModuleResolver());
   }
 
   // Call __setstate__ to ensure that the returned Module is ready to
   // run.
   auto state = at::ivalue::Tuple::create(
-      method_compile_spec,
-      loweredModule.attr("__processed_module"));
+      method_compile_spec, loweredModule.attr("__processed_module"));
   loweredModule.run_method("__setstate__", state);
   return loweredModule;
 }
