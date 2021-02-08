@@ -174,6 +174,10 @@ class PackageImporter:
         unpickler.persistent_load = persistent_load
         result = unpickler.load()
 
+        # TODO from zdevito:
+        #   This stateful weird function will need to be removed in our efforts
+        #   to unify the format. It has a race condition if multiple python
+        #   threads try to read independent files
         torch._utils._validate_loaded_sparse_tensors()
 
         return result
