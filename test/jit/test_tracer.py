@@ -2373,4 +2373,4 @@ class TestMixTracingScripting(JitTestCase):
         inp = torch.rand([20, 20])
         self.checkTrace(m, (inp,))
         g = torch.jit.trace(m, (inp,)).graph
-        FileCheck.check("aten::linear").run(g)
+        FileCheck().check("aten::linear").run(g)
