@@ -7,8 +7,10 @@ from torch.utils.data.datapipes.iter.readfilesfromzip import ReadFilesFromZipIte
 from torch.utils.data.datapipes.iter.batch import BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch
 from torch.utils.data.datapipes.iter.callable import \
     (CallableIterDataPipe as Callable, CollateIterDataPipe as Collate)
+from torch.utils.data.datapipes.iter.selecting import \
+    (FilterIterDataPipe as Filter)
 from torch.utils.data.datapipes.iter.sampler import \
-    (SamplerIterDataPipe as Sampler, FilterIterDataPipe as Filter)
+    (SamplerIterDataPipe as Sampler)
 
 
 __all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFormTar', 'ReadFilesFromZip'

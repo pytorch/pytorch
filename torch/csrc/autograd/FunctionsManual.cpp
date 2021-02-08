@@ -691,7 +691,7 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
 // and they must have the same shape.
 // Note that the `output` must have the same `indices` as the `mask` so we are using just a clone.
 // However, to get `values` we have to use specific helper function for CPU/CUDA and use the `mask` data to filter `values`
-// That's why we created this `_sparse_matrix_mask_helper` function.
+// That's why we created this `_sparse_mask_helper` function.
 Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
   Tensor output = at::empty_like(mask);
   Tensor mask_indices = mask._indices().clone();
@@ -699,7 +699,7 @@ Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
   if (mask._nnz() == 0) {
     r_values = at::zeros_like(mask._values());
   } else {
-    r_values = _sparse_matrix_mask_helper(input, mask_indices.contiguous());
+    r_values = _sparse_mask_helper(input, mask_indices.contiguous());
   }
   at::sparse::get_sparse_impl(output)->set_indices_and_values_unsafe(mask_indices, r_values);
   return output;
@@ -2937,15 +2937,8 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
   return grad / (self + 1).conj();
 }
 
-Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices, IntArrayRef values_shape) {
-  // TODO: improve this backward by writing a kernel (maybe)
-  auto dense_grad = sparse_grad_out.is_sparse() ? sparse_grad_out.to_dense() : sparse_grad_out;
-  auto full_size = sparse_grad_out.sizes();
-  auto flattened_grad_shape = values_shape.vec();
-  flattened_grad_shape[0] = at::prod_intlist(full_size.slice(0, indices.size(0)));
-  auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
-  auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
-  return flattened_dense_grad.index_select(0, flattened_indices);
+Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices) {
+  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
