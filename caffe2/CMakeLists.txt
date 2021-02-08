@@ -1347,7 +1347,7 @@ if(BUILD_SHARED_LIBS)
     set_target_properties(torch_global_deps PROPERTIES
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
   endif()
-  set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
+  set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE CXX)
   if(USE_MPI)
       target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})
   endif()
