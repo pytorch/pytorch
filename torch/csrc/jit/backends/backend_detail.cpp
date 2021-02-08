@@ -91,7 +91,7 @@ BackendPreprocessFunction getBackendPreprocessFunction(
 Module codegen_backend_module(const std::string& backend_name,
                               const Module& orig_module,
                               const c10::Dict<IValue, IValue>& method_compile_spec,
-                              c10::DictTypePtr any_dict_ty) {
+                              const c10::DictTypePtr& any_dict_ty) {
   const c10::QualifiedName qual_backend_name(
       {"__torch__",
        "torch",

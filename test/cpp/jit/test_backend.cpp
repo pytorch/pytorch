@@ -25,8 +25,6 @@ TEST(BackendTest, ToBackend) {
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
   auto ref = m.forward(inputs).toTuple()->elements();
-  std::cout << ref[0].toTensor().item<float>() << ", "
-      << ref[1].toTensor().item<float>() << std::endl;
 
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
@@ -37,8 +35,8 @@ TEST(BackendTest, ToBackend) {
   auto lm = torch::jit::detail::codegen_backend_module(
       "test_backend", m, compile_spec, any_dict_ty);
   auto res = lm.forward(inputs).toTuple()->elements();
-  std::cout << res[0].toTensor().item<float>() << ", "
-            << res[1].toTensor().item<float>() << std::endl;
+  AT_ASSERT(res[0].toTensor().equal(ref[0].toTensor()));
+  AT_ASSERT(res[1].toTensor().equal(ref[1].toTensor()));
 }
 }
 }
