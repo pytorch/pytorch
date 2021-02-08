@@ -20,15 +20,14 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 #include <ATen/Config.h>
-#include <ideep.hpp>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
-#include <ATen/native/ConvUtils.h>
 #include "ATen/core/interned_strings.h"
 #include "NativeFunctions.h"
 #include "c10/util/Exception.h"
 #include "jit/ir/ir.h"
 #include <third_party/ideep/include/ideep/operators/conv.hpp>
-
+#include <ideep.hpp>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/ConvUtils.h>
 
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
@@ -1236,6 +1235,88 @@ void replaceWeightsBias(Node* conv) {
 
   conv->replaceInput(1, conv->owningGraph()->insertConstant(packed_weights));
   conv->replaceInput(2, conv->owningGraph()->insertConstant(packed_bias));
+}
+
+
+/*
+
+  at::Tensor ref = at::conv2d(
+      input,
+      weight,
+      bias,
+      {stride, stride},
+      {pad, pad},
+      {dilation, dilation},
+      groups);
+
+*/
+
+
+ideep::tensor construct_itensor(void* data, int64_t* dims, int64_t rank) {
+
+  auto tag = ideep::format_tag::undef;
+  switch (rank) {
+    case 1:
+      tag = ideep::format_tag::a;
+    case 4:
+      tag = ideep::format_tag::nchw;
+    default:
+      TORCH_INTERNAL_ASSERT(false);
+  }
+
+  std::vector<int64_t> vdims;
+
+  for (size_t i = 0; i < static_cast<int64_t>(rank); i++) {
+    vdims.push_back(dims[i]);
+  }
+
+  return ideep::tensor(vdims, ideep::data_type::f32, tag, data);
+}
+
+void conv2d_out(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+
+  std::vector<int64_t>  output_size;
+
+  auto dims_iter = buf_dims;
+  ideep::tensor x = construct_itensor(buf_data[0],  dims_iter, buf_ranks[0]);
+  dims_iter += buf_ranks[0];
+  ideep::tensor w = construct_itensor(buf_data[1], dims_iter, buf_ranks[1]);
+  dims_iter += buf_ranks[1];
+  ideep::tensor y = construct_itensor(buf_data[2], dims_iter, buf_ranks[2]);
+  c10::optional<ideep::tensor> b;
+  if (bufs_num == 4) {
+    dims_iter += buf_ranks[2];
+    b = construct_itensor(buf_data[3], dims_iter, buf_ranks[3]);
+  }
+
+  std::vector<int64_t> padding_l {0, 0}; // paddingH paddingW
+  std::vector<int64_t>& padding_r = padding_l;
+  std::vector<int64_t> dilation {1, 1};
+  std::vector<int64_t> strides {2, 2};
+  int64_t groups = 1;
+
+  std::vector<int64_t> output_sizes = at::native::conv_output_size(x.get_dims(), w.get_dims(), padding_l, strides, dilation);
+  auto attr = ideep::attr_t();
+  // we should probably pass it as a temp buffer
+  //ideep::tensor tmp;
+
+  if (b.has_value()) {
+    ideep::convolution_forward::compute(
+        x, w, b.value(), {output_sizes.cbegin(), output_sizes.cend()}, y, strides, dilation, padding_l, padding_r,
+          groups, ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr);
+  } else {
+    ideep::convolution_forward::compute(
+        x, w, {output_sizes.cbegin(), output_sizes.cend()}, y, strides, dilation,
+        padding_l, padding_r,
+        groups, ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr);
+  }
 }
 
 
