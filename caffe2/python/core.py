@@ -40,35 +40,15 @@ NameScope = scope.NameScope
 
 # Bring datatype enums to the main namespace
 class DataType:
-    UNDEFINED = 0
-    FLOAT = 1
-    INT32 = 2
-    BYTE = 3
-    STRING = 4
-    BOOL = 5
-    UINT8 = 6
-    INT8 = 7
-    UINT16 = 8
-    INT16 = 9
-    INT64 = 10
-    FLOAT16 = 12
-    DOUBLE = 13
-    ZERO_COLLISION_HASH = 14
+    pass
 
 
-def _CheckDataType():
-    # Verify that the DataType values defined above match the ones defined in
-    # the caffe2.proto file
+def _InitDataType():
     for name, value in caffe2_pb2.TensorProto.DataType.items():
-        py_value = getattr(DataType, name, None)
-        if py_value != value:
-            raise AssertionError(
-                f"DataType {name} does not match the value defined in "
-                f"caffe2.proto: {py_value} vs {value}"
-            )
+        setattr(DataType, name, value)
 
 
-_CheckDataType()
+_InitDataType()
 
 
 def _GetRegisteredOperators():

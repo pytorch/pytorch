@@ -13,20 +13,6 @@
 
 namespace at { namespace native {
 
-// in order to dispatch mkldnn linear to addmm which can be removed after linear ported.
-Tensor& mkldnn_addmm_wraper_out(Tensor& result, const Tensor& bias,
-    const Tensor& input, const Tensor& weight, Scalar beta, Scalar alpha) {
-  TORCH_CHECK(false,
-      "mkldnn_addmm_wraper_out: in-place mkldnn operations are not supported yet");
-}
-
-Tensor mkldnn_addmm_wraper(const Tensor& bias, const Tensor& input,
-    const Tensor& weight, Scalar beta, Scalar alpha) {
-  TORCH_CHECK(input.dim() == 2,
-      "mkldnn_addmm_wraper: input needs to has dim 2, input dim ", input.dim());
-  return at::mkldnn_linear(input, weight.t(), bias);
-}
-
 Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, bias);

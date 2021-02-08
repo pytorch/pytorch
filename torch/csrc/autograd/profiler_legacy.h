@@ -331,7 +331,7 @@ struct TORCH_API LegacyEvent {
   uint64_t correlation_id_;
   // Extra arguments for computing op flops
   std::unordered_map<std::string, c10::IValue> extra_args_;
-  uint64_t flops_;
+  uint64_t flops_ = 0;
 };
 
 // a linked-list of fixed sized vectors, to avoid
