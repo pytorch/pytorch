@@ -49,14 +49,20 @@ def _forward_from_src(src: str, importer: Optional[PackageImporter]):
 
 
 def reduce_graph_module(body: dict) -> torch.nn.Module:
-    return _deserialize_graph_module(None, body)
+    # BC: attribute name was changed from `code` to `_code` to facilitate
+    # making `code` into a property and adding a docstring to it
+    forward = _forward_from_src(body.get('_code') or body['code'], None)
+    return _deserialize_graph_module(forward, body, None)
 
 
-def reduce_package_graph_module(importer: PackageImporter, body: dict) -> torch.nn.Module:
-    return _deserialize_graph_module(importer, body)
+def reduce_package_graph_module(importer: PackageImporter,
+                                body: dict,
+                                generated_module_name: str) -> torch.nn.Module:
+    forward = importer.import_module(generated_module_name).forward
+    return _deserialize_graph_module(forward, body, importer)
 
 
-def _deserialize_graph_module(importer: Optional[PackageImporter], body: dict) -> torch.nn.Module:
+def _deserialize_graph_module(forward, body: dict, importer: Optional[PackageImporter]) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -70,20 +76,7 @@ def _deserialize_graph_module(importer: Optional[PackageImporter], body: dict) -
             super().__init__()
             self.__dict__ = body
 
-    if importer is not None:
-        # If we are unpickling this module from a torch.package, we can
-        # retrieve the serialized forward directly from the package.
-        module_id = body['_fx_generated_id']
-        CodeOnlyModule.forward = importer.import_module(f"fx-generated._{module_id}").forward
-    else:
-        # Otherwise, we're unpickling from a regular pickle file. Retrieve the
-        # serialized forward that is stashed in the object state.
-        try:
-            CodeOnlyModule.forward = _forward_from_src(body['_code'], importer)
-        except KeyError:
-            # BC: attribute name was changed from `code` to `_code` to facilitate
-            # making `code` into a property and adding a docstring to it
-            CodeOnlyModule.forward = _forward_from_src(body['code'], importer)
+    CodeOnlyModule.forward = forward
 
     from .symbolic_trace import Tracer
 
@@ -338,13 +331,12 @@ class {module_name}(torch.nn.Module):
         cls.__call__ = wrapped_call
 
     def __reduce_package__(self, exporter: PackageExporter):
-        module_id = exporter.get_unique_id()
-        exporter.save_source_string(f'fx-generated._{module_id}', self.code)
-        self._fx_generated_id = module_id
+        generated_module_name = f'fx-generated._{exporter.get_unique_id()}'
+        exporter.save_source_string(generated_module_name, self.code)
 
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
-        return (reduce_package_graph_module, (dict_without_graph,))
+        return (reduce_package_graph_module, (dict_without_graph, generated_module_name))
 
     def __reduce__(self):
         """

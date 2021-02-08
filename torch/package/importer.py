@@ -166,8 +166,6 @@ class PackageImporter:
                     load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
                 storage = loaded_storages[key]
                 return storage
-            elif typename == 'package-importer':
-                return self
             elif typename == 'reduce_package':
                 func, args = data
                 return func(self, *args)
