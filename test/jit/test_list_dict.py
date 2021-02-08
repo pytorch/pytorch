@@ -20,6 +20,35 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestList(JitTestCase):
+    def test_list_bool_conversion(self):
+        def if_predicate(l: List[int]):
+            if l:
+                s = 0
+                for n in l:
+                    s += n
+
+                return s
+            else:
+                return -1
+
+        self.checkScript(if_predicate, ([1, 2, 3],))
+        self.checkScript(if_predicate, ([],))
+
+        def while_predicate(l: List[int]):
+            s = 0
+
+            while l:
+                s += l.pop()
+
+        self.checkScript(while_predicate, ([1, 2, 3],))
+        self.checkScript(while_predicate, ([],))
+
+        def ternary_predicate(l: List[int]):
+            return "non-empty" if l else "empty"
+
+        self.checkScript(ternary_predicate, ([1, 2, 3],))
+        self.checkScript(ternary_predicate, ([],))
+
     def test_in_check(self):
         def int_in(x: List[int]) -> bool:
             return 2 in x
@@ -1174,6 +1203,34 @@ class TestDict(JitTestCase):
 
     def dict_bool(self):
         return {True: 1}
+
+    def test_dict_bool_conversion(self):
+        def if_predicate(d: Dict[int, int]):
+            if d:
+                s, t = 0, 0
+                for k, v in d.items():
+                    s += k
+                    t += v
+
+                return s, t
+            else:
+                return -1, -1
+
+        self.checkScript(if_predicate, ({1: 2, 3: 5},))
+        self.checkScript(if_predicate, ({},))
+
+        def while_predicate(d: Dict[int, int]):
+            while d:
+                d.clear()
+
+        self.checkScript(while_predicate, ({1: 2, 3: 5},))
+        self.checkScript(while_predicate, ({},))
+
+        def ternary_predicate(d: Dict[int, int]):
+            return "non-empty" if d else "empty"
+
+        self.checkScript(ternary_predicate, ({1: 2, 3: 5},))
+        self.checkScript(ternary_predicate, ({},))
 
     def test_del(self):
         def inputs():
