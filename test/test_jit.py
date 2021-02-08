@@ -1280,8 +1280,8 @@ graph(%Ra, %Rb):
             return x.type(t)
         scr = torch.jit.script(foo)
         x = torch.rand(3, 4)
-        for t in [torch.int8, torch.float64, torch.float32, \
-                    torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
+        for t in [torch.int8, torch.float64, torch.float32,
+                  torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
             self.assertEqual(scr(x, t), foo(x, t))
 
 
