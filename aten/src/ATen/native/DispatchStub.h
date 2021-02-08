@@ -62,7 +62,7 @@ template <typename FnPtr, typename T>
 struct TORCH_API DispatchStub;
 
 struct TORCH_API DispatchStubImpl {
-  void* get_call_ptr_impl(DeviceType device_type, std::function<void*()> cpu_chooser) {
+  void* get_call_ptr_impl(DeviceType device_type, std::function<void*()> const& cpu_chooser) {
     switch (device_type) {
       case DeviceType::CPU: {
         // Use memory_order_relaxed here since even if two threads race,
@@ -112,7 +112,11 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T>: protected DispatchStubImpl {
 
 private:
   FnPtr get_call_ptr(DeviceType device_type) {
-    return reinterpret_cast<FnPtr>(get_call_ptr_impl(device_type, [this] { return choose_cpu_impl(); }));
+    return reinterpret_cast<FnPtr>(
+      get_call_ptr_impl(
+        device_type,
+        [this] { return reinterpret_cast<void*>(choose_cpu_impl()); }
+    ));
   }
 
 public:
