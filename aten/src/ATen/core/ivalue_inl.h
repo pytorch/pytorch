@@ -359,10 +359,13 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   /**
-   * Explicitly mark the future as comleted with the output value and DataPtrs.
+   * Explicitly mark the future as completed with the output value and DataPtrs.
    * The data_ptrs contains storage pointers for all tensors in IValue, which
    * will be passed to postMarkCompletedHook. Some subclass, like CUDAFuture,
-   * uses these DataPtrs to synchronize CUDA streams.
+   * uses these DataPtrs to synchronize CUDA streams. You only need to provide
+   * data_ptrs when 1) DataPtrs cannot be extracted through
+   * IValue::getSubValues() or 2) customized DataPtrs extraction is more
+   * efficient.
    */
   void markCompletedWithDataPtrs(
       IValue value,
