@@ -144,10 +144,11 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
         at::wrapPropagateTLSState<void>([wp, child]() {
           auto future = wp.lock();
           if (future->hasError()) {
-            std::rethrow_exception(future->exception_ptr());
+            child->setError(future->exception_ptr());
           } else {
             const Message& message = *future->value().toCustomClass<Message>();
             std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
+            dataPtrs.reserve(message.tensors().size());
             for (const auto& tensor : message.tensors()) {
               dataPtrs.emplace_back(tensor.storage().data_ptr());
             }
