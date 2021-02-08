@@ -41,7 +41,23 @@ Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optiona
 }
 
 Tensor repeat_interleave(const Tensor &self, int64_t repeats, c10::optional<int64_t> dim) {
-    return at::native::repeat_interleave(self, at::tensor({repeats}, self.options().dtype(kLong)), dim);
+    int64_t _dim;
+    Tensor input = self;
+    if (!dim) {
+        input = self.flatten();
+        _dim = 0;
+    } else {
+        TORCH_CHECK(dim.value() >= -input.dim() && dim.value() < input.dim(),
+            "dim must be within the range [-input.dim(), input.dim())");
+        _dim = dim.value() >= 0 ? dim.value() : dim.value() + input.dim();
+    }
+    if (repeats == 1) {
+        return input;
+    }
+    input = input.unsqueeze(_dim + 1);
+    std::vector<int64_t> repeat_shape(input.dim(), 1);
+    repeat_shape[_dim + 1] = repeats;
+    return input.repeat(IntArrayRef(repeat_shape)).flatten(_dim, _dim + 1);
 }
 
 }}
