@@ -29,6 +29,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     const uint32_t* kernel_col_indices,
     const uint32_t* kernel_row_values,
     const uint8_t* kernel_values,
+    const uint32_t kernel_row_block_size,
     const uint32_t kernel_col_block_size,
     uint8_t output_zero_point,
     uint8_t output_min,
@@ -68,9 +69,18 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     goto error;
   }
 
+  if (kernel_row_block_size == 8 && kernel_col_block_size == 1) {
+    // This is to gate 8x1 on SSE2 since we have not implemented SSE2
+    // kernel that suppors 8x1 sparsity pattern.
+    if (pytorch_qnnp_params.q8gemm_sparse_c8x1.packA == NULL) {
+      status = pytorch_qnnp_status_invalid_parameter;
+      goto error;
+    }
+  }
   fully_connected->sparse_matrix.col_indices = kernel_col_indices;
   fully_connected->sparse_matrix.row_values = kernel_row_values;
   fully_connected->sparse_matrix.values = kernel_values;
+  fully_connected->sparse_matrix.row_block_size = kernel_row_block_size;
   fully_connected->sparse_matrix.col_block_size = kernel_col_block_size;
 
   fully_connected->groups = 1;
@@ -86,12 +96,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
   fully_connected->dynamic_conv_quantization_params.multipliers =
     requantization_scales;
 
-  if (use_prepack_kernel) {
-    fully_connected->ukernel_type =
-      pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq;
-  } else {
-    fully_connected->ukernel_type = pytorch_qnnp_ukernel_type_gemm_sparse_dq;
-  }
+  // Always use prepacking based kernel
+  fully_connected->ukernel_type = pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq;
   fully_connected->format = pytorch_qnnp_format_quint8;
 
   *fully_connected_out = fully_connected;
