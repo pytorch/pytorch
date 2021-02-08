@@ -26,6 +26,13 @@ namespace kernels {
 
 optional<tuple<int64_t, int64_t>> called_with_args;
 
+
+// The calling convention in the dispatcher requires that calls to KernelFunction::call()/callBoxed()
+// take in a DispatchKeySet.
+// The value itself is meaningless for all of the tests that use kernels without a DispatchKeySet argument.
+// See Note [Plumbing Keys Through The Dispatcher] for details.
+c10::DispatchKeySet CPU_TEST_SET = c10::DispatchKeySet(c10::DispatchKey::CPU);
+
 void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
   EXPECT_EQ(2, stack->size());
   EXPECT_TRUE(stack->at(0).isInt());
@@ -177,7 +184,7 @@ void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -191,7 +198,7 @@ void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -203,7 +210,7 @@ void expectBoxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -224,7 +231,7 @@ void expectInPlaceBoxedCallingWorks(const KernelFunction& func) {
   auto t = at::zeros({1});
   auto s = 1.0f;
   vector<IValue> stack {t, s};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated out arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -239,7 +246,7 @@ void expectOutOfPlaceBoxedCallingWorks(const KernelFunction& func) {
   auto s = 1.0f;
   auto t = at::zeros({1});
   vector<IValue> stack {s, t};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated out arg and returned it on the stack
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -256,7 +263,7 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
   vector<IValue> stack {s1, s2, t1, t2};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated output args and returned them on the stack
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
@@ -274,7 +281,7 @@ void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMe
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, &stack);
+    func.callBoxed(dummy, CPU_TEST_SET, &stack);
   }, errorMessage);
 }
 
@@ -290,7 +297,7 @@ void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, 3, 4);
+  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -303,7 +310,7 @@ void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.call<void, int64_t, int64_t>(dummy, 3, 4);
+  func.call<void, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -316,7 +323,7 @@ void expectUnboxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, 3, 4);
+  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -330,7 +337,7 @@ void expectInPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto t = at::zeros({1});
-  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, t, 1.0f);
+  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, CPU_TEST_SET, t, 1.0f);
 
   // should have updated first arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -341,7 +348,7 @@ void expectOutOfPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto t = at::zeros({1});
-  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(dummy, 1.0f, t);
+  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(dummy, CPU_TEST_SET, 1.0f, t);
 
   // should have updated out arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -358,7 +365,7 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
 
   std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
     std::tuple<at::Tensor&, at::Tensor&>, at::Scalar, at::Scalar, at::Tensor&, at::Tensor&
-  >(dummy, s1, s2, t1, t2);
+  >(dummy, CPU_TEST_SET, s1, s2, t1, t2);
 
   // kernel should have updated out args and returned them in a tuple
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
