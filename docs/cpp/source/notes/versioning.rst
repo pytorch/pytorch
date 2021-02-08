@@ -20,7 +20,7 @@ This will output something like:
 
 .. code-block:: text
 
-  PyTorch version: 1.8.0
+  PyTorch version: 1.9.0
 
 .. note::
 
