@@ -34,15 +34,15 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
   // for ops like aten::degrees which has overloads for
   // builtin ops, before replacing the node we also verify
   // that first input to the node is a Tensor.
-  auto verify_tensor_like_op = [](graph_node_list_iterator& iter){
-    if (iter->inputs().size() == 0){
+  auto verify_tensor_like_op = [](graph_node_list_iterator& iter) {
+    if (iter->inputs().size() == 0) {
       return false;
     }
-    if (iter->input(0)->type().get()->kind() == TypeKind::TensorType){
+    if (iter->input(0)->type().get()->kind() == TypeKind::TensorType) {
       return true;
     }
     // operators like vstack,etc get List of Tensors
-    if (iter->input(0)->type().get()->kind() == TypeKind::ListType){
+    if (iter->input(0)->type().get()->kind() == TypeKind::ListType) {
       return true;
     }
     return false;
