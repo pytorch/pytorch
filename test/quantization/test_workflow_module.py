@@ -864,7 +864,7 @@ class TestFakeQuantize(TestCase):
 
     def _test_forward_per_tensor_cachemask_impl(self, device):
         for torch_type in (torch.qint8, torch.quint8):
-            Xs = (torch.randn(4, 8, device=device), torch.randn(4,16, device=device)[:,::2])
+            Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
             # pick the scale + zp so that some values get clipped
             for X in Xs:
                 obs = torch.quantization.MinMaxObserver(torch_type)
