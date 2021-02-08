@@ -161,6 +161,13 @@ option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
+# BUILD_SPLIT_CUDA must also be exported as an environment variable before building, with
+# `export BUILD_SPLIT_CUDA=1` because cpp_extension.py can only work properly if this variable
+# also exists in the environment.
+# This option is incompatible with CUDA_SEPARABLE_COMPILATION.
+cmake_dependent_option(
+    BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
+    "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -219,7 +226,13 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
-option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+
+if(NOT DEFINED USE_VULKAN)
+  cmake_dependent_option(
+      USE_VULKAN "Use Vulkan GPU backend" ON
+      "ANDROID" OFF)
+endif()
+
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
