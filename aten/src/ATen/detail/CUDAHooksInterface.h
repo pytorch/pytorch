@@ -181,6 +181,10 @@ struct TORCH_API CUDAHooksInterface {
   virtual int getNumGPUs() const {
     return 0;
   }
+
+  virtual void deviceSynchronize(int64_t device_index) const {
+    TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
+  }
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument

@@ -826,7 +826,7 @@ TEST(LoopNest, ScheduleInlineSimple) {
       });
 
   LoopNest l1({y});
-  LoopNest l2({y});
+  LoopNest l2(l1);
   l2.computeInline(x->buf());
 
   l1.prepareForCodegen();
@@ -1156,7 +1156,7 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
   }
 
   LoopNest l1({y});
-  LoopNest l2({y});
+  LoopNest l2(l1);
   l2.computeInline(x->buf());
 
   l1.prepareForCodegen();
@@ -1228,7 +1228,6 @@ TEST(LoopNest, ScheduleSplitAThenInline) {
     return a->call(j + ExprHandle(8));
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1247,7 +1246,6 @@ TEST(LoopNest, ScheduleSplitBThenInline) {
     return a->call(j + ExprHandle(8));
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1275,8 +1273,6 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   Tensor* b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
     return a->call(j + ExprHandle(8));
   });
-
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1296,7 +1292,6 @@ TEST(LoopNest, ScheduleInlineThenSplit) {
     return a->call(j + ExprHandle(8));
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1325,7 +1320,6 @@ TEST(LoopNest, ScheduleSplitInlineThenSplit) {
     return a->call(j + ExprHandle(8));
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1357,7 +1351,6 @@ TEST(LoopNest, ScheduleSplitInlineSimplify) {
     return a->call(j) - ExprHandle(1);
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1714,10 +1707,11 @@ TEST(LoopNest, LoopNestComputeAt_2) {
       c_ref[y * kW + x] = y * x + (y + 1) * x + y * (x + 1) + (y + 1) * (x + 1);
     }
   }
+  LoopNest orig_loopnest({c});
 
   {
     // First let's try to compute P at axis cy (the outer loop)
-    LoopNest l({c});
+    LoopNest l(orig_loopnest);
     std::vector<For*> loops = l.getLoopStmtsFor(c);
     l.computeAt(l.getLoopBodyFor(p), loops[0]);
     l.prepareForCodegen();
@@ -1748,7 +1742,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
   }
   {
     // Now let's try to compute P at axis cx (the inner loop)
-    LoopNest l({c});
+    LoopNest l(orig_loopnest);
     std::vector<For*> loops = l.getLoopStmtsFor(c);
     l.computeAt(l.getLoopBodyFor(p), loops[1]);
     l.prepareForCodegen();
@@ -1823,9 +1817,10 @@ TEST(LoopNest, LoopNestComputeAt_3) {
     }
   }
 
+  LoopNest orig_loopnest({D});
   {
     // First let's try to compute A at axis dy (the outer loop)
-    LoopNest l({D});
+    LoopNest l(orig_loopnest);
     std::vector<For*> loops = l.getLoopStmtsFor(D);
     l.computeAt(l.getLoopBodyFor(A), loops[0]);
     l.prepareForCodegen();
@@ -1861,7 +1856,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   }
   {
     // Now let's try to compute A at axis dx (the inner loop)
-    LoopNest l({D});
+    LoopNest l(orig_loopnest);
     std::vector<For*> loops = l.getLoopStmtsFor(D);
     l.computeAt(l.getLoopBodyFor(A), loops[1]);
     l.prepareForCodegen();
@@ -1895,10 +1890,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 
     assertAllEqual(c_data, c_ref);
   }
-}
-
-TEST(LoopNest, LoopNestComputeAt_4) {
-  // TODO: Verify that computeAt works with reduction axis
 }
 
 class LoopOrderHelper : public IRVisitor {
@@ -2606,8 +2597,9 @@ TEST(LoopNest, UnrollMultipleStatements) {
       x,
       0,
       kTotalSize,
-      Block::make({Store::make(a_buf, {x}, x * 2),
-                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
+      Block::make(
+          {Store::make(a_buf, {x}, x * 2),
+           Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2658,9 +2650,10 @@ TEST(LoopNest, UnrollWithLet) {
       x,
       0,
       kTotalSize,
-      Block::make({Let::make(e, 7),
-                   Store::make(a_buf, {x}, e),
-                   Store::make(b_buf, {x}, e + 1)}));
+      Block::make(
+          {Let::make(e, 7),
+           Store::make(a_buf, {x}, e),
+           Store::make(b_buf, {x}, e + 1)}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2700,9 +2693,9 @@ TEST(LoopNest, NormalizeStartPositive) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 50, 100, for_body);
   Block::make({for_stmt});
 
@@ -2768,9 +2761,9 @@ TEST(LoopNest, NormalizeStartZero) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 0, 100, for_body);
   Block::make({for_stmt});
 
@@ -2803,9 +2796,9 @@ TEST(LoopNest, NormalizeStartVariable) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, y, 100, for_body);
   Block::make({for_stmt});
 
@@ -3564,7 +3557,7 @@ TEST(LoopNest, DeadStoreElimination) {
   Stmt* stmt = Block::make({stmt1});
 
   // Will eliminate if not used by an output.
-  LoopNest loop(stmt, {f.node()}, {}, {});
+  LoopNest loop(stmt, {f.node()}, {});
   loop.eliminateDeadStores();
 
   std::ostringstream oss;
@@ -3578,7 +3571,7 @@ TEST(LoopNest, DeadStoreElimination) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   // But won't eliminate if used by different outputs.
-  LoopNest loop2(stmt, {f.node(), g.node()}, {}, {});
+  LoopNest loop2(stmt, {f.node(), g.node()}, {});
   loop2.eliminateDeadStores();
 
   oss.clear();
@@ -3619,7 +3612,7 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
 
   // Will eliminate the write to g, but not f since it used by the producer of
   // h.
-  LoopNest loop(stmt, {h.node()}, {}, {});
+  LoopNest loop(stmt, {h.node()}, {});
   loop.eliminateDeadStores();
 
   std::ostringstream oss;
@@ -3634,7 +3627,7 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   // Sanity check won't eliminate if g is an output.
-  LoopNest loop2(stmt, {h.node(), g.node()}, {}, {});
+  LoopNest loop2(stmt, {h.node(), g.node()}, {});
   loop2.eliminateDeadStores();
 
   oss.clear();
@@ -3647,45 +3640,6 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   #CHECK:     h[x, y] = f[x * y];
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
-}
-
-TEST(LoopNest, InlineOutputBuffers) {
-  KernelScope kernel_scope;
-  const int M = 4;
-  const int N = 5;
-  const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
-  Tensor* c = Compute(
-      "broadcast_add",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf.load(m, n) + b_buf.load(n, k);
-      });
-  Tensor* out1 = Compute(
-      "out1",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c->call(m, n, k) + 1;
-      });
-
-  Tensor* out2 = Compute(
-      "out2",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return out1->call(m, n, k) / c->call(m, n, k) * 4;
-      });
-  for (const bool inline_outputs : {true, false}) {
-    LoopNest l({out1, out2});
-    l.inlineIntermediateBufs(inline_outputs);
-    Stmt* stmt1 = l.root_stmt();
-    std::ostringstream oss;
-    oss << *stmt1;
-    size_t num_out1_uses = inline_outputs ? 1 : 2;
-    torch::jit::testing::FileCheck()
-        .check_count("out1", num_out1_uses, /*exactly*/ true)
-        ->run(oss.str());
-  }
 }
 
 TEST(LoopNest, CompoundTensorSimple) {
@@ -3705,7 +3659,7 @@ TEST(LoopNest, CompoundTensorSimple) {
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block* body = Block::make({outer_for1, outer_for2});
 
-  Tensor* A = new CompoundTensor(a_buf.node(), {i.node(), j.node()}, body);
+  Tensor* A = new Tensor(a_buf.node(), body);
 
   LoopNest l({A});
   l.prepareForCodegen();
@@ -3744,7 +3698,7 @@ TEST(LoopNest, CompoundTensorUsed) {
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block* body = Block::make({outer_for1, outer_for2});
 
-  Tensor* A = new CompoundTensor(a_buf.node(), {i.node(), j.node()}, body);
+  Tensor* A = new Tensor(a_buf.node(), body);
   Tensor* B = Compute(
       "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->call(i, j + 1) + A->call(i, j + 2);

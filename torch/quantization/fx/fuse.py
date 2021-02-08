@@ -21,7 +21,7 @@ from .fusion_patterns import *  # noqa: F401
 
 from .quantization_types import Pattern
 
-from typing import Callable, Tuple, Optional
+from typing import Callable, Tuple
 
 
 class Fuser:
@@ -59,11 +59,12 @@ class Fuser:
         model = GraphModule(input_root, self.fused_graph)
         return model
 
-    def _find_matches(self, root: GraphModule, graph: Graph,
-                      patterns: Dict[Pattern, Callable]
-                      ) -> Dict[str, Tuple[Node, Optional[Any]]]:
+    def _find_matches(
+            self, root: GraphModule, graph: Graph,
+            patterns: Dict[Pattern, Callable]
+    ) -> Dict[str, Tuple[Node, FuseHandler]]:
         modules = dict(root.named_modules())
-        match_map = {}  # node name -> (root_node, match_value?)
+        match_map : Dict[str, Tuple[Node, FuseHandler]] = {}  # node name -> (root_node, match_value)
 
         def apply_match(pattern, node, match):
             if isinstance(pattern, tuple):

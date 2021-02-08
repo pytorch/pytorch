@@ -1,11 +1,13 @@
 import torch
 
 import math
+from pathlib import PurePosixPath
 
 from torch.testing._internal.common_utils import \
     (TestCase, make_tensor, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
+from torch.testing._internal import mypy_wrapper
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -442,10 +444,9 @@ class TestTesting(TestCase):
     @slowTest
     def test_cuda_assert_should_stop_test_suite(self, device):
         # This test is slow because it spawn another process to run another test suite.
-        import subprocess
-        import sys
 
-        problematic_test_script = """\
+        # Test running of cuda assert test suite should early terminate.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python
 
 import torch
@@ -479,16 +480,70 @@ instantiate_device_type_tests(
 
 if __name__ == '__main__':
     run_tests()
-"""
-
-        # Test running of cuda assert test suite should early terminate.
-        p = subprocess.run([sys.executable, '-c', problematic_test_script], stderr=subprocess.PIPE, timeout=120)
+""")
         # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', p.stderr.decode('ascii'))
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('Ran 1 test', p.stderr.decode('ascii'))
+        self.assertIn('Ran 1 test', stderr)
+
 
 instantiate_device_type_tests(TestTesting, globals())
+
+
+class TestMypyWrapper(TestCase):
+    def test_glob(self):
+        # can match individual files
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='test/test_torch.py',
+            filename=PurePosixPath('test/test_torch.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='test/test_torch.py',
+            filename=PurePosixPath('test/test_testing.py'),
+        ))
+
+        # dir matters
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='tools/codegen/utils.py',
+            filename=PurePosixPath('torch/nn/modules.py'),
+        ))
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='setup.py',
+            filename=PurePosixPath('setup.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='setup.py',
+            filename=PurePosixPath('foo/setup.py'),
+        ))
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='foo/setup.py',
+            filename=PurePosixPath('foo/setup.py'),
+        ))
+
+        # can match dirs
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='torch',
+            filename=PurePosixPath('torch/random.py'),
+        ))
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='torch',
+            filename=PurePosixPath('torch/nn/cpp.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='torch',
+            filename=PurePosixPath('tools/fast_nvcc/fast_nvcc.py'),
+        ))
+
+        # can match wildcards
+        self.assertTrue(mypy_wrapper.glob(
+            pattern='tools/autograd/*.py',
+            filename=PurePosixPath('tools/autograd/gen_autograd.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='tools/autograd/*.py',
+            filename=PurePosixPath('tools/autograd/deprecated.yaml'),
+        ))
+
 
 if __name__ == '__main__':
     run_tests()

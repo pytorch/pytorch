@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/passes/peephole.h>
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/peephole_alias_sensitive.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
@@ -25,6 +27,7 @@ struct PeepholeOptimizeImpl {
       : graph_(graph), shape_peepholes_(!disable_shape_peepholes) {
     run(graph->block());
     PeepholeOptimizeListIdioms(graph);
+    PeepholeOptimizeAliasSensitive(graph);
   }
 
   // The intent for this optimization pass is to catch all of the small, easy to
@@ -422,11 +425,11 @@ void FuseAddMM(Block* block) {
 
             // Attempts to find a matrix with a defined scalar type to type as
             auto* type_as_mat = mat1;
-            if (!type_as_mat->type()->expect<TensorType>()->scalarType()) {
+            if (!type_as_mat->type()->expectRef<TensorType>().scalarType()) {
               type_as_mat = mat2;
             }
             auto mat_scalar_type =
-                type_as_mat->type()->expect<TensorType>()->scalarType();
+                type_as_mat->type()->expectRef<TensorType>().scalarType();
 
             // we can't use type_as if we don't know the target type (mm), the
             // bias needs to be coerced to

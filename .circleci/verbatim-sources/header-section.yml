@@ -11,6 +11,9 @@ parameters:
   run_binary_tests:
     type: boolean
     default: false
+  run_build:
+    type: boolean
+    default: true
 
 docker_config_defaults: &docker_config_defaults
   user: jenkins
