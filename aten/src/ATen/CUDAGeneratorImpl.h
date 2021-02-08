@@ -56,7 +56,7 @@ namespace at {
  *
  * Example (see e.g. native/cuda/Dropout.cu):
  *
- * #include <ATen/cuda/CUDAGeneratorImpl.h>
+ * #include <ATen/CUDAGeneratorImpl.h>
  * #include <ATen/cuda/CUDAGraphsUtils.cuh>
  *
  * __global__ void kernel(..., PhiloxCudaState philox_args) {
@@ -119,7 +119,7 @@ struct PhiloxCudaState {
   bool captured_ = false;
 };
 
-struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
+struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CUDAGeneratorImpl(DeviceIndex device_index = -1);
   ~CUDAGeneratorImpl() = default;
@@ -129,8 +129,10 @@ struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   void set_current_seed(uint64_t seed) override;
   uint64_t current_seed() const override;
   uint64_t seed() override;
+  void set_state(const c10::TensorImpl& new_state) override;
+  c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
   void set_philox_offset_per_thread(uint64_t offset);
-  uint64_t philox_offset_per_thread();
+  uint64_t philox_offset_per_thread() const;
   void capture_prologue(int64_t* offset_extragraph);
   uint64_t capture_epilogue();
   PhiloxCudaState philox_cuda_state(uint64_t increment);
@@ -153,10 +155,10 @@ private:
 namespace cuda {
 namespace detail {
 
-  TORCH_CUDA_API const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1);
-  TORCH_CUDA_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
+TORCH_CUDA_CPP_API const Generator& getDefaultCUDAGenerator(
+    DeviceIndex device_index = -1);
+TORCH_CUDA_CPP_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
 
 } // namespace detail
 } // namespace cuda
 } // namespace at
-

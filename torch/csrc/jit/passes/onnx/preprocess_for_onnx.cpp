@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
+
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -143,7 +144,8 @@ static void ReplaceAddWithConcat(Block* b) {
         continue;
       }
 
-      TypePtr elem = it->input(0)->type()->cast<ListType>()->getElementType();
+      TypePtr elem =
+          it->input(0)->type()->castRaw<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
         Node* concat_node = b->owningGraph()->create(onnx::Concat, 1);
         concat_node->i_(attr::axis, 0);
@@ -197,7 +199,7 @@ static void fuseListAndListUnpack(Block* b) {
             it->input()->type()->cast<ListType>() &&
             it->input()
                 ->type()
-                ->cast<ListType>()
+                ->castRaw<ListType>()
                 ->getElementType()
                 ->cast<IntType>()) {
           Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
@@ -215,9 +217,84 @@ static void fuseListAndListUnpack(Block* b) {
   }
 }
 
+static void decomposeLinear(Block* b) {
+  std::vector<Node*> linear_nodes;
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      decomposeLinear(child_block);
+    }
+    if (it->kind() == aten::linear) {
+      linear_nodes.push_back(*it);
+    }
+  }
+  for (Node* node : linear_nodes) {
+    auto g = b->owningGraph();
+
+    if (node->inputs()[2]->mustBeNone()) {
+      auto t_weight_n =
+          g->create(aten::t, {node->inputs()[1]}, 1)->insertBefore(node);
+      auto matmul_n =
+          g->create(aten::matmul, {node->inputs()[0], t_weight_n->output()}, 1)
+              ->insertBefore(node);
+      node->output()->replaceAllUsesWith(matmul_n->output());
+      node->destroy();
+    } else {
+      auto dim_n =
+          g->create(aten::dim, {node->inputs()[0]}, 1)->insertBefore(node);
+      auto const_2 = g->insertConstant(IValue(2));
+      const_2->node()->moveBefore(node);
+      auto eq_n = g->create(aten::eq, {dim_n->output(), const_2}, 1)
+                      ->insertBefore(node);
+
+      auto if_n = g->create(prim::If, {eq_n->output()}, 1)->insertBefore(node);
+
+      auto true_block = if_n->addBlock();
+      auto false_block = if_n->addBlock();
+
+      {
+        WithInsertPoint guard(true_block->return_node());
+        auto const_1 = g->insertConstant(IValue(1.0));
+        auto t_weight_n = g->create(aten::t, {node->inputs()[1]}, 1)
+                              ->insertBefore(true_block->return_node());
+        auto addmm_n = g->create(
+                            aten::addmm,
+                            {node->inputs()[2],
+                             node->inputs()[0],
+                             t_weight_n->output(),
+                             const_1,
+                             const_1},
+                            1)
+                           ->insertBefore(true_block->return_node());
+        true_block->registerOutput(addmm_n->output());
+      }
+
+      {
+        WithInsertPoint guard(false_block->return_node());
+        auto const_1 = g->insertConstant(IValue(1.0));
+        auto t_weight_n = g->create(aten::t, {node->inputs()[1]}, 1)
+                              ->insertBefore(false_block->return_node());
+        auto matmul_n =
+            g->create(
+                 aten::matmul, {node->inputs()[0], t_weight_n->output()}, 1)
+                ->insertBefore(false_block->return_node());
+        auto add_n =
+            g->create(
+                 aten::add, {matmul_n->output(), node->inputs()[2], const_1}, 1)
+                ->insertBefore(false_block->return_node());
+        false_block->registerOutput(add_n->output());
+      }
+      node->output()->replaceAllUsesWith(if_n->output());
+      node->destroy();
+    }
+  }
+}
+
 } // namespace
 
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
+  GRAPH_DEBUG("priot to decompose linear", graph);
+  decomposeLinear(graph->block());
+  GRAPH_DEBUG("after decompose linear", graph);
   FuseWithListUnpack(graph->block());
   ReplaceAddWithConcat(graph->block());
   fuseListAndListUnpack(graph->block());

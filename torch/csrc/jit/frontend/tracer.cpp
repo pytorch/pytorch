@@ -137,7 +137,7 @@ Value* TracingState::getValue(const IValue& var) {
     return graph->insertNode(dict_node)->output();
   }
   if (var.isTensor()) {
-    auto ten = var.toTensor();
+    auto& ten = var.toTensor();
     if (!ten.defined()) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
@@ -237,7 +237,7 @@ bool TracingState::hasValue(const IValue& var) const {
 Value* TracingState::getOutput(const IValue& iv, size_t i) {
   bool tracing_mode_strict = getTracingState()->strict;
   if (iv.isTensor()) {
-    at::Tensor var = iv.toTensor();
+    const at::Tensor& var = iv.toTensor();
     if (!var.defined()) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
@@ -506,7 +506,7 @@ void setValueTrace(const IValue& v, Value* value) {
 }
 void TracingState::setValue(const IValue& v, Value* value) {
   if (v.isTensor()) {
-    auto var = v.toTensor();
+    auto& var = v.toTensor();
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
   } else if (v.isTensorList()) {
@@ -562,7 +562,11 @@ void addInputs(Node* n, const char* name, int64_t value) {
 }
 
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
-  if (value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else if (value) {
     detail::genericAddInput(n, *value);
   } else {
     Graph* g = n->owningGraph();

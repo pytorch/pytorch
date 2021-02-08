@@ -54,7 +54,7 @@ class _NormBase(Module):
 
     def reset_running_stats(self) -> None:
         if self.track_running_stats:
-            # running_mean/running_var/num_batches... are registerd at runtime depending
+            # running_mean/running_var/num_batches... are registered at runtime depending
             # if self.track_running_stats is on
             self.running_mean.zero_()  # type: ignore[operator]
             self.running_var.fill_(1)  # type: ignore[operator]

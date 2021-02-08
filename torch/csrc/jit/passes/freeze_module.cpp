@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
+
 #include <torch/csrc/jit/jit_log.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -155,7 +156,7 @@ class AttributePropagator {
       Module& attrModule,
       std::shared_ptr<Graph>& graph) {
     if (!input->type()->cast<InterfaceType>() &&
-        !input->type()->expect<ClassType>()->is_module()) {
+        !input->type()->expectRef<ClassType>().is_module()) {
       return false;
     }
 
@@ -289,11 +290,11 @@ class AttributePropagator {
 
   IValue overrideGradient(IValue attr) {
     if (attr.isTensor()) {
-      auto t = attr.toTensor();
+      auto& t = attr.toTensor();
       if (t.requires_grad()) {
-        t = t.detach();
-        t.set_requires_grad(false);
-        attr = IValue(t);
+        auto detached = t.detach();
+        detached.set_requires_grad(false);
+        attr = IValue(std::move(detached));
       }
     } else if (attr.isTuple()) {
       auto tuple = std::move(attr).toTuple();
@@ -424,7 +425,7 @@ class AttributePropagator {
           if (!findConstantAttr(input, name, attrModule, graph)) {
             GRAPH_DEBUG(
                 input->type()->cast<InterfaceType>() ||
-                        input->type()->expect<ClassType>()->is_module()
+                        input->type()->expectRef<ClassType>().is_module()
                     ? "attribute: " + name + " is mutable."
                     : "");
             continue;

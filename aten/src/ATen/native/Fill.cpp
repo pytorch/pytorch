@@ -18,7 +18,7 @@ Tensor& fill_out(Tensor& self, Scalar value) {
     self.copy_(out);
     return self;
   }
-  if (self.device() == at::kCPU && self.numel() == 1 && !self.is_complex() && !value.isComplex()) {
+  if (self.device() == at::kCPU && self.numel() == 1) {
     return at::detail::scalar_fill(self, value);
   }
   auto iter = TensorIteratorConfig()

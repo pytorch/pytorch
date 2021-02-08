@@ -100,6 +100,12 @@ class TestViewOps(TestCase):
 
         return True
 
+    # Returns true if v1 and v2 are views of the same base
+    def is_view_of_same_base(self, v1, v2):
+        if (not v1._is_view() or v1 is v2):
+            return False
+        return self.is_view_of(v1._base, v2)
+
     # Performs transpose if contiguous=True, else returns the input tensor as is
     def _do_transpose(self, x, contiguous=False, dim0=0, dim1=1):
         if contiguous:
@@ -112,6 +118,56 @@ class TestViewOps(TestCase):
         t = torch.ones(5, 5, device=device)
         s = t.conj()
         self.assertTrue(s is t)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False), torch.complex64)
+    def test_view_dtype(self, device, dtype):
+        int_dtype = {
+            torch.half: torch.int16,
+            torch.bfloat16: torch.int16,
+            torch.float: torch.int,
+            torch.double: torch.long,
+            torch.complex64: torch.long,
+        }[dtype]
+        numpy_dtype = {
+            torch.half: np.int16,
+            torch.bfloat16: np.int16,
+            torch.float: np.int32,
+            torch.double: np.int64,
+            torch.complex64: np.int64,
+        }[dtype]
+
+        def generate_inputs():
+            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5)
+            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5).permute(2, 0, 1)
+            yield make_tensor((1, 5, 1), device, dtype, low=-5, high=5).expand(5, 5, 5)
+            yield make_tensor((10, 5, 10), device, dtype, low=-5, high=5)[::2, :, ::2]
+            yield make_tensor((0, 5, 10), device, dtype, low=-5, high=5)
+            yield make_tensor((), device, dtype, low=-5, high=5)
+
+        def run_test(fp_tensor):
+            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.complex128))
+            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.int8))
+
+            int_tensor = fp_tensor.view(int_dtype)
+            self.assertEqual(int_tensor.dtype, int_dtype)
+            self.assertEqual(int_tensor.shape, fp_tensor.shape)
+            self.assertEqual(int_tensor.stride(), fp_tensor.stride())
+
+            self.assertEqual(fp_tensor, int_tensor.view(dtype), rtol=0, atol=0)
+            self.assertEqual(fp_tensor.cpu().numpy().view(numpy_dtype), int_tensor, rtol=0, atol=0)
+
+            fp_tensor.zero_()
+            self.assertEqual(fp_tensor, torch.zeros_like(fp_tensor), rtol=0, atol=0)
+
+        for fp_tensor in generate_inputs():
+            run_test(fp_tensor)
+
+        # Test that requires_grad is dropped, because view(dtype) does not support backward
+        if dtype is torch.double:
+            t = make_tensor((5, 5, 5), device, torch.double, low=-5, high=5, requires_grad=True)
+            self.assertFalse(t.view(torch.complex64).requires_grad)
+
 
     @onlyOnCPUAndCUDA
     def test_view_as_complex(self, device):
@@ -456,6 +512,64 @@ class TestViewOps(TestCase):
 
         nv[6] = 0
         self.assertNotEqual(t[1, 1], nv[6])
+
+    def test_flatten_view(self, device):
+        def test_writes_propagate(t, v):
+            idx_t = (0,) * t.ndim
+            idx_v = (0,) * v.ndim
+            v[idx_v] = 0
+            self.assertEqual(t[idx_t], v[idx_v])
+
+        t = torch.ones(1, 2, 3, 4, device=device)
+        v = t.flatten()
+        self.assertTrue(self.is_view_of(t, v))
+        test_writes_propagate(t, v)
+
+        # zero-dimensional tensor
+        t = torch.tensor(1, device=device)
+        v = t.flatten()
+        test_writes_propagate(t, v)
+        self.assertTrue(self.is_view_of(t, v))
+
+        t = torch.ones(1, 2, 3, 4, device=device).transpose(2, 3)
+        v = t.flatten(0, 1)
+        test_writes_propagate(t, v)
+        self.assertTrue(self.is_view_of_same_base(t, v))
+
+        # stride[i] = stride[i + 1] * size[i + 1] is satisfied for 3 groups:
+        t = torch.ones(720, device=device) \
+            .as_strided((2, 3, 2, 3, 5, 4), (6, 2, 15, 5, 1, 0))
+        #               [--1--|---2---|-3-] [--1--|----2---|-3-]
+        v1 = t.flatten(0, 1)
+        v2 = v1.flatten(1, 3)
+        v3 = v2.flatten(2, 2)
+        test_writes_propagate(t, v1)
+        self.assertTrue(self.is_view_of_same_base(t, v1))
+        test_writes_propagate(t, v2)
+        self.assertTrue(self.is_view_of_same_base(t, v2))
+        test_writes_propagate(t, v3)
+        self.assertTrue(self.is_view_of_same_base(t, v3))
+
+    @onlyOnCPUAndCUDA
+    def test_flatten_nonview(self, device):
+        def assert_is_nonview(t, nv):
+            idx_t = (0,) * t.ndim
+            idx_nv = (0,) * nv.ndim
+            self.assertTrue(not nv._is_view())
+            nv[idx_nv] = 0
+            self.assertNotEqual(t[idx_t], nv[idx_nv])
+        t = torch.ones(2, 3, 2, 3, device=device).transpose(2, 3)
+        nv = t.flatten(1, 3)
+        assert_is_nonview(t, nv)
+
+        t = torch.ones(2, 2, device=device).T
+        nv = t.flatten()
+        assert_is_nonview(t, nv)
+
+        # flatten returns the original object if start_dim=end_dim
+        t = t = torch.ones(2, 2, device=device)
+        nv = t.flatten(1, 1)
+        self.assertTrue(t is nv)
 
     def test_basic_indexing_slice_view(self, device):
         t = torch.ones(5, 5, device=device)

@@ -8,7 +8,7 @@ from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optio
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
 from ._state import _get_script_class
 
-from torch._C import TensorType, TupleType, FloatType, IntType, \
+from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, StreamObjType, FutureType, EnumType
 
@@ -170,13 +170,19 @@ def get_type_line(source):
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
     # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
     # to the hack in torch/_VF.py.
-    type_lines = list(filter(lambda line: not line[1].endswith("# type: ignore"),
+
+    # An ignore type line can be of following format:
+    #   1) # type: ignore
+    #   2) # type: ignore[rule-code]
+    # This ignore statement must be at the end of the line
+    type_pattern = re.compile("# type: ignore(\\[[a-zA-Z-]+\\])?$")
+    type_lines = list(filter(lambda line: not type_pattern.search(line[1]),
                              type_lines))
-    lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
 
     if len(type_lines) == 0:
-        type_pattern = re.compile('#[\t ]*type[\t ]*(?!: ignore$):')
-        wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
+        # Catch common typo patterns like extra spaces, typo in 'ignore', etc.
+        wrong_type_pattern = re.compile("#[\t ]*type[\t ]*(?!: ignore(\\[.*\\])?$):")
+        wrong_type_lines = list(filter(lambda line: wrong_type_pattern.search(line[1]), lines))
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
                                + " is probably invalid.\nIt must be '# type:'"
@@ -305,6 +311,8 @@ def try_ann_to_type(ann, loc):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
     if ann is float:
         return FloatType.get()
+    if ann is complex:
+        return ComplexType.get()
     if ann is int:
         return IntType.get()
     if ann is str:
@@ -364,6 +372,7 @@ __all__ = [
     'TensorType',
     'TupleType',
     'FloatType',
+    'ComplexType',
     'IntType',
     'ListType',
     'StringType',

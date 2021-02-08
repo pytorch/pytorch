@@ -16,14 +16,14 @@ TEST(Registerizer, RegisterizerSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0, 1),
+       For::make(
+           x,
+           0,
+           10,
+           Block::make({Store::make(
+               a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
 
   /*
    * A[0] = 0;
@@ -61,14 +61,14 @@ TEST(Registerizer, RegisterizerLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {x}, Add::make(Load::make(a, {x}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0, 1),
+       For::make(
+           x,
+           0,
+           10,
+           Block::make({Store::make(
+               a, {x}, Add::make(Load::make(a, {x}, 1), x), 1)}))});
 
   /*
    * A[0] = 0;
@@ -108,14 +108,14 @@ TEST(Registerizer, RegisterizerLoopFixedLoad) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {x}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0, 1),
+       For::make(
+           x,
+           0,
+           10,
+           Block::make({Store::make(
+               a, {x}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
 
   /*
    * A[0] = 0;
@@ -518,14 +518,14 @@ TEST(Registerizer, RegisterizerSymbolicIndices) {
   VarHandle N("N", kInt);
   BufHandle a("A", {N}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {i}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {i}, Add::make(Load::make(a, {i}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {i}, 0, 1),
+       For::make(
+           x,
+           0,
+           10,
+           Block::make({Store::make(
+               a, {i}, Add::make(Load::make(a, {i}, 1), x), 1)}))});
 
   /*
    * A[i] = 0;
@@ -720,14 +720,14 @@ TEST(Registerizer, RegisterizerNoRepeatedStores) {
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           b, {x}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0, 1),
+       For::make(
+           x,
+           0,
+           10,
+           Block::make({Store::make(
+               b, {x}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
 
   /*
    * A[0] = 0;
@@ -941,8 +941,9 @@ TEST(Registerizer, RegisterizerLoadThenStore) {
       x,
       0,
       10,
-      Block::make({Store::make(b, {0}, Add::make(Load::make(a, {0}, 1), x), 1),
-                   Store::make(a, {0}, Load::make(b, {0}, 1), 1)}))});
+      Block::make(
+          {Store::make(b, {0}, Add::make(Load::make(a, {0}, 1), x), 1),
+           Store::make(a, {0}, Load::make(b, {0}, 1), 1)}))});
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -988,15 +989,15 @@ TEST(Registerizer, RegisterizerParallelized) {
   VarHandle x("x", kInt);
   LoopOptions loopOpts;
   loopOpts.set_gpu_block_index(0);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)}),
-                       loopOpts)});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0, 1),
+       For::make(
+           x,
+           0,
+           10,
+           Block::make(
+               {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)}),
+           loopOpts)});
 
   /*
    * A[0] = 0;
@@ -2428,13 +2429,14 @@ TEST(Registerizer, RegisterizerPartialOverlapsTwo) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({Store::make(a, {1}, Load::make(a, {0}, 1), 1),
-                            Store::make(a, {0}, Load::make(a, {1}, 1), 1),
-                            Store::make(a, {0}, Load::make(a, {1}, 1), 1),
-                            For::make(x, 1, 10, Store::make(a, {x}, x, 1)),
-                            Store::make(a, {1}, Load::make(a, {0}, 1), 1),
-                            Store::make(a, {0}, Load::make(a, {1}, 1), 1),
-                            Store::make(a, {0}, Load::make(a, {1}, 1), 1)});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {1}, Load::make(a, {0}, 1), 1),
+       Store::make(a, {0}, Load::make(a, {1}, 1), 1),
+       Store::make(a, {0}, Load::make(a, {1}, 1), 1),
+       For::make(x, 1, 10, Store::make(a, {x}, x, 1)),
+       Store::make(a, {1}, Load::make(a, {0}, 1), 1),
+       Store::make(a, {0}, Load::make(a, {1}, 1), 1),
+       Store::make(a, {0}, Load::make(a, {1}, 1), 1)});
 
   /*
    * A[1] = A[0];
@@ -2502,9 +2504,10 @@ TEST(Registerizer, RegisterizerNestedBlocks) {
       {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
        Block::make(
            {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 2), 1)}),
-       Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 3), 1),
-                    Block::make({Store::make(
-                        a, {0}, Add::make(Load::make(a, {0}, 1), 4), 1)})})});
+       Block::make(
+           {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 3), 1),
+            Block::make({Store::make(
+                a, {0}, Add::make(Load::make(a, {0}, 1), 4), 1)})})});
 
   /*
    * A[0] = (A[0]) + 1;
@@ -3441,14 +3444,14 @@ TEST(Registerizer, RegisterizerLoopLetVarOuter) {
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt =
-      Block::make({Let::make(y, 30),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {y}, Add::make(x, Load::make(a, {y}, 1)), 1)}))});
+  Stmt* stmt = Block::make(
+      {Let::make(y, 30),
+       For::make(
+           x,
+           0,
+           10,
+           Block::make({Store::make(
+               a, {y}, Add::make(x, Load::make(a, {y}, 1)), 1)}))});
 
   /*
    * int y = 30;
