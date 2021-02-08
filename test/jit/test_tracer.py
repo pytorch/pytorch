@@ -2367,3 +2367,10 @@ class TestMixTracingScripting(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be understood by the tracer, only outputs matching"):
             mod = ReturnsBadDict()
             traced_module = torch.jit.trace(mod, [torch.ones(1), torch.ones(1)], strict=False)
+
+    def test_trace_linear(self):
+        m = torch.nn.Linear(20, 20)
+        inp = torch.rand([20, 20])
+        self.checkTrace(m, (inp,))
+        g = torch.jit.trace(m, (inp,)).graph
+        FileCheck.check("aten::linear").run(g)
