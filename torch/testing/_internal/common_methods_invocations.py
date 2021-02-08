@@ -1642,6 +1642,8 @@ op_db: List[OpInfo] = [
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.frexp),
                    dtypesIfCPU=all_types_and(torch.bool, torch.half),
                    dtypesIfCUDA=floating_types_and(torch.half),
+                   # skip testing torch.frexp as it is not supported by ROCM platform yet
+                   dtypesIfROCM=_dispatch_dtypes(()),
                    test_inplace_grad=False,
                    safe_casts_outputs=True,
                    skips=(

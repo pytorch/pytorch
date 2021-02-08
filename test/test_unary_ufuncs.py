@@ -21,6 +21,8 @@ from torch.testing._internal.common_device_type import (
     OpDTypes)
 from torch.testing import (
     floating_types_and, all_types_and_complex_and, floating_types)
+from torch.utils.cpp_extension import ROCM_HOME
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
 
 if TEST_SCIPY:
     import scipy
@@ -1637,6 +1639,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
+    @unittest.skipIf(TEST_ROCM, "skip on ROCM")
     @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False))
     def test_frexp(self, device, dtype):
         input = make_tensor((50, 50), device, dtype, low=-9, high=9)
