@@ -495,9 +495,10 @@ private:
 
   // hard limit number of registered types
   // note: constexpr provokes Windows compilation error "member may not be initialized"
-  // static constexpr size_t MaxTypeIndex = UINT8_MAX;
-  #define MaxTypeIndex UINT8_MAX
+  // static constexpr size_t MaxTypeIndex = 32;
+  #define MaxTypeIndex 32
 
+public:
   static std::atomic<uint16_t> nextTypeIndex;
 
   static detail::TypeMetaData* typeMetaDatas();
