@@ -651,13 +651,20 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 stmts.append('}')
         return stmts
 
+    # Generates a Dispatcher::redispatch() call into the dispatcher. We do this mainly for performance reasons:
+    #  - Pre-compute the full DispatchKeySet. This saves the dispatcher from having to read from TLS.
+    #  - redispatch() avoids a redundant call to RecordFunction, which was already called right before
+    #    we entered this autograd kernel.
+    # For view replay calls, we generate an orderinary Dispatcher::call() instead, because:
+    #  - We want to replay the entire call into the op, including any previously-set dispatch keys.
+    #  - The view replay call also is not part of the hot path.
     def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str], *, is_view_call: bool) -> str:
         """ Dispatch call via function in a namespace or method on Tensor."""
         dispatcher_sig = DispatcherSignature.from_schema(f.func)
         dispatcher_exprs = dispatcher_sig.exprs()
 
         if is_view_call:
-            # View replay functions use the standard Dispatcher::call API, since they are not hot-path.
+            # View replay functions use the standard Dispatcher::call API.
             if Variant.function in f.variants:
                 call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
                     api_name=cpp.name(
