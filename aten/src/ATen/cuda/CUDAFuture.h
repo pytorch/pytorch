@@ -19,7 +19,8 @@
 #include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
 
-namespace at { namespace cuda {
+namespace at {
+namespace cuda {
 
 struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
  public:
@@ -36,7 +37,6 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
   }
 
  protected:
-
   /**
    * The dataPtrs field contains storage pointers of all tensors in the IValue.
    * This method records CUDAEvents on participating devices and uses those
@@ -52,8 +52,8 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
     currentDevice_ = c10::cuda::current_device();
 
     // Extract them once and cache them for later uses.
-    dataPtrs_ = dataPtrs.has_value() ?
-        std::move(*dataPtrs): extractDataPtrs(value);
+    dataPtrs_ =
+        dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
 
     std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
     for (const at::DataPtr& data_ptr : dataPtrs_) {
@@ -101,7 +101,8 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
       for (const at::DataPtr& data_ptr : dataPtrs_) {
         if (data_ptr.device().is_cuda()) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+              data_ptr,
+              at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
         }
       }
 
@@ -113,14 +114,14 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
 
   void postWaitHook(const at::IValue& value) override {
     for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-      cudaEvent.block(
-          at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+      cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
     }
 
     for (const at::DataPtr& data_ptr : dataPtrs_) {
       if (data_ptr.device().is_cuda()) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+            data_ptr,
+            at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
       }
     }
   }
