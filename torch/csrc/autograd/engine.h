@@ -96,7 +96,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // is run in a "default" mode, which means that all next_edges we encounter
   // should get executed. If it's not empty, only functions that have an entry
   // and this entry has needed == True should be executed. exec_info is only empty
-  // when the graph is executed via .backward() and the input parameter is not passed.
+  // when the graph is executed via .backward() and the inputs parameter is not passed.
   // Otherwise, when executed through .grad(), or when inputs arg is specified for
   // .backward(), exec_info will be non-empty.
   //
