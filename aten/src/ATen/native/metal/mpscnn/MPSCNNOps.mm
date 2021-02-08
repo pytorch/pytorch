@@ -253,6 +253,35 @@ Tensor sigmoid(const Tensor& input) {
   return neuronKernel(input, [MPSCNNNeuronOp sigmoid]);
 }
 
+API_AVAILABLE(ios(11.0), macos(10.13))
+Tensor& hardsigmoid_(Tensor& input) {
+  MPSImage* X = imageFromTensor(input);
+  std::vector<int64_t> outputSize = input.sizes().vec();
+  std::vector<int64_t> textureSize = outputSize;
+  if (input.dim() == 2) {
+    textureSize = {outputSize[0], outputSize[1], 1, 1};
+  }
+  MetalTensor mt{outputSize};
+  MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
+  mt.texture()->allocateTemporaryTextureStorage(textureSize, commandBuffer);
+  MPSImage* Y = imageFromMetalTensor(mt);
+  static dispatch_once_t onceToken;
+  static MPSCNNNeuronHardSigmoid* neuron = nil;
+  dispatch_once(&onceToken, ^{
+    neuron = [[MPSCNNNeuronHardSigmoid alloc]
+        initWithDevice:[MPSCNNContext sharedInstance].device
+                     a:1.0/6.0
+                     b:0.5];
+  });
+  [neuron encodeToCommandBuffer:commandBuffer.buffer
+                    sourceImage:X
+               destinationImage:Y];
+  MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
+  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
+  metalTensor.texture()->copyFromTexture(Y);
+  return input;
+}
+
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor tanh(const Tensor& input) {
   return neuronKernel(input, [MPSCNNNeuronOp tanh]);
@@ -269,6 +298,42 @@ Tensor& hardtanh_(Tensor& input, Scalar min_val, Scalar max_val) {
   MPSCNNClampOp* clampOp = [MPSCNNClampOp newWithTextures:@[ X, Y ]
                                                      Args:@[ @(min), @(max) ]];
   [clampOp encode:commandBuffer.buffer];
+  MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
+  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
+  metalTensor.texture()->copyFromTexture(Y);
+  return input;
+}
+
+Tensor& hardswish_(Tensor& input) {
+  MPSImage* X = imageFromTensor(input);
+  MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
+  std::vector<int64_t> outputSize = input.sizes().vec();
+  std::vector<int64_t> textureSize = outputSize;
+  if (input.dim() == 2) {
+    textureSize = {outputSize[0], outputSize[1], 1, 1};
+  }
+  MPSImage* Y = [MPSImage temporaryImageFromSize:textureSize commandBuffer:commandBuffer];
+  id<MTLComputeCommandEncoder> encoder =
+      [commandBuffer.buffer computeCommandEncoder];
+  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+      specializedPipelineState:metal::mpscnn::kernelFor(
+                                   X, @"hardswish", @"hardswish_nonarray")
+                     Constants:@[
+                       @(X.featureChannels),
+                       @(X.height),
+                       @(X.width)
+                     ]];
+
+  [encoder setComputePipelineState:state];
+  [encoder setTexture:[X texture] atIndex:0];
+  [encoder setTexture:[Y texture] atIndex:1];
+
+  const auto& launchParams =
+      metal::mpscnn::spatialPointwiseKernelLaunchParams(state, X);
+  [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+          threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+  [encoder endEncoding];
+  [X markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensor& metalTensor = impl->unsafe_opaque_handle();
   metalTensor.texture()->copyFromTexture(Y);
@@ -351,6 +416,16 @@ Tensor addmm(const Tensor& bias, const Tensor& input, const Tensor& weight) {
   return output;
 }
 
+bool broadCastFirstInput(const Tensor& input1, const Tensor& input2) {
+  if (
+    (input2.sizes()[2] > 1 && input1.sizes()[2] == 1) ||
+    (input2.sizes()[3] > 1 && input1.sizes()[3] == 1)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor binaryElementwiseShaderKernel(
     const Tensor& input1,
@@ -360,6 +435,9 @@ Tensor binaryElementwiseShaderKernel(
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
+  if (broadCastFirstInput(input1, input2)) {
+    outputSize = input2.sizes().vec();
+  }
   MetalTensor mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
@@ -392,6 +470,9 @@ Tensor& binaryElementwiseShaderKernel_(
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
+  if (broadCastFirstInput(input1, input2)) {
+    outputSize = input2.sizes().vec();
+  }
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
   TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
@@ -423,6 +504,9 @@ Tensor binaryElementwiseMPSCNNKernel(
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
+  if (broadCastFirstInput(input1, input2)) {
+    outputSize = input2.sizes().vec();
+  }
   MetalTensor mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
@@ -451,6 +535,9 @@ Tensor& binaryElementwiseMPSCNNKernel_(
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
+  if (broadCastFirstInput(input1, input2)) {
+    outputSize = input2.sizes().vec();
+  }
   MetalTensor mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);

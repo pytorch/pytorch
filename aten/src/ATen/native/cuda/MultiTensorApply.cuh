@@ -115,6 +115,7 @@ void multi_tensor_apply(
         }
     }
 
+
 template<int depth, typename T, typename... ArgTypes>
 void multi_tensor_apply(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
