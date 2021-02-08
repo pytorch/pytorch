@@ -864,19 +864,20 @@ class TestFakeQuantize(TestCase):
 
     def _test_forward_per_tensor_cachemask_impl(self, device):
         for torch_type in (torch.qint8, torch.quint8):
-            X = torch.randn(4, 8).to(device)
+            Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
             # pick the scale + zp so that some values get clipped
-            obs = torch.quantization.MinMaxObserver(torch_type)
-            obs(X * 0.75)
-            scale, zero_point = obs.calculate_qparams()
-            scale, zero_point = float(scale), int(zero_point)
-            quant_min, quant_max = obs._calculate_qmin_qmax()
+            for X in Xs:
+                obs = torch.quantization.MinMaxObserver(torch_type)
+                obs(X * 0.75)
+                scale, zero_point = obs.calculate_qparams()
+                scale, zero_point = float(scale), int(zero_point)
+                quant_min, quant_max = obs._calculate_qmin_qmax()
 
-            Y_test, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
-                X, scale, zero_point, quant_min, quant_max)
-            Y_ref = _fake_quantize_per_tensor_affine_reference(
-                X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
-            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+                Y_test, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
+                    X, scale, zero_point, quant_min, quant_max)
+                Y_ref = _fake_quantize_per_tensor_affine_reference(
+                    X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
+                self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
 
     def test_forward_per_tensor_cachemask_cpu(self):
         device = torch.device('cpu')
