@@ -298,6 +298,8 @@ Pointwise Ops
     exp
     exp2
     expm1
+    fake_quantize_per_channel_affine
+    fake_quantize_per_tensor_affine
     fix
     float_power
     floor
@@ -470,6 +472,7 @@ Other Operations
     diag_embed
     diagflat
     diagonal
+    diff
     einsum
     flatten
     flip
