@@ -41,7 +41,7 @@ namespace native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
-    const Tensor& weight,
+    const Tensor& weight_t,
     const Tensor& bias) {
   TORCH_CHECK(self.dim() >= 2,
       "mkldnn_linear: input needs to has dim at least 2, input dim ", self.dim());
@@ -51,7 +51,8 @@ Tensor mkldnn_linear(
   // reshape first if input dim is greater than 2 and the reshape will cost a memory copy.
   auto self_reshaped = self.dim() > 2 ? self.reshape({-1, self.size(self.dim() - 1)}) : self;
   const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
-  // weight can be a mkldnn tensor or dense tensor.
+  // weight_t can be a mkldnn tensor or dense tensor.
+  const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
   const ideep::tensor w = itensor_from_tensor(weight);
 
   ideep::tensor y;
@@ -76,16 +77,17 @@ Tensor mkldnn_linear(
 
 
 Tensor mkldnn_linear_backward_input(
-    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight){
+    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight_t){
   TORCH_CHECK(grad_output.is_mkldnn(),
       "mkldnn_linear_backward: grad_output needs to be mkldnn layout");
-  TORCH_CHECK(weight.type().backend() == at::Backend::CPU && weight.scalar_type() == kFloat,
-      "mkldnn_linear_backward: weight needs to be a dense tensor");
+  TORCH_CHECK(weight_t.type().backend() == at::Backend::CPU && weight_t.scalar_type() == kFloat,
+      "mkldnn_linear_backward: weight_t needs to be a dense tensor");
   auto grad_output_reshaped = grad_output.dim() > 2 ?
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
 
   ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
-  // weight always dense tensor for training.
+  // weight_t always dense tensor for training.
+  const Tensor weight = weight_t.is_contiguous() ? weight_t : weight_t.contiguous();
   const ideep::tensor w = itensor_view_from_dense(weight);
 
   std::vector<int64_t> input_reshaped_size;
