@@ -58,9 +58,9 @@ TORCH_API void registerBackendPreprocessFunction(
     const std::string& name,
     const BackendPreprocessFunction& preprocess);
 
-TORCH_API bool hasBackendPreprocessFunction(const std::string& name);
+bool hasBackendPreprocessFunction(const std::string& name);
 
-TORCH_API BackendPreprocessFunction
+BackendPreprocessFunction
 getBackendPreprocessFunction(const std::string& name);
 
 TORCH_API Module codegen_backend_module(
