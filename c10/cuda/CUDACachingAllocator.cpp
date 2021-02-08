@@ -399,7 +399,8 @@ class DeviceCachingAllocator {
       remaining->prev = block;
       remaining->ptr = static_cast<char*>(remaining->ptr) + size;
       remaining->size -= size;
-      pool.blocks.insert(remaining);
+      bool inserted = pool.blocks.insert(remaining).second;
+      TORCH_INTERNAL_ASSERT(inserted);
 
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
@@ -417,7 +418,8 @@ class DeviceCachingAllocator {
     }
 
     block->allocated = true;
-    active_blocks.insert(block);
+    bool inserted = active_blocks.insert(block).second;
+    TORCH_INTERNAL_ASSERT(inserted);
 
     c10::reportMemoryUsageToProfiler(
         block, block->size, c10::Device(c10::DeviceType::CUDA, device));
