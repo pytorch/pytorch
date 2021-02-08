@@ -289,6 +289,7 @@ _(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, fill_diagonal_) \
+_(aten, diff) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \

@@ -13,6 +13,7 @@ import unittest
 from math import sqrt
 from pathlib import Path
 from torch.multiprocessing import Process
+from torch.testing import FileCheck
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 from torch.fx.node import Target
 from torch.fx.passes import shape_prop
@@ -731,6 +732,30 @@ class TestFX(JitTestCase):
         self.assertIn('builtins.getattr', graph_str)
         self.assertIn('operator.add', graph_str)
         self.assertIn('torch.add', graph_str)
+
+    def test_pretty_print_node(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param: torch.nn.Parameter = torch.nn.Parameter(
+                    torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x: torch.Tensor, y: int = 2):
+                return self.linear(x[y] + self.param).clamp(min=0.0, max=1.0)
+
+        traced = symbolic_trace(M())
+
+        all_formatted = "\n".join([n.format_node() for n in traced.graph.nodes])
+
+        FileCheck().check("x").check("placeholder") \
+            .check("y").check("placeholder") \
+            .check("getitem").check("call_function") \
+            .check("param").check("get_attr") \
+            .check("add").check("call_function") \
+            .check("linear").check("call_module") \
+            .check("clamp").check("call_method") \
+            .run(all_formatted)
 
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
@@ -1597,6 +1622,18 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(NotImplementedError, "new_args"):
             x[0] = 4
 
+    def test_partial_trace(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if y:
+                    return 2 * x
+                else:
+                    return x
+        mod = Foo()
+        mod_true = symbolic_trace(mod, concrete_args={'y': True})
+        mod_false = symbolic_trace(mod, concrete_args={'y': False})
+        self.assertEqual(mod_true(3), 6)
+        self.assertEqual(mod_false(3), 3)
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
