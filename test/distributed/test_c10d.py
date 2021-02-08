@@ -4022,6 +4022,69 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
+    class AcceptsParam(torch.nn.Module):
+        def __init__(self, p):
+            super().__init__()
+            self.a = p
+
+        def forward(self, input):
+            return self.a * input
+
+    @requires_nccl()
+    def test_ddp_weight_sharing(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # No need to act on big tensors to catch errors
+        size = 2
+        dev = self.rank
+
+        class Model(torch.nn.Module):
+            def __init__(inst):
+                super().__init__()
+                p = torch.nn.Parameter(torch.randn(size, requires_grad=True))
+                inst.sub0 = self.AcceptsParam(p)
+                inst.sub1 = self.AcceptsParam(p)
+
+            def forward(self, input):
+                return self.sub0(input) + self.sub1(input)
+
+        m0 = Model().cuda(dev)
+        m1 = Model().cuda(dev)
+        with torch.no_grad():
+            for p0, p1 in zip(m0.parameters(), m1.parameters()):
+                p1.copy_(p0)
+        models = [m0, m1]
+
+        opts = [torch.optim.SGD(m.parameters(), lr=0.1) for m in models]
+
+        for i, use_bucket_view in enumerate((True, False)):
+            models[i] = torch.nn.parallel.DistributedDataParallel(models[i],
+                                                                  bucket_cap_mb=1,
+                                                                  gradient_as_bucket_view=use_bucket_view,
+                                                                  device_ids=[dev],
+                                                                  process_group=process_group)
+
+        for try_set_to_none in (True, False):
+            for i in range(3):
+                for m, opt in zip(models, opts):
+                    m.zero_grad(set_to_none=try_set_to_none)
+                    m(self.rank + 1 + 10 * i).sum().backward()
+                    opt.step()
+
+            for (name, p0), (_, p1) in zip(m0.named_parameters(), m1.named_parameters()):
+                print(type(p0), type(p1))
+                self.assertEqual(p0, p1, "mismatch at " + name)
+                self.assertEqual(p0.grad, p1.grad, "mismatch at " + name + ".grad")
+
+    def test_ddp_checkpointing(self):
+        pass
+        # gradient_as_bucket_view=True, False
+
+    def test_ddp_checkpointing_weight_sharing(self):
+        pass
+        # gradient_as_bucket_view=True, False
+
 
 class ReducerModule(nn.Module):
     def __init__(self):

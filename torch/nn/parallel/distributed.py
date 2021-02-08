@@ -560,6 +560,9 @@ class DistributedDataParallel(Module):
             list(parameter for _, parameter in replica)
             for replica in modules_and_parameters]
 
+        # Deduplicate.
+        # param_mod
+
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
             if isinstance(module, torch.nn.Embedding):
