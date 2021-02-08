@@ -169,7 +169,7 @@ Diagram::
   linear_weight_fp32
 
   # dynamically quantized model
-  # linear and conv weights are in int8
+  # linear and LSTM weights are in int8
   previous_layer_fp32 -- linear_int8_w_fp32_inp -- activation_fp32 -- next_layer_fp32
                        /
      linear_weight_int8

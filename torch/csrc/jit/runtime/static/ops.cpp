@@ -4,6 +4,8 @@
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -115,6 +117,11 @@ bool canRunOutOfPlace(Node* n) {
 bool canReuseInputsOutputs(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   return !SRViewOperatorRegistry()->Has(op_name);
+}
+
+bool isViewOp(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  return SRViewOperatorRegistry()->Has(op_name);
 }
 
 bool canReuseInputs(Node* n) {
@@ -279,25 +286,9 @@ SROperator aten_stack(Node* n) {
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(inputs[0]);
     }
-#ifndef NDEBUG
-    at::IntArrayRef entry_shape = inputs[0].sizes();
-    for (auto i = 1; i < inputs.size(); i++) {
-      TORCH_CHECK(
-          inputs[i].sizes() == entry_shape,
-          "stack expects each tensor to be equal size, but got ",
-          entry_shape,
-          " at entry 0 and ",
-          inputs[i].sizes(),
-          " at entry ",
-          i);
-    }
-#endif
-    for (auto i = 0; i < inputs.size(); i++) {
-      inputs[i] = inputs[i].unsqueeze(dim);
-    }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::_cat_out_cpu(out_t, inputs, dim);
+    at::native::_stack_out_cpu(inputs, dim, out_t);
   };
 }
 
@@ -413,6 +404,40 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             include_last_offset);
       };
     });
+REGISTER_OPERATOR_FUNCTOR_OPT(
+    quantized::embedding_bag_4bit_rowwise_offsets,
+    embedding_bag_4bit_rowwise_offsets,
+    false, // don't reuse byte inputs
+    true,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto& weight = p_node->Input(0).toTensor();
+        auto& indices = p_node->Input(1).toTensor();
+        auto offsets = p_node->Input(2).toOptional<at::Tensor>();
+        auto pruned_weights = p_node->Input(5).toBool();
+        auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
+        auto compressed_indices_mapping =
+            p_node->Input(7).toOptional<at::Tensor>();
+        auto include_last_offset = p_node->Input(8).toBool();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) =
+              at::empty({0}, weight.options().dtype(at::kFloat));
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        return at::native::embedding_bag_byte_rowwise_offsets_out(
+            out_t,
+            weight,
+            indices,
+            offsets,
+            false, // unused scale_grad_by_freq
+            0, // unused mode
+            pruned_weights,
+            per_sample_weights,
+            compressed_indices_mapping,
+            include_last_offset);
+      };
+    });
 
 // The out variant takes precedence over native
 REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {
@@ -434,6 +459,19 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {
     auto& output = p_node->Output(0).toTensor();
     fastResizeToZero(output);
     at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
+  };
+});
+REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    auto in1_l =
+        at::native::toListOfOptionalTensors(p_node->Input(1).toListRef());
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::index_out(out_t, in0_t, in1_l);
   };
 });
 
