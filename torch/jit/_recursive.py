@@ -597,12 +597,8 @@ def check_module_initialized(mod):
     # This is to avoid importing torch.distributed.nn
     if not hasattr(mod, 'remote_parameters'):
         for name, param in mod._parameters.items():
-            if torch.nn.parameter.is_lazy(param):
+            if isinstance(param, torch.nn.parameter.UninitializedParameter):
                 raise RuntimeError("'{}' has uninitialized parameters {}. Did you forget to run a forward pass?"
-                                   .format(torch.typename(type(mod)), name))
-        for name, buf in mod._buffers.items():
-            if torch.nn.parameter.is_lazy(buf):
-                raise RuntimeError("'{}' has uninitialized buffers {}. Did you forget to run a forward pass?"
                                    .format(torch.typename(type(mod)), name))
 
 def infer_methods_to_compile(nn_module):
