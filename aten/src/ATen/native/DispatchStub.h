@@ -61,23 +61,15 @@ CPUCapability get_cpu_capability();
 template <typename FnPtr, typename T>
 struct TORCH_API DispatchStub;
 
-template <typename rT, typename T, typename... Args>
-struct TORCH_API DispatchStub<rT (*)(Args...), T> {
-  using FnPtr = rT (*) (Args...);
-
-  DispatchStub() = default;
-  DispatchStub(const DispatchStub&) = delete;
-  DispatchStub& operator=(const DispatchStub&) = delete;
-
-private:
-  FnPtr get_call_ptr(DeviceType device_type) {
+struct TORCH_API DispatchStubImpl {
+  void* get_call_ptr_impl(DeviceType device_type, std::function<void*()> cpu_chooser) {
     switch (device_type) {
       case DeviceType::CPU: {
         // Use memory_order_relaxed here since even if two threads race,
         // they will still compute the same value for cpu_dispatch_ptr.
         auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
         if (!fptr) {
-          fptr = choose_cpu_impl();
+          fptr = cpu_chooser();
           cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
         }
         return fptr;
@@ -94,6 +86,33 @@ private:
       default:
         AT_ERROR("DispatchStub: unsupported device type", device_type);
     }
+  }
+
+private:
+  // Fixing dispatch error in Windows debug builds.
+  // See https://github.com/pytorch/pytorch/issues/22681 for more details.
+  #if defined(_MSC_VER) && defined(_DEBUG)
+    std::atomic<void*> cpu_dispatch_ptr;
+    void* cuda_dispatch_ptr;
+    void* hip_dispatch_ptr;
+  #else
+    std::atomic<void*> cpu_dispatch_ptr{nullptr};
+    void* cuda_dispatch_ptr = nullptr;
+    void* hip_dispatch_ptr = nullptr;
+  #endif
+};
+
+template <typename rT, typename T, typename... Args>
+struct TORCH_API DispatchStub<rT (*)(Args...), T>: protected DispatchStubImpl {
+  using FnPtr = rT (*) (Args...);
+
+  DispatchStub() = default;
+  DispatchStub(const DispatchStub&) = delete;
+  DispatchStub& operator=(const DispatchStub&) = delete;
+
+private:
+  FnPtr get_call_ptr(DeviceType device_type) {
+    return reinterpret_cast<FnPtr>(get_call_ptr_impl(device_type, [this] { return choose_cpu_impl(); }));
   }
 
 public:
@@ -128,17 +147,6 @@ public:
     return DEFAULT;
   }
 
-// Fixing dispatch error in Windows debug builds.
-// See https://github.com/pytorch/pytorch/issues/22681 for more details.
-#if defined(_MSC_VER) && defined(_DEBUG)
-  std::atomic<FnPtr> cpu_dispatch_ptr;
-  FnPtr cuda_dispatch_ptr;
-  FnPtr hip_dispatch_ptr;
-#else
-  std::atomic<FnPtr> cpu_dispatch_ptr{nullptr};
-  FnPtr cuda_dispatch_ptr = nullptr;
-  FnPtr hip_dispatch_ptr = nullptr;
-#endif
   static FnPtr DEFAULT;
 #ifdef HAVE_AVX_CPU_DEFINITION
   static FnPtr AVX;
