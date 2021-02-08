@@ -143,30 +143,6 @@ void boxed_func_for_outofplace_op(const OperatorHandle& /*opHandle*/, Stack* sta
 }
 
 void boxed_func_for_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
-  // (Tensor(a!), Tensor(b!), Scalar, Scalar) -> (Tensor(a!), Tensor(b!))
-  EXPECT_EQ(4, stack->size());
-
-  ASSERT_TRUE(stack->at(0).isTensor());
-  auto t1 = stack->at(0).toTensor();
-
-  ASSERT_TRUE(stack->at(1).isTensor());
-  auto t2 = stack->at(1).toTensor();
-
-  ASSERT_TRUE(stack->at(2).isScalar());
-  auto s1 = stack->at(2).toScalar();
-
-  ASSERT_TRUE(stack->at(3).isScalar());
-  auto s2 = stack->at(3).toScalar();
-
-  t1.add_(s1);
-  t2.add_(s2);
-
-  stack->clear();
-  torch::jit::push(stack, t1);
-  torch::jit::push(stack, t2);
-}
-
-void boxed_func_for_legacy_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
   // (Scalar, Scalar, Tensor(a!), Tensor(b!)) -> (Tensor(a!), Tensor(b!))
   EXPECT_EQ(4, stack->size());
 
@@ -275,26 +251,6 @@ void expectOutOfPlaceBoxedCallingWorks(const KernelFunction& func) {
 void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto t1 = at::zeros({1});
-  auto t2 = at::zeros({1});
-  auto s1 = 1.0f;
-  auto s2 = 2.0f;
-  vector<IValue> stack {t1, t2, s1, s2};
-  func.callBoxed(dummy, &stack);
-
-  // kernel should have updated output args and returned them on the stack
-  EXPECT_EQ(t1.item().toFloat(), 1.0f);
-  EXPECT_EQ(t2.item().toFloat(), 2.0f);
-  EXPECT_EQ(2, stack.size());
-  EXPECT_TRUE(stack[0].isTensor());
-  EXPECT_TRUE(stack[0].toTensor().is_same(t1));
-  EXPECT_TRUE(stack[1].isTensor());
-  EXPECT_TRUE(stack[1].toTensor().is_same(t2));
-}
-
-void expectLegacyOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
-  OperatorHandle dummy = makeDummyOperatorHandle();
-
   auto s1 = 1.0f;
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
@@ -395,31 +351,6 @@ void expectOutOfPlaceUnboxedCallingWorks(const KernelFunction& func) {
 void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto t1 = at::zeros({1});
-  auto t2 = at::zeros({1});
-  auto s1 = 1.0f;
-  auto s2 = 2.0f;
-
-  std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
-    std::tuple<at::Tensor&, at::Tensor&>, at::Tensor&, at::Tensor&, at::Scalar, at::Scalar
-  >(dummy, t1, t2, s1, s2);
-
-  // kernel should have updated out args and returned them in a tuple
-  EXPECT_EQ(t1.item().toFloat(), 1.0f);
-  EXPECT_EQ(t2.item().toFloat(), 2.0f);
-
-  auto t1_out = std::get<0>(tup);
-  EXPECT_EQ(t1_out.item().toFloat(), 1.0f);
-  EXPECT_TRUE(t1_out.is_same(t1));
-
-  auto t2_out = std::get<1>(tup);
-  EXPECT_EQ(t2_out.item().toFloat(), 2.0f);
-  EXPECT_TRUE(t2_out.is_same(t2));
-}
-
-void expectLegacyOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
-  OperatorHandle dummy = makeDummyOperatorHandle();
-
   auto s1 = 1.0f;
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
@@ -478,11 +409,6 @@ TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCal
   kernels::expectOutOfPlaceMultiBoxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withLegacyOutOfPlaceMultiSignature_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_legacy_outofplace_multi_op>();
-  kernels::expectLegacyOutOfPlaceMultiBoxedCallingWorks(func);
-}
-
 // functional, unboxed calling
 
 TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
@@ -515,11 +441,6 @@ TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingU
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
   kernels::expectOutOfPlaceMultiUnboxedCallingWorks(func);
-}
-
-TEST(KernelFunctionTest, givenBoxedFunction_withLegacyOutOfPlaceMultiSignature_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_legacy_outofplace_multi_op>();
-  kernels::expectLegacyOutOfPlaceMultiUnboxedCallingWorks(func);
 }
 
 // functors etc.
