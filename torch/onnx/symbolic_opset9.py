@@ -660,6 +660,10 @@ def prelu(g, self, weight):
     return g.op("PRelu", self, weight)
 
 
+def silu(g, input):
+    return g.op('Mul', input, g.op('Sigmoid', input))
+
+
 def relu(g, input):
     return g.op("Relu", input)
 
@@ -2321,7 +2325,8 @@ def scatter_add(g, self, dim, index, src):
     if sizes:
         to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
     else:
-        to_add = zeros_like(self, dtype)
+        dtype = sym_help.scalar_type_to_pytorch_type.index(dtype)
+        to_add = zeros_like(g, self, dtype)
     to_add = sym_help._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
@@ -2418,7 +2423,9 @@ def _var_mean(g, input, dim, correction, keepdim):
     sqr_sub = g.op("Mul", sub_v, sub_v)
     keepdim_mean = 0 if dim is None else keepdim
     var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
-    # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
+    # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+    if correction is None:
+        correction = 1
     if correction != 0:
         num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
         one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
@@ -2428,12 +2435,12 @@ def _var_mean(g, input, dim, correction, keepdim):
 
 
 def std(g, input, *args):
-    v = var(g, input, *args)
-    return g.op("Sqrt", v)
+    var, _ = var_mean(g, input, *args)
+    return g.op("Sqrt", var)
 
 
 def var(g, input, *args):
-    var, _ = var_mean(input, *args)
+    var, _ = var_mean(g, input, *args)
     return var
 
 
@@ -2443,10 +2450,10 @@ def var(g, input, *args):
 # aten::var_mean(Tensor self, int[1] dim, bool unbiased, bool keepdim=False)
 # aten::var_mean(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False)
 def var_mean(g, input, *args):
-    if len(args) == 3:
-        return _var_mean(g, input, *args)
-    else:
+    if len(args) == 1:
         return _var_mean(g, input, None, args[0], None)
+    else:
+        return _var_mean(g, input, *args)
 
 
 def std_mean(g, input, *args):
@@ -2800,8 +2807,7 @@ def kl_div(g, input, target, reduction, log_target):
     elif reduction == 2:
         return sym_help._reducesum_helper(g, output, keepdims_i=0)
     else:
-        return sym_help._onnx_unsupported("kl_div with reduction other than none, mean, or sum. Please open a bug to "
-                                          "request ONNX export support for the missing reduction type.")
+        return sym_help._onnx_unsupported("kl_div with reduction other than none, mean, or sum.")
 
 
 @parse_args('v', 'v', 'is', 'i')

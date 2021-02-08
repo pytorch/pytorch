@@ -4,9 +4,9 @@
 
 #include <type_traits>
 #include <complex>
+#include <limits>
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
-#include <ATen/NumericLimits.h>
 #include <ATen/NumericUtils.h>
 #if defined(__CUDACC__)
 #include <THC/THCDeviceUtils.cuh>
@@ -104,7 +104,7 @@ struct WelfordOps {
   inline C10_DEVICE res_t project(acc_t acc) const {
     auto mean = acc.mean;
     combine_t divisor = acc.nf - correction;
-    scalar_t ret = at::numeric_limits<scalar_t>::upper_bound();
+    scalar_t ret = std::numeric_limits<scalar_t>::infinity();
     if (divisor > 0) {
       ret = take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor);
     }

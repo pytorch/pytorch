@@ -518,7 +518,9 @@ std::string generateKernel(
   // Note: Random number generation is only supported for CUDA kernels.
   // Note: Constant None node is ignored and we will handle it in the
   //       places where the constant None node is used
-  for (const auto& n : graph.nodes()) {
+  // Note: No need to iterate over reference as n is a pointer
+  for (const auto n : graph.nodes()) {
+    static_assert(std::is_pointer<decltype(n)>::value, "n must be a pointer");
     // Note: FusedConcat nodes work by narrowing the output Tensors before the
     // kernel runs
     if (n->kind() == prim::FusedConcat)
