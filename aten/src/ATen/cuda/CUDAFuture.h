@@ -37,6 +37,14 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
 
  protected:
 
+  /**
+   * The dataPtrs field contains storage pointers of all tensors in the IValue.
+   * This method records CUDAEvents on participating devices and uses those
+   * CUDAEvents to synchronize streams when calling postWaitHook().
+   * If dataPtrs does not have a value, this method will try to inspect the
+   * given IValue by walking through all subvalues and extracting data pointers
+   * from CUDA tensors.
+   */
   void postMarkCompletedHook(
       const at::IValue& value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>

@@ -358,6 +358,12 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     markCompletedWithDataPtrs(std::move(value));
   }
 
+  /**
+   * Explicitly mark the future as comleted with the output value and DataPtrs.
+   * The data_ptrs contains storage pointers for all tensors in IValue, which
+   * will be passed to postMarkCompletedHook. Some subclass, like CUDAFuture,
+   * uses these DataPtrs to synchronize CUDA streams.
+   */
   void markCompletedWithDataPtrs(
       IValue value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
@@ -497,9 +503,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return type_;
   }
 
-  // This hook is called by this class's then() method when it prepares the
-  // instance it returns to the caller. It should be overridden by subclasses so
-  // that they can produce an instace of their own type.
+  // This method should be overridden by subclasses so that they can produce an
+  // instace of their own type.
   virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
     return c10::make_intrusive<Future>(type);
   }
@@ -512,6 +517,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   // It allows subclasses to further update their state if they so need. For
   // example the CUDAFuture subclass uses it to determine what devices the value
   // resides on and record an event in those devices' current streams.
+  // The data_ptrs field contains storage pointers of all tensors in the value,
+  // which is used by the CUDAFuture subclass to synchronize streams.
   virtual void postMarkCompletedHook(
       const at::IValue& value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
