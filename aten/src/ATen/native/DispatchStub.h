@@ -62,6 +62,7 @@ template <typename FnPtr, typename T>
 struct TORCH_API DispatchStub;
 
 struct TORCH_API DispatchStubImpl {
+protected:
   void* get_call_ptr_impl(DeviceType device_type, std::function<void*()> const& cpu_chooser) {
     switch (device_type) {
       case DeviceType::CPU: {
@@ -88,7 +89,7 @@ struct TORCH_API DispatchStubImpl {
     }
   }
 
-private:
+public:
   // Fixing dispatch error in Windows debug builds.
   // See https://github.com/pytorch/pytorch/issues/22681 for more details.
   #if defined(_MSC_VER) && defined(_DEBUG)
@@ -103,7 +104,7 @@ private:
 };
 
 template <typename rT, typename T, typename... Args>
-struct TORCH_API DispatchStub<rT (*)(Args...), T>: protected DispatchStubImpl {
+struct TORCH_API DispatchStub<rT (*)(Args...), T>: public DispatchStubImpl {
   using FnPtr = rT (*) (Args...);
 
   DispatchStub() = default;
