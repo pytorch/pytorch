@@ -1,4 +1,4 @@
-from functools import reduce, wraps
+from functools import reduce, wraps, partial
 from itertools import product
 from operator import mul, itemgetter
 import collections
@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest)
+     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN)
 
 from distutils.version import LooseVersion
 
@@ -95,6 +95,20 @@ class SampleInput(object):
 
         return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
 
+class AliasInfo(object):
+    """Class holds alias information. For example, torch.abs ->
+    torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
+    """
+
+    def __init__(self, alias_name):
+        self.name = alias_name
+        self.op = _getattr_qual(torch, alias_name)
+        self.method_variant = getattr(torch.Tensor, alias_name, None)
+        self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
+
+    def __call__(self, *args, **kwargs):
+        return self.op(*args, **kwargs)
+
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
 
@@ -145,6 +159,7 @@ class OpInfo(object):
                  safe_casts_outputs=False,  # whether op allows safe casting when writing to out arguments
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
+                 aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  variant_test_name='',  # additional string to include in the test name
                  supports_sparse=False,  # supported for sparse
                  check_batched_grad=True,  # check batched grad when doing gradcheck
@@ -192,6 +207,10 @@ class OpInfo(object):
         self.supports_sparse = supports_sparse
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
+
+        self.aliases = ()  # type: ignore
+        if aliases is not None:
+            self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -559,6 +578,21 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
                                           requires_grad=requires_grad), shape))
                  for size, shape in test_cases)
 
+def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None):
+    a = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    is_integral = not dtype.is_floating_point and not dtype.is_complex
+    b = make_tensor((S, S, S), device, dtype, low=1 if is_integral else 0.1, high=None,
+                    requires_grad=requires_grad)
+
+    kwargs = None
+    if rounding_mode is not None:
+        kwargs = dict(rounding_mode=rounding_mode)
+
+    return [
+        SampleInput((a, b), kwargs=kwargs),
+        SampleInput((a,), args=(2,)),
+    ]
+
 def sample_inputs_stack(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
@@ -604,6 +638,33 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+def sample_inputs_diff(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((1,), 0, None, None),
+        ((S,), 0, None, None),
+        ((S, 1), 0, None, None),
+        ((S, 1), 1, None, None),
+        ((S, S), 0, None, None),
+        ((S, S), 1, None, None),
+        ((S, S), 0, (1, S), (2, S)),
+        ((S, S), 0, None, (2, S)),
+        ((S, S, S), 1, None, None),
+        ((S, S, S), 1, (S, 1, S), (S, 1, S)),)
+
+    sample_inputs = []
+    for size, dim, size_prepend, size_append in test_cases:
+        args = (make_tensor(size, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad), 1, dim,
+                make_tensor(size_prepend, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad) if size_prepend else None,
+                make_tensor(size_append, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad) if size_append else None)
+        sample_inputs += [SampleInput(args)]
+
+    return tuple(sample_inputs)
 
 def sample_inputs_index_select(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S, S), device, dtype,
@@ -1095,6 +1156,23 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def sample_inputs_diag(op_info, device, dtype, requires_grad):
+    vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
+
+    tensors = (
+        make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((3, 5), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((5, 3), device, dtype, low=None, high=None, requires_grad=requires_grad),
+    )
+
+    args = ((), (2,), (-2,), (1,), (2,))
+
+    samples = []
+    for tensor, arg in product(tensors, args):
+        samples.append(SampleInput(tensor, args=arg))
+
+    return samples + [vec_sample]
+
 def sample_inputs_logit(op_info, device, dtype, requires_grad):
     low, high = op_info.domain
 
@@ -1162,8 +1240,37 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
+    UnaryUfuncInfo('abs',
+                   aliases=('absolute', ),
+                   ref=np.abs,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/49224
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input)
+                       # We can break the logic of the loop over all possible types but it is OK.
+                       # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
+                       SkipInfo('TestCommon', 'test_jit_alias_remapping',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
+                   ),
+                   test_inplace_grad=False,
+                   assert_autodiffed=True),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
+                   aliases=('arccos', ),
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,
@@ -1240,6 +1347,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addr),
 
     UnaryUfuncInfo('asin',
+                   aliases=('arcsin', ),
                    ref=np.arcsin,
                    domain=(-1, 1),
                    supports_sparse=True,
@@ -1369,6 +1477,31 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('diff',
+           op=torch.diff,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_diff,
+           test_inplace_grad=False),
+    OpInfo('div',
+           variant_test_name='no_rounding_mode',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_div,
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='true_rounding',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='true'),
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='trunc_rounding',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='trunc'),
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='floor_rounding',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='floor'),
+           assert_autodiffed=True),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half),
@@ -1383,6 +1516,12 @@ op_db: List[OpInfo] = [
                    ),
                    assert_autodiffed=True,
                    safe_casts_outputs=True),
+    OpInfo('diag',
+           dtypes=all_types_and_complex_and(torch.bool),
+           dtypesIfCPU=all_types_and_complex_and(torch.bool),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_diag,
+           test_inplace_grad=False),
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
                      ref=np.fft.fft,
@@ -2157,14 +2296,7 @@ if TEST_SCIPY:
                dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                test_inplace_grad=False,
                supports_tensor_out=False,
-               # Reference: https://github.com/pytorch/pytorch/issues/50381
-               test_complex_grad=False,
-               sample_inputs_func=sample_inputs_trace,
-               skips=(
-                   SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                            dtypes=[torch.complex64, torch.complex128]),
-                   SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                            dtypes=[torch.complex64, torch.complex128]))),
+               sample_inputs_func=sample_inputs_trace)
     ]
     op_db = op_db + op_db_scipy_reference
 
@@ -2258,6 +2390,9 @@ NO_ARGS = NoArgsClass()
 def ident(x):
     return x
 
+# Do NOT add to this list. Method tests are being DEPRECATED and replaced by OpInfos.
+# See https://github.com/pytorch/pytorch/wiki/Writing-tests-in-PyTorch-1.8
+#
 # (
 #   method name,
 #   input size/constructing fn,
@@ -2438,8 +2573,6 @@ def method_tests():
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
         ('complex', (S, S, S), ((S, S, S),), ''),
-        ('abs', (S, S, S), NO_ARGS, '', (True,)),
-        ('abs', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
@@ -2818,16 +2951,6 @@ def method_tests():
         ('dist', (), ((), 4), 'scalar_4'),
         ('dist', (S, S, S), ((), 4), 'scalar_4_broadcast_rhs'),
         ('dist', (), ((S, S, S), 4), 'scalar_4_broadcast_lhs'),
-        ('diag', (M, M), NO_ARGS, '2d'),
-        ('diag', (3, 5), NO_ARGS, '2d_wide'),
-        ('diag', (3, 5), (2,), '2d_wide_pos'),
-        ('diag', (3, 5), (-2,), '2d_wide_neg'),
-        ('diag', (5, 3), NO_ARGS, '2d_tall'),
-        ('diag', (5, 3), (2,), '2d_tall_pos'),
-        ('diag', (5, 3), (-2,), '2d_tall_neg'),
-        ('diag', (M,), NO_ARGS, '1d'),
-        ('diag', (M, M), (1,), '2d_1'),
-        ('diag', (M, M), (2,), '2d_2'),
         ('diag_embed', (S, S), NO_ARGS),
         ('diagonal', (M, M), NO_ARGS, '2d'),
         ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
