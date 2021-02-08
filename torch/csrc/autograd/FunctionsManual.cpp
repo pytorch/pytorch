@@ -306,14 +306,30 @@ Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   return handle_r_to_c(self_st, out);
 }
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, c10::string_view rounding_mode) {
+  if (rounding_mode != "true") {
+    return at::zeros_like(grad, grad.options().dtype(self_st));
+  }
+
   auto result = grad / other.conj();
   return handle_r_to_c(self_st, result);
 }
 
-Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+  return div_tensor_self_backward(grad, other, self_st, "true");
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, c10::string_view rounding_mode) {
+  if (rounding_mode != "true") {
+    return at::zeros_like(grad, grad.options().dtype(other.scalar_type()));
+  }
+
   auto result = -grad * ((self / other) / other).conj();
   return handle_r_to_c(other, result);
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+  return div_tensor_other_backward(grad, self, other, "true");
 }
 
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
@@ -553,23 +569,36 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
   return self;
 }
 
-std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
+std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes, int64_t dim) {
   std::vector<Tensor> grad_inputs(sizes.size());
   if (!grad.defined()) {
     return grad_inputs;
   }
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   int64_t accumulate = 0;
+
+  Tensor grad_;
+  bool grad_is_complex = grad.is_complex();
+  if (grad_is_complex) {
+    grad_ = at::real(grad);
+  }
   for (size_t i = 0; i < sizes.size(); ++i) {
+    Tensor grad_val;
+    if (!at::isComplexType(dtypes[i]) && grad_is_complex) {
+      // R -> C
+      grad_val = grad_;
+    } else {
+      grad_val = grad;
+    }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape == std::vector<int64_t>({0})) {
-      grad_inputs[i] = at::zeros({0}, grad.options());
+      grad_inputs[i] = at::zeros({0}, grad_val.options());
       continue;
     }
     auto size = shape[dim];
     accumulate += size;
-    grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
+    grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
   }
   return grad_inputs;
 }
@@ -591,7 +620,9 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
 // calls that appear in derivative formulas. If the tensor has requires_grad
 // set, this function returns its strides or throws an error if the tensor
 // is sparse. If requires_grad is not set, an empty array is returned since
-// there will be no backward pass.
+// there will be no backward pass. There has one special case, if input is MKLDNN
+// tensor and has requires_grad set, just return an empty array, the reason is
+// that MKLDNN tensor is a opaque tensor which has not stride info.
 //
 // This function only supports the case where `input` is the tensor whose
 // single derivative is being calculated.
@@ -612,6 +643,7 @@ at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & 
       "' tensor to be strided, but a sparse tensor was given instead. ",
       "Please either use a strided tensor or set requires_grad=False for '",
       input_name, "'");
+    if (input.is_mkldnn()) return IntArrayRef({});
     return input.strides();
   } else {
     return IntArrayRef({});
@@ -659,7 +691,7 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
 // and they must have the same shape.
 // Note that the `output` must have the same `indices` as the `mask` so we are using just a clone.
 // However, to get `values` we have to use specific helper function for CPU/CUDA and use the `mask` data to filter `values`
-// That's why we created this `_sparse_matrix_mask_helper` function.
+// That's why we created this `_sparse_mask_helper` function.
 Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
   Tensor output = at::empty_like(mask);
   Tensor mask_indices = mask._indices().clone();
@@ -667,7 +699,7 @@ Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
   if (mask._nnz() == 0) {
     r_values = at::zeros_like(mask._values());
   } else {
-    r_values = _sparse_matrix_mask_helper(input, mask_indices.contiguous());
+    r_values = _sparse_mask_helper(input, mask_indices.contiguous());
   }
   at::sparse::get_sparse_impl(output)->set_indices_and_values_unsafe(mask_indices, r_values);
   return output;
@@ -2905,15 +2937,8 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
   return grad / (self + 1).conj();
 }
 
-Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices, IntArrayRef values_shape) {
-  // TODO: improve this backward by writing a kernel (maybe)
-  auto dense_grad = sparse_grad_out.is_sparse() ? sparse_grad_out.to_dense() : sparse_grad_out;
-  auto full_size = sparse_grad_out.sizes();
-  auto flattened_grad_shape = values_shape.vec();
-  flattened_grad_shape[0] = at::prod_intlist(full_size.slice(0, indices.size(0)));
-  auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
-  auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
-  return flattened_dense_grad.index_select(0, flattened_indices);
+Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices) {
+  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])

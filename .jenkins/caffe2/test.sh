@@ -84,7 +84,8 @@ fi
 # CircleCI docker images could install conda as jenkins user, or use the OS's python package.
 PIP=$(which pip)
 PIP_USER=$(stat --format '%U' $PIP)
-if [[ "$PIP_USER" = root ]]; then
+CURRENT_USER=$(id -u -n)
+if [[ "$PIP_USER" = root && "$CURRENT_USER" != root ]]; then
   MAYBE_SUDO=sudo
 fi
 
