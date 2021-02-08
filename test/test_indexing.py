@@ -762,9 +762,9 @@ class TestIndexing(TestCase):
         self.assertEqual(v[:, [0, 4, 2]].shape, (5, 3, 3))
         self.assertEqual(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
 
-    @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
-    @dtypesIfCPU(torch.float, torch.long, torch.bool, torch.bfloat16)
-    @dtypesIfCUDA(torch.half, torch.long, torch.bool)
+    @dtypes(torch.cfloat, torch.cdouble, torch.float, torch.bfloat16, torch.long, torch.bool)
+    @dtypesIfCPU(torch.cfloat, torch.cdouble, torch.float, torch.long, torch.bool, torch.bfloat16)
+    @dtypesIfCUDA(torch.cfloat, torch.cdouble, torch.half, torch.long, torch.bool, torch.bfloat16)
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         vals = torch.ones(3, 2, 4, device=device, dtype=dtype)

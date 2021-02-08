@@ -357,6 +357,7 @@ Tensor tril_indices_cuda(
         col,
         tril_size - rectangle_size,
         tril_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
 
@@ -434,6 +435,7 @@ Tensor triu_indices_cuda(
         col,
         rectangle_size,
         triu_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
 

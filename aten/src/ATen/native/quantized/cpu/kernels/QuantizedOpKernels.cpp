@@ -2054,41 +2054,36 @@ void q_batch_norm_kernel(
 
 }
 
-void fake_quantize_tensor_kernel(
+void fake_quantize_tensor_cachemask_kernel(
     Tensor& output,
+    Tensor& mask,
     const Tensor& input,
     float sc,
     int64_t z_point,
     int64_t quant_min,
     int64_t quant_max) {
   float inv_scale = 1.0f / sc;
-  auto iter = TensorIterator::unary_op(output, input);
-  cpu_kernel(iter, [&](float self) -> float {
-    return (std::fmin(
-                std::fmax(
-                    static_cast<int64_t>(
-                        z_point + std::nearbyint(self * inv_scale)),
-                    quant_min),
-                quant_max) -
-            z_point) *
-        sc;
-  });
-}
 
-void fake_quantize_grad_tensor_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  float inv_scale = 1.0f / sc;
-  auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
-  cpu_kernel(iter, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(z_point + std::nearbyint(x * inv_scale));
-    return dy * (xq >= quant_min && xq <= quant_max);
+  auto iter_combined = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(output)
+    .add_output(mask)
+    .add_input(input)
+    .build();
+
+  // TODO(#51090): make it work for other dtypes
+  iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    for (int64_t i = 0; i < n; i++) {
+      float* output_val = (float*)(data[0] + i * strides[0]);
+      bool* mask_val = (bool*)(data[1] + i * strides[1]);
+      float* input_val = (float*)(data[2] + i * strides[2]);
+
+      const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+      *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
+      *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+    }
   });
+
 }
 
 void fake_quantize_learnable_tensor_grad_kernel_cpu(
@@ -2097,7 +2092,8 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
     float inv_scale,
     int64_t zero_point,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    float grad_factor) {
   float dscale_small = quant_min - zero_point;
   float dscale_big = quant_max - zero_point;
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
@@ -2126,23 +2122,35 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
       int64_t xqi = std::nearbyint(zero_point + (*XInput) * inv_scale);
       *dXOutput = (*dYInput) * (xqi >= quant_min && xqi <= quant_max);
       // Calculate gradients for scale and zero point.
-      xqi = std::max(std::min(xqi, quant_max), quant_min);
-      float xfqi = static_cast<float>((xqi - zero_point) * scale);
-      if (xqi == quant_min || xqi == quant_max) {
-        *dZeroPointOutput = (*dYInput) * (-1) * scale;
-        *dScaleOutput = (xqi == quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big);
+      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - zero_point) * scale);
+      // Calculate gradients according to the gradient of the clamp function.
+      if (xqi < quant_min || xqi > quant_max) {
+        *dZeroPointOutput = (*dYInput) * (-1) * scale * grad_factor;
+        *dScaleOutput = ((xqi < quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big)) * grad_factor;
       } else {
         *dZeroPointOutput = 0;
-        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale;
+        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale * grad_factor;
       }
     }
   });
 }
 
-void fake_quant_per_channel_cpu(
+void fake_quant_per_channel_cachemask_cpu(
     TensorIterator& iter,
+    TensorIterator& iter_mask,
     int64_t quant_min,
     int64_t quant_max) {
+  // TODO(future, optional): read once, write twice.  Not done at the moment
+  //   for simplicity, as we do not expect this to be a bottleneck.
+
+  // write mask
+  cpu_kernel(iter_mask, [=](float self, float scale, int64_t zero_point) -> bool {
+    float inv_scale = 1.0f / scale;
+    const auto qval = static_cast<int64_t>(zero_point + std::nearbyint(self * inv_scale));
+    return ((quant_min <= qval) && (qval <= quant_max));
+  });
+
+  // write fake_quant
   cpu_kernel(iter, [=](float self, float scale, int64_t zero_point) -> float {
     float inv_scale = 1.0f / scale;
     return (std::fmin(
@@ -2156,55 +2164,58 @@ void fake_quant_per_channel_cpu(
   });
 }
 
-void fake_quant_grad_per_channel_cpu(
-    TensorIterator& iter,
-    int64_t quant_min,
-    int64_t quant_max) {
-  cpu_kernel(
-      iter, [=](float x, float dy, float scale, int64_t zero_point) -> float {
-        float inv_scale = 1.0f / scale;
-        int64_t xq =
-            static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-        return dy * (xq >= quant_min && xq <= quant_max);
-      });
-}
-
 void fake_quantize_learnable_channel_grad_kernel_cpu(
-    TensorIterator& iter,
+    TensorIterator& iter_x,
+    TensorIterator& iter_scale,
+    TensorIterator& iter_zero_point,
     int64_t quant_min,
-    int64_t quant_max) {
-  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    /*  To see how the input and outputs are referenced and assigned,
-        please see the implemenetation of
-        fake_quantize_learnable_tensor_grad_kernel_cpu.
-    */
-    for (int64_t i = 0; i < n; i++) {
-      float* dx_output = (float*)(data[0] + i * strides[0]);
-      float* dscale_output = (float*)(data[1] + i * strides[1]);
-      float* dzero_point_output = (float*)(data[2] + i * strides[2]);
-      float* x_input = (float*)(data[3] + i * strides[3]);
-      float* dy_input = (float*)(data[4] + i * strides[4]);
-      float* scale_input = (float*)(data[5] + i * strides[5]);
-      float* zero_point_input = (float*)(data[6] + i * strides[6]);
-
-      float inv_scale = 1.0f / (*scale_input);
-      float dscale_small = quant_min - (*zero_point_input);
-      float dscale_big = quant_max - (*zero_point_input);
+    int64_t quant_max,
+    float grad_factor) {
+      // write x.grad
+  cpu_kernel(iter_x,
+    [=] (float x_input, float dy_input, float scale_input, float zero_point_input) -> float {
+      float dx_output;
+      float inv_scale = 1.0f / scale_input;
       // Calculate gradients for X.
-      int64_t xqi = std::nearbyint((*zero_point_input) + (*x_input) * inv_scale);
-      *dx_output = (*dy_input) * (xqi >= quant_min && xqi <= quant_max);
+      int64_t xqi = std::nearbyint(x_input * inv_scale) + static_cast<int64_t>(zero_point_input);
+      dx_output = dy_input * (xqi >= quant_min && xqi <= quant_max);
+      return dx_output;
+    });
+
+  // write scale.grad
+  cpu_kernel(iter_scale,
+    [=] (float x_input, float dy_input, float scale_input, float zero_point_input) -> float {
+      float dscale_output;
+      float inv_scale = 1.0f / scale_input;
+      float dscale_small = quant_min - zero_point_input;
+      float dscale_big = quant_max - zero_point_input;
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint(x_input * inv_scale) + static_cast<int64_t>(zero_point_input);
       // Calculate gradients for scale and zero point.
-      xqi = std::max(std::min(xqi, quant_max), quant_min);
-      float xfqi = static_cast<float>((xqi - (*zero_point_input)) * (*scale_input));
-      if (xqi == quant_min || xqi == quant_max) {
-        *dzero_point_output = (*dy_input) * (-1) * (*scale_input);
-        *dscale_output = (xqi == quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big);
+      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - zero_point_input) * scale_input);
+      if (xqi < quant_min || xqi > quant_max) {
+        dscale_output = ((xqi < quant_min) ? (dy_input * dscale_small) : (dy_input * dscale_big)) * grad_factor;
       } else {
-        *dzero_point_output = 0;
-        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale;
+        dscale_output = dy_input * (xfqi - x_input) * inv_scale * grad_factor;
       }
-    }
-  });
+      return dscale_output;
+    });
+
+  // write zero_point_grad
+  cpu_kernel(iter_zero_point,
+    [=] (float x_input, float dy_input, float scale_input, float zero_point_input) -> float {
+      float dzero_point_output;
+      float inv_scale = 1.0f / scale_input;
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint(x_input * inv_scale) + static_cast<int64_t>(zero_point_input);
+      // Calculate gradients for scale and zero point.
+      if (xqi < quant_min || xqi > quant_max) {
+        dzero_point_output = dy_input * (-1) * scale_input * grad_factor;
+      } else {
+        dzero_point_output = 0;
+      }
+      return dzero_point_output;
+    });
 }
 
 // Assumes X is composed of M groups of N elements. Normalizes each of the
@@ -3048,12 +3059,9 @@ REGISTER_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
                   &dequantize_tensor_per_channel_float_qparams_cpu);
 REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
                   &fake_quantize_learnable_tensor_grad_kernel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_per_channel_stub,
-                  &fake_quant_grad_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_tensor_stub,
-                  &fake_quantize_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
+REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub, &fake_quant_per_channel_cachemask_cpu);
+REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub,
+                  &fake_quantize_tensor_cachemask_kernel);
 REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
                   &qadaptive_avg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,

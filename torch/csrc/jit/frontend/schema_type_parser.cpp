@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -11,6 +12,7 @@
 using c10::AliasInfo;
 using c10::BoolType;
 using c10::CapsuleType;
+using c10::ComplexType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
@@ -24,6 +26,7 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
@@ -41,7 +44,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"Storage", IntType::get()},
+      {"Storage", StorageType::get()},
       {"QScheme", QSchemeType::get()},
       {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
@@ -53,6 +56,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},
+      {"complex", ComplexType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},

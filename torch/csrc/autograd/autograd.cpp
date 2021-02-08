@@ -155,5 +155,18 @@ variable_list grad(
     outputs, gradients, retain_graph.value(), create_graph, inputs, allow_unused, /*accumulate_grad=*/false);
 }
 
+
+namespace forward_ad {
+
+uint64_t enter_dual_level() {
+  return ForwardADLevel::get_next_idx();
+}
+
+void exit_dual_level(uint64_t level) {
+  ForwardADLevel::release_idx(level);
+}
+
+} // namespace forward_ad
+
 } // namespace autograd
 } // namespace torch

@@ -124,7 +124,7 @@ private:
 public:
   // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
   // set. The iterator is only invalidated by the destruction of the underlying
-  // DispatchKeySet as the iterator stores a pointer to the raw represenation of
+  // DispatchKeySet as the iterator stores a pointer to the raw representation of
   // the DispatchKeySet.
   class iterator {
    public:
@@ -190,14 +190,15 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 // NB: keys in this set also get associated with Math
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
-  DispatchKey::AutogradCPU,
-  DispatchKey::AutogradCUDA,
-  DispatchKey::AutogradXLA,
-  DispatchKey::AutogradNestedTensor,
-  DispatchKey::AutogradPrivateUse1,
-  DispatchKey::AutogradPrivateUse2,
-  DispatchKey::AutogradPrivateUse3,
-  DispatchKey::AutogradOther,
+    DispatchKey::AutogradCPU,
+    DispatchKey::AutogradCUDA,
+    DispatchKey::AutogradXLA,
+    DispatchKey::AutogradNestedTensor,
+    DispatchKey::AutogradXPU,
+    DispatchKey::AutogradPrivateUse1,
+    DispatchKey::AutogradPrivateUse2,
+    DispatchKey::AutogradPrivateUse3,
+    DispatchKey::AutogradOther,
 });
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
@@ -235,7 +236,7 @@ C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 
 // This API exists because we have a use case for checking
-// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
+// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
 // in OperatorEntry.cpp but we disallow it in has() API.
 C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 

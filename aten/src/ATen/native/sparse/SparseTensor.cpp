@@ -7,13 +7,13 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/IndexingUtils.h>
 
 #include <TH/THBlasUtils.h>
 
 namespace at { namespace native {
 
 using namespace at::sparse;
-
 
 /******************************************************************************
  * access methods
@@ -75,6 +75,8 @@ SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> l
   DispatchKey dispatch_key;
   if (device_or_default(device).is_cuda()) {
     dispatch_key = DispatchKey::SparseCUDA;
+  } else if (device_or_default(device).type() == DeviceType::XPU) {
+    dispatch_key = DispatchKey::SparseXPU;
   } else {
     dispatch_key = DispatchKey::SparseCPU;
   }
@@ -95,7 +97,7 @@ SparseTensor new_with_dims_and_tensor_sparse(
     int64_t sparse_dim,
     int64_t dense_dim,
     ArrayRef<int64_t> size,
-    const LongTensor& indices,
+    const Tensor& indices,
     const Tensor& values,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -106,7 +108,7 @@ SparseTensor new_with_dims_and_tensor_sparse(
   // NOTE: There is no guarantee that `indices` and `values` don't contain AutogradMeta. However,
   // we want to maintain the invariant that `indices_` and `values_` of a sparse tensor don't
   // contain AutogradMeta, and to achieve that we shallow-copy `indices` and `values` here.
-  auto indices_shallow_copy = LongTensor(indices.unsafeGetTensorImpl()->shallow_copy_and_detach(
+  auto indices_shallow_copy = Tensor(indices.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/indices.unsafeGetTensorImpl()->version_counter(),
     /*allow_tensor_metadata_change=*/true));
   auto values_shallow_copy = Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach(
@@ -163,11 +165,11 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
     // If the indices has elements in it, we infer the minimum sparse dimension sizes
     // as the max value of each dim in indices.
     // NB: It used to keepdim. I think that was wrong.
-    LongTensor min_indices = std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
-    LongTensor computed_indices_sizes = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
+    Tensor min_indices = std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
+    Tensor computed_indices_sizes = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     computed_indices_sizes.add_(1); // len = max_index + 1
-    LongTensor cpu_min_indices = min_indices.to(at::DeviceType::CPU);
-    LongTensor cpu_computed_indices_sizes = computed_indices_sizes.to(at::DeviceType::CPU);
+    Tensor cpu_min_indices = min_indices.to(at::DeviceType::CPU);
+    Tensor cpu_computed_indices_sizes = computed_indices_sizes.to(at::DeviceType::CPU);
     auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
     auto cpu_computed_indices_sizes_accessor = cpu_computed_indices_sizes.accessor<int64_t, 1>();
     for (int64_t d = 0; d < sparse_dim; d++) {
@@ -206,9 +208,9 @@ void _validate_sparse_coo_tensor_args(const Tensor& indices, const Tensor& value
 
   // Check to make sure all indices are within the boundaries of `size`
   if (indices.numel() > 0) {
-    LongTensor min_indices = std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
-    LongTensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
-    LongTensor cpu_min_indices, cpu_max_indices;
+    Tensor min_indices = std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
+    Tensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
+    Tensor cpu_min_indices, cpu_max_indices;
     if (indices.is_cuda()) {
       cpu_min_indices = min_indices.to(at::DeviceType::CPU);
       cpu_max_indices = max_indices.to(at::DeviceType::CPU);
@@ -317,7 +319,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   if (nz.size(1) == 0) {
     return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, optTypeMetaToScalarType(sparse_options.dtype_opt()), sparse_options.layout_opt(), sparse_options.device_opt(), sparse_options.pinned_memory_opt());
   }
-  LongTensor indices;
+  Tensor indices;
   if (sparse_dim == dims) {
     indices = nz.clone();
   } else {
@@ -328,7 +330,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 
   Tensor values;
   if (self.dim() > 0) {
-    std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
+    auto ix = toListOfOptionalTensors(indices.chunk(indices.size(0), 0));
     values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
   } else {
     AT_ASSERT(nz.sizes().equals({0, 1}));
@@ -343,9 +345,10 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 
 // NB: Dropped the resizeNd variants
 
-Tensor sparse_to_dense(const SparseTensor& self) {
+Tensor sparse_to_dense(const SparseTensor& self, c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(!dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
   if(self.scalar_type() == ScalarType::Half && self.options().device().is_cpu()) {
-    AT_ERROR("to_dense() not supported for float16 on CPU");
+    TORCH_CHECK(false, "to_dense() not supported for float16 on CPU");
   }
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
   return dst.add_(self);
@@ -374,23 +377,23 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     return dst;
   }
 
-  LongTensor indices = self._indices();
+  Tensor indices = self._indices();
   Tensor values = self._values().contiguous();
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
   int64_t nnz = self._nnz();
 
-  LongTensor indices_scalar = flatten_indices(indices, self.sizes());
+  Tensor indices_scalar = flatten_indices(indices, self.sizes());
 
   SparseTensor dst = new_sparse(optTypeMetaToScalarType(self.options().dtype_opt()), self.options().layout_opt(), self.options().device_opt(), self.options().pinned_memory_opt());
   get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
   // TODO: is there a more idiomatic way to do this?
-  LongTensor newIndices = at::empty(indices.sizes(), indices.options());
+  Tensor newIndices = at::empty(indices.sizes(), indices.options());
   Tensor newValues = at::empty(values.sizes(), values.options());
   alias_into_sparse(dst, newIndices, newValues);
 
-  LongTensor indicesBuffer;
-  LongTensor indicesPermutation;
+  Tensor indicesBuffer;
+  Tensor indicesPermutation;
   std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
   // NB: The accessor accesses here rely on self._nnz() > 0 (tested earlier in this function)
   auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
@@ -445,7 +448,7 @@ void inline sparse_mask_out_cpu_kernel(
   const Tensor& t,
   const int64_t r_nnz,
   const int64_t sparse_dim,
-  const LongTensor& mask_indices
+  const Tensor& mask_indices
 ) {
   auto r_values_accessor = r_values.accessor<scalar_t, 1>();
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
@@ -475,7 +478,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   }
   int64_t dim = t.dim();
   int64_t sparse_dim = mask.sparse_dim();
-  LongTensor mask_indices = mask._indices();
+  Tensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   alias_into_sparse(r, mask_indices.clone(), r_values);
@@ -491,7 +494,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
 
     // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices ].
     // Keeping this implementation because it is faster than flatten_indices()
-    LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
+    Tensor indices = at::zeros({mask._nnz()}, mask_indices.options());
     for (int64_t d = 0; d < mask.sparse_dim(); d++) {
       indices.mul_(mask.size(d));
       indices.add_(mask_indices.select(0, d));
@@ -523,6 +526,64 @@ SparseTensor sparse_mask_cpu(const Tensor& t, const SparseTensor& mask) {
   SparseTensor r = at::empty({0}, t.options().layout(kSparse));
   sparse_mask_out_cpu(r, t, mask);
   return r;
+}
+
+Tensor sparse_mask_helper_cpu(
+  const SparseTensor& t,
+  const Tensor& mask_indices
+) {
+  /*
+    This is a helper function which filter values from `t._values()` using the `mask_indices`.
+    This CPU implementation uses a simple hash_map to filter values by matching the `mask_indices`
+    with the indices at tensor input `t`.
+
+    Inputs:
+      `t`             - coalesced sparse tensor input
+      `mask_indices`  - mask indices tensor
+
+    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will 
+    works independently if the mask is coalesced or not. 
+  */
+  TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
+  TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
+  TORCH_CHECK(mask_indices.dim() == t._indices().dim(), "mask_indices: operands have incompatible indices dim; self has dim ",
+      t._indices().dim(), " but mask has dim ", mask_indices.dim());
+  TORCH_CHECK(mask_indices.is_contiguous(), "mask_indices: mask is not contiguous");
+
+  int64_t r_nnz = mask_indices.size(1);
+  auto t_v = t._values();
+  auto vsize = t_v.sizes().vec();
+  vsize[0] = r_nnz;
+ 
+  Tensor r_values = at::zeros(vsize, t_v.options());
+  auto t_i = t._indices();
+  auto t_nnz = t._nnz();
+
+  std::unordered_map<int64_t, int64_t> t_flatten_indices = std::unordered_map<int64_t, int64_t>{};
+  auto full_size = t.sizes();
+  auto ti_flattened_indices = at::sparse::flatten_indices(t_i, full_size);
+
+  // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this flatten value `index` to the original position `i`
+  auto t_indices_accessor = t_i.accessor<int64_t, 2>();
+  for(int64_t i = 0; i < t_nnz; i++) {
+    int64_t index = ti_flattened_indices.data_ptr<int64_t>()[i];
+    t_flatten_indices[index] = i;
+  }
+
+  // Step 2: Filter `t._values()` values by matching the flatten `mask_indices` with the flatten `t._indices()` using the
+  // hash_map `t_flatten_indices`
+
+  auto flattened_mask_indices = at::sparse::flatten_indices(mask_indices, full_size);
+  at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      int64_t index = flattened_mask_indices.data_ptr<int64_t>()[i];
+      auto iter = t_flatten_indices.find(index);
+      if (iter != t_flatten_indices.end()) {
+        r_values[i] = t_v[ iter->second ];
+      }
+    }
+  });
+  return r_values; 
 }
 
 }} // namespace at::native

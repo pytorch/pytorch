@@ -65,6 +65,9 @@ class CPPTimer:
 class Timer(object):
     """Helper class for measuring execution time of PyTorch statements.
 
+    For a full tutorial on how to use this class, see:
+    https://pytorch.org/tutorials/recipes/recipes/benchmark.html
+
     The PyTorch Timer is based on `timeit.Timer` (and in fact uses
     `timeit.Timer` internally), but with several key differences:
 
@@ -103,7 +106,7 @@ class Timer(object):
 
         `label`, `sub_label`, `description`, `env`, `num_threads`
 
-    Arguments:
+    Args:
         stmt: Code snippet to be run in a loop and timed.
 
         setup: Optional setup code. Used to define variables used in `stmt`

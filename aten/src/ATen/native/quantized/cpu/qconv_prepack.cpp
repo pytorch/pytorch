@@ -170,6 +170,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   return ret_ptr;
 }
 
+template struct PackedConvWeight<2>;
+template struct PackedConvWeight<3>;
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK

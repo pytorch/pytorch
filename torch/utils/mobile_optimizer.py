@@ -39,13 +39,34 @@ def optimize_for_mobile(
     if preserved_methods is None:
         preserved_methods = []
 
+    # Convert potential byte arrays into strings (if there is any) to pass type checking
+    # Here we use a new name as assigning it back to preserved_methods will invoke
+    # mypy errors (i.e. List[AnyStr] = List[str])
+    preserved_methods_str: List[str] = [str(method) for method in preserved_methods]
+
+    bundled_inputs_attributes = _get_bundled_inputs_preserved_attributes(script_module, preserved_methods_str)
+    if all([hasattr(script_module, method) for method in bundled_inputs_attributes]):
+        preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_attributes))
+
+    non_exist_methods = []
+    for method in preserved_methods_str:
+        if not hasattr(script_module, method):
+            non_exist_methods.append(method)
+    if non_exist_methods:
+        raise AttributeError(
+            'The following methods to preserve do not exist in script_module: {}'
+            .format(', '.join(non_exist_methods)))
+
     backend = backend.lower()
     if backend == 'cpu':
-        optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blocklist, preserved_methods)
+        optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(
+            script_module._c,
+            optimization_blocklist,
+            preserved_methods_str)
     elif backend == 'vulkan':
-        optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c, preserved_methods)
+        optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c, preserved_methods_str)
     elif backend == 'metal':
-        optimized_cpp_module = torch._C._jit_pass_metal_optimize_for_mobile(script_module._c, preserved_methods)
+        optimized_cpp_module = torch._C._jit_pass_metal_optimize_for_mobile(script_module._c, preserved_methods_str)
     else:
         raise TypeError("Unknown backend, must be one of 'CPU', 'Vulkan' or 'Metal'")
 
@@ -66,9 +87,9 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
 
     lint_list = []
 
-    if not hasattr(script_module, "_generate_bundled_inputs"):
-        lint_list.append({"name": LintCode.BUNDLED_INPUT.name, "message": "No bundled input, please add bundled inputs before "
-                          "saving the module using torch.utils.bundled_inputs.augment_model_with_bundled_inputs."})
+    if not hasattr(script_module, "_generate_bundled_inputs_for_forward"):
+        lint_list.append({"name": LintCode.BUNDLED_INPUT.name, "message": "No bundled input for forward, please add bundled inputs "
+                          "before saving the module using torch.utils.bundled_inputs.augment_model_with_bundled_inputs."})
 
     for name, param in script_module.named_parameters():
         if param.requires_grad:
@@ -88,3 +109,23 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
                               "operator.".format(op_name)})
 
     return lint_list
+
+def _get_bundled_inputs_preserved_attributes(script_module: torch.jit.ScriptModule, preserved_methods: List[str]) -> List[str]:
+
+    # Technically it is possible that if a function only bundles inputs for functions besides forward that these wont exist.
+    # Haven't seen a reason for that to be a valid usecase yet so not going to account for it
+    bundled_inputs_attributes = [
+        'get_all_bundled_inputs',
+        'get_num_bundled_inputs',
+        'run_on_bundled_input',
+    ]
+    if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):
+        bundled_inputs_attributes.append('get_bundled_inputs_functions_and_info')
+        all_info = script_module.get_bundled_inputs_functions_and_info()
+        for function_name in all_info:
+            if function_name not in preserved_methods:
+                bundled_inputs_attributes.append(function_name)
+            bundled_inputs_attributes.append("get_all_bundled_inputs_for_" + function_name)
+            bundled_inputs_attributes.append("_bundled_inputs_deflated_" + function_name)
+
+    return bundled_inputs_attributes

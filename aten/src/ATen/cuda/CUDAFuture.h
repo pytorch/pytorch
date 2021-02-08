@@ -21,26 +21,19 @@
 
 namespace at { namespace cuda {
 
-struct TORCH_CUDA_API CUDAFuture final : at::ivalue::Future {
+struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
  public:
-  using at::ivalue::Future::Future;
-
-  void setDataPtrExtractor(DataPtrExtractor dataPtrExtractor) override {
-    std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
-    dataPtrExtractor_ = std::move(dataPtrExtractor);
+  CUDAFuture(at::TypePtr type) : at::ivalue::Future(std::move(type)) {
+    // Use current device to initialize currentDevice_. This is necessary
+    // because postMarkCompletedHook won't be called when the Future contains
+    // an error. Uninitialized currentDevice_ could lead to crash when used
+    // in CUDAGuard.
+    currentDevice_ = c10::cuda::current_device();
   }
 
  protected:
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override {
-    auto fut = c10::make_intrusive<CUDAFuture>(std::move(type));
-    // The new future needs the DataPtr extractor when it gets marked complete
-    // but this might happen immediately inline or in parallel by another
-    // thread. In both these cases this would/might happen before the user has
-    // time to set their own DataPtr extractor, which might lead to failures
-    // if the default extractor can't handle some of the user's types.
-    // Therefore we propagate our extractor.
-    fut->setDataPtrExtractor(dataPtrExtractor_);
-    return fut;
+    return c10::make_intrusive<CUDAFuture>(std::move(type));
   }
 
   void postMarkCompletedHook(const at::IValue& value) override {
@@ -119,6 +112,22 @@ struct TORCH_CUDA_API CUDAFuture final : at::ivalue::Future {
     }
   }
 
+  virtual std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+      const at::IValue& value) {
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+
+    std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
+    }
+    return data_ptrs;
+  }
+
  private:
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks.
@@ -133,25 +142,6 @@ struct TORCH_CUDA_API CUDAFuture final : at::ivalue::Future {
   // A cached version of the data ptrs extracted from the value when the future
   // is first marked completed.
   std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
-
-  DataPtrExtractor dataPtrExtractor_;
-  std::mutex dataPtrExtractorMutex_;
-
-  std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
-      const at::IValue& value) {
-    std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
-    std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
-    if (dataPtrExtractor_ != nullptr) {
-      // If a Python communication hook is used, dataPtrExtractor_ will be
-      // set in torch/csrc/jit/python/pybind_utils.h, which allows Python
-      // dependency to be imported.
-      data_ptrs = dataPtrExtractor_(value);
-    } else {
-      // If a C++ communication hook is used, use the default extractor.
-      data_ptrs = at::ivalue::Future::defaultDataPtrExtractor(value);
-    }
-    return data_ptrs;
-  }
 };
 
 } // namespace cuda

@@ -16,14 +16,15 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
+from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan, container_abcs
 
 from test_torch import AbstractTestCases
 
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
-from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, IS_WINDOWS, \
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -763,12 +764,6 @@ class TestCuda(TestCase):
             self.assertEqual(x.cuda().get_device(), 0)
             torch.cuda.set_device(1)
         self.assertEqual(x.cuda().get_device(), 0)
-
-    def test_is_tensor(self):
-        for t in types:
-            tensor = get_gpu_type(t)()
-            self.assertTrue(torch.is_tensor(tensor))
-        self.assertTrue(torch.is_tensor(torch.cuda.HalfTensor()))
 
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
@@ -1818,7 +1813,7 @@ class TestCuda(TestCase):
                     self.assertEqual(b.grad, grad * a)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(not IS_SANDCASTLE, "Does not work on Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
     def test_cuda_init_race(self):
         # See https://github.com/pytorch/pytorch/issues/16559
         import subprocess
@@ -2421,6 +2416,7 @@ t2.start()
                 self.assertEqual(results[t].sum().item(), size * size)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
@@ -2882,6 +2878,17 @@ t2.start()
                     out = linear(data)
                 self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
 
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8)).cuda()
+        input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
+        with torch.cuda.amp.autocast():
+            output = checkpoint_sequential(model, 2, input)
+        self.assertTrue(output.requires_grad)
+        self.assertTrue(output.dtype is torch.float16)
+        output.sum().backward()
+
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_max_large_axis(self):
@@ -3097,6 +3104,24 @@ t2.start()
         for meth_with_args in tensor_with_args:
             # Adds an empty dict for kwargs, which none of the Tensor methods use
             run("Tensor", *(meth_with_args + ({},)))
+
+    def test_batch_norm_gather_stats(self):
+        input = torch.randn(1, 3, 3, 3, device='cuda')
+        mean, invstd = torch.batch_norm_gather_stats(
+            input, mean=torch.ones(2, 3, device='cuda'), invstd=torch.ones(2, 3, device='cuda'),
+            running_mean=None, running_var=None  , momentum=.1, eps=1e-5, count=2
+        )
+        self.assertEqual(mean, torch.ones(3, device='cuda'))
+        self.assertEqual(invstd, torch.ones(3, device='cuda'))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_cuda_device_memory_allocated(self):
+        from torch.cuda import memory_allocated
+        device_count = torch.cuda.device_count()
+        current_alloc = [memory_allocated(idx) for idx in range(device_count)]
+        x = torch.ones(10, device="cuda:0")
+        self.assertTrue(memory_allocated(0) > current_alloc[0])
+        self.assertTrue(all(memory_allocated(torch.cuda.device(idx)) == current_alloc[idx] for idx in range(1, device_count)))
 
 
 class TestCudaComm(TestCase):

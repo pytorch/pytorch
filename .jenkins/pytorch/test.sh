@@ -11,6 +11,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
+export LANG=C.UTF-8
+
 if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
@@ -18,6 +20,10 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda11.1* ]]; then
+  export BUILD_SPLIT_CUDA=ON
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -240,6 +246,21 @@ test_custom_script_ops() {
   fi
 }
 
+test_jit_hooks() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+    echo "Testing jit hooks in cpp"
+    HOOK_BUILD="$PWD/../jit-hook-build"
+    pushd test/jit_hooks
+    cp -a "$HOOK_BUILD" build
+    # Run tests Python-side and export the script modules with hooks
+    python model.py --export-script-module=model
+    # Run tests C++-side and load the exported script modules
+    build/test_jit_hooks ./model
+    popd
+    assert_git_not_dirty
+  fi
+}
+
 test_torch_function_benchmark() {
   echo "Testing __torch_function__ benchmarks"
   pushd benchmarks/overrides_benchmark
@@ -337,6 +358,11 @@ test_vec256() {
   fi
 }
 
+test_torch_deploy() {
+  SIMPLE_MODEL_PATH=torch/csrc/deploy/example/simple.pt LIBINTERPRETER_PATH=build/lib/libinterpreter.so build/bin/interpreter_test
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -354,6 +380,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
+    test_torch_deploy
+  fi
   install_torchvision
   test_python_shard1
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then

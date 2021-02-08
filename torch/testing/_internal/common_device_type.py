@@ -172,6 +172,8 @@ except ImportError:
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
         test_name += "_" + op.name.replace('.', '_')
+        if op.variant_test_name:
+            test_name += "_" + op.variant_test_name
 
     test_name += "_" + device_type
 
@@ -186,6 +188,9 @@ def _construct_test_name(test_name, op, device_type, dtype):
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = 'generic_device_type'
+
+    # Flag to disable test suite early due to unrecoverable error such as CUDA error.
+    _stop_test_suite = False
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -227,6 +232,9 @@ class DeviceTypeTestBase(TestCase):
             return self.precision
         return test.precision_overrides.get(dtype, self.precision)
 
+    def _should_stop_test_suite(self, rte):
+        return False
+
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
@@ -241,12 +249,25 @@ class DeviceTypeTestBase(TestCase):
             #   op-specific decorators to the original test.
             #   Test-sepcific decorators are applied to the original test,
             #   however.
-            if op is not None and op.decorators is not None:
+            if op is not None:
+                active_decorators = []
+                if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
+                    active_decorators.append(skipIf(True, "Skipped!"))
+
+                if op.decorators is not None:
+                    for decorator in op.decorators:
+                        # Can't use isinstance as it would cause a circular import
+                        if decorator.__class__.__name__ == 'DecorateInfo':
+                            if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
+                                active_decorators += decorator.decorators
+                        else:
+                            active_decorators.append(decorator)
+
                 @wraps(test)
                 def test_wrapper(*args, **kwargs):
                     return test(*args, **kwargs)
 
-                for decorator in op.decorators:
+                for decorator in active_decorators:
                     test_wrapper = decorator(test_wrapper)
 
                 test_fn = test_wrapper
@@ -254,12 +275,8 @@ class DeviceTypeTestBase(TestCase):
                 test_fn = test
 
             # Constructs the test
-            @wraps(test)
+            @wraps(test_fn)
             def instantiated_test(self, name=name, test=test_fn, dtype=dtype, op=op):
-                if op is not None and op.should_skip(generic_cls.__name__, name,
-                                                     self.device_type, dtype):
-                    self.skipTest("Skipped!")
-
                 device_arg: str = cls.get_primary_device()
                 if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
@@ -271,6 +288,11 @@ class DeviceTypeTestBase(TestCase):
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
+                except RuntimeError as rte:
+                    # check if rte should stop entire test suite.
+                    self._stop_test_suite = self._should_stop_test_suite(rte)
+                    # raise the runtime error as is for the test suite to record.
+                    raise rte
                 finally:
                     self.precision = guard_precision
 
@@ -313,6 +335,12 @@ class DeviceTypeTestBase(TestCase):
             for dtype in dtypes:
                 instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
 
+    def run(self, result=None):
+        super().run(result=result)
+        # Early terminate test if _stop_test_suite is set.
+        if self._stop_test_suite:
+            result.stop()
+
 
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
@@ -327,6 +355,14 @@ class CUDATestBase(DeviceTypeTestBase):
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
 
+    def _should_stop_test_suite(self, rte):
+        # CUDA device side error will cause subsequence test cases to fail.
+        # stop entire test suite if catches RuntimeError during torch.cuda.synchronize().
+        try:
+            torch.cuda.synchronize()
+        except RuntimeError as rte:
+            return True
+        return False
 
     def has_cudnn(self):
         return not self.no_cudnn

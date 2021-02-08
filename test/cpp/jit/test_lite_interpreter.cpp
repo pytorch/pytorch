@@ -3,8 +3,10 @@
 #include <c10/core/TensorOptions.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
@@ -65,38 +67,49 @@ TEST(LiteInterpreterTest, CheckAttrAccess) {
   AT_ASSERT(!mobile_optimized);
 }
 
-TEST(LiteInterpreterTest, Add) {
-  Module m("m");
-  m.register_parameter("foo", torch::ones({}), false);
-  // TODO: support default param val, which was pushed in
-  // function schema's checkAndNormalizeInputs()
-  //  m.define(R"(
-  //    def add_it(self, x, b : int = 4):
-  //      return self.foo + x + b
-  //  )");
-  m.define(R"(
-    def add_it(self, x):
-      b = 4
-      return self.foo + x + b
-  )");
+TEST(LiteInterpreterTest, MethodInvocation) { // NOLINT (use =delete in gtest)
+  const std::vector<std::string> test_programs{
+      // test invoking a method with default parameter
+      R"(
+      def test_func(self, x, b : int = 4):
+        return self.foo + x + b
+      )",
+      // inner method call with default parameter (gets inlined)
+      R"(
+      def add_with_default_arg(self, x, b : int = 4):
+        return self.foo + x + b
+      def test_func(self, x):
+        return self.add_with_default_arg(x)  # invoke method w/ default arg
+      )",
+      // simple method call
+      R"(
+      def test_func(self, x):
+        b = 4
+        return self.foo + x + b
+      )",
+  };
+  for (const auto& test_program : test_programs) {
+    Module m("m");
+    m.register_parameter("foo", torch::ones({}), false);
+    m.define(test_program);
 
-  std::vector<IValue> inputs;
-  auto minput = 5 * torch::ones({});
-  inputs.emplace_back(minput);
-  auto ref = m.run_method("add_it", minput);
+    const int fortyTwo = 42; // (keep linter happy)
+    auto minput = fortyTwo * torch::ones({});
+    auto ref = m.run_method("test_func", minput);
 
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-  IValue res;
-  for (int i = 0; i < 3; ++i) {
-    auto bcinputs = inputs;
-    res = bc.get_method("add_it")(bcinputs);
+    std::stringstream ss;
+    m._save_for_mobile(ss);
+    mobile::Module bc = _load_for_mobile(ss);
+    const auto& test_func = bc.get_method("test_func");
+    IValue res;
+    for (int i = 0; i < 3; ++i) {
+      res = test_func({minput});
+    }
+
+    auto resd = res.toTensor().item<float>();
+    auto refd = ref.toTensor().item<float>();
+    AT_ASSERT(resd == refd);
   }
-
-  auto resd = res.toTensor().item<float>();
-  auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
 }
 
 TEST(LiteInterpreterTest, Conv) {
@@ -335,6 +348,87 @@ class TorchBindLiteInterpreterTestStruct
     return ss.str();
   }
 };
+
+namespace {
+struct ClassNamespaceValue : public SugaredValue {
+  explicit ClassNamespaceValue(c10::QualifiedName name)
+      : basename_(std::move(name)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& name) override {
+    const auto fullName = c10::QualifiedName(basename_, name);
+
+    // Check to see if it is a custom class.
+    if (auto custom_class = getCustomClass(fullName.qualifiedName())) {
+      return std::make_shared<ClassValue>(custom_class);
+    }
+
+    // If it's not a custom class, assume it's another namespace
+    return std::make_shared<ClassNamespaceValue>(std::move(fullName));
+  }
+
+  std::string kind() const override {
+    return "Class Namespace";
+  }
+
+ private:
+  c10::QualifiedName basename_;
+};
+
+struct TestModuleResolver : public Resolver {
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) override {
+    if (name == "torch") {
+      return std::make_shared<BuiltinModule>("aten");
+    } else if (name == "__torch__") {
+      return std::make_shared<ClassNamespaceValue>(c10::QualifiedName(name));
+    }
+
+    return nullptr;
+  }
+
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      override {
+    return nullptr;
+  }
+};
+} // namespace
+
+TEST(LiteInterpreterTest, BuiltinClass) {
+  script::Module m("m");
+
+  auto cls = getCustomClass(
+      "__torch__.torch.classes._TorchScriptTesting._LiteInterpreterTest");
+  TORCH_INTERNAL_ASSERT(cls);
+  c10::intrusive_ptr<torch::CustomClassHolder> obj_holder;
+  m.register_attribute("my_obj", cls, IValue::make_capsule(obj_holder));
+
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(
+      R"(
+    def __getstate__(self):
+      return 1
+    def __setstate__(self, a):
+      self.my_obj = __torch__.torch.classes._TorchScriptTesting._LiteInterpreterTest()
+
+    def forward(self, x) -> str:
+      return self.my_obj.get(x)
+  )",
+      std::make_shared<TestModuleResolver>());
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  auto res =
+      bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
+  const auto& str = res.toStringRef();
+  std::string expected = "Hello! Your tensor has 12 elements!";
+  AT_ASSERT(str == expected);
+}
 
 TEST(LiteInterpreterTest, BuiltinFunction) {
   script::Module m("m");
@@ -782,11 +876,41 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
 }
 
+TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
+  torch::jit::Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      x1 = torch.zeros(2, 2)
+      x2 = torch.empty_like(torch.empty(2, 2))
+      x3 = torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
+      return (x1, x2, x3)
+  )");
+  m.eval();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+
+  torch::jit::mobile::Module ptl_model = torch::jit::_load_for_mobile(ss);
+  std::set<std::string> operator_names =
+      torch::jit::mobile::_export_operator_list(ptl_model);
+  std::set<std::string> expected_operator_names = {
+      "aten::_convolution",
+      "aten::empty.memory_format",
+      "aten::empty_like",
+      "aten::zeros",
+  };
+  EXPECT_EQ(operator_names, expected_operator_names)
+      << "Expected the root operator lists to be the same";
+}
+
 namespace {
 static auto reg =
     torch::class_<TorchBindLiteInterpreterTestStruct>(
         "_TorchScriptTesting",
         "_LiteInterpreterTest")
+        .def(torch::init<>())
         .def("get", &TorchBindLiteInterpreterTestStruct::get)
         .def_pickle(
             // __getattr__

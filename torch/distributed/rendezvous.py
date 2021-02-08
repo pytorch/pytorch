@@ -31,7 +31,7 @@ def register_rendezvous_handler(scheme, handler):
     Pick a unique name and use the URL scheme to identify it when
     calling the `rendezvous()` function.
 
-    Arguments:
+    Args:
         scheme (str): URL scheme to identify your rendezvous handler.
         handler (function): Handler that is invoked when the
             `rendezvous()` function is called with a URL that uses

@@ -1,24 +1,23 @@
 #ifdef TORCH_ENABLE_LLVM
 #include <gtest/gtest.h>
 
-#include "test/cpp/tensorexpr/test_base.h"
+#include <test/cpp/tensorexpr/test_base.h>
 
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <test/cpp/tensorexpr/padded_buffer.h>
+#include <test/cpp/tensorexpr/test_utils.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <cmath>
 #include <numeric>
 
 namespace torch {
 namespace jit {
-using namespace torch::jit::tensorexpr;
 using namespace torch::jit::tensorexpr;
 
 using LLVMExprEval = ExprEval<LLVMCodeGen>;
@@ -217,6 +216,38 @@ TEST(LLVM, BitCast) {
   }
 }
 
+TEST(LLVM, fastLogFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128 * 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_log(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  LLVMCodeGen ir_eval(stmt, {a_buf, b_buf});
+  ir_eval.call({a_v, b_v});
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    auto ref = std::log(a_v(i));
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_FLOAT_EQ(test, ref);
+    }
+  }
+}
+
 TEST(LLVM, LetTest01) {
   KernelScope kernel_scope;
 
@@ -262,15 +293,15 @@ TEST(LLVM, LetTestMultitype) {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
   VarHandle y("y", kHalf);
-  auto block =
-      Block::make({Let::make(x, 3),
-                   Let::make(y, 6.f),
-                   a.store(
-                       {0},
-                       Cast::make(
-                           kDouble,
-                           ExprHandle(2.f) +
-                               (x * ExprHandle(3.f) + y * ExprHandle(4.f))))});
+  auto block = Block::make(
+      {Let::make(x, 3),
+       Let::make(y, 6.f),
+       a.store(
+           {0},
+           Cast::make(
+               kDouble,
+               ExprHandle(2.f) +
+                   (x * ExprHandle(3.f) + y * ExprHandle(4.f))))});
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -558,7 +589,7 @@ TEST(LLVM, VectorizerLoadStoreTest) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<Block*>(s)->front());
+  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
 
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
@@ -582,7 +613,7 @@ TEST(LLVM, VectorizeBitCast) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<Block*>(s)->front());
+  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
@@ -1449,7 +1480,8 @@ TEST(LLVM, RFactorReduction) {
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
   loop_n = loops.at(1);
-  loop.rfactor(b->body(), loop_n->var(), loop_n->body());
+  auto b_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(b_body, loop_n->var(), loop_n->body());
 
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
@@ -1490,7 +1522,8 @@ TEST(LLVM, RFactorVectorizedReduction) {
   For* loop_k = loops.at(0);
   For* loop_m = loops.at(1);
   For* loop_n = loops.at(2);
-  loopnest.rfactor(b->body(), loop_n->var());
+  auto b_body = NodeFinder<ReduceOp>::find(loopnest.root_stmt())[0];
+  loopnest.rfactor(b_body, loop_n->var());
 
   loops = NodeFinder<For>::find(loopnest.root_stmt());
   loop_k = loops.at(0);

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/builtin_functions.h>
+
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
@@ -72,6 +73,8 @@ const auto aten_ops_additional =
     R"SCRIPT(
 def _assert(condition : Tensor, message : str):
   assert bool(condition), message
+def __contains__(self: str, key: str):
+    return self.find(key, 0, len(self)) != -1
 )SCRIPT";
 
 // Implementations of historic symbol behaviors are defined here

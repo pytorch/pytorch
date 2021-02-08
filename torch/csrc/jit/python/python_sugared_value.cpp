@@ -217,6 +217,33 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
+#ifndef __HIP_PLATFORM_HCC__
+std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  // List of all the cuda operators which are supported in JIT
+  const std::unordered_set<std::string> cuda_ops = {
+      "current_stream",
+      "default_stream",
+      "_current_device",
+      "_set_device",
+      "device_index",
+      "device_count",
+      "set_stream"};
+
+  if (cuda_ops.find(field) != cuda_ops.end()) {
+    return std::make_shared<BuiltinFunction>(Symbol::cuda(field), c10::nullopt);
+  }
+
+  py::object member = getattr(loc, field);
+  // note: is_constant = true because we consider that global properties
+  // on modules like math.pi or torch.float to be constants
+  // even though it is possible, though rare, for someone to mutate them
+  return toSugaredValue(member, m, loc, /*is_constant=*/true);
+}
+#endif
+
 Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
@@ -332,7 +359,7 @@ void recurseThroughNestedModules(
     if (prefix != "") {
       submodule_prefix = prefix + ".";
     }
-    submodule_prefix = submodule_prefix + key_string;
+    submodule_prefix += key_string;
     recurseThroughNestedModules(
         loc, m, keys, values, module_value, submodule_prefix, field);
   };
@@ -355,7 +382,7 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
   for (const auto& name : paramNames) {
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
-    Value* tensor_v = m.graph()->insertGetAttr(self_, name);
+    m.graph()->insertGetAttr(self_, name);
     values.push_back(tryGetAttr(loc, m, name));
     keys.push_back(name_v);
   }
@@ -593,6 +620,96 @@ bool ModuleValue::hasAttr(
   return tryGetAttr(loc, m, field) != nullptr;
 }
 
+std::shared_ptr<SugaredValue> ModuleValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
+  bool have_pre_hooks =
+      class_type && class_type->getForwardPreHooks().size() != 0;
+  bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
+
+  std::vector<Value*> arg_values;
+  std::vector<NamedValue> pre_hook_result;
+  Value* forward_input = nullptr;
+  std::shared_ptr<Graph> calling_graph = caller.graph();
+
+  if (have_pre_hooks || have_hooks) {
+    // convert forward args into tuple for forward hooks
+    // (the input of eager hooks are always tuples)
+    for (const auto& sv : args) {
+      arg_values.push_back(sv.value(*calling_graph));
+    }
+    forward_input =
+        calling_graph->insertNode(calling_graph->createTuple(arg_values))
+            ->output();
+  }
+
+  // call pre_hooks
+  if (have_pre_hooks) {
+    for (const auto& hook : class_type->getForwardPreHooks()) {
+      TORCH_INTERNAL_ASSERT(forward_input != nullptr);
+      Value* pre_hook_output =
+          FunctionValue(hook)
+              .call(
+                  loc,
+                  caller,
+                  {NamedValue(self_), NamedValue(forward_input)},
+                  kwargs,
+                  n_binders)
+              ->asValue(loc, caller);
+      if (pre_hook_output->type() != NoneType::get()) {
+        if (pre_hook_output->type()->kind() != TypeKind::TupleType) {
+          pre_hook_output =
+              calling_graph
+                  ->insertNode(calling_graph->createTuple({pre_hook_output}))
+                  ->output();
+        }
+        forward_input = pre_hook_output;
+      }
+    }
+    // de-tuple pre_hook output for forward
+    at::ArrayRef<Value*> output_nodes =
+        calling_graph
+            ->insertNode(calling_graph->createTupleUnpack(forward_input))
+            ->outputs();
+    for (auto& output_node : output_nodes) {
+      pre_hook_result.emplace_back(NamedValue(output_node));
+    }
+    if (args.size() != 0) { // only replace input if it existed
+      args = pre_hook_result;
+    }
+  }
+
+  // call forward
+  std::shared_ptr<SugaredValue> forwardSV =
+      attr(loc, caller, "forward")->call(loc, caller, args, kwargs, n_binders);
+  Value* forward_output = forwardSV->asValue(loc, caller);
+
+  // call hooks
+  if (have_hooks) {
+    for (const auto& hook : class_type->getForwardHooks()) {
+      Value* forward_hook_output = FunctionValue(hook)
+                                       .call(
+                                           loc,
+                                           caller,
+                                           {NamedValue(self_),
+                                            NamedValue(forward_input),
+                                            NamedValue(forward_output)},
+                                           kwargs,
+                                           n_binders)
+                                       ->asValue(loc, caller);
+      if (forward_hook_output->type() != NoneType::get()) {
+        forward_output = forward_hook_output;
+      }
+    }
+  }
+
+  return std::make_shared<SimpleValue>(forward_output);
+}
+
 // This method controls how we desugar attribute lookups on ScriptModules.
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
@@ -604,7 +721,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // Check if it's a property.
   auto prop =
-      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+      concreteType_->getJitType()->expectRef<ClassType>().getProperty(field);
   if (prop) {
     return MethodValue(self_, prop->getter->name())
         .call(loc, m, {}, {}, /*n_binders=*/1);
@@ -620,7 +737,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   throw ErrorReport(loc)
       << "Module '"
-      << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
+      << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
+      << "'"
       << " has no attribute '" << field << "' " << hint;
 }
 
@@ -849,9 +967,9 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
     return given;
   };
 
-  Value* start;
-  Value* stop;
-  Value* step;
+  Value* start = nullptr;
+  Value* stop = nullptr;
+  Value* step = nullptr;
   size_t n = args.size();
   // Slice's constructor signature is Slice(start=None, stop, step=None)
   if (n == 1) {
@@ -880,7 +998,7 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
-    SourceRange loc,
+    const SourceRange& loc,
     bool is_constant) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
@@ -918,10 +1036,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
       const auto v = static_cast<uint8_t>(qscheme->qscheme);
       return toSimple(g.insertConstant(v, loc));
-    } else if (THPLayout_Check(obj.ptr())) {
-      auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
-      const auto l = static_cast<int8_t>(layout->layout);
-      return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       py::tuple tup = obj;
       std::vector<Value*> values;
@@ -938,6 +1052,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
+#ifndef USE_ROCM
+    std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
+    if (obj_name.compare("torch.cuda") == 0) {
+      return std::make_shared<CUDAPythonModuleValue>(obj);
+    }
+#endif
     return std::make_shared<PythonModuleValue>(obj);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||

@@ -613,4 +613,23 @@ void foreach_tensor_trunc_cuda_(TensorList tensors) {
     });
 }
 
+void foreach_tensor_zero_cuda_(TensorList tensors) {
+    check_foreach_api_restrictions(tensors);
+
+    if (!can_use_fast_route(tensors)) {
+        return at::native::foreach_tensor_zero_slow_(tensors);
+    }
+
+    std::vector<std::vector<at::Tensor>> tensor_lists;
+    tensor_lists.emplace_back(tensors.vec());
+
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, tensors[0].scalar_type(), "foreach_zero_cuda_", [&]() {
+        multi_tensor_apply<1>(tensor_lists,
+                              ZeroFunctor<scalar_t,
+                                          /* depth */ 1,
+                                          /* r_args_depth */ 1, 
+                                          /* res_arg_index */ 0>());
+    });
+}
+
 }} // namespace at::native

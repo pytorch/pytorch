@@ -55,7 +55,7 @@ class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
     """
 
@@ -78,7 +78,7 @@ class DataLoader(Generic[T_co]):
 
     See :py:mod:`torch.utils.data` documentation page for more details.
 
-    Arguments:
+    Args:
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
             (default: ``1``).
@@ -110,7 +110,7 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
-        prefetch_factor (int, optional, keyword-only arg): Number of sample loaded
+        prefetch_factor (int, optional, keyword-only arg): Number of samples loaded
             in advance by each worker. ``2`` means there will be a total of
             2 * num_workers samples prefetched across all workers. (default: ``2``)
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
@@ -308,10 +308,6 @@ class DataLoader(Generic[T_co]):
     def multiprocessing_context(self, multiprocessing_context):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
-                if not multiprocessing._supports_context:
-                    raise ValueError('multiprocessing_context relies on Python >= 3.4, with '
-                                     'support for different start methods')
-
                 if isinstance(multiprocessing_context, string_classes):
                     valid_start_methods = multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
@@ -966,8 +962,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self._index_queues[idx].put(_utils.worker._ResumeIteration())
             resume_iteration_cnt = self._num_workers
             while resume_iteration_cnt > 0:
-                data = self._get_data()
-                if isinstance(data, _utils.worker._ResumeIteration):
+                return_idx, return_data = self._get_data()
+                if isinstance(return_idx, _utils.worker._ResumeIteration):
+                    assert return_data is None
                     resume_iteration_cnt -= 1
         # prime the prefetch loop
         for _ in range(self._prefetch_factor * self._num_workers):

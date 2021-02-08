@@ -15,16 +15,19 @@ import math
 from functools import partial
 import inspect
 import io
+import copy
 import operator
 import argparse
 import unittest
 import warnings
 import random
 import contextlib
+import shutil
 import socket
 import subprocess
 import time
 from collections import OrderedDict
+from collections.abc import Sequence
 from contextlib import contextmanager
 from functools import wraps
 from itertools import product
@@ -35,7 +38,7 @@ import json
 from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Optional
+from typing import cast, Any, Dict, Iterable, Iterator, Optional
 
 from torch.testing._internal import expecttest
 from torch.testing import \
@@ -49,8 +52,6 @@ from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
-from torch.autograd import gradcheck
-from torch.autograd.gradcheck import gradgradcheck
 
 torch.backends.disable_global_flags()
 
@@ -300,11 +301,16 @@ IS_PPC = platform.machine() == "ppc64le"
 
 if IS_WINDOWS:
     @contextmanager
-    def TemporaryFileName():
+    def TemporaryFileName(*args, **kwargs):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
+        if 'delete' in kwargs:
+            if kwargs['delete'] is not False:
+                raise UserWarning("only TemporaryFileName with delete=False is supported on Windows.")
+        else:
+            kwargs['delete'] = False
+        f = tempfile.NamedTemporaryFile(*args, **kwargs)
         try:
             f.close()
             yield f.name
@@ -312,10 +318,27 @@ if IS_WINDOWS:
             os.unlink(f.name)
 else:
     @contextmanager  # noqa: T484
-    def TemporaryFileName():
-        with tempfile.NamedTemporaryFile() as f:
+    def TemporaryFileName(*args, **kwargs):
+        with tempfile.NamedTemporaryFile(*args, **kwargs) as f:
             yield f.name
 
+if IS_WINDOWS:
+    @contextmanager
+    def TemporaryDirectoryName(suffix=None):
+        # On Windows the directory created by TemporaryDirectory is likely to be removed prematurely,
+        # so we first create the directory using mkdtemp and then remove it manually
+        try:
+            dir_name = tempfile.mkdtemp(suffix=suffix)
+            yield dir_name
+        finally:
+            shutil.rmtree(dir_name)
+else:
+    @contextmanager  # noqa: T484
+    def TemporaryDirectoryName(suffix=None):
+        with tempfile.TemporaryDirectory(suffix=suffix) as d:
+            yield d
+
+IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
@@ -324,7 +347,6 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    import importlib
     import importlib.util
     spec = importlib.util.find_spec(name)
     return spec is not None
@@ -358,7 +380,7 @@ if TEST_NUMPY:
 
     # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
     numpy_to_torch_dtype_dict = {
-        np.bool       : torch.bool,
+        np.bool_      : torch.bool,
         np.uint8      : torch.uint8,
         np.int8       : torch.int8,
         np.int16      : torch.int16,
@@ -405,15 +427,15 @@ class DeterministicGuard:
         self.deterministic = deterministic
 
     def __enter__(self):
-        self.deterministic_restore = torch.is_deterministic()
-        torch.set_deterministic(self.deterministic)
+        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
+        torch.use_deterministic_algorithms(self.deterministic)
 
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.set_deterministic(self.deterministic_restore)
+        torch.use_deterministic_algorithms(self.deterministic_restore)
 
-# This decorator can be used for API tests that call torch.set_deterministic().
-# When the test is finished, it will restore the previous deterministic flag
-# setting.
+# This decorator can be used for API tests that call
+# torch.use_deterministic_algorithms().  When the test is finished, it will
+# restore the previous deterministic flag setting.
 #
 # If CUDA >= 10.2, this will set the environment variable
 # CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that
@@ -443,7 +465,7 @@ class DeterministicGuard:
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        with DeterministicGuard(torch.is_deterministic()):
+        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             class CuBLASConfigGuard:
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
@@ -572,28 +594,14 @@ def suppress_warnings(fn):
     return wrapper
 
 
-def get_cpu_type(type_name):
-    module, name = type_name.rsplit('.', 1)
-    assert module == 'torch.cuda'
-    return getattr(torch, name)
-
-
-def get_gpu_type(type_name):
-    if isinstance(type_name, type):
-        type_name = '{}.{}'.format(type_name.__module__, type_name.__name__)
-    module, name = type_name.rsplit('.', 1)
-    assert module == 'torch'
-    return getattr(torch.cuda, name)
-
-
 def to_gpu(obj, type_map=None):
     if type_map is None:
         type_map = {}
     if isinstance(obj, torch.Tensor):
         assert obj.is_leaf
-        t = type_map.get(obj.type(), get_gpu_type(obj.type()))
+        t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.clone().type(t)
+            res = obj.clone().to(dtype=t, device="cuda")
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -631,8 +639,10 @@ def freeze_rng_state():
 def set_default_dtype(dtype):
     saved_dtype = torch.get_default_dtype()
     torch.set_default_dtype(dtype)
-    yield
-    torch.set_default_dtype(saved_dtype)
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
@@ -912,12 +922,10 @@ class TestCase(expecttest.TestCase):
     # NOTE: both torch_fn and np_fn should be functions that take a single
     #   tensor (array). If the torch and/or NumPy function require additional
     #   arguments then wrap the function in a lambda or pass a partial function.
-    # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
     def compare_with_numpy(self, torch_fn, np_fn, tensor_like,
                            device=None, dtype=None, **kwargs):
         assert TEST_NUMPY
-        assert dtype is not torch.bfloat16
 
         if isinstance(tensor_like, torch.Tensor):
             assert device is None
@@ -925,7 +933,9 @@ class TestCase(expecttest.TestCase):
             a = tensor_like.detach().cpu().numpy()
             t = tensor_like
         else:
-            a = np.array(tensor_like, dtype=torch_to_numpy_dtype_dict[dtype])
+            d = copy.copy(torch_to_numpy_dtype_dict)
+            d[torch.bfloat16] = np.float32
+            a = np.array(tensor_like, dtype=d[dtype])
             t = torch.tensor(tensor_like, device=device, dtype=dtype)
 
         np_result = np_fn(a)
@@ -939,6 +949,8 @@ class TestCase(expecttest.TestCase):
                 # NOTE: copying an array before conversion is necessary when,
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
+            if dtype is torch.bfloat16 and torch_result.dtype is torch.bfloat16 and np_result.dtype is torch.float:
+                torch_result = torch_result.to(torch.float)
 
         self.assertEqual(np_result, torch_result, **kwargs)
 
@@ -1275,6 +1287,31 @@ class TestCase(expecttest.TestCase):
                         msg += '\n'
                     self.fail(msg)
 
+    @contextmanager
+    def assertWarnsOnceRegex(self, category, regex=''):
+        """Context manager for code that *must always* warn
+
+        This filters expected warnings from the test and fails if
+        the expected warning is not caught. It uses set_warn_always() to force
+        TORCH_WARN_ONCE to behave like TORCH_WARN
+        """
+        pattern = re.compile(regex)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            prev = torch.is_warn_always_enabled()
+            torch.set_warn_always(True)
+            try:
+                yield
+            finally:
+                torch.set_warn_always(prev)
+                if len(ws) == 0:
+                    self.fail('no warning caught')
+                if len(ws) > 1:
+                    self.fail('too many warnings caught: %s' % '\n    '.join([str(w) for w in ws]))
+                self.assertTrue(type(ws[0].message) is category)
+                self.assertTrue(re.match(pattern, str(ws[0].message)),
+                                f'{pattern}, {ws[0].message}')
+
     def assertExpected(self, s, subname=None):
         r"""
         Test that a string matches the recorded contents of a file
@@ -1359,19 +1396,30 @@ class TestCase(expecttest.TestCase):
         s = re.sub(r'__torch__[^ ]+', '', s)
         self.assertExpected(s, subname)
 
-    # returns captured stderr
+    # run code in subprocess and capture exceptions.
     @staticmethod
-    def runWithPytorchAPIUsageStderr(code):
+    def run_process_no_exception(code, env=None):
         import subprocess
 
-        env = os.environ.copy()
-        env["PYTORCH_API_USAGE_STDERR"] = "1"
-        pipes = subprocess.Popen(
+        popen = subprocess.Popen(
             [sys.executable, '-c', code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env)
-        return pipes.communicate()[1].decode('ascii')
+        (stdout, stderr) = popen.communicate()
+        return (stdout, stderr)
+
+    # returns captured stderr
+    @staticmethod
+    def runWithPytorchAPIUsageStderr(code):
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        # remove IN_CI flag since this is a wrapped test process.
+        # IN_CI flag should be set in the parent process only.
+        if "IN_CI" in env.keys():
+            del env["IN_CI"]
+        (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
+        return stderr.decode('ascii')
 
 
 def download_file(url, binary=True):
@@ -1519,7 +1567,7 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
             s[i] = 0
         elif s[i] == 0:
             s[i] = 1
-    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+    return u.mm(torch.diag(s).to(dtype)).mm(v.transpose(0, 1))
 
 
 def random_symmetric_matrix(l, *batches, **kwargs):
@@ -1543,6 +1591,17 @@ def random_symmetric_psd_matrix(l, *batches, **kwargs):
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1))
+
+
+def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, device='cpu'):
+    """
+    Returns a batch of random Hermitian semi-positive-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_hermitian_psd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device)
+    return torch.matmul(A, A.conj().transpose(-2, -1))
 
 
 def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
@@ -1786,8 +1845,16 @@ def do_test_empty_full(self, dtypes, layout, device):
                                             dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                             int64_dtype, layout, device, fv + 5, False)
 
+# this helper method is to recursively
+# clone the tensor-type input of operators tested by OpInfo
+def clone_input_helper(input):
+    if isinstance(input, torch.Tensor):
+        return torch.clone(input)
 
+    if isinstance(input, Sequence):
+        return tuple(map(clone_input_helper, input))
 
+    return input
 
 THESE_TAKE_WAY_TOO_LONG = {
     'test_Conv3d_groups',
@@ -1852,11 +1919,52 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
-def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
+
+def gradcheck(fn, inputs, **kwargs):
+    # Wrapper around gradcheck that enables certain keys by default.
+    # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
+    # forward-mode AD are tested by default. We create this wrapper because we'd like to keep new checks
+    # to be disabled to default for the public-facing api to avoid breaking user code.
+    #
+    # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
+    keys_enabled_by_default = (
+        "check_batched_grad",)
+
+    for key in keys_enabled_by_default:
+        kwargs[key] = kwargs.get(key, True)
+
+    return torch.autograd.gradcheck(fn, inputs, **kwargs)
+
+
+def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
+    # Wrapper around gradgradcheck that enables certain keys by default
+    # See gradcheck above for an explanation of why we need something like this.
+    #
+    # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
+    keys_enabled_by_default = (
+        "check_batched_grad",)
+
+    for key in keys_enabled_by_default:
+        kwargs[key] = kwargs.get(key, True)
+
+    return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
+
+
+def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, **kwargs):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
-    test_case.assertTrue(gradcheck(apply_fn, inputs))
-    test_case.assertTrue(gradgradcheck(apply_fn, inputs))
+    test_case.assertTrue(gradcheck(apply_fn, inputs, **kwargs))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs, **kwargs))
+
+
+@contextmanager
+def set_cwd(path: str) -> Iterator[None]:
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(path)
+        yield
+    finally:
+        os.chdir(old_cwd)
 
 
 # Using @precisionOverride specific to your test is the recommended way
