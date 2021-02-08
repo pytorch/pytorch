@@ -403,6 +403,10 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.checkGraphModuleNodes(
             mq_ns, expected_node_occurrence=expected_occurrence)
 
+        # TODO(before land): test both scripted and non-scripted
+        mp_ns = torch.jit.script(mp_ns)
+        mq_ns = torch.jit.script(mq_ns)
+
         # calibrate
         input_fp32 = torch.randn(2, 1, 2, 2)
         mp_ns(input_fp32)
@@ -446,6 +450,10 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.checkGraphModuleNodes(
             mq_ns, expected_node_occurrence=expected_occurrence)
 
+        # TODO(before land): test both scripted and non-scripted
+        mp_ns = torch.jit.script(mp_ns)
+        mq_ns = torch.jit.script(mq_ns)
+
         # calibrate
         input_fp32 = torch.randn(2, 1)
         mp_ns(input_fp32)
@@ -469,6 +477,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq = convert_fx(mp_copy)
 
         mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        # TODO(before land): test both scripted and non-scripted
+        mp_shadows_mq = torch.jit.script(mp_shadows_mq)
 
         # calibrate
         input_fp32 = torch.randn(1, 1, 4, 4)
@@ -503,6 +514,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq = convert_fx(mp_copy)
 
         mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        # TODO(before land): test both scripted and non-scripted
+        mp_shadows_mq = torch.jit.script(mp_shadows_mq)
 
         # calibrate
         input_fp32 = torch.randn(2, 1)

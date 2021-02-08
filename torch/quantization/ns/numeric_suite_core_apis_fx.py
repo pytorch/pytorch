@@ -509,6 +509,8 @@ def _create_a_shadows_b(
     return gm_c
 
 class OutputLogger(nn.Module):
+    stats: List[torch.Tensor]
+
     def __init__(
         self,
         node_name: str,
@@ -516,7 +518,7 @@ class OutputLogger(nn.Module):
         other_node_name: Optional[str] = None,
     ):
         super().__init__()
-        self.stats = []
+        self.stats: List[torch.Tensor] = []
         # name of the node whose output this Logger is capturing
         self.node_name = node_name
         # name of the model from which the node originated from
@@ -526,7 +528,7 @@ class OutputLogger(nn.Module):
         # in a_shadows_b
         self.other_node_name = other_node_name
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         self.stats.append(x.detach())
         return x
 
@@ -588,7 +590,15 @@ def get_matching_activations(
     results = collections.defaultdict(dict)
     for gm in (gm_a, gm_b):
         for gm_name, mod in gm.named_modules():
-            if isinstance(mod, logger_cls):
+            # TODO(before land): better check when scripted
+            is_logger = (
+                isinstance(mod, logger_cls)
+                or (
+                    isinstance(mod, torch.jit.RecursiveScriptModule)
+                    and mod.original_name == 'OutputLogger'
+                )
+            )
+            if is_logger:
                 results[mod.node_name + '.stats'][mod.model_name] = mod.stats
     return dict(results)
 
@@ -603,7 +613,15 @@ def get_matching_activations_a_shadows_b(
     """
     results = collections.defaultdict(dict)
     for name, mod in gm_a_shadows_b.named_modules():
-        if isinstance(mod, logger_cls):
+        # TODO(before land): better check when scripted
+        is_logger = (
+            isinstance(mod, logger_cls)
+            or (
+                isinstance(mod, torch.jit.RecursiveScriptModule)
+                and mod.original_name == 'OutputLogger'
+            )
+        )
+        if is_logger:
             # If logger_obj.other_node_name is populated, then this logger
             # is from model A, and other_node_name is the name from model B.
             if mod.other_node_name is None:
