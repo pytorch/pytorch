@@ -578,6 +578,26 @@ class TestMkldnn(TestCase):
                     x.to_mkldnn().transpose(dim1, dim2).to_dense(),
                 )
 
+    def test_linear_non_contiguous_weight(self):
+        in_features = torch.randint(3, 10, (1,)).item()
+        out_features = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(3, in_features, dtype=torch.float32) * 10
+        w = torch.randn(in_features, out_features, dtype=torch.float32)
+        for bias in [True, False]:
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            linear = torch.nn.Linear(in_features, out_features).float()
+            linear.weight = torch.nn.Parameter(w.t())
+            mkldnn_linear = copy.deepcopy(linear)
+            y1 = linear(x1).sum()
+            y2 = mkldnn_linear(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+            self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad)
+            if bias:
+                self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
+
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
@@ -597,8 +617,7 @@ class TestMkldnn(TestCase):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
         x = torch.randn(3, in_features, dtype=torch.float32) * 10
-        # Only works for bias case by dispatch onednn linear to addmm.
-        for bias in [True]:
+        for bias in [True, False]:
             x1 = x.clone().requires_grad_()
             x2 = x.clone().to_mkldnn().requires_grad_()
             linear = torch.nn.Linear(in_features, out_features).float()
