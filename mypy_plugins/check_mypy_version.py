@@ -29,6 +29,5 @@ For example, if you installed mypy via pip, run this:
 Or if you installed mypy via conda, run this:
 
     conda install -c conda-forge mypy={correct_version}
-''', end='', file=sys.stderr)
-        sys.exit(2)  # https://github.com/python/mypy/issues/6003
+''', file=sys.stderr)
     return Plugin
