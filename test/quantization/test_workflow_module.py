@@ -872,7 +872,7 @@ class TestFakeQuantize(TestCase):
             scale, zero_point = float(scale), int(zero_point)
             quant_min, quant_max = obs._calculate_qmin_qmax()
 
-            Y_test, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
+            Y_test = torch.fake_quantize_per_tensor_affine(
                 X, scale, zero_point, quant_min, quant_max)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
@@ -899,7 +899,7 @@ class TestFakeQuantize(TestCase):
             quant_min, quant_max = obs._calculate_qmin_qmax()
 
             # forward pass
-            Y_test, mask = torch.fake_quantize_per_tensor_affine_cachemask(
+            Y_test = torch.fake_quantize_per_tensor_affine(
                 X, scale, zero_point, quant_min, quant_max)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
@@ -1246,7 +1246,7 @@ class TestFakeQuantize(TestCase):
 
             Y = _fake_quantize_per_channel_affine_reference(
                 X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
-            Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+            Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
@@ -1339,7 +1339,7 @@ class TestFakeQuantize(TestCase):
             zero_point = zero_point.to(torch.int64)
             quant_min, quant_max = obs._calculate_qmin_qmax()
             X.requires_grad_()
-            Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+            Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             dout = torch.rand(X.shape, dtype=torch.float).to(device)
             dX = _fake_quantize_per_channel_affine_grad_reference(
