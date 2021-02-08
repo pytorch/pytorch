@@ -10058,6 +10058,7 @@ def add_test(test, decorator=None):
 
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
+            print(cuda_test_name, test)
             add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
 
 for test_params in module_tests + new_module_tests:

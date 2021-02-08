@@ -211,7 +211,7 @@ conv_depthwise3d_cuda_backward_weight_kernel(
   const int warpid = threadIdx.x / C10_WARP_SIZE;
   const int nwarps = blockDim.x / C10_WARP_SIZE;
 
-  scalar_t grad = 0;
+  accscalar_t grad = 0;
   int batch = warpid / oT;
   int gout_frame = warpid - batch * oT;
   for (int outer_pos = warpid; outer_pos < input.size(0) * oT;
@@ -231,14 +231,14 @@ conv_depthwise3d_cuda_backward_weight_kernel(
     int gout_col = laneid - gout_row * oW;
 
     for (; gout_row < oH; ) {
-      const scalar_t op1 = __ldg(gout_ptr);
+      const accscalar_t op1 = __ldg(gout_ptr);
       gout_ptr += C10_WARP_SIZE;
 
       const int in_col = (gout_col * strideW) + (k_col * dilationW) - paddingW;
       const int in_row = (gout_row * strideH) + (k_row * dilationH) - paddingH;
       const int in_pos = in_row * iW + in_col;
 
-      scalar_t op2 = (scalar_t)0;
+      accscalar_t op2 = (scalar_t)0;
       if (in_col >= 0 && in_col < iW && in_row >= 0 && in_row < iH) {
         op2 = __ldg(input_ptr + in_pos);
       }
@@ -343,7 +343,7 @@ void conv_depthwise_shape_check(
 #define NODEF_OR_EQUAL_3(x, y1, y2, y3) \
   (NODEF_OR_EQUAL(x[0], y1) && \
    NODEF_OR_EQUAL(x[1], y2) && \
-   NODEF_OR_EQUAL(x[1], y3))
+   NODEF_OR_EQUAL(x[2], y3))
 
 #define DWCONV3D_FORWARD_DISPATCH_SPECIALIZATION(kt, kh, kw, dilt, dilh, dilw) \
   if (NODEF_OR_EQUAL_3(kernel_size, (kt), (kh), (kw)) &&                    \
@@ -392,20 +392,20 @@ Tensor conv_depthwise3d_cuda(
   conv_depthwise_shape_check<3>(input, weight, bias, Tensor() /* undefined */,
                                 kernel_size, stride, padding, dilation);
 
-  auto output_size = conv_output_size(input.sizes(), weight.sizes(),
+  Tensor input_ = input.contiguous();
+
+  if (input.dim() == 4 /* no batch */) {
+    input_ = input.unsqueeze(0);
+  }
+
+  auto output_size = conv_output_size(input_.sizes(), weight.sizes(),
                                       padding, stride, dilation);
   for (size_t i = 0; i < output_size.size(); ++i) {
     TORCH_CHECK(output_size[i] > 0,
                 "Output size should be positive, got ", output_size[i], " at dim ", i);
   }
   Tensor output = at::empty(output_size, input.options());
-
-  Tensor input_ = input.contiguous();
   Tensor output_ = output;
-  if (input.dim() == 4 /* no batch */) {
-    input_ = input.unsqueeze(0);
-    output_ = output.unsqueeze(0);
-  }
   Tensor weight_ = weight.contiguous();
   Tensor bias_ = bias.defined() ? bias.contiguous() : bias;
 
@@ -445,8 +445,8 @@ Tensor conv_depthwise3d_cuda(
 #undef DWCONV3D_FORWARD_DISPATCH_SPECIALIZATION
 #undef DWCONV3D_FORWARD_DISPATCH_OTHERS
 
-#define DWCONV3D_BACKWARD_INPUT_DISPATCH_SPECIALIZATION( \
-    kt, kh, kw, dilt, dilh, dilw, dt, dh, dw) \
+#define DWCONV3D_BACKWARD_INPUT_DISPATCH_SPECIALIZATION(                    \
+    kt, kh, kw, dilt, dilh, dilw, dt, dh, dw)                               \
   if (NODEF_OR_EQUAL_3(kernel_size, (kt), (kh), (kw)) &&                    \
       NODEF_OR_EQUAL_3(dilation, (dilt), (dilh), (dilw)) &&                 \
       NODEF_OR_EQUAL_3(stride, (dt), (dh), (dw))) {                         \
@@ -504,7 +504,10 @@ Tensor conv_depthwise3d_cuda(
         dilation[0], dilation[1], dilation[2]);                             \
   }
 
-std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
+std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias,
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -512,33 +515,22 @@ std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
-    const std::array<bool, 3> output_mask) {
+    const std::array<bool, 3> output_mask)
+{
 
-  TORCH_CHECK(grad_output.device() == input.device() && 
-              input.device() == weight.device(), 
+  TORCH_CHECK(grad_output.device() == input.device() &&
+              input.device() == weight.device(),
               "expects input, weight and grad_output to be on the same device.");
   conv_depthwise_shape_check<3>(
       input, weight, Tensor() /* undefined */, grad_output,
       kernel_size, stride, padding, dilation);
 
-  bool is_batch = input.dim() == 5;
-  auto options = grad_output.options();
-
-  const Tensor grad_output_ =
-      (is_batch ? grad_output.contiguous()
-                : grad_output.contiguous().unsqueeze(0));
-  const Tensor input_ =
-      (is_batch ? input.contiguous() : input.contiguous().unsqueeze(0));
+  const Tensor grad_output_ = grad_output.contiguous();
+  const Tensor input_ = input.contiguous();
   const Tensor weight_ = weight.contiguous();
 
-  Tensor grad_input =
-      (output_mask[0] ? at::empty(input.sizes(), options) : Tensor());
-  Tensor grad_weight =
-      (output_mask[1] ? at::empty(weight.sizes(), options) : Tensor());
-  Tensor grad_bias; /* undefined temporarily */
-
   Tensor grad_input_ =
-      (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
+      (output_mask[0] ?  grad_input
                       : Tensor());
 
   if (output_mask[0]) {
@@ -612,6 +604,71 @@ std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
   }
 
   return std::tie(grad_input, grad_weight, grad_bias);
+
+}
+
+
+std::tuple<Tensor&, Tensor&, Tensor&> conv_depthwise3d_backward_cuda_out(
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias,
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& weight,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation) {
+  if (grad_weight.defined()) {
+    grad_weight.resize_(weight.sizes());
+    grad_weight.zero_();
+  }
+
+  return _depthwise_3d_backward_cuda_out(
+      grad_input,
+      grad_weight,
+      grad_bias,
+      grad_output,
+      input,
+      weight,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      {true,true,true});
+}
+
+std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& weight,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    const std::array<bool, 3> output_mask) {
+
+  auto options = grad_output.options();
+  Tensor grad_input =
+      (output_mask[0] ? at::empty(input.sizes(), options) : Tensor());
+  Tensor grad_weight =
+      (output_mask[1] ? at::empty(weight.sizes(), options) : Tensor());
+  Tensor grad_bias; /* undefined temporarily */
+
+  return _depthwise_3d_backward_cuda_out(
+      grad_input,
+      grad_weight,
+      grad_bias,
+      grad_output,
+      input,
+      weight,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      output_mask
+  );
+
 }
 
 #undef DWCONV3D_BACKWARD_INPUT_DISPATCH_SPECIALIZATION
