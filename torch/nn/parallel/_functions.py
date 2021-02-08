@@ -57,7 +57,6 @@ class Gather(Function):
             'Gather function not implemented for CPU tensors'
         )
         if (target_device == 'cpu'):
-            target_device = _get_device_index(target_device, True, allow_cpu=True)
             ctx.target_device = 'cpu'
         else:
             target_device = _get_device_index(target_device, True)
