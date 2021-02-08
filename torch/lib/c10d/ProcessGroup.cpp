@@ -67,7 +67,7 @@ ProcessGroup::Work::Work(
       std::vector<c10::IValue> inputs;
       if (inputTensors) {
         for (const auto& tensor : *inputTensors) {
-        inputs.push_back(tensor);
+          inputs.push_back(tensor);
         }
       }
       recordingFunction->before(profilingTitle, inputs);

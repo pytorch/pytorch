@@ -1258,6 +1258,15 @@ struct to_ir {
       const TernaryIf& expr,
       const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
+    // If the cond expr is a static value, then we metacompile the `if`
+    // statemement and only emit true or false branch
+    if (cond_value.staticIf()) {
+        if (*cond_value.staticIf()) {
+            return emitExpr(expr.true_expr(), type_hint);
+        } else {
+            return emitExpr(expr.false_expr(), type_hint);
+        }
+    }
     auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
     auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);

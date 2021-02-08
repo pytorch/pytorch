@@ -202,7 +202,7 @@ void checkProfiledEvents(
   for (const auto& li : event_lists) {
     for (const auto& evt : li) {
       auto match = !strcmp(evt.name(), expected_profile_str);
-      eventCount += match;
+      eventCount += (match) ? 1 : 0;
       if (verify_shapes && match) {
         auto shapesVec = evt.shapes();
         EXPECT_EQ(shapesVec[0], expected_shapes[eventCount-1]);
