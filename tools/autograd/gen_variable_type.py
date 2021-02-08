@@ -36,7 +36,9 @@ from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
 import tools.codegen.api.cpp as cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
+from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import Callable, List, Optional, Sequence, Tuple, Union
@@ -89,6 +91,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'reflection_pad1d_backward', 'reflection_pad2d_backward',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
+    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
