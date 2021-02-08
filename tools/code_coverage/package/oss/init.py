@@ -31,6 +31,7 @@ from .utils import (
 
 BLOCKED_PYTHON_TESTS = {
     "run_test.py",
+    "print_test_stats.py",
     "test_dataloader.py",
     "test_multiprocessing.py",
     "test_multiprocessing_spawn.py",
