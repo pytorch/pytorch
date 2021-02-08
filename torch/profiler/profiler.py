@@ -92,7 +92,8 @@ class profile(object):
       during the profiling;
     - ``record_shapes`` - save information about operator's input shapes;
     - ``profile_memory`` - track tensor memory allocation/deallocation;
-    - ``with_stack`` - record source information (file and line number) for the ops.
+    - ``with_stack`` - record source information (file and line number) for the ops;
+    - ``with_flops`` - use formula to estimate the FLOPS of specific operators (matrix multiplication and 2D convolution);
     - ``use_cuda`` - (deprecated, use ``activities``).
 
     .. note::
@@ -178,6 +179,7 @@ class profile(object):
             record_shapes: bool = False,
             profile_memory: bool = False,
             with_stack: bool = False,
+            with_flops: bool = False,
             # deprecated:
             use_cuda: Optional[bool] = None):
         if activities:
@@ -207,6 +209,7 @@ class profile(object):
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
         self.record_shapes = record_shapes
+        self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.step_num = 0
@@ -353,6 +356,7 @@ class profile(object):
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             record_shapes=self.record_shapes,
+            with_flops=self.with_flops,
             profile_memory=self.profile_memory,
             with_stack=self.with_stack,
             use_kineto=True,
