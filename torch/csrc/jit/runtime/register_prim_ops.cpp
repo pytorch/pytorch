@@ -1356,6 +1356,7 @@ RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("bool"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("complex"),
     CREATE_DICT_OPS("Tensor"),
 });
 

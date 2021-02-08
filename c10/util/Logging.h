@@ -322,6 +322,9 @@ struct DDPLoggingData {
   std::string backend_name;
 };
 
+C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
+C10_API void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData);
+
 namespace detail {
 // Return value is needed to do the static variable initialization trick
 C10_API bool LogAPIUsageFakeReturn(const std::string& context);
