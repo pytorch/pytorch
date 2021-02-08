@@ -7,6 +7,7 @@ T_co = TypeVar('T_co', covariant=True)
 
 class BatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BatchIterDataPipe`.
+
     Iterable DataPipe to create mini-batches of data. An outer dimension will be added as
     `batch_size` if `drop_last` is set to `True`, or `length % batch_size` for the
     last batch if `drop_last` is set to `False`.
@@ -59,6 +60,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
 
 class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BucketBatchIterDataPipe`.
+
     Iterable DataPipe to create mini-batches of data from sorted bucket. An outer
     dimension will be added as `batch_size` if `drop_last` is set to `True`,
     or `length % batch_size` for the last batch if `drop_last` is set to `False`.

@@ -346,6 +346,13 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(NotImplementedError):
             len(filter_dp)
 
+        def _non_bool_fn(data):
+            return 1
+
+        filter_dp = dp.iter.Filter(input_ds, filter_fn=_non_bool_fn)
+        with self.assertRaises(ValueError):
+            temp = [d for d in filter_dp]
+
     def test_sampler_datapipe(self):
         arrs = range(10)
         input_dp = IDP(arrs)
