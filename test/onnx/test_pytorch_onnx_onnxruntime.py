@@ -5743,7 +5743,7 @@ class TestONNXRuntime(unittest.TestCase):
         running_mean = model.bn.running_mean
         running_var = model.bn.running_var
         saved_mean = x.mean((0, 2, 3))
-        saved_var = x.var((0, 2, 3))
+        saved_var = x.var((0, 2, 3), correction=1)
 
         pytorch_out = [out.detach().numpy(),
                        running_mean.cpu().numpy(), running_var.cpu().numpy(),

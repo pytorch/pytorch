@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <math.h>
 #include <float.h>
+#include <limits>
 
 // NumericLimits.h is a holder for numeric limits definitions of commonly used
 // types. This header is very specific to ROCm HIP and may be removed in the
@@ -104,18 +105,18 @@ struct numeric_limits<at::BFloat16> {
 
 template <>
 struct numeric_limits<float> {
-  static inline C10_HOST_DEVICE float lowest() { return -FLT_MAX; }
-  static inline C10_HOST_DEVICE float max() { return FLT_MAX; }
-  static inline C10_HOST_DEVICE float lower_bound() { return -static_cast<float>(inf); }
-  static inline C10_HOST_DEVICE float upper_bound() { return static_cast<float>(inf); }
+  static inline C10_HOST_DEVICE float lowest() { return -std::numeric_limits<float>::max(); }
+  static inline C10_HOST_DEVICE float max() { return std::numeric_limits<float>::max(); }
+  static inline C10_HOST_DEVICE float lower_bound() { return -std::numeric_limits<float>::infinity(); }
+  static inline C10_HOST_DEVICE float upper_bound() { return std::numeric_limits<float>::infinity(); }
 };
 
 template <>
 struct numeric_limits<double> {
-  static inline C10_HOST_DEVICE double lowest() { return -DBL_MAX; }
-  static inline C10_HOST_DEVICE double max() { return DBL_MAX; }
-  static inline C10_HOST_DEVICE double lower_bound() { return -inf; }
-  static inline C10_HOST_DEVICE double upper_bound() { return inf; }
+  static inline C10_HOST_DEVICE float lowest() { return -std::numeric_limits<float>::max(); }
+  static inline C10_HOST_DEVICE float max() { return std::numeric_limits<float>::max(); }
+  static inline C10_HOST_DEVICE double lower_bound() { return -std::numeric_limits<double>::infinity(); }
+  static inline C10_HOST_DEVICE double upper_bound() { return std::numeric_limits<double>::infinity(); }
 };
 
 } // namespace at
