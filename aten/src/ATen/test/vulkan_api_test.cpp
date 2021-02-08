@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
+#include <torch/script.h>
 
 // TODO: These functions should move to a common place.
 
@@ -1455,6 +1456,182 @@ TEST(VulkanAPITest, upsample_nearest2d) {
 
   ASSERT_TRUE(check);
 }
+
+TEST(VulkanAPITest, roi_align) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  float roi_data[] = {
+    0., 0., 0., 5., 5.,
+    0., 5., 5., 10., 10.,
+  };
+  at::Tensor input = at::rand({1, 2, 10, 10}), rois = at::from_blob(roi_data, {2, 5});
+  double spatial_scale = 1.0;
+  int64_t pooled_height = 3, pooled_width = 3, sampling_ratio = -1;
+  bool aligned = true;
+  at::Tensor output = at::roi_align(
+      input, rois, spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned);
+
+  ASSERT_EQ(output.sizes()[0], 2);
+  ASSERT_EQ(output.sizes()[1], 2);
+  ASSERT_EQ(output.sizes()[2], 3);
+  ASSERT_EQ(output.sizes()[3], 3);
+
+  at::Tensor output_vulkan = at::roi_align(
+      input.vulkan(), rois.vulkan(), spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned);
+  const auto output_vulkan_cpu = output_vulkan.cpu();
+  const auto check = almostEqual(output, output_vulkan_cpu);
+  if (!check) {
+    std::cout << "output:\n" << output << std::endl;
+    std::cout << "output_vulkan_cpu:\n" << output_vulkan_cpu << std::endl;
+    showRtol(output, output_vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, gen_proposals) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const int64_t A = 4;
+  const int64_t H = 10;
+  const int64_t W = 8;
+  const int64_t img_count = 3;
+
+  auto scores = at::ones({img_count, A, H, W});
+  auto bbox_deltas_src = at::linspace(0, 10, img_count * 4 * A * H * W);
+  auto bbox_deltas = bbox_deltas_src.view({img_count, 4 * A, H, W});
+  auto im_info = at::ones({img_count, 3});
+  auto anchors = at::ones({A, 4});
+
+  auto output = at::gen_proposals(
+      scores.contiguous(),
+      bbox_deltas.contiguous(),
+      im_info,
+      anchors,
+      2.0, // spatial_scale
+      6000, // pre_nms_topN
+      300, // post_nms_topN
+      0.7, // nms_thresh
+      16, // min_size
+      true, // angle_bound_on
+      -90, // angle_bound_lo
+      90, // angle_bound_hi
+      1.0, // clip_angle_thresh
+      true // legacy_plus_one
+  );
+
+  auto output_vulkan = at::gen_proposals(
+      scores.vulkan(),
+      bbox_deltas.vulkan(),
+      im_info.vulkan(),
+      anchors.vulkan(),
+      2.0, // spatial_scale
+      6000, // pre_nms_topN
+      300, // post_nms_topN
+      0.7, // nms_thresh
+      16, // min_size
+      true, // angle_bound_on
+      -90, // angle_bound_lo
+      90, // angle_bound_hi
+      1.0, // clip_angle_thresh
+      true // legacy_plus_one
+  );
+
+  auto output_cpu_rois = std::get<0>(output);
+  std::cout << "output_cpu_rois:\n" << output_cpu_rois << std::endl;
+  auto output_cpu_probs = std::get<1>(output);
+  std::cout << "output_cpu_probs:\n" << output_cpu_probs << std::endl;
+
+  auto output_vulkan_rois = std::get<0>(output_vulkan);
+  auto output_vulkan_probs = std::get<1>(output_vulkan);
+  auto output_vulkan_rois_cpu = output_vulkan_rois.cpu();
+  std::cout << "output_vulkan_rois_cpu:\n" << output_vulkan_rois_cpu << std::endl;
+  auto output_vulkan_probs_cpu = output_vulkan_probs.cpu();
+  std::cout << "output_vulkan_probs_cpu:\n" << output_vulkan_probs_cpu << std::endl;
+
+  const auto checkRois = almostEqual(output_cpu_rois, output_vulkan_rois_cpu);
+  ASSERT_TRUE(checkRois);
+
+  const auto checkProbs = almostEqual(output_cpu_probs, output_vulkan_probs_cpu);
+  ASSERT_TRUE(checkProbs);
+}
+
+TEST(VulkanAPITest, nms) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+  at::Tensor boxes = at::rand({100, 4});
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+  at::Tensor scores = at::rand({100});
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+
+  float threshold = 0.1;
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+
+  at::Tensor output = at::nms(boxes, scores, threshold);
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+  at::Tensor output_vulkan = at::nms(boxes.vulkan(), scores, threshold);
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+  const auto output_vulkan_cpu = output_vulkan.cpu();
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+  std::cout << "output:\n" << output << std::endl;
+  std::cout << "output_vulkan_cpu:\n" << output_vulkan_cpu << std::endl;
+  const auto check = almostEqual(output, output_vulkan_cpu);
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+  if (!check) {
+    //std::cout << "output:\n" << output << std::endl;
+    //std::cout << "output_vulkan_cpu:\n" << output_vulkan_cpu << std::endl;
+    showRtol(output, output_vulkan.cpu());
+  }
+  std::cout << "XXX nms_test " << __LINE__ << std::endl;
+  ASSERT_TRUE(check);
+}
+
+/*
+TEST(VulkanAPITest, roi_align2) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+  auto& ops = torch::jit::getAllOperatorsFor(torch::jit::Symbol::fromQualString("_aten::roi_align"));
+  ASSERT_EQ(ops.size(), 1);
+
+  auto& op = ops.front();
+  ASSERT_EQ(op->schema().name(), "_aten::roi_align");
+
+  torch::jit::Stack stack;
+  float roi_data[] = {
+    0., 0., 0., 5., 5.,
+    0., 5., 5., 10., 10.
+  };
+  at::Tensor input = at::rand({1, 2, 10, 10}), rois = at::from_blob(roi_data, {2, 5});
+  double spatial_scale = 1.0;
+  int64_t pooled_height = 3, pooled_width = 3, sampling_ratio = -1;
+  bool aligned = true;
+  torch::jit::push(stack, input, rois, spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned);
+  op->getOperation()(&stack);
+  at::Tensor output;
+  torch::jit::pop(stack, output);
+
+  ASSERT_EQ(output.sizes()[0], 2);
+  ASSERT_EQ(output.sizes()[1], 2);
+  ASSERT_EQ(output.sizes()[2], 3);
+  ASSERT_EQ(output.sizes()[3], 3);
+
+  at::Tensor output_vulkan = at::roi_align(
+      input.vulkan(), rois.vulkan(), spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned);
+
+  const auto check = almostEqual(output, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output, output_vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+*/
 
 enum class OpType {
   addmm,

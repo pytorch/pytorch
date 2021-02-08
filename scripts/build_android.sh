@@ -159,7 +159,7 @@ mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=Debug \
     "${CMAKE_ARGS[@]}"
 
 # Cross-platform parallel build

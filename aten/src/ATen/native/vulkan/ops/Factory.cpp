@@ -14,6 +14,23 @@ Tensor empty_memory_format(
     const c10::optional<Device> device,
     const c10::optional<bool> pin_memory,
     const optional<MemoryFormat> memory_format) {
+
+  int64_t numel = 1;
+  for (const auto& n : sizes) {
+      numel *= n;
+  }
+
+  if ((sizes.size() == 0) || (numel == 0)) {
+      return at::empty(
+          sizes,
+          at::TensorOptions()
+              .dtype(dtype)
+              .layout(layout)
+              .memory_format(memory_format)
+              .pinned_memory(pin_memory)
+      ); 
+  }
+
   return convert(vTensor{
       api::context(),
       sizes,

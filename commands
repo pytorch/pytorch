@@ -1,0 +1,16 @@
+
+ANDROID_ABI=arm64-v8a \
+BUILD_MOBILE_TEST=1 \
+./scripts/build_android.sh \
+  -DANDROID_CCACHE=$(which ccache) \
+  -DANDROID_DEBUG_SYMBOLS=ON \
+  -DBUILD_BINARY=ON \
+  -DUSE_VULKAN=ON \
+  -DUSE_VULKAN_API=ON \
+  -DUSE_VULKAN_SHADERC_RUNTIME=OFF \
+  -DUSE_VULKAN_WRAPPER=ON
+
+
+
+./speed_benchmark_torch --model=frcnn-mnetv3-vulkan-2.pt --input_type=float --input_dims=3,224,224 --warmup=10 --iter=20 --vulkan=true
+

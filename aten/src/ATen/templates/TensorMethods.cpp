@@ -4,6 +4,7 @@
 #include <c10/core/Stream.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/Backtrace.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/dispatch/Dispatcher.h>

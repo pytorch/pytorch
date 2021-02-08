@@ -69,6 +69,7 @@ C10_DEFINE_bool(
 
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
 C10_DEFINE_bool(vulkan, false, "Whether to use Vulkan backend (GPU).");
+C10_DEFINE_bool(btinput, false, "body tracking input");
 
 namespace {
 
@@ -166,8 +167,32 @@ class Runner {
   virtual c10::IValue run(
       torch::jit::Module& module,
       const std::vector<c10::IValue>& inputs) {
-    return module.forward(inputs);
+    auto tensor = inputs[0].toTensor();
+    inputs_.clear();
+    //inputs_.reserve(inputs.size());
+    //for (const auto& input : inputs) {
+    //  inputs_.emplace_back(input.toTensor().vulkan());
+    //}
+
+
+    //inputs_.reserve(1);
+    //c10::List<at::Tensor> list{};
+    //list.reserve(1);
+    //list.push_back(tensor);
+    //inputs_.emplace_back(list);
+    //return module.forward({inputs_});
+
+    float height = (float)tensor.sizes()[-2];
+    float width = (float)tensor.sizes()[-1];
+
+    std::vector<float> imageSize{height, width, 1.0};
+    at::Tensor imInfo = torch::from_blob(imageSize.data(), {1, 3});
+    auto input = c10::ivalue::Tuple::create({tensor, imInfo});
+    return module.forward({input});
   }
+
+ private:
+  std::vector<c10::IValue> inputs_;
 };
 
 class vkRunner final : public Runner {
@@ -177,14 +202,37 @@ class vkRunner final : public Runner {
       torch::jit::Module& module,
       const std::vector<c10::IValue>& inputs) override {
     // Upload the input tensor(s) to GPU memory.
+    auto tensor = inputs[0].toTensor();
     inputs_.clear();
-    inputs_.reserve(inputs.size());
-    for (const auto& input : inputs) {
-      inputs_.emplace_back(input.toTensor().vulkan());
-    }
+    //inputs_.reserve(inputs.size());
+    //for (const auto& input : inputs) {
+    //  inputs_.emplace_back(input.toTensor().vulkan());
+    //}
 
-    // Run, and download the output tensor to system memory.
-    return module.forward(inputs_).toTensor().cpu();
+    //inputs_.reserve(1);
+    //c10::List<at::Tensor> list{};
+    //list.reserve(1);
+    //list.push_back(tensor.vulkan());
+    //inputs_.emplace_back(list);
+    //// Run, and download the output tensor to system memory.
+    //return module.forward({inputs_}).toTensor().cpu();
+    
+    if (FLAGS_btinput) {
+        float height = (float)tensor.sizes()[-2];
+        float width = (float)tensor.sizes()[-1];
+
+        std::vector<float> imageSize{height, width, 1.0};
+        at::Tensor imInfo = torch::from_blob(imageSize.data(), {1, 3});
+        auto input = c10::ivalue::Tuple::create({tensor.vulkan(), imInfo});
+        return module.forward({input});
+    } else {
+      inputs_.reserve(1);
+      c10::List<at::Tensor> list{};
+      list.reserve(1);
+      list.push_back(tensor.vulkan());
+      inputs_.emplace_back(list);
+      return module.forward({inputs_}).toTensor().cpu();
+    }
   }
 
  private:

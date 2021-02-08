@@ -3079,6 +3079,26 @@
   dispatch:
     CPU, CUDA: hardshrink_backward
 
+- func: roi_align(Tensor self, Tensor rois, float spatial_scale, int pooled_height, int pooled_width, int sampling_ratio, bool aligned) -> Tensor
+  variants: function
+  dispatch:
+    CPU: aten_ROIAlignForwardCPUKernel
+
+- func: nms(Tensor self, Tensor scores, float threshold) -> Tensor
+  variants: function
+  dispatch:
+    CPU: nms_cpu
+
+- func: gen_proposals(Tensor self, Tensor bbox_deltas, Tensor im_info, Tensor anchors, float spatial_scale, int pre_nms_topN, int post_nms_topN, float nms_thresh, float min_size, bool angle_bound_on, int angle_bound_lo, int angle_bound_hi, float clip_angle_thresh, bool legacy_plus_one) -> (Tensor output_0, Tensor output_1)
+  variants: function
+  dispatch:
+    CPU: GenerateProposalsCPUKernel
+
+- func: bbox_transform(Tensor self, Tensor bbox_deltas, Tensor im_info, float[] weights, bool apply_scale, bool rotated, bool angle_bound_on, int angle_bound_lo, int angle_bound_hi, float clip_angle_thresh, bool legacy_plus_one) -> (Tensor output_0, Tensor output_1)
+  variants: function
+  dispatch:
+    CPU: BBoxTransformCPUKernel
+
 - func: rsqrt(Tensor self) -> Tensor
   variants: function, method
   dispatch:
