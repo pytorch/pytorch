@@ -10,7 +10,7 @@ namespace c10 {
 // be handled specially.  Its semantics is that it redispatches to the
 // *next* dispatch key that would have been processed, skipping the current
 // one.
-void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*) {
+void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*) {
   TORCH_INTERNAL_ASSERT(0,
     "fallthrough_kernel was executed but it should have been short-circuited by the dispatcher. "
     "This could occur if you registered a fallthrough kernel as a override for a specific operator "
@@ -19,7 +19,7 @@ void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*) {
     "let us know in the bug tracker.");
 }
 
-void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, Stack*) {
+void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, DispatchKeySet, Stack*) {
   TORCH_INTERNAL_ASSERT(0,
     op.operator_name(), " has kernels registered to both Math and a backend mapped to AutogradOther. "
     "This makes the backend kernel unreachable (see Note [Ambiguity in AutogradOther kernel]). "
@@ -27,7 +27,7 @@ void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, S
     "Autograd dispatch key for the backend.", "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }
 
-void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, Stack*) {
+void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, DispatchKeySet, Stack*) {
   // DO NOT LOOK AT STACK, YOU HAVE SHORT CIRCUITED BOXING
   // See Note [named_not_supported_kernel]
   TORCH_CHECK(0,

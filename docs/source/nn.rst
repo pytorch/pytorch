@@ -176,9 +176,6 @@ Normalization Layers
     nn.BatchNorm1d
     nn.BatchNorm2d
     nn.BatchNorm3d
-    nn.LazyBatchNorm1d
-    nn.LazyBatchNorm2d
-    nn.LazyBatchNorm3d
     nn.GroupNorm
     nn.SyncBatchNorm
     nn.InstanceNorm1d
