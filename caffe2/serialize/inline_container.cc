@@ -52,30 +52,21 @@ size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
   return in_->read(pos, buf, n, "reading file");
 }
 
-PyTorchStreamReader::PyTorchStreamReader(
-    const std::string& file_name,
-    std::string version_location)
+PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
     : ar_(std::make_unique<mz_zip_archive>()),
-      in_(std::make_unique<FileAdapter>(file_name)),
-      version_location_(std::move(version_location)) {
+      in_(std::make_unique<FileAdapter>(file_name)) {
+  init();
+}
+
+PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
+    : ar_(std::make_unique<mz_zip_archive>()),
+      in_(std::make_unique<IStreamAdapter>(in)) {
   init();
 }
 
 PyTorchStreamReader::PyTorchStreamReader(
-    std::istream* in,
-    std::string version_location)
-    : ar_(std::make_unique<mz_zip_archive>()),
-      in_(std::make_unique<IStreamAdapter>(in)),
-      version_location_(std::move(version_location)) {
-  init();
-}
-
-PyTorchStreamReader::PyTorchStreamReader(
-    std::shared_ptr<ReadAdapterInterface> in,
-    std::string version_location)
-    : ar_(std::make_unique<mz_zip_archive>()),
-      in_(std::move(in)),
-      version_location_(std::move(version_location)) {
+    std::shared_ptr<ReadAdapterInterface> in)
+    : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
   init();
 }
 
@@ -124,7 +115,12 @@ void PyTorchStreamReader::init() {
   // version check
   at::DataPtr version_ptr;
   size_t version_size;
-  std::tie(version_ptr, version_size) = getRecord(version_location_);
+  if (hasRecord("version")) {
+    std::tie(version_ptr, version_size) = getRecord("version");
+  } else {
+    TORCH_CHECK(hasRecord(".data/version"))
+    std::tie(version_ptr, version_size) = getRecord(".data/version");
+  }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
   AT_ASSERTM(
@@ -290,19 +286,14 @@ size_t ostream_write_func(
   return ret;
 }
 
-PyTorchStreamWriter::PyTorchStreamWriter(
-    std::string file_name,
-    std::string version_location)
-    : archive_name_(basename(file_name)),
-      version_location_(std::move(version_location)) {
+PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
+    : archive_name_(basename(file_name)) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)>& writer_func,
-    std::string version_location)
+    const std::function<size_t(const void*, size_t)>& writer_func)
     : archive_name_("archive"),
-      version_location_(std::move(version_location)),
       writer_func_(writer_func) {
   setup(archive_name_);
 }
@@ -371,7 +362,11 @@ void PyTorchStreamWriter::writeEndOfFile() {
   // Rewrites version info
   std::string version = c10::to_string(version_);
   version.push_back('\n');
-  writeRecord(version_location_, version.c_str(), version.size());
+  if (version_ >= 0x6L) {
+    writeRecord(".data/version", version.c_str(), version.size());
+  } else {
+    writeRecord("version", version.c_str(), version.size());
+  }
 
   AT_ASSERT(!finalized_);
   finalized_ = true;
