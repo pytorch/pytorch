@@ -4,7 +4,7 @@ namespace torch {
 namespace custom_backend {
 namespace {
 constexpr auto kBackendName = "custom_backend";
-static auto cls = torch::jit::backend<CustomBackend>(kBackendName);
+static auto cls = torch::jit::backend<CustomBackend>(kBackendName, preprocess);
 }
 
 std::string getBackendName() {
