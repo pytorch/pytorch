@@ -3295,6 +3295,27 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
+    @onlyCPU
+    def test_warn_always_caught(self, device):
+        # Check that we can catch a TORCH_WARN_ONCE warning twice
+        # since assertWarnsOnceRegex uses set_warn_always(True) which changes
+        # TORCH_WARN_ONCE to TORCH_WARN
+        a = np.arange(10)
+        a.flags.writeable = False
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+            torch.from_numpy(a)
+
+        # OK, got it once, now try again
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+            torch.from_numpy(a)
+
+        # Make sure emitting two warnings, even if they pass the regex, will fail
+        # the assertWarnsOnceRegex context manager which only allows a single warning
+        with self.assertRaisesRegex(AssertionError, '.*too many.*non-writeable.*'):
+            with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+                torch.from_numpy(a)
+                torch.from_numpy(a)
+
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64
