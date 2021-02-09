@@ -66,6 +66,7 @@ ProcessGroup::Work::Work(
       // profiling output.
       std::vector<c10::IValue> inputs;
       if (inputTensors) {
+        inputs.reserve(inputTensors->size());
         for (const auto& tensor : *inputTensors) {
           inputs.push_back(tensor);
         }

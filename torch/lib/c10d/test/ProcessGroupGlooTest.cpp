@@ -194,7 +194,8 @@ void checkProfiledEvents(
     const thread_event_lists& event_lists,
     const char* expected_profile_str,
     int expected_count,
-    std::vector<std::vector<long>> expected_shapes, bool verify_shapes = true) {
+    std::vector<std::vector<int64_t>> expected_shapes,
+    bool verify_shapes = true) {
   auto eventCount = 0;
   if (verify_shapes) {
     EXPECT_EQ(expected_count, expected_shapes.size());
