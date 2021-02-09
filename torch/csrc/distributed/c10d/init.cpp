@@ -290,8 +290,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("reducer"),
           py::call_guard<py::gil_scoped_release>())
         .def(
-          "set_construction_logging_data",
-          &::c10d::Logger::set_construction_logging_data,
+          "set_construction_data_and_log",
+          &::c10d::Logger::set_construction_data_and_log,
           py::arg("module_name"),
           py::arg("device_ids"),
           py::arg("output_device"),

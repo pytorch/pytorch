@@ -4,6 +4,8 @@ namespace c10d {
 
 namespace {
 
+const int kMilliSecondToNanosSecond = 1000000;
+
 std::string parse_env(const char* env_var_name) {
   char* stringValue = std::getenv(env_var_name);
   std::string res = "N/A";
@@ -56,7 +58,7 @@ std::vector<int> Logger::get_bucket_sizes() {
   return bucket_sizes;
 }
 
-void Logger::set_construction_logging_data(
+void Logger::set_construction_data_and_log(
     const std::string& module_name,
     const std::vector<int>& device_ids,
     int output_device,
@@ -91,6 +93,16 @@ void Logger::calculate_avg_cpu_time(
     int64_t& avg_time,
     int64_t cpu_start_time,
     int64_t cpu_end_time) {
+  // If cpu_end_time is not recorded in this iteration,
+  // avg_time will return invalid value.
+  // For some cases like DDP runs on non-sync mode, backward compute
+  // end time can not be recorded in this iteration and thus can not
+  // calculate the valid avg_time.
+  // In this case, skip calculating the avg_time and return.
+  TORCH_CHECK(reducer_->num_iterations_ > 0);
+  if (cpu_end_time < cpu_start_time) {
+    return;
+  }
   long num_iters = reducer_->num_iterations_;
   avg_time = ((cpu_end_time - cpu_start_time) + avg_time * (num_iters - 1)) /
       num_iters;
@@ -99,13 +111,23 @@ void Logger::calculate_avg_cpu_time(
 #ifdef USE_CUDA
 void Logger::calculate_avg_gpu_time(
     int64_t& avg_time,
-    cudaEvent_t gpu_start,
-    cudaEvent_t gpu_end) {
+    at::cuda::CUDAEvent& gpu_start,
+    at::cuda::CUDAEvent& gpu_end) {
+  TORCH_CHECK(reducer_->num_iterations_ > 0);
   long num_iters = reducer_->num_iterations_;
-  float milliseconds = 0.0;
-  cudaEventElapsedTime(&milliseconds, gpu_start, gpu_end);
-  avg_time =
-      (int(milliseconds * 1000000) + avg_time * (num_iters - 1)) / num_iters;
+  float milliseconds = gpu_start.elapsed_time(gpu_end);
+  // If gpu_end is not recorded in this iteration,
+  // milliseconds will have invalid value.
+  // For some cases like DDP runs on non-sync mode,
+  // gpu_end can not be recorded in this iteration and thus can not
+  // calculate the valid avg_time.
+  // In this case, skip calculating the avg_time and return.
+  if (milliseconds < 0) {
+    return;
+  }
+  avg_time = (int(milliseconds * kMilliSecondToNanosSecond) +
+              avg_time * (num_iters - 1)) /
+      num_iters;
 }
 #endif
 
@@ -126,22 +148,35 @@ void Logger::set_runtime_stats() {
   }
   // rebuilt_bucket_sizes will not change once buckets are rebuilt,
   // so it only needs to set once during whole training loop.
-  if (reducer_->num_iterations_ == 2) {
+  if (ddp_logging_data_->has_rebuilt_buckets != reducer_->has_rebuilt_bucket_) {
     ddp_logging_data_->has_rebuilt_buckets = reducer_->has_rebuilt_bucket_;
     ddp_logging_data_->rebuilt_bucket_sizes = get_bucket_sizes();
   }
 
-  // set_runtime_stats is called at beginning of forward call,
-  // when it is cheap to synchronize the cuda events of previous iteration,
-  // as it is guaranteed that all cuda operations are done in previous
-  // iteration.
   if (reducer_->replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
-    cudaEventSynchronize(reducer_->gpu_timer_.forward_start);
-    cudaEventSynchronize(reducer_->gpu_timer_.backward_compute_start);
-    cudaEventSynchronize(reducer_->gpu_timer_.backward_compute_end);
-    cudaEventSynchronize(reducer_->gpu_timer_.backward_comm_start);
-    cudaEventSynchronize(reducer_->gpu_timer_.backward_comm_end);
+    // It is possible users did not call backward or run codes in
+    // no-sync mode, in this case, some cudaEvents like "backward_compute_end"
+    // or "backward_comm_start" or "backward_comm_end" will not be recorded.
+    // cudaEvent is created when it is first time to be recorded.
+    // If it is never recorded/created, skip synchronize and calculation.
+    // Otherwise it will throw cuda errors.
+    if (!reducer_->gpu_timer_.forward_start.isCreated() ||
+        !reducer_->gpu_timer_.backward_compute_start.isCreated() ||
+        !reducer_->gpu_timer_.backward_compute_end.isCreated() ||
+        !reducer_->gpu_timer_.backward_comm_start.isCreated() ||
+        !reducer_->gpu_timer_.backward_comm_end.isCreated()) {
+      return;
+    }
+
+    // set_runtime_stats is called at the beginning of forward call,
+    // when it is cheap to synchronize the cuda events of previous iteration,
+    // as mostly all cuda operations are finished in previous iteration.
+    reducer_->gpu_timer_.forward_start.synchronize();
+    reducer_->gpu_timer_.backward_compute_start.synchronize();
+    reducer_->gpu_timer_.backward_compute_end.synchronize();
+    reducer_->gpu_timer_.backward_comm_start.synchronize();
+    reducer_->gpu_timer_.backward_comm_end.synchronize();
     calculate_avg_gpu_time(
         ddp_logging_data_->avg_forward_compute_time,
         reducer_->gpu_timer_.forward_start,

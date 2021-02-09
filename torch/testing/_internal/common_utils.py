@@ -639,8 +639,10 @@ def freeze_rng_state():
 def set_default_dtype(dtype):
     saved_dtype = torch.get_default_dtype()
     torch.set_default_dtype(dtype)
-    yield
-    torch.set_default_dtype(saved_dtype)
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
