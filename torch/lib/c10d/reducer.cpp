@@ -1152,10 +1152,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
                 TORCH_CHECK(false,
                     "Detected at least one parameter gradient is not the "
                     "expected DDP bucket view with gradient_as_bucket_view=True. "
-                    "This is unexpected, and may happen (for example) if multiple "
-                    "allreduce hooks were registered onto the same parameter. "
-                    "If you hit this error, please file an issue with a minimal "
-                    "repro.");
+                    "This may happen (for example) if multiple allreduce hooks "
+                    "were registered onto the same parameter. If you hit this error, "
+                    "please file an issue with a minimal repro.");
               }
             }
             // The grad is modified and needs to be written back.
