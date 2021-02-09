@@ -2122,18 +2122,6 @@ class TestLinalg(TestCase):
             assert USV.V is out[2]
             self.assertEqual(USV.S, np_s)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @onlyCUDA
-    @dtypes(torch.float)
-    def test_linalg_svd_out_different_device(self, device, dtype):
-        t = torch.randn(5, 7, device=device, dtype=dtype)  # this is on cuda
-        u = torch.empty((5, 5), device='cpu', dtype=dtype)
-        s = torch.empty((5,), device='cpu', dtype=dtype)
-        v = torch.empty((7, 7), device='cpu', dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, 'svd output tensor U is on the wrong device: expected cuda:.* got cpu'):
-            torch.linalg.svd(t, out=(u, s, v))
-
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
