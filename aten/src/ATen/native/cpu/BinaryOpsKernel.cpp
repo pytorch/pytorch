@@ -19,6 +19,27 @@ namespace {
 
 using namespace vec256;
 
+// Note: Explicit implementation of copysign for Half and BFloat16
+// is needed to workaround g++-7/8 crash on aarch64, but also makes
+// copysign faster for the half-precision types
+template<typename T>
+T copysign(T a, T b) {
+  return std::copysign(a, b);
+}
+
+// Implement copysign for half precision floats using bit ops
+// Sign is the most significant bit for both half and bfloat16 types
+template<>
+c10::Half copysign(c10::Half a, c10::Half b) {
+  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+}
+
+template<>
+c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
+   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
+}
+
+
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
 void add_kernel(TensorIteratorBase& iter, Scalar alpha_scalar) {
@@ -180,7 +201,7 @@ void div_floor_kernel(TensorIterator& iter) {
                 floordiv += scalar_t(1.0);
               }
             } else {
-              floordiv = std::copysign(scalar_t(0), a / b);
+              floordiv = copysign(scalar_t(0), a / b);
             }
             return floordiv;
           });
@@ -887,23 +908,6 @@ void heaviside_kernel(TensorIterator& iter) {
         return a == 0 ? b : static_cast<scalar_t>(a > 0);
     });
   });
-}
-
-template<typename T>
-T copysign(T a, T b) {
-  return std::copysign(a, b);
-}
-
-// Implement copysign for half precision floats using bit ops
-// Sign is the most significant bit for both half and bfloat16 types
-template<>
-c10::Half copysign(c10::Half a, c10::Half b) {
-  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
-}
-
-template<>
-c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
 }
 
 void copysign_kernel(TensorIterator& iter) {
