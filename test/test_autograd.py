@@ -21,7 +21,8 @@ import json
 torch.set_default_dtype(torch.double)
 
 from torch import nn
-from torch._six import inf, nan, istuple
+from torch._six import inf, nan
+from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
@@ -5065,7 +5066,7 @@ def add_test(
                     if not exclude_tensor_method(name, test_name):
                         output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                         output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
-                        if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
+                        if not isinstance(output_tensor, torch.Tensor) and not isinstance(output_tensor, tuple):
                             if dtype.is_complex:
                                 output_tensor = torch.tensor((output_tensor, ), dtype=torch.cfloat, device=device)
                             else:

@@ -135,33 +135,19 @@ static void upsample_nearest1d_backward_out_cuda_template(
       "upsample_nearest1d_backward_out_cuda_template",
       {grad_output_arg, grad_input_arg});
 
-  TORCH_CHECK(
-      output_size.size() == 1,
-      "It is expected output_size equals to 1, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 3,
-      "It is expected input_size equals to 3, but got size ",
-      input_size.size());
-
   int output_width = output_size[0];
 
   int nbatch = input_size[0];
   int channels = input_size[1];
   int input_width = input_size[2];
 
-  upsample_1d_shape_check(
-      Tensor(), grad_output_, nbatch, channels, input_width, output_width);
-
   Tensor grad_output = grad_output_.contiguous();
-  grad_input.resize_({nbatch, channels, input_width});
 
   if (grad_input.numel() == 0) {
     return;
   }
 
-  // upsample_1d_shape_check makes sure `nbatch != 0`
+  // upsample_nearest1d meta call makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
