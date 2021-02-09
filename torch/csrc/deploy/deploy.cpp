@@ -65,7 +65,10 @@ Interpreter::Interpreter(InterpreterManager* manager)
         _binary_libtorch_deployinterpreter_so_start[0] != '\0',
         "Intepreter library libtorch_deployinterpreter.so was not included, was PyTorch built with USE_DEPLOY=ON?");
     std::ofstream dst(library_name, std::ios::binary);
-    dst.write(_binary_libtorch_deployinterpreter_so_start, _binary_libtorch_deployinterpreter_so_end - _binary_libtorch_deployinterpreter_so_start);
+    dst.write(
+        _binary_libtorch_deployinterpreter_so_start,
+        _binary_libtorch_deployinterpreter_so_end -
+            _binary_libtorch_deployinterpreter_so_start);
   }
   handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY);
   if (!handle_) {
