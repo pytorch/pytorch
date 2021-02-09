@@ -946,8 +946,6 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
     is_batched_column_major = result.transpose(-2, -1).is_contiguous();
   }
 
-  // if result is not empty and not in batched column major format or does not have the same dtype as input
-  // we have to allocate a temporary tensor
   // if result is not empty and not in batched column major format
   bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
   copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
@@ -1329,8 +1327,6 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
     is_batched_column_major = result.transpose(-2, -1).is_contiguous();
   }
 
-  // if result is not empty and not in batched column major format or does not have the same dtype as input
-  // we have to allocate a temporary tensor
   // if result is not empty and not in batched column major format
   bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
   copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
