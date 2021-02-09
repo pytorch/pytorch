@@ -1141,10 +1141,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
   {
-    using Binop = Tensor (*)(const Tensor&, const Tensor&, std::string);
-    using Unop = Tensor (*)(const Tensor&, Scalar, std::string);
-    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, std::string>);
-    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, Scalar, std::string>);
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, c10::optional<std::string>);
+    using Unop = Tensor (*)(const Tensor&, Scalar, c10::optional<std::string>);
+    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, c10::optional<std::string>>);
+    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, Scalar, c10::optional<std::string>>);
   }
 
   // at::pow has three out-of-place overloads
