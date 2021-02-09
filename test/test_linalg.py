@@ -2846,15 +2846,15 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32)
     def test_tensorsolve_errors_and_warnings(self, device, dtype):
         # tensorsolve expects the input that can be reshaped to a square matrix
-        a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
-        b = torch.randn(8, 4)
+        a = torch.eye(2 * 3 * 4, dtype=dtype, device=device).reshape((2 * 3, 4, 2, 3, 4))
+        b = torch.randn(8, 4, dtype=dtype, device=device)
         self.assertTrue(np.prod(a.shape[2:]) != np.prod(b.shape))
         with self.assertRaisesRegex(RuntimeError, r'Expected self to satisfy the requirement'):
             torch.linalg.tensorsolve(a, b)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
         out = torch.empty_like(a)
-        b = torch.randn(6, 4)
+        b = torch.randn(6, 4, dtype=dtype, device=device)
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
             torch.linalg.tensorsolve(a, b, out=out)
@@ -2866,6 +2866,13 @@ class TestLinalg(TestCase):
         out = torch.empty_like(a).to(torch.int)
         with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
             torch.linalg.tensorsolve(a, b, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.tensorsolve(a, b, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2964,18 +2971,18 @@ class TestLinalg(TestCase):
         def check_shape(a_shape, ind):
             # tensorinv requires the input to satisfy
             # prod(a.shape[ind:]) == prod(a.shape[:ind])
-            a = torch.randn(a_shape)
+            a = torch.randn(a_shape, dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, "Expected self to satisfy the requirement"):
                 torch.linalg.tensorinv(a, ind=ind)
 
         def check_ind(a_shape, ind):
-            a = torch.randn(a_shape)
+            a = torch.randn(a_shape, dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, "Expected a strictly positive integer"):
                 torch.linalg.tensorinv(a, ind=ind)
 
         def check_out(a_shape, ind):
             # if non-empty out tensor with wrong shape is passed a warning is given
-            a = torch.randn(a_shape)
+            a = torch.randn(a_shape, dtype=dtype, device=device)
             out = torch.empty_like(a)
             with warnings.catch_warnings(record=True) as w:
                 # Trigger warning
@@ -2985,9 +2992,16 @@ class TestLinalg(TestCase):
                 self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
             # dtypes should be compatible
-            out = torch.empty_like(a).to(torch.int)
+            out = torch.empty(0, dtype=torch.int, device=device)
             with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
                 torch.linalg.tensorinv(a, ind=ind, out=out)
+
+            # device should match
+            if torch.cuda.is_available():
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                out = torch.empty(0, dtype=dtype, device=wrong_device)
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    torch.linalg.tensorinv(a, ind=ind, out=out)
 
         # test for invalid shape
         check_shape((2, 3, 4), ind=1)
