@@ -12628,6 +12628,17 @@ dedent """
             test_str.append(str(fn.foo.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
+    # Tests that "# type: ignore[*]" is supported in type lines and is
+    # properly ignored.
+    def test_mypy_type_ignore(self):
+        @torch.jit.script
+        def foo(x):  # type: ignore
+            return x
+
+        @torch.jit.script
+        def bar(x):  # type: ignore[no-redef]
+            return x
+
     def test_method_casts_script(self):
         cast_types = [
             'byte', 'char', 'double', 'float', 'int', 'long', 'short'
