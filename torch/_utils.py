@@ -421,11 +421,26 @@ class ExceptionWrapper(object):
             # makes stack traces unreadable. It will not be changed in Python
             # (https://bugs.python.org/issue2651), so we work around it.
             msg = KeyErrorMessage(msg)
-        elif getattr(self.exc_type, "message", None):
-            # Some exceptions have first argument as non-str but explicitly
-            # have message field
-            raise self.exc_type(message=msg)
-        raise self.exc_type(msg)
+
+        try:
+            if getattr(self.exc_type, "message", None):
+                # Some exceptions have first argument as non-str but explicitly
+                # have message field
+                e = self.exc_type(message=msg)
+            else:
+                e = self.exc_type(msg)
+        except TypeError:
+            # We have no guarantee that `self.exc_type` can be constructed with
+            # our updated message; a custom Exception could take arbitrary
+            # arguments. In such a case we can't re-raise and must instead
+            # salvage as much information as possible and raise a generic
+            # exception.
+            e = Exception(
+                f"Failed to re-raise {self.exc_type.__name__}: "
+                f"raising Exception instead\n\n{msg}"
+            )
+
+        raise e
 
 
 def _get_available_device_type():

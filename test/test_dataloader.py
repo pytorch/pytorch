@@ -385,6 +385,24 @@ class ErrorDataset(Dataset):
         return self.size
 
 
+class CustomException(Exception):
+
+    def __init__(self, message: str, other_arg: str):
+        super().__init__(message)
+
+
+class CustomExceptionDataset(Dataset):
+
+    def __init__(self, size):
+        self.size = size
+
+    def __getitem__(self, idx):
+        raise CustomException("Test failure", "Other arg")
+
+    def __len__(self):
+        return self.size
+
+
 class SegfaultDataset(Dataset):
 
     def __init__(self, size):
@@ -514,6 +532,12 @@ def _test_large_sampler_indices(persistent_workers):
     for x in it:
         assert x.numel() == 0
         raise RuntimeError('My Error')
+
+
+def _test_custom_exception():
+    dataset = CustomExceptionDataset(10)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
+    _ = next(iter(dataloader))
 
 
 def disable_stderr(worker_id):
@@ -952,6 +976,18 @@ except RuntimeError as e:
             next(loader2_it)
             next(loader1_it)
             next(loader2_it)
+
+    def test_custom_exception(self):
+        p = ErrorTrackingProcess(target=_test_custom_exception)
+        p.start()
+        p.join(JOIN_TIMEOUT)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+            self.assertIsInstance(p.exception, Exception)
+            self.assertRegex(str(p.exception), r'Failed to re-raise')
+        finally:
+            p.terminate()
 
     @unittest.skip("temporarily disable until flaky failures are fixed")
     def test_segfault(self):
