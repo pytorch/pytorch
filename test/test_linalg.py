@@ -3162,6 +3162,32 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_matrix_rank_out_errors_and_warnings(self, device, dtype):
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.bool, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            torch.linalg.matrix_rank(a, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.matrix_rank(a, out=out)
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            out = torch.empty(3, dtype=dtype, device=device)
+            # Trigger warning
+            torch.linalg.matrix_rank(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_matrix_rank_basic(self, device, dtype):
         matrix_rank = torch.linalg.matrix_rank
 
