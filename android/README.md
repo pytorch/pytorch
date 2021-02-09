@@ -63,22 +63,19 @@ The workflow contains several steps:
 
 3\. And finally run `gradle` in `android/pytorch_android` directory with task `assembleRelease`
 
-Script requires that Android SDK, Android NDK and gradle are installed.
+Script requires that Android SDK and Android NDK are installed.
 They are specified as environment variables:
 
 `ANDROID_HOME` - path to [Android SDK](https://developer.android.com/studio/command-line/sdkmanager.html)
 
 `ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk)
 
-`GRADLE_HOME` - path to [gradle](https://gradle.org/releases/)
-
-
-After successful build you should see the result as aar file:
+After successful build you should see the result as aar files:
 
 ```
-$ find pytorch_android/build/ -type f -name *aar
-pytorch_android/build/outputs/aar/pytorch_android.aar
-pytorch_android_torchvision/build/outputs/aar/pytorch_android.aar
+$ find android/pytorch_android*/build/ -type f -name *aar
+android/pytorch_android/build/outputs/aar/pytorch_android-release.aar
+android/pytorch_android_torchvision/build/outputs/aar/pytorch_android_torchvision-release.aar
 ```
 
 It can be used directly in android projects, as a gradle dependency:
