@@ -275,17 +275,6 @@ class TestViewOps(TestCase):
             self.assertTrue(self.is_view_of(a, a_split_dim1_tensor))
 
     @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
-    def test_real_imag_noncomplex(self, device, dtype):
-        t = torch.ones((5, 5), dtype=dtype, device=device)
-
-        with self.assertRaises(RuntimeError):
-            torch.real(t)
-
-        with self.assertRaises(RuntimeError):
-            torch.imag(t)
-
-    @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_complex_dtypes())
     def test_real_imag_view(self, device, dtype):
         def compare_with_numpy(contiguous_input=True):
