@@ -1,6 +1,7 @@
 
 import ast
 import inspect
+import sys
 import textwrap
 import torch
 
@@ -53,6 +54,10 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     """
 
     def check(self, nn_module: torch.nn.Module) -> None:
+
+        # Check if we have a Python version <3.8
+        self.using_deprecated_ast: bool = sys.version_info < (3, 8)
+
         source_lines = textwrap.dedent(inspect.getsource(nn_module.__class__.__init__))
 
         # This AST only contains the `__init__` method of the nn.Module
@@ -114,7 +119,12 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         elif ann_type == "Optional":
             # Assigning `None` to an `Optional` type gives you an
             # AnnAssign Node where value=Constant(value=None, kind=None)
-            if not isinstance(node.value, ast.Constant):
+            # or, in Python <3.8, value=NameConstant(value=None)
+            if (not self.using_deprecated_ast
+                    and not isinstance(node.value, ast.Constant)):
+                return
+            if (self.using_deprecated_ast
+                    and not isinstance(node.value, ast.NameConstant)):
                 return
             if node.value.value:
                 return
@@ -185,8 +195,13 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             if node.args[1].keys:
                 return
         elif ann_type == "Optional":
-            # `None` is Constant(value=None, kind=None)
-            if not isinstance(node.args[1], ast.Constant):
+            # `None` is Constant(value=None, kind=None), or, in Python
+            # <3.8, value=NameConstant(value=None)
+            if (not self.using_deprecated_ast
+                    and not isinstance(node.args[1], ast.Constant)):
+                return
+            if (self.using_deprecated_ast
+                    and not isinstance(node.args[1], ast.NameConstant)):
                 return
             if node.args[1].value:
                 return
