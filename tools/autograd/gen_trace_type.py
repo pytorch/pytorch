@@ -312,12 +312,7 @@ def get_return_value(f: NativeFunction) -> str:
         return f'std::make_tuple({moved})'
 
 TRACE_DISPATCH = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-    .typed<${arg_types}>();
-${assign_return_values}c10::Dispatcher::singleton()
-    .redispatch<${ret_and_arg_types}>(${redispatch_args});
-""")
+${assign_return_values}at::redispatch::${api_name}(${unpacked_args});""")
 
 def emit_trace_body(f: NativeFunction) -> List[str]:
     trace_body: List[str] = []
@@ -328,22 +323,24 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
     # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
     dispatch_key_set = 'ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer)'
-    redispatch_args = ', '.join(['op', dispatch_key_set] + [a.expr for a in dispatcher_exprs])
+    redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     assign_return_values = f'{tie_return_values(f)} = ' \
                            if f.func.kind() == SchemaKind.functional and f.func.returns else ''
 
+    api_name = cpp.name(f.func, faithful_name_for_out_overloads=True)
+    if f.manual_cpp_binding:
+        # The redispatching namespace doesn't include fastpath manual_cpp_binding ops.
+        # Instead, call the codegen'd __dispatch_ binding
+        api_name = '__dispatch_' + api_name
+
     trace_body.append(TRACE_DISPATCH.substitute(
-        operator_name=f.func.name.name,
-        overload_name=f.func.name.overload_name,
-        arg_types=dispatcher_sig.type(),
         assign_return_values=assign_return_values,
-        ret_and_arg_types=ret_and_arg_types,
-        redispatch_args=redispatch_args,
+        api_name=api_name,
+        unpacked_args=redispatch_args,
     ))
 
     trace_body.append(format_postrecord_trace(f))
