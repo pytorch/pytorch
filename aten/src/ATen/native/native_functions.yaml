@@ -1392,17 +1392,17 @@
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
-- func: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+- func: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   variants: function, method
   dispatch:
     CPU, CUDA: div
 
-- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
   dispatch:
     CPU, CUDA: div_
 
-- func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+- func: div.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: div_out
 
@@ -1417,12 +1417,12 @@
   dispatch:
     DefaultBackend: div_
 
-- func: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+- func: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   variants: function, method
   dispatch:
     DefaultBackend: div
 
-- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
+- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
   dispatch:
     DefaultBackend: div_
@@ -1443,18 +1443,18 @@
 - func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
 
-- func: divide.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+- func: divide.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   variants: function, method
 
-- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
 
-- func: divide.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+- func: divide.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
 
-- func: divide.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+- func: divide.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   variants: function, method
 
-- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
+- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
 
   # true_divide, an alias for div
