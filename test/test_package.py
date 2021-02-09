@@ -3,6 +3,7 @@ import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
+from torch.package.module_environment import set_module_env, ModuleEnv, DefaultImporter
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -191,7 +192,7 @@ import module_a
 
         f2 = self.temp()
         pe = PackageExporter(f2, verbose=False)
-        pe.importers.insert(0, importer1.import_module)
+        pe.module_env = ModuleEnv([importer1, DefaultImporter])
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
             pe.require_module(loaded1.__module__)
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
@@ -220,7 +221,7 @@ import module_a
         def make_exporter():
             pe = PackageExporter(f2, verbose=False)
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
-            pe.importers.insert(0, importer1.import_module)
+            pe.module_env = ModuleEnv([importer1, DefaultImporter])
             return pe
 
         # This should fail. The 'PackageAObject' type defined from 'importer1'
@@ -357,8 +358,7 @@ import module_a
             # came from imported packages so that it can resolve
             # class names like torchvision.models.resnet.ResNet
             # to their source code.
-
-            e.importers.insert(0, i.import_module)
+            e.module_env = ModuleEnv([i, DefaultImporter])
 
             # e.importers is a list of module importing functions
             # that by default contains importlib.import_module.
