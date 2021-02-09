@@ -996,6 +996,10 @@ class AbstractTestCases:
             self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, [2, 2]), torch.tensor([[1, 2], [3, 4]]))
             self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, torch.Size([2, 2])), torch.tensor([[1, 2], [3, 4]]))
             self.assertEqual(torch.ones(2, 10).unflatten(1, (5, 2)), torch.ones(2, 5, 2))
+            self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, (-1, 2)),
+                             torch.tensor([[1, 2], [3, 4]]))
+            self.assertEqual(torch.ones(2, 10).unflatten(1, (5, -1)),
+                             torch.ones(2, 5, 2))
 
             # test invalid args: tensor, str, sizes
             with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
@@ -1012,6 +1016,11 @@ class AbstractTestCases:
                 torch.tensor([1]).unflatten(0, [2, 2])
             with self.assertRaisesRegex(IndexError, r"dimension specified as 0 but tensor has no dimensions"):
                 torch.tensor(1).unflatten(0, [0])
+            with self.assertRaisesRegex(RuntimeError, r"only one dimension can be inferred"):
+                torch.randn(5, 10).unflatten(1, (-1, -1))
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"Provided sizes \[-1, 4\] don't multiply up to the size of dim 1 \(10\)"):
+                torch.randn(5, 10).unflatten(1, (-1, 4))
 
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):

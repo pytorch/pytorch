@@ -1077,6 +1077,12 @@ class TestNamedTensor(TestCase):
         self.assertTrue(torch.equal(
             torch.ones(4).unflatten(-1, (['A', 2], ['B', 2])),
             torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', -1], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', 2], ['B', -1])),
+            torch.ones(2, 2, names=('A', 'B'))))
 
         # test args: namedtensor, int, namedshape
         self.assertTrue(torch.equal(
@@ -1095,6 +1101,11 @@ class TestNamedTensor(TestCase):
         # test invalid args: namedtensor, int, sizes
         with self.assertRaisesRegex(RuntimeError, r"input is a named tensor but no names were given for unflattened sizes"):
             torch.tensor([1], names=("A",)).unflatten(0, (1, 1))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Provided sizes \[3, -1\] don't multiply up to the "
+                                    r"size of dim 1 \('B': 4\) in Tensor\['A', 'B'\]"):
+            torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 3), ('B2', -1)))
 
         tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
 
