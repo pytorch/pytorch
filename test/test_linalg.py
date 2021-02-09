@@ -2551,6 +2551,21 @@ class TestLinalg(TestCase):
             b = torch.randn(2, 2, 2, dtype=dtype, device=device)
             torch.linalg.solve(A, b, out=out)
 
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            torch.linalg.solve(a, b, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            clone_a = torch.empty_like(a)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.solve(a, b, out=out)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -2623,6 +2638,35 @@ class TestLinalg(TestCase):
         run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting b
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_solve_errors_and_warnings(self, device, dtype):
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        lu = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected solution to be compatible with"):
+            torch.solve(b, a, out=(out, lu))
+
+        out = torch.empty(0, dtype=dtype, device=device)
+        lu = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected lu to be compatible with"):
+            torch.solve(b, a, out=(out, lu))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            lu = torch.empty_like(a)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.solve(b, a, out=(out, lu))
+            out = torch.empty(0, dtype=dtype, device=device)
+            lu = torch.empty_like(a).to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.solve(b, a, out=(out, lu))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
