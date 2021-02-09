@@ -376,6 +376,12 @@ class Transformer(Interpreter):
         assert isinstance(target, str)
         return Proxy(self.new_graph.get_attr(target), self.tracer)
 
+    def call_module(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+        # Override so that the leaf module policy from `self.tracer` is respected.
+        assert isinstance(target, str)
+        submod = self.fetch_attr(target)
+        return self.tracer.call_module(submod, submod.forward, args, kwargs)
+
     def transform(self) -> GraphModule:
         """
         Transform ``self.module`` and return the transformed

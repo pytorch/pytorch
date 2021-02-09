@@ -13,6 +13,7 @@ import unittest
 from math import sqrt
 from pathlib import Path
 from torch.multiprocessing import Process
+from torch.testing import FileCheck
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 from torch.fx.node import Target
 from torch.fx.passes import shape_prop
@@ -732,6 +733,30 @@ class TestFX(JitTestCase):
         self.assertIn('operator.add', graph_str)
         self.assertIn('torch.add', graph_str)
 
+    def test_pretty_print_node(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param: torch.nn.Parameter = torch.nn.Parameter(
+                    torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x: torch.Tensor, y: int = 2):
+                return self.linear(x[y] + self.param).clamp(min=0.0, max=1.0)
+
+        traced = symbolic_trace(M())
+
+        all_formatted = "\n".join([n.format_node() for n in traced.graph.nodes])
+
+        FileCheck().check("x").check("placeholder") \
+            .check("y").check("placeholder") \
+            .check("getitem").check("call_function") \
+            .check("param").check("get_attr") \
+            .check("add").check("call_function") \
+            .check("linear").check("call_module") \
+            .check("clamp").check("call_method") \
+            .run(all_formatted)
+
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
         # We used to call anonymous Tensor values `__tensor_constant*`, but
@@ -1056,6 +1081,13 @@ class TestFX(JitTestCase):
         interp = Interpreter(gm)
         result = interp.run(torch.ones(3, 4), torch.ones(3, 4), torch.rand(3, 4))
         self.assertEqual(result, torch.ones(3, 4) * 2.0)
+
+    @skipIfNoTorchVision
+    def test_interpreter_noop_resnet18(self):
+        rn18 = resnet18()
+        transformed = torch.fx.Transformer(symbolic_trace(rn18)).transform()
+        inp = torch.randn(5, 3, 224, 224)
+        self.assertEqual(transformed(inp), rn18(inp))
 
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):

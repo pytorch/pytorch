@@ -22,7 +22,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
-from torch.fx.experimental.normalize import normalize_functional_args
+from torch.fx.experimental.normalize import NormalizeArgs
 
 try:
     from torchvision.models import resnet18
@@ -764,14 +764,20 @@ terrible spacing
         input = torch.randn(5, 3, 224, 224)
         ref_outs = traced(input)
 
-        traced = normalize_functional_args(traced)
+        traced = NormalizeArgs(traced).transform()
 
         test_outs = traced(input)
         self.assertEqual(test_outs, ref_outs)
 
+        modules = dict(traced.named_modules())
         for node in traced.graph.nodes:
             if node.target == torch.nn.functional.relu:
                 self.assertEqual(len(node.args), 0)
+            if node.op == 'call_module':
+                submod_class = modules[node.target].__class__
+                nn_class = getattr(torch.nn, submod_class.__name__)
+                if submod_class == nn_class:
+                    self.assertEqual(len(node.args), 0)
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
