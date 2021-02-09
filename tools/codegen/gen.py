@@ -127,10 +127,13 @@ class ComputeFunction:
         Literal[Target.DECLARATION],
         Literal[Target.DEFINITION]
     ]
+    is_redispatching_fn: bool
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        if Variant.function not in f.variants:
+        # We unconditionally generate function variants of the redispatch API.
+        # This is mainly because we can namespace functions separately, but not methods,
+        if Variant.function not in f.variants and not self.is_redispatching_fn:
             return None
 
         name = cpp.name(f.func)
@@ -138,9 +141,11 @@ class ComputeFunction:
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
-            result = f"TORCH_API {sig_group.signature.decl()};\n"
+            sig_str = sig_group.signature.decl(is_redispatching_fn=self.is_redispatching_fn)
+            result = f"TORCH_API {sig_str};\n"
             if sig_group.faithful_signature is not None:
-                result += f"TORCH_API {sig_group.faithful_signature.decl()};\n"
+                sig_str = sig_group.faithful_signature.decl(is_redispatching_fn=self.is_redispatching_fn)
+                result += f"TORCH_API {sig_str};\n"
             return result
 
         if self.target is not Target.DEFINITION:
@@ -155,15 +160,20 @@ class ComputeFunction:
                 sig = sig_group.signature
 
             dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
-            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
+            if self.is_redispatching_fn:
+                dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in dispatcher_exprs])
+                dispatcher_call = 'redispatch'
+            else:
+                dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
+                dispatcher_call = 'call'
 
             return f"""
 // aten::{f.func}
-{sig.defn()} {{
+{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_sig.type()}>();
-    return op.call({dispatcher_exprs_str});
+    return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
 
@@ -910,10 +920,18 @@ def main() -> None:
     })
 
     cpu_fm.write('Functions.h', lambda: {
-        'function_declarations': list(mapMaybe(ComputeFunction(Target.DECLARATION), native_functions)),
+        'function_declarations': list(mapMaybe(
+            ComputeFunction(Target.DECLARATION, is_redispatching_fn=False), native_functions)),
+        'function_redispatch_declarations': list(mapMaybe(
+            ComputeFunction(Target.DECLARATION, is_redispatching_fn=True), native_functions)),
     })
     cpu_fm.write('Functions.cpp', lambda: {
-        'function_definitions': list(mapMaybe(ComputeFunction(Target.DEFINITION), native_functions)),
+        'function_definitions': list(mapMaybe(
+            ComputeFunction(Target.DEFINITION, is_redispatching_fn=False), native_functions)),
+    })
+    cpu_fm.write('RedispatchFunctions.cpp', lambda: {
+        'function_redispatch_definitions': list(mapMaybe(
+            ComputeFunction(Target.DEFINITION, is_redispatching_fn=True), native_functions)),
     })
     core_fm.write('TensorBody.h', lambda: {
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(Target.DECLARATION), native_functions)),
