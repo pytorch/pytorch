@@ -965,6 +965,7 @@ Miscellanea
    -  Nondeterministic constructors (``rand``, ``randn``) will have a
       single random value embedded in the trace. This is likely not the
       intended behavior. One workaround is to wrap ``torch.randn`` in a ``torch.fx.wrap`` function and call that instead.
+
     ::
 
         @torch.fx.wrap
