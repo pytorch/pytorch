@@ -2448,6 +2448,12 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, out)
             self.assertEqual(x, out)
 
+            # Check out= variant with complex128 out tensor
+            out = torch.empty_like(x).to(torch.complex128)
+            ans = torch.linalg.solve(A, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(x.to(torch.complex128), out)
+
             # Check empty out
             out = torch.empty(0, dtype=dtype, device=device)
             ans = torch.linalg.solve(A, b, out=out)
