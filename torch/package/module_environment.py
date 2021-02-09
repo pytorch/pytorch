@@ -11,11 +11,13 @@ from .importer import BaseImporter
 
 class ModuleEnvError(Exception):
     """Raised by ModuleEnv.check_obj."""
+
     pass
 
 
 class _DefaultImporter(BaseImporter):
     """An importer that implements the default behavior of Python."""
+
     def __init__(self):
         self.modules = sys.modules
 
@@ -50,6 +52,7 @@ class ModuleEnv:
         obj2 = getattr(module, obj_name)
         assert obj1 is obj2
     """
+
     def __init__(self, importers: Optional[List[BaseImporter]] = None):
         if importers is None:
             importers = [DefaultImporter]
