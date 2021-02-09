@@ -62,15 +62,18 @@ template <typename FnPtr, typename T>
 struct TORCH_API DispatchStub;
 
 struct TORCH_API DispatchStubImpl {
+  virtual void* choose_cpu_fn() = 0;
+  virtual ~DispatchStubImpl() = default;
+
 protected:
-  void* get_call_ptr_impl(DeviceType device_type, std::function<void*()> const& cpu_chooser) {
+  void* get_call_ptr_impl(DeviceType device_type) {
     switch (device_type) {
       case DeviceType::CPU: {
         // Use memory_order_relaxed here since even if two threads race,
         // they will still compute the same value for cpu_dispatch_ptr.
         auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
         if (!fptr) {
-          fptr = cpu_chooser();
+          fptr = choose_cpu_fn();
           cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
         }
         return fptr;
@@ -113,11 +116,7 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T>: public DispatchStubImpl {
 
 private:
   FnPtr get_call_ptr(DeviceType device_type) {
-    return reinterpret_cast<FnPtr>(
-      get_call_ptr_impl(
-        device_type,
-        [this] { return reinterpret_cast<void*>(choose_cpu_impl()); }
-    ));
+    return reinterpret_cast<FnPtr>(get_call_ptr_impl(device_type));
   }
 
 public:
@@ -125,6 +124,10 @@ public:
   rT operator()(DeviceType device_type, ArgTypes&&... args) {
     FnPtr call_ptr = get_call_ptr(device_type);
     return (*call_ptr)(std::forward<ArgTypes>(args)...);
+  }
+
+  void* choose_cpu_fn() override {
+    return reinterpret_cast<void*>(choose_cpu_impl());
   }
 
   FnPtr choose_cpu_impl() {
