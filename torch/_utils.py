@@ -393,10 +393,13 @@ def annotate(ret, **kwargs):
 # and the frame (which holds reference to all the object in its temporary scope)
 # holding reference the traceback.
 
-class KeyErrorMessage(str):
-    r"""str subclass that returns itself in repr"""
-    def __repr__(self):
-        return self
+class _RemoteTraceback(Exception):
+    r"""Remote Exception with traceback as error message"""
+    def __init__(self, tb):
+        self.tb = tb
+
+    def __str__(self):
+        return self.tb
 
 
 class ExceptionWrapper(object):
@@ -406,26 +409,15 @@ class ExceptionWrapper(object):
         # NOTE [ Python Traceback Reference Cycle Problem ]
         if exc_info is None:
             exc_info = sys.exc_info()
-        self.exc_type = exc_info[0]
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
         self.where = where
 
     def reraise(self):
         r"""Reraises the wrapped exception in the current thread"""
-        # Format a message such as: "Caught ValueError in DataLoader worker
-        # process 2. Original Traceback:", followed by the traceback.
-        msg = "Caught {} {}.\nOriginal {}".format(
-            self.exc_type.__name__, self.where, self.exc_msg)
-        if self.exc_type == KeyError:
-            # KeyError calls repr() on its argument (usually a dict key). This
-            # makes stack traces unreadable. It will not be changed in Python
-            # (https://bugs.python.org/issue2651), so we work around it.
-            msg = KeyErrorMessage(msg)
-        elif getattr(self.exc_type, "message", None):
-            # Some exceptions have first argument as non-str but explicitly
-            # have message field
-            raise self.exc_type(message=msg)
-        raise self.exc_type(msg)
+        self.exc = Exception("Re-raise the exception {}".format(self.where))
+        # Exception Chain
+        self.exc.__cause__ = _RemoteTraceback(self.exc_msg)
+        raise self.exc
 
 
 def _get_available_device_type():

@@ -18,7 +18,7 @@ from torch.utils.data import (_utils, Dataset, IterableDataset, TensorDataset, D
                               ChainDataset, BufferedShuffleDataset)
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from torch._utils import ExceptionWrapper
+from torch._utils import ExceptionWrapper, _RemoteTraceback
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ROCM, TEST_WITH_TSAN, IS_SANDCASTLE)
@@ -843,14 +843,23 @@ class TestDataLoader(TestCase):
                 return
 
     def test_error_in_init(self):
-        for num_workers in [0, 2]:
-            loader = self._get_data_loader(ErrorIterableDataset(), num_workers=num_workers)
-            with self.assertRaisesRegex(RuntimeError, 'Error in __iter__'):
-                list(iter(loader))
+        loader = self._get_data_loader(ErrorIterableDataset(), num_workers=0)
+        with self.assertRaisesRegex(RuntimeError, 'Error in __iter__'):
+            list(iter(loader))
+
+        loader = self._get_data_loader(ErrorIterableDataset(), num_workers=2)
+        with self.assertRaises(Exception) as cm:
+            list(iter(loader))
+        e = cm.exception.__cause__
+        self.assertIsInstance(e, _RemoteTraceback)
+        self.assertRegex(e.tb, "RuntimeError: Error in __iter__$")
 
         loader = self._get_data_loader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
-        with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
+        with self.assertRaises(Exception) as cm:
             list(iter(loader))
+        e = cm.exception.__cause__
+        self.assertIsInstance(e, _RemoteTraceback)
+        self.assertRegex(e.tb, "RuntimeError: Error in worker_init_fn$")
 
     def test_typing(self):
         from typing import List
