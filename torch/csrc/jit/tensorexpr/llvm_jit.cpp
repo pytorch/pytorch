@@ -20,6 +20,8 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 
+#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
+
 #include <c10/util/Half.h>
 
 #include <algorithm>
@@ -80,6 +82,11 @@ static void registerIntrinsics(
     intrinsics.insert(sym.symbol);
   }
   assertSuccess(JD.define(absoluteSymbols(symbols)));
+
+  for (const auto& kv : getNNCFunctionRegistry()) {
+    assertSuccess(
+        JD.define(absoluteSymbols({entry(kv.first.c_str(), kv.second)})));
+  }
 }
 
 namespace llvm {
@@ -87,7 +94,7 @@ namespace orc {
 
 // Lightly modified implementation from LLVM's Kaleidoscope JIT tutorial:
 // https://llvm.org/docs/tutorial/BuildingAJIT1.html
-#if LLVM_VERSION_MAJOR >= 9 && LLVM_VERSION_MAJOR <= 12
+#if LLVM_VERSION_MAJOR >= 9
 class TORCH_API PytorchLLVMJITImpl {
  private:
   std::unique_ptr<TargetMachine> TM;
@@ -226,7 +233,7 @@ class TORCH_API PytorchLLVMJITImpl {
 };
 
 #else // LLVM_VERSION_MAJOR
-#error Only LLVM versions 8 through 12 are supported.
+#error Only LLVM versions 8 and above are supported.
 #endif
 
 PytorchLLVMJIT::PytorchLLVMJIT()

@@ -1,9 +1,9 @@
 from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
-from types import ModuleType
 import builtins
 import importlib
 import inspect
 import linecache
+from weakref import WeakValueDictionary
 from torch.serialization import _load
 import pickle
 import torch
@@ -437,7 +437,7 @@ class _ExternNode(_PathNode):
     pass
 
 # A private global registry of all modules that have been package-imported.
-_package_imported_modules: Dict[str, ModuleType] = {}
+_package_imported_modules: WeakValueDictionary = WeakValueDictionary()
 
 # `inspect` by default only looks in `sys.modules` to find source files for classes.
 # Patch it to check our private registry of package-imported modules as well.
