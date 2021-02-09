@@ -1094,7 +1094,7 @@ except RuntimeError as e:
         self.assertEqual(len(fetched), 20)
         for i, d in enumerate(fetched):
             # non-batched should not convert ints into tensors
-            self.assertIsInstance(d, torch._six.int_classes)
+            self.assertIsInstance(d, int)
             self.assertEqual(d, i)
         # DataLoader should match len of the iterable-style dataset (if implemented)
         self.assertEqual(len(dataloader), len(dataset))
@@ -1113,7 +1113,7 @@ except RuntimeError as e:
             fetched = sorted(dataloader_iter)
             for a, b in zip(fetched, expected):
                 # non-batched should not convert ints into tensors
-                self.assertIsInstance(a, torch._six.int_classes)
+                self.assertIsInstance(a, int)
                 self.assertEqual(a, b)
             # DataLoader should match len of the iterable-style dataset (if implemented)
             self.assertEqual(len(dataloader), len(dataset))
