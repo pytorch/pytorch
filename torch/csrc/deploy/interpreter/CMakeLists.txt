@@ -104,16 +104,3 @@ target_include_directories(torch_deployinterpreter PUBLIC ${PYTHON_INC_DIR})
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
 target_link_libraries(torch_deployinterpreter PRIVATE crypt crypto ssl pthread dl util m z ffi lzma readline nsl ncursesw panelw) # for python builtins
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
-
-
-add_custom_command(
-  OUTPUT libtorch_deploy_interpreter.o
-  COMMAND cp $<TARGET_FILE:torch_deployinterpreter> .
-  COMMAND ld -r -b binary -o libtorch_deployinterpreter.o libtorch_deployinterpreter.so
-  COMMAND rm libtorch_deployinterpreter.so
-  DEPENDS torch_deployinterpreter
-  VERBATIM
-)
-
-add_library(torch_deployinterpreter_symbols STATIC libtorch_deployinterpreter.o)
-set_target_properties(torch_deployinterpreter_symbols PROPERTIES LINKER_LANGUAGE CXX)

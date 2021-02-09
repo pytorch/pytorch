@@ -1,10 +1,8 @@
 #include <torch/csrc/deploy/deploy.h>
 
-#ifndef _WIN32
 #include <dlfcn.h>
 #include <libgen.h>
 #include <unistd.h>
-#endif
 
 extern "C" char _binary_libtorch_deployinterpreter_so_start[];
 extern "C" char _binary_libtorch_deployinterpreter_so_end[];
@@ -53,17 +51,12 @@ MovableObject InterpreterSession::create_movable(PythonObject obj) {
       manager_->next_object_id_++, std::move(pickled), manager_));
 }
 
-#ifndef _WIN32
-
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
   char library_name[L_tmpnam];
   std::tmpnam(library_name);
   library_name_ = library_name;
   {
-    TORCH_CHECK(
-        _binary_libtorch_deployinterpreter_so_start[0] != '\0',
-        "Intepreter library libtorch_deployinterpreter.so was not included, was PyTorch built with USE_DEPLOY=ON?");
     std::ofstream dst(library_name, std::ios::binary);
     dst.write(
         _binary_libtorch_deployinterpreter_so_start,
@@ -98,13 +91,5 @@ Interpreter::~Interpreter() {
     dlclose(handle_);
   }
 }
-
-#else
-Interpreter::Interpreter(InterpreterManager* manager)
-    : handle_(nullptr), manager_(manager) {
-  TORCH_CHECK(false, "Torch Deploy is not yet implemented on Windows");
-};
-Interpreter::~Interpreter() {}
-#endif
 
 } // namespace torch
