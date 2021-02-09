@@ -46,7 +46,7 @@ bool isSimpleMap(Node* node) {
       "aten::cos(Tensor self) -> Tensor",
       "aten::cosh(Tensor self) -> Tensor",
       "aten::div(Tensor self, Tensor other) -> Tensor",
-      "aten::div(Tensor self, Tensor other, *, str rounding_mode) -> Tensor",
+      "aten::div(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor",
       "aten::exp(Tensor self) -> Tensor",
       "aten::expm1(Tensor self) -> Tensor",
       "aten::erf(Tensor self) -> Tensor",
@@ -88,7 +88,7 @@ bool isSimpleMap(Node* node) {
       "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
       "aten::mul(Tensor self, Scalar other) -> Tensor",
       "aten::div(Tensor self, Scalar other) -> Tensor",
-      "aten::div(Tensor self, Scalar other, *, str rounding_mode) -> Tensor",
+      "aten::div(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor",
 
       "aten::eq(Tensor self, Tensor other) -> Tensor",
       "aten::eq(Tensor self, Scalar other) -> Tensor",

@@ -249,7 +249,7 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
 // To perform floor division the sparse tensor must be coalesced first.
 
-SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, std::string rounding_mode, SparseTensor& r) {
+SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, c10::optional<std::string> rounding_mode, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
   TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
@@ -259,7 +259,7 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
   AT_ASSERT(t.is_sparse());
 
   // See note "Sparse Floor Division"
-  const bool should_coalesce = (rounding_mode != "true") && !t.is_coalesced();
+  const bool should_coalesce = rounding_mode.has_value() && !t.is_coalesced();
   if (is_same_tensor(r, t)) {
     if (should_coalesce) {
       coalesce_(r);
@@ -303,21 +303,20 @@ SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, SparseT
   return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
-Tensor div_sparse(const Tensor& self, const Tensor& value, std::string rounding_mode) {
+Tensor div_sparse(const Tensor& self, const Tensor& value, c10::optional<std::string> rounding_mode) {
   auto commonDtype = at::result_type(self, value);
-  if (c10::isIntegralType(commonDtype, /*include_bool=*/true) &&
-      rounding_mode == "true") {
+  if (c10::isIntegralType(commonDtype, /*include_bool=*/true) && !rounding_mode.has_value()) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
   }
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return div_out_sparse_zerodim(self, value, std::move(rounding_mode), result);
 }
 
-Tensor& div_sparse_(Tensor& self, const Tensor& value, std::string rounding_mode) {
+Tensor& div_sparse_(Tensor& self, const Tensor& value, c10::optional<std::string> rounding_mode) {
   return div_out_sparse_zerodim(self, value, std::move(rounding_mode), self);
 }
 
-SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, std::string rounding_mode, SparseTensor& r) {
+SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, c10::optional<std::string> rounding_mode, SparseTensor& r) {
   return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), std::move(rounding_mode), r);
 }
 
