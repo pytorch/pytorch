@@ -1,4 +1,4 @@
-from functools import reduce, wraps
+from functools import reduce, wraps, partial
 from itertools import product
 from operator import mul, itemgetter
 import collections
@@ -6,7 +6,7 @@ import operator
 
 import torch
 import numpy as np
-from torch._six import inf, istuple
+from torch._six import inf
 from torch.autograd import Variable
 import collections.abc
 
@@ -577,6 +577,21 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
                                           low=None, high=None,
                                           requires_grad=requires_grad), shape))
                  for size, shape in test_cases)
+
+def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None):
+    a = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    is_integral = not dtype.is_floating_point and not dtype.is_complex
+    b = make_tensor((S, S, S), device, dtype, low=1 if is_integral else 0.1, high=None,
+                    requires_grad=requires_grad)
+
+    kwargs = None
+    if rounding_mode is not None:
+        kwargs = dict(rounding_mode=rounding_mode)
+
+    return [
+        SampleInput((a, b), kwargs=kwargs),
+        SampleInput((a,), args=(2,)),
+    ]
 
 def sample_inputs_stack(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
@@ -1467,6 +1482,26 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_diff,
            test_inplace_grad=False),
+    OpInfo('div',
+           variant_test_name='no_rounding_mode',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_div,
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='true_rounding',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='true'),
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='trunc_rounding',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='trunc'),
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_test_name='floor_rounding',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='floor'),
+           assert_autodiffed=True),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half),
@@ -3379,7 +3414,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if istuple(args):
+    if isinstance(args, tuple):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args
