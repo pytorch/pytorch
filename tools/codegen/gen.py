@@ -349,14 +349,14 @@ class ComputeBackendSelect:
         if self.target is Target.DEFINITION:
             # I don't think there's actually a good reason to generate
             # these two cases differently
-            # The first case could probably be improved though- it calls dispatchTypeId(),
+            # The first case could probably be improved though- it calls computeDispatchKeySet(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
             if native_tensor_args:
                 tensor_args = ', '.join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
   DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
-  DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
+  DispatchKey _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask).highestPriorityTypeId();"""
             else:
                 compute_dk = f"DispatchKey _dk = {dispatch_key};"
             return f"""\
