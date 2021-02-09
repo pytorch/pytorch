@@ -66,31 +66,7 @@ struct TORCH_API DispatchStubImpl {
   virtual ~DispatchStubImpl() = default;
 
 protected:
-  void* get_call_ptr_impl(DeviceType device_type) {
-    switch (device_type) {
-      case DeviceType::CPU: {
-        // Use memory_order_relaxed here since even if two threads race,
-        // they will still compute the same value for cpu_dispatch_ptr.
-        auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
-        if (!fptr) {
-          fptr = choose_cpu_fn();
-          cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
-        }
-        return fptr;
-      }
-
-      case DeviceType::CUDA:
-        TORCH_INTERNAL_ASSERT(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
-        return cuda_dispatch_ptr;
-
-      case DeviceType::HIP:
-        TORCH_INTERNAL_ASSERT(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
-        return hip_dispatch_ptr;
-
-      default:
-        AT_ERROR("DispatchStub: unsupported device type", device_type);
-    }
-  }
+  void* get_call_ptr_impl(DeviceType device_type);
 
 public:
   // Fixing dispatch error in Windows debug builds.
