@@ -2633,21 +2633,6 @@ class TestLinalg(TestCase):
             b = torch.randn(2, 2, 2, dtype=dtype, device=device)
             torch.linalg.solve(A, b, out=out)
 
-        # dtypes should be compatible
-        a = torch.eye(2, dtype=dtype, device=device)
-        b = torch.randn(2, 1, dtype=dtype, device=device)
-        out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
-            torch.linalg.solve(a, b, out=out)
-
-        # device should match
-        if torch.cuda.is_available():
-            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-            out = torch.empty(0, dtype=dtype, device=wrong_device)
-            clone_a = torch.empty_like(a)
-            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                torch.linalg.solve(a, b, out=out)
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
