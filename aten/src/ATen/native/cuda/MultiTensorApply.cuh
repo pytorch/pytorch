@@ -71,7 +71,12 @@ void multi_tensor_apply(
         int loc_tensor_info = 0;
         for(size_t t = 0; t < n_tensors; t++) {
 
-            tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t].to<scalar_T>();
+            int index = t;
+            if (scalars.size() != n_tensors) {
+                index = 0;
+            }
+
+            tensorListMeta.scalar_vals[loc_tensor_info] = scalars[index].to<scalar_T>();
 
             tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
