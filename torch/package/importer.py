@@ -149,7 +149,7 @@ class PackageImporter:
         loaded_storages = {}
 
         def load_tensor(data_type, size, key, location, restore_location):
-            name = f'data/{key}'
+            name = f'.data/{key}.storage'
             dtype = data_type(0).dtype
 
             storage = self.zip_reader.get_storage_from_record(name, size, dtype).storage()
@@ -191,7 +191,7 @@ class PackageImporter:
         return self._mangler.parent_name()
 
     def _read_extern(self):
-        return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
+        return self.zip_reader.get_record('.data/extern_modules').decode('utf-8').splitlines(keepends=False)
 
     def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
         mangled_filename = self._mangler.mangle(filename) if filename else None
