@@ -165,7 +165,8 @@ void div_floor_kernel(TensorIterator& iter) {
   } else {
     // See NOTE: [Floor Division in Python]
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
-      cpu_kernel(iter,
+      using vec_t = Vec256<scalar_t>;
+      cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
             auto mod = std::fmod(a, b);
             auto div = (a - mod) / b;
@@ -183,6 +184,19 @@ void div_floor_kernel(TensorIterator& iter) {
               floordiv = std::copysign(scalar_t(0), a / b);
             }
             return floordiv;
+          },
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t>{
+            using vec_t = Vec256<scalar_t>;
+            auto mod = a.fmod(b);
+            auto div = (a - mod) / b;
+            const auto zero = vec_t(0);
+            auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
+            const auto one = vec_t(1);
+            div = vec_t::blendv(div, div - one, mask);
+            auto floordiv = div.floor();
+            mask = (div - floordiv) > vec_t(0.5);
+            floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
+            return vec_t::blendv(floordiv, zero.copysign(a / b), div == zero);
           });
     });
   }

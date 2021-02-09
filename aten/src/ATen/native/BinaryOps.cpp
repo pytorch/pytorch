@@ -208,35 +208,35 @@ Tensor& div_(Tensor& self, Scalar other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
-Tensor& div_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
-  if (rounding_mode == "true") {
+Tensor& div_out(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, Tensor& result) {
+  if (!rounding_mode.has_value()) {
     return div_true_out(self, other, result);
-  } else if (rounding_mode == "trunc") {
+  } else if (*rounding_mode == "trunc") {
     return div_trunc_out(self, other, result);
-  } else if (rounding_mode == "floor") {
+  } else if (*rounding_mode == "floor") {
     return div_floor_out(self, other, result);
   }
 
   TORCH_CHECK(false,
-      "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
-      "but found '", rounding_mode, "'");
+      "div expected rounding_mode to be None, 'trunc', or 'floor' "
+      "but found '", *rounding_mode, "'");
 }
 
-Tensor div(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor div(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   Tensor result;
   native::div_out(self, other, std::move(rounding_mode), result);
   return result;
 }
 
-Tensor& div_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor& div_(Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return native::div_out(self, other, std::move(rounding_mode), self);
 }
 
-Tensor div(const Tensor& self, Scalar other, std::string rounding_mode) {
+Tensor div(const Tensor& self, Scalar other, c10::optional<std::string> rounding_mode) {
   return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
-Tensor& div_(Tensor& self, Scalar other, std::string rounding_mode) {
+Tensor& div_(Tensor& self, Scalar other, c10::optional<std::string> rounding_mode) {
   return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
@@ -261,23 +261,23 @@ Tensor& divide_(Tensor& self, Scalar other) {
   return self.div_(other);
 }
 
-Tensor& divide_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
+Tensor& divide_out(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, Tensor& result) {
   return at::div_out(result, self, other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor divide(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor& divide_(Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, Scalar other, std::string rounding_mode) {
+Tensor divide(const Tensor& self, Scalar other, c10::optional<std::string> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, Scalar other, std::string rounding_mode) {
+Tensor& divide_(Tensor& self, Scalar other, c10::optional<std::string> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
