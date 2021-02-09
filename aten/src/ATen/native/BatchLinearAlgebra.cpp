@@ -547,8 +547,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   }
 
   auto expected_result_shape = vector_case ? squeezed_result_shape : other_broadcasted.sizes();
-  TORCH_CHECK(result.sizes().equals(expected_result_shape),
-    "result shape ", result.sizes(), " does not match the expected shape ", expected_result_shape);
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(expected_result_shape));
 
   // result tensor must be in batched column major order (Fortran contiguous) for 2D inputs
   // or C contiguous for 1D input
@@ -598,14 +597,12 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
   TORCH_CHECK(other.dim() >= 1,
            "other should have at least 1 dimension, but has ", other.dim(), " dimensions instead");
 
-  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
-
   // Two types of 'other' tensors are supported:
   // - 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
   // - 2-dimensional (2D) tensor or batch of 2D tensors (matrix case)
   // original torch.solve supported only the matrix case, while NumPy works for both cases
   // for the batched input we need to be able to distinguish them
-  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // A.shape[:-1]
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
   bool vector_case = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
 
   bool is_batched_column_major = false;
@@ -615,11 +612,23 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
     is_batched_column_major = result.transpose(-2, -1).is_contiguous();
   }
 
+  // if 'other' is a batch of 2D tensors, then 'input' can be non-batched and will be broadcasted
+  auto expected_shape = expected_batched_rhs_shape;
+  if (!vector_case && other.dim() > 2) {
+    expected_shape = other.sizes();
+  }
+
+  bool result_equal_expected_shape = result.sizes().equals(expected_shape);
+  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+
   auto infos = at::empty({0}, input.options().dtype(kInt));
 
-  // if result is not empty and not in batched column major format or does not have the same dtype as input
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
+  copy_needed |= !result_equal_expected_shape; // or result does not have the expected shape
   // we have to allocate a temporary tensor
-  if ((result.numel() != 0 && !is_batched_column_major) || !result_input_same_type) {
+  if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = linalg_solve_out_info(result_tmp, infos, input, other, vector_case);
     at::native::resize_output(result, result_tmp.sizes());

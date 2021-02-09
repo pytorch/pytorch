@@ -2503,9 +2503,22 @@ class TestLinalg(TestCase):
             run_test_singular_input(*params)
 
         # if out tensor with wrong shape is passed a warning is given
+        # matrix 'b' case
         with warnings.catch_warnings(record=True) as w:
             A = torch.eye(2, dtype=dtype, device=device).reshape((1, 2, 2)).repeat(2, 1, 1)
             b = torch.randn(2, 2, 2, dtype=dtype, device=device)
+            out = torch.zeros(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.linalg.solve(A, b, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # if out tensor with wrong shape is passed a warning is given
+        # vector 'b' case
+        with warnings.catch_warnings(record=True) as w:
+            A = torch.eye(2, dtype=dtype, device=device)
+            b = torch.randn(2, dtype=dtype, device=device)
             out = torch.zeros(1, dtype=dtype, device=device)
             # Trigger warning
             torch.linalg.solve(A, b, out=out)
