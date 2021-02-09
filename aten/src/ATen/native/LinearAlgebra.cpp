@@ -104,9 +104,9 @@ std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sig
   checkSameDevice("linalg_slogdet", sign, input, "sign");
   checkSameDevice("linalg_slogdet", logabsdet, input, "logabsdet");
   checkLinalgCompatibleDtype("linalg_slogdet", sign, input, "sign");
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(input.dtype()));
-  TORCH_CHECK(at::isFloatingType(logabsdet.scalar_type()),
-    "logabsdet dtype ", logabsdet.scalar_type(), " does not match the expected dtype ", real_dtype);
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  // logabsdet is always real-valued here
+  checkLinalgCompatibleDtype("linalg_slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
 
   Tensor sign_tmp, logabsdet_tmp;
   std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
@@ -194,8 +194,8 @@ Tensor pinverse(const Tensor& self, double rcond) {
 
 Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
   checkSameDevice("linalg_matrix_rank", result, self);
-  TORCH_CHECK(isIntegralType(result.scalar_type(), /*includeBool=*/false),
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", ScalarType::Long);
+  ScalarType output_type = ScalarType::Long;
+  checkLinalgCompatibleDtype("linalg_matrix_rank", result.scalar_type(), output_type);
 
   // Matrices or batch of matrices are allowed
   TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
@@ -1982,9 +1982,8 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
 
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
   checkSameDevice("linalg_cond", result, self);
-  ScalarType real_type = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(isFloatingType(result.scalar_type()),
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_type);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
   at::native::resize_output(result, result_tmp.sizes());
@@ -2015,9 +2014,8 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
   checkSameDevice("linalg_cond", result, self);
-  ScalarType real_type = toValueType(self.scalar_type());
-  TORCH_CHECK(isFloatingType(result.scalar_type()),
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_type);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, ord);
   at::native::resize_output(result, result_tmp.sizes());

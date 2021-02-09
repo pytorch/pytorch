@@ -1471,9 +1471,8 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, c
   checkLinalgCompatibleDtype("linalg_eigh", eigvecs, self, "eigenvectors");
 
   // eigenvalues are always real-valued here
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(at::isFloatingType(eigvals.scalar_type()),
-    "eigvals dtype ", eigvals.scalar_type(), " does not match self dtype ", real_dtype);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_eigh", eigvals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor eigvals_tmp, eigvecs_tmp;
   std::tie(eigvals_tmp, eigvecs_tmp) = at::linalg_eigh(self, uplo);
@@ -1498,9 +1497,8 @@ Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
   checkSameDevice("linalg_eigvalsh", result, self);
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(at::isFloatingType(result.scalar_type()),
-    "result dtype ", result.scalar_type(), " does not match self dtype ", real_dtype);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_eigvalsh", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_eigvalsh(self, uplo);
 
@@ -1602,12 +1600,11 @@ std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor
   checkSameDevice("symeig", vecs, self, "eigenvectors");
   checkLinalgCompatibleDtype("symeig", vecs, self, "eigenvectors");
   // eigenvalues are always real-valued here
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(at::isFloatingType(vals.scalar_type()),
-    "eigenvalues dtype ", vals.scalar_type(), " does not match self dtype ", real_dtype);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("symeig", vals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor vals_tmp, vecs_tmp;
-  std::tie(vals_tmp, vecs_tmp) = at::_symeig_helper(self, eigenvectors, upper);
+  std::tie(vals_tmp, vecs_tmp) = at::symeig(self, eigenvectors, upper);
 
   at::native::resize_output(vals, vals_tmp.sizes());
   at::native::resize_output(vecs, vecs_tmp.sizes());
@@ -1776,9 +1773,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
   checkLinalgCompatibleDtype("svd", U, self, "U");
   checkLinalgCompatibleDtype("svd", V, self, "V");
   // singular values are always real-valued here
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(at::isFloatingType(S.scalar_type()),
-    "S dtype ", S.scalar_type(), " does not match self dtype ", real_dtype);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("svd", S.scalar_type(), real_dtype, "S");
 
   Tensor U_tmp, S_tmp, V_tmp;
   std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
@@ -1829,12 +1825,11 @@ static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst
 
 std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
                                                      const Tensor& self, bool full_matrices, bool compute_uv) {
-  checkLinalgCompatibleDtype("svd", U, self, "U");
-  checkLinalgCompatibleDtype("svd", VT, self, "VT");
+  checkLinalgCompatibleDtype("linalg_svd", U, self, "U");
+  checkLinalgCompatibleDtype("linalg_svd", VT, self, "VT");
   // singular values are always real-valued here
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(at::isFloatingType(S.scalar_type()),
-    "S dtype ", S.scalar_type(), " does not match self dtype ", real_dtype);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_svd", S.scalar_type(), real_dtype, "S");
   Tensor U_tmp, S_tmp, VT_tmp;
   std::tie(U_tmp, S_tmp, VT_tmp) = at::linalg_svd(self, full_matrices, compute_uv);
   svd_resize_and_copy("U", U_tmp, U);
