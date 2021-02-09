@@ -318,6 +318,27 @@ class NaiveTypePropagator {
         break;
       }
       default:
+
+        // TODO: temporary placement to avoid recompilation
+        if (node->kind() == c10::Symbol::fromQualString("aten::_batch_norm_impl_index")) {
+          auto out_type = node->input(0)->type()->cast<TensorType>();
+          node->outputs()[0]->setType(out_type);
+
+          // TODO: do we actually promote dtype here?
+          auto mean_rstd_type = TensorType::create(
+              *out_type->scalarType(),
+              *out_type->device(),
+              *out_type->dim(),
+              out_type->requires_grad());
+
+          node->outputs()[1]->setType(mean_rstd_type);
+          node->outputs()[2]->setType(mean_rstd_type);
+          node->outputs()[3]->setType(IntType::create());
+
+          break;
+        }
+
+
         TORCH_CHECK(
             false,
             "type inference failed, unrecognized operation encountered:",

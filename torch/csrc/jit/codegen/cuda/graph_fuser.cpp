@@ -48,6 +48,11 @@ Value* createConditionalConstant(Node* profile_ivalue) {
   if (profile_ivalue->hasAttribute(Symbol::attr("profiled_int_list"))) {
     // int[]
     val = IValue(profile_ivalue->is(Symbol::attr("profiled_int_list")));
+  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_bool_list"))) {
+    // bool[]
+    auto int_list = profile_ivalue->is(Symbol::attr("profiled_bool_list"));
+    std::vector<bool> bool_list(int_list.begin(), int_list.end());
+    val = IValue(bool_list);
   } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_size"))) {
     // int[]
     val = IValue(profile_ivalue->is(Symbol::attr("profiled_size")));
@@ -750,7 +755,9 @@ struct CudaGraphFuser {
     for (size_t i = 0; i < outputs.size(); ++i) {
       if (usedOnlyInSize(outputs[i]))
         continue;
-      shape_of[soutputs[i]] = graph->insert(aten::size, {outputs[i]});
+      if (soutputs[i]->type()->isSubtypeOf(TensorType::get())) {
+        shape_of[soutputs[i]] = graph->insert(aten::size, {outputs[i]});
+      }
     }
 
     for (Node* n : subgraph->nodes()) {

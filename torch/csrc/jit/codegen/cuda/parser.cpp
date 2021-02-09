@@ -31,6 +31,7 @@ namespace {
 
 const auto& sizeAttr = Symbol::attr("profiled_size");
 const auto& intListAttr = Symbol::attr("profiled_int_list");
+const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
 
 typedef Val* CgValue;
@@ -989,22 +990,20 @@ class IrParser {
                 unaryOp(UnaryOpType::Reciprocal, num_features);
             auto* grad_in = mul(mul(reciprocal_size, rstd), inner);
 
-            value_map.emplace(node->output(0)->unique(), grad_in);
+            if (output_mask[0]) {
+              value_map.emplace(node->output(0)->unique(), grad_in);
+            }
 
-            // TODO: grad_bias and grad_weight are disabled because
-            // they are incompabilble with grad_in fusion
-            // Requires seperate kernels
+            if (output_mask[1] && weight != nullptr) {
+              auto grad_weight = sum(mul(grad_out, x_hat),
+              outer_reduction_axes);
+              value_map.emplace(node->output(1)->unique(), grad_weight);
+            }
 
-            // if (output_mask[1] && weight != nullptr) {
-            //  auto grad_weight = sum(mul(grad_out, x_hat),
-            //  outer_reduction_axes);
-            //  value_map.emplace(node->output(1)->unique(), grad_weight);
-            // }
-
-            // if (output_mask[2] && bias != nullptr) {
-            //  auto grad_bias = sum(grad_out, outer_reduction_axes);
-            //  value_map.emplace(node->output(2)->unique(), grad_bias);
-            // }
+            if (output_mask[2] && bias != nullptr) {
+              auto grad_bias = sum(grad_out, outer_reduction_axes);
+              value_map.emplace(node->output(2)->unique(), grad_bias);
+            }
           },
           // TODO: #ProfileIValue List should update this
           [](const Node* node) -> bool { return true; },
@@ -1528,6 +1527,41 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
   pn->setCallback(ivalue_profiler);
 }
 
+void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isBoolList(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(boolListAttr)) {
+      auto list = value.toBoolList();
+      std::vector<int64_t> val(list.begin(), list.end());
+      pn->is_(boolListAttr, val);
+    } else {
+      auto profiled_ints = pn->is(boolListAttr);
+      auto input_bools = value.toBoolList();
+      TORCH_INTERNAL_ASSERT(
+          profiled_ints.size() == input_bools.size() &&
+              std::equal(
+                  input_bools.begin(),
+                  input_bools.end(),
+                  profiled_ints.begin()),
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
 bool anyInBlock(
     const Block* block,
     const std::function<bool(const Node*)>& fn) {
@@ -1648,6 +1682,16 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
         return false;
     }
     return true;
+  }
+
+  static auto native_layer_norm_backward_schema = getOperatorForLiteral(
+          "aten::native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")->schema();
+  if (node->matches(native_layer_norm_backward_schema)) {
+    switch (offset) {
+      case 7:
+        profileBoolList(pr, node, offset);
+        return true;
+    }
   }
 
   return false;
