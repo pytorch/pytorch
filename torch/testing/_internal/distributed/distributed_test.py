@@ -3218,7 +3218,7 @@ class DistributedTest:
         @unittest.skipIf(
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
-        def test_ddp_logging_data(self):
+        def test_ddp_logging_data_cpu(self):
             group, group_id, rank = self._init_global_test()
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
@@ -3235,6 +3235,18 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
             self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_ddp_logging_data_gpu(self):
+            group, group_id, rank = self._init_global_test()
+            model_DDP = copy.deepcopy(DDP_NET)
+            model_DDP.cuda(rank)
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=[rank])
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.device_ids, [rank])
+            self.assertEqual(ddp_logging_data.output_device, rank)
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
