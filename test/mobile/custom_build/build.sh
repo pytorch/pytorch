@@ -61,23 +61,11 @@ run_custom_build_with_static_dispatch() {
   LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_custom_libtorch_static"
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
-  # The new static dispatch and c10 registration can work together.
-  # It generates static dispatch code for selected backends and
-  # fallback to regular dispatch for the rest. This way, it can be
-  # used to reduce dispatcher's overhead for perf sensitive use cases
-  # without compromising the functionality.
-  #
-  # We can introduce separate flags to disable the fallback to the
-  # regular c10 dispatch, with which the linker can strip out unused
-  # op invocation code.
-  #
   # Here we omitted the OP_DEPENDENCY flag so it generates registration
   # code for used ROOT ops only, whose unboxing kernels are still needed
   # by the JIT runtime. The intermediate ops will be automatically kepted
   # by the linker as they are statically referenced by the static dispatch
   # code, for which we can bypass the registration.
-  #
-  # TODO: handle manual registrations.
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
