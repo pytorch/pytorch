@@ -774,7 +774,7 @@ namespace {
 // Utilities exposed in RNNUtils.h
 namespace cudnn_rnn {
 
-TORCH_CUDA_CU_API std::tuple<Tensor, std::vector<Tensor>>
+TORCH_CUDA_CPP_API std::tuple<Tensor, std::vector<Tensor>>
 copy_weights_to_flat_buf_views(
     TensorList weight_arr,
     int64_t weight_stride0,

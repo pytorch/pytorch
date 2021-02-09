@@ -95,10 +95,10 @@
   dispatch:
     DefaultBackend: _fw_primal
 
-- func: make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
+- func: _make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
   variants: function
 
-- func: unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
+- func: _unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
   variants: function
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
@@ -1365,6 +1365,16 @@
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
   variants: method
 
+- func: diff(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None) -> Tensor
+  variants: function, method
+  dispatch:
+    Math: diff
+
+- func: diff.out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    Math: diff_out
+
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
   dispatch:
@@ -1382,6 +1392,20 @@
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
+- func: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU, CUDA: div
+
+- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA: div_
+
+- func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: div_out
+
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
   variants: function, method
@@ -1389,6 +1413,16 @@
     DefaultBackend: div
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    DefaultBackend: div_
+
+- func: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+  variants: function, method
+  dispatch:
+    DefaultBackend: div
+
+- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
   variants: method
   dispatch:
     DefaultBackend: div_
@@ -1407,6 +1441,20 @@
   variants: function, method
 
 - func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
+
+- func: divide.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+  variants: function, method
+
+- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+  variants: method
+
+- func: divide.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+
+- func: divide.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+  variants: function, method
+
+- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
   variants: method
 
   # true_divide, an alias for div
@@ -1483,7 +1531,7 @@
     CPU: _embedding_bag_forward_only_cpu
     CUDA: _embedding_bag_forward_only_cuda
 
-- func: rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
+- func: _rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
 
 # row_stack is the alias of vstack
 - func: row_stack(Tensor[] tensors) -> Tensor
@@ -2124,11 +2172,26 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
-- func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+- func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     MkldnnCPU: mkldnn_linear
+
+- func: mkldnn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+      MkldnnCPU: mkldnn_linear_backward_input
+
+- func: mkldnn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    MkldnnCPU: mkldnn_linear_backward_weights
+
+- func: mkldnn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    MkldnnCPU: mkldnn_linear_backward
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
@@ -2671,10 +2734,10 @@
     SparseCPU: sparse_sparse_matmul_cpu
     SparseCUDA: sparse_sparse_matmul_cuda
 
-- func: _sparse_matrix_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
+- func: _sparse_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
   dispatch:
-    SparseCPU: sparse_matrix_mask_helper_cpu
-    SparseCUDA: sparse_matrix_mask_helper_cuda
+    SparseCPU: sparse_mask_helper_cpu
+    SparseCUDA: sparse_mask_helper_cuda
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -3519,6 +3582,16 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: stack_out
+
+- func: _stack(Tensor[] tensors, int dim=0) -> Tensor
+  dispatch: # match the backends supported by _cat
+    CPU: _stack_cpu
+    DefaultBackend: _stack
+
+- func: _stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch: # match the backends supported by _cat_out
+    CPU: _stack_out_cpu
+    DefaultBackend: _stack_out
 
 - func: hstack(Tensor[] tensors) -> Tensor
 
@@ -4637,33 +4710,43 @@
 - func: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: fake_quantize_per_tensor_affine
+    Math: fake_quantize_per_tensor_affine
 
-- func: fake_quantize_per_tensor_affine_backward(Tensor grad, Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
+- func: fake_quantize_per_tensor_affine_cachemask(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
+  variants: function
+  dispatch:
+    CPU, CUDA: fake_quantize_per_tensor_affine_cachemask
+
+- func: fake_quantize_per_tensor_affine_cachemask_backward(Tensor grad, Tensor mask) -> Tensor
   variants: function
 
-- func: _fake_quantize_learnable_per_tensor_affine(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> Tensor
+- func: _fake_quantize_learnable_per_tensor_affine(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max, float grad_factor=1.0) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _fake_quantize_learnable_per_tensor_affine
 
-- func: _fake_quantize_learnable_per_tensor_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> (Tensor, Tensor, Tensor)
+- func: _fake_quantize_learnable_per_tensor_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max, float grad_factor=1.0) -> (Tensor, Tensor, Tensor)
   variants: function
 
 - func: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: fake_quantize_per_channel_affine
+    Math: fake_quantize_per_channel_affine
 
-- func: fake_quantize_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
+- func: fake_quantize_per_channel_affine_cachemask(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
+  variants: function
+  dispatch:
+    CPU, CUDA: fake_quantize_per_channel_affine_cachemask
+
+- func: fake_quantize_per_channel_affine_cachemask_backward(Tensor grad, Tensor mask) -> Tensor
   variants: function
 
-- func: _fake_quantize_learnable_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
+- func: _fake_quantize_learnable_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max, float grad_factor=1.0) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _fake_quantize_learnable_per_channel_affine
 
-- func: _fake_quantize_learnable_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> (Tensor, Tensor, Tensor)
+- func: _fake_quantize_learnable_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max, float grad_factor=1.0) -> (Tensor, Tensor, Tensor)
   variants: function
 
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
@@ -4921,8 +5004,8 @@
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_index_fill_
-    CUDA: legacy::cuda::_th_index_fill_
+    CPU: index_fill_
+    CUDA: index_fill_
 
 - func: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
@@ -5147,12 +5230,6 @@
   variants: method
   dispatch:
     CPU, CUDA: __irshift__
-
-- func: lgamma_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: _lgamma__cpu
-    CUDA: _lgamma__cuda
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
@@ -5890,17 +5967,14 @@
     CPU: _solve_helper_cpu
     CUDA: _solve_helper_cuda
 
-- func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    CPU: legacy::cpu::_th_potri_out
-    CUDA: legacy::cuda::_th_potri_out
-
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_potri
-    CUDA: legacy::cuda::_th_potri
+    CPU, CUDA: cholesky_inverse
+
+- func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: cholesky_inverse_out
 
 - func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -5979,8 +6053,12 @@
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: _lgamma_out_cpu
-    CUDA: _lgamma_out_cuda
+    CPU, CUDA: lgamma_out
+
+- func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA: lgamma_
 
 - func: lgamma(Tensor self) -> Tensor
   variants: method, function

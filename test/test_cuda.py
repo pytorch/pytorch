@@ -17,7 +17,7 @@ import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
-from torch._six import inf, nan, container_abcs
+from torch._six import inf, nan
 
 from test_torch import AbstractTestCases
 
@@ -2416,6 +2416,7 @@ t2.start()
                 self.assertEqual(results[t].sum().item(), size * size)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
@@ -2526,7 +2527,7 @@ t2.start()
         def cast(val, to_type):
             if isinstance(val, torch.Tensor):
                 return val.to(to_type) if val.is_floating_point() else val
-            elif isinstance(val, container_abcs.Iterable):
+            elif isinstance(val, collections.abc.Iterable):
                 return type(val)(cast(v, to_type) for v in val)
             else:
                 return val
@@ -2566,7 +2567,7 @@ t2.start()
             def compare(first, second):
                 if isinstance(first, torch.Tensor):
                     return torch.equal(first, second)
-                elif isinstance(first, container_abcs.Iterable):
+                elif isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
                 else:
                     return first == second
@@ -3112,6 +3113,16 @@ t2.start()
         )
         self.assertEqual(mean, torch.ones(3, device='cuda'))
         self.assertEqual(invstd, torch.ones(3, device='cuda'))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_cuda_device_memory_allocated(self):
+        from torch.cuda import memory_allocated
+        device_count = torch.cuda.device_count()
+        current_alloc = [memory_allocated(idx) for idx in range(device_count)]
+        x = torch.ones(10, device="cuda:0")
+        self.assertTrue(memory_allocated(0) > current_alloc[0])
+        self.assertTrue(all(memory_allocated(torch.cuda.device(idx)) == current_alloc[idx] for idx in range(1, device_count)))
+
 
 class TestCudaComm(TestCase):
     def _test_broadcast(self, input):

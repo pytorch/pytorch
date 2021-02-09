@@ -2,8 +2,10 @@ import re
 
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
-from enum import Enum
+from enum import Enum, auto
 import itertools
+
+from tools.codegen.utils import *
 
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
@@ -47,11 +49,110 @@ class Location:
 # Valid values of the 'variants' field in native_functions.yaml
 Variant = Enum('Variant', ('function', 'method'))
 
+# NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
+class DispatchKey(Enum):
+    Undefined = 0
+    CatchAll = Undefined
+
+    CPU = auto()
+    CUDA = auto()
+    HIP = auto()
+    FPGA = auto()
+    MSNPU = auto()
+    XLA = auto()
+    Vulkan = auto()
+    Metal = auto()
+    XPU = auto()
+    MKLDNN = auto()
+    OpenGL = auto()
+    OpenCL = auto()
+    IDEEP = auto()
+    QuantizedCPU = auto()
+    QuantizedCUDA = auto()
+    QuantizedXPU = auto()
+    ComplexCPU = auto()
+    ComplexCUDA = auto()
+    CustomRNGKeyId = auto()
+    MkldnnCPU = auto()
+    SparseCPU = auto()
+    SparseCUDA = auto()
+    SparseHIP = auto()
+    SparseXPU = auto()
+    NestedTensor = auto()
+    PrivateUse1 = auto()
+    PrivateUse2 = auto()
+    PrivateUse3 = auto()
+    EndOfBackendKeys = PrivateUse3
+
+    Meta = auto()
+    BackendSelect = auto()
+    Named = auto()
+    AutogradOther = auto()
+    AutogradCPU = auto()
+    AutogradCUDA = auto()
+    AutogradXLA = auto()
+    AutogradNestedTensor = auto()
+    AutogradXPU = auto()
+    AutogradPrivateUse1 = auto()
+    AutogradPrivateUse2 = auto()
+    AutogradPrivateUse3 = auto()
+    Tracer = auto()
+    Autocast = auto()
+    Batched = auto()
+    VmapMode = auto()
+    TESTING_ONLY_GenericWrapper = auto()
+    TESTING_ONLY_GenericMode = auto()
+    NumDispatchKeys = auto()
+    Autograd = auto()
+    Math = auto()
+    DefaultBackend = auto()
+    EndOfAliasKeys = DefaultBackend
+
+    CPUTensorId = CPU
+    CUDATensorId = CUDA
+    PrivateUse1_PreAutograd = AutogradPrivateUse1
+    PrivateUse2_PreAutograd = AutogradPrivateUse2
+    PrivateUse3_PreAutograd = AutogradPrivateUse3
+
+    def __str__(self) -> str:
+        return self.name
+
+    def lower(self) -> str:
+        return str(self).lower()
+
+    @staticmethod
+    def parse(value: str) -> 'DispatchKey':
+        for k, v in DispatchKey.__members__.items():
+            if k == value:
+                return v
+        raise AssertionError(f'unknown dispatch key {value}')
+
 class UseC10Dispatcher(Enum):
     full = 0
     hacky_wrapper_for_legacy_signatures = 1
 
-STRUCTURED_DISPATCH_KEYS = {'CUDA', 'CPU'}
+STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+
+# Dispatch keys that "support all backends".  These codegen slightly differently
+# then backend specific keys.
+def is_generic_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {DispatchKey.DefaultBackend, DispatchKey.Math}
+
+# CUDA specific dispatch keys
+def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.CUDA,
+        DispatchKey.QuantizedCUDA,
+        DispatchKey.ComplexCUDA,
+        DispatchKey.SparseCUDA,
+        DispatchKey.AutogradCUDA,
+        DispatchKey.CUDATensorId,
+    }
+
+# Structured kernel generation is only supported for certain key types;
+# otherwise use old-style
+def is_structured_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in STRUCTURED_DISPATCH_KEYS
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -108,9 +209,7 @@ class NativeFunction:
     #
     #   dispatch:
     #       Math: $operator_name
-    #
-    # TODO: str key could be replaced with more explicit enum
-    dispatch: Dict[str, str]
+    dispatch: Dict[DispatchKey, str]
 
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
@@ -153,7 +252,7 @@ class NativeFunction:
             # Structured functions MUST have a dispatch table
             return True
         else:
-            return self.dispatch.keys() != {'Math'}
+            return self.dispatch.keys() != {DispatchKey.Math}
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -226,7 +325,7 @@ class NativeFunction:
 
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
-        dispatch: Dict[str, str] = {}
+        dispatch: Dict[DispatchKey, str] = {}
         if raw_dispatch is not None:
             assert not manual_kernel_registration, \
                 "cannot specify both manual_kernel_registration and dispatch; with " \
@@ -237,12 +336,13 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 assert isinstance(v, str), e
                 for k in ks.split(","):
-                    dispatch[k.strip()] = v
+                    dispatch_key = DispatchKey.parse(k.strip())
+                    dispatch[dispatch_key] = v
         elif not structured and structured_delegate is None:
             from tools.codegen.api import cpp
-            dispatch['Math'] = cpp.name(func)
+            dispatch[DispatchKey.Math] = cpp.name(func)
 
-        assert not ('DefaultBackend' in dispatch and 'Math' in dispatch), \
+        assert not (DispatchKey.DefaultBackend in dispatch and DispatchKey.Math in dispatch), \
             "cannot specify both DefaultBackend and Math on a single kernel; each " \
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
             "implementation, specify DefaultBackend; otherwise specify Math only"
@@ -341,7 +441,7 @@ class StructuredNativeFunctions:
         assert self.out.structured
         # For now, structured composite kernels are not supported (need some
         # design work to figure out how to make the composite case work)
-        assert self.out.dispatch.keys() != {'Math'}
+        assert self.out.dispatch.keys() != {DispatchKey.Math}
         if self.inplace is not None:
             assert self.inplace.func.kind() == SchemaKind.inplace
             assert self.inplace.structured_delegate == self.out.func.name
