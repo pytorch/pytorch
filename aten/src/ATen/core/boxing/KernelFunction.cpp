@@ -24,7 +24,10 @@ void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, D
     op.operator_name(), " has kernels registered to both Math and a backend mapped to AutogradOther. "
     "This makes the backend kernel unreachable (see Note [Ambiguity in AutogradOther kernel]). "
     "If it's intended to override Math kernel behavior, please open an issue to request a dedicated "
-    "Autograd dispatch key for the backend.", "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
+    "Autograd dispatch key for the backend.\n",
+    "If you only want to run inference instead of training, add `at::AutoNonVariableTypeMode guard(true);` "
+    "before model.forward(). Note this guard is only available in C++ but not Python at present.",
+    "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }
 
 void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, DispatchKeySet, Stack*) {
