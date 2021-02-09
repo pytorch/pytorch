@@ -12011,6 +12011,41 @@ TEST(NVFuserTest, FusionOmitPredicate2_CUDA) {
   testValidate(&fusion, cg_outputs, aten_inputs, {t3, t3}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  c10::IntArrayRef shape{17, 19};
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = broadcast(tv0, {false, true});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  tv3->split(1, 128);
+  tv0->computeAt(tv3, 2);
+
+  for (auto tv : {tv2, tv3}) {
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({shape[0]}, options);
+  at::Tensor t1 = at::randn(shape, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto t3 = t0.unsqueeze(-1).expand(shape) + t1;
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {t3}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
