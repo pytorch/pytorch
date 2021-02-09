@@ -422,225 +422,112 @@ void upsample_trilinear3d_backward_kernel_impl(
   });
 }
 
-// Helper method for ti_cpu_upsample_linear
-// Load source data into a buffer
-template <typename scalar_t, typename index_t, int step>
-inline void load(scalar_t* dst, scalar_t *src, index_t * index) {
-  for (int k = 0; k < step; k++) {
-    *dst = *(src + *index);
-    dst++;
-    index++;
-  }
-}
+// Helper structs and methods for ti_cpu_upsample_linear
 
-// Helper method for ti_cpu_upsample_linear
-// Compute output value as linear interpolation of source data
-// with changing weights
-template <typename scalar_t, int step>
-inline void compute_linear(scalar_t* dst, scalar_t * src1, scalar_t* src2, scalar_t* w0, scalar_t* w1) {
-  for (int k = 0; k < step; k++) {
-    *dst = *src1 * *w0 + *src2 * *w1;
-    dst++;
-    src1++;
-    src2++;
-    w0++;
-    w1++;
-  }
-}
-
-// Helper method for ti_cpu_upsample_linear
-// Overriden moethod to compute output value as linear interpolation of source data
-// with fixed weights
-template <typename scalar_t, int step>
-inline void compute_linear(scalar_t* dst, scalar_t * src1, scalar_t* src2, scalar_t w0, scalar_t w1) {
-  for (int k = 0; k < step; k++) {
-    *dst = *src1 * w0 + *src2 * w1;
-    dst++;
-    src1++;
-    src2++;
-  }
-}
-
-
-// Interpolation type structure to compute output value in n-dimensional case.
-// - use buffers (buf) to prefetch source data.
+// Linear Interpolation structure to compute output value in n-dimensional case.
 // - recursively compute interpolated output for each dimension
-//
-// for example for 2D:
-// 
-// source[0, 0] -> buffer[0]
-// source[0, 1] -> buffer[1]
-// interpolate(buffer[0], weight00, buffer[1], weight01) -> buffer[2]
-//
-// source[1, 0] -> buffer[0]
-// source[1, 1] -> buffer[1]
-// interpolate(buffer[0], weight00, buffer[1], weight01) -> buffer[3]
-// 
-// interpolate(buffer[2], weight10, buffer[3], weight11) -> output
-//
-// We have 2^out_ndims of buffers, each buffer has size of step.
-// e.g. for 1D case: out_ndims=1 -> 2 buffers
-// e.g. for 2D case: out_ndims=2 -> 4 buffers
-// e.g. for 3D case: out_ndims=3 -> 8 buffers
-template <int n, typename scalar_t, typename index_t, int step>
-struct Interp {
-    static inline void eval(scalar_t* out, scalar_t* buf, scalar_t* src[], index_t* idx[], scalar_t* w[]) {
-        constexpr int i = 2 * (n - 1);
-        constexpr int j = 2 * (n - 1) + 1;
-        constexpr int is = i * step;
-        constexpr int js = j * step;
-        constexpr int half = 1 << (n - 2);
-        Interp<n - 1, scalar_t, index_t, step>::eval(&buf[is], buf, &src[0], idx, &w[2]);        
-        Interp<n - 1, scalar_t, index_t, step>::eval(&buf[js], buf, &src[half], idx, &w[2]); 
-        compute_linear<scalar_t, step>(out, &buf[is], &buf[js], w[0][0], w[1][0]);
+template <int n, typename scalar_t, typename index_t>
+struct InterpLinear {
+    static inline scalar_t eval(char* src, char** data, const int64_t* strides, int64_t i) {
+        index_t i0 = *(index_t*)&data[0][i * strides[0]];
+        index_t i1 = *(index_t*)&data[2][i * strides[2]];
+        scalar_t w0 = *(scalar_t *)&data[1][i * strides[1]];
+        scalar_t w1 = *(scalar_t *)&data[3][i * strides[3]];
+
+        scalar_t t0 = InterpLinear<n - 1, scalar_t, index_t>::eval(src + i0, &data[4], &strides[4], i);
+        scalar_t t1 = InterpLinear<n - 1, scalar_t, index_t>::eval(src + i1, &data[4], &strides[4], i);
+
+        return t0 * w0 + t1 * w1;
     }
 };
 
-
-template <typename scalar_t, typename index_t, int step>
-struct Interp<1, scalar_t, index_t, step> {
-    static inline void eval(scalar_t* out, scalar_t* buf, scalar_t* src[], index_t* idx[], scalar_t* w[]) {
-      load<scalar_t, index_t, step>(&buf[0], src[0], idx[0]);
-      load<scalar_t, index_t, step>(&buf[step], src[0], idx[1]);
-      compute_linear<scalar_t, step>(out, &buf[0], &buf[step], w[0], w[1]);
+template <typename scalar_t, typename index_t>
+struct InterpLinear<1, scalar_t, index_t> {
+    static inline scalar_t eval(char* src, char** data, const int64_t* strides, int64_t i) {
+        index_t i0 = *(index_t*)&data[0][i * strides[0]];
+        index_t i1 = *(index_t*)&data[2][i * strides[2]];
+        scalar_t w0 = *(scalar_t *)&data[1][i * strides[1]];
+        scalar_t w1 = *(scalar_t *)&data[3][i * strides[3]];
+        scalar_t t0 = *(scalar_t *)&src[i0];
+        scalar_t t1 = *(scalar_t *)&src[i1];
+        return t0 * w0 + t1 * w1;
     }
 };
 
-
-template <int n, typename scalar_t, typename index_t, int step>
-static inline void interp(scalar_t* out, scalar_t* buf, scalar_t* src[], index_t* idx[], scalar_t* w[]) {
-  Interp<n, scalar_t, index_t, step>::eval(out, buf, src, idx, w);
+template <int n, typename scalar_t, typename index_t>
+static inline scalar_t interp_linear(char* src, char** data, const int64_t* strides, int64_t i) {
+  return InterpLinear<n, scalar_t, index_t>::eval(src, data, strides, i);
 }
 
+static inline bool is_zero_stride(const int64_t* strides) {
+  return (strides[0] == 0) && (strides[1] == 0) && (strides[2] == 0) && (strides[3] == 0);
+}
+
+template <typename scalar_t, typename index_t>
+static inline bool is_contiguous_stride(const int64_t* strides) {
+  return (strides[0] == sizeof(index_t)) && (strides[1] == sizeof(scalar_t)) &&
+         (strides[2] == sizeof(index_t)) && (strides[3] == sizeof(scalar_t));
+}
+
+template <int N, int non_zero_stride_dim, typename scalar_t, typename index_t>
+struct CheckAlmostAllZeroStrides {
+  static inline bool eval(const int64_t* strides) {
+    return (N == non_zero_stride_dim ? is_contiguous_stride<scalar_t, index_t>(strides) : is_zero_stride(strides)) &&
+            CheckAlmostAllZeroStrides<N - 1, non_zero_stride_dim, scalar_t, index_t>::eval(&strides[4]);
+  }
+};
+
+template <int non_zero_stride_dim, typename scalar_t, typename index_t>
+struct CheckAlmostAllZeroStrides<0, non_zero_stride_dim, scalar_t, index_t> {
+  static inline bool eval(const int64_t* strides) {
+    return true;
+  }
+};
+
+template <int n, int s, typename scalar_t, typename index_t>
+static inline bool is_all_zero_stride(const int64_t* strides) {
+  return CheckAlmostAllZeroStrides<n, s, scalar_t, index_t>::eval(strides);
+}
 
 template <typename scalar_t, typename index_t, int out_ndims>
-inline void assert_strides_linear(const int64_t* strides) {
-  for (int i=0; i<out_ndims; i++) {
-    // Assert strides for indices 0, 1 and weights 0, 1
-    TORCH_INTERNAL_ASSERT(
-      strides[4 * i + 0 + 2] == strides[4 * i + 2 + 2], strides[4 * i + 0 + 2], strides[4 * i + 2 + 2]        
-    );
-    TORCH_INTERNAL_ASSERT(
-      strides[4 * i + 1 + 2] == strides[4 * i + 3 + 2], strides[4 * i + 1 + 2], strides[4 * i + 3 + 2]
-    );
+static inline void basic_loop(char** data, const int64_t* strides, int64_t n) {
+  char* dst = data[0];
+  char* src = data[1];
+  for (int64_t i = 0; i < n; i++) {
+    *(scalar_t*)&dst[i * strides[0]] = interp_linear<out_ndims, scalar_t, index_t>(
+        src + i * strides[1], &data[2], &strides[2], i);
   }
-
-  // Assert zero stride for indices and weights on dims -2, -3, ...
-  for (int i=0; i<out_ndims - 1; i++) {
-    TORCH_INTERNAL_ASSERT(strides[4 * i + 0 + 2] == 0, strides[4 * i + 0 + 2]);
-    TORCH_INTERNAL_ASSERT(strides[4 * i + 1 + 2] == 0, strides[4 * i + 1 + 2]);
-  }
-
-  // Assert zero stride for the source
-  TORCH_INTERNAL_ASSERT(strides[1] == 0, strides[1]);
-
-  // Assert stride for the output
-  TORCH_INTERNAL_ASSERT(strides[0] == sizeof(scalar_t), strides[0], sizeof(scalar_t));
-
-  // Assert non-zero stride for indices and weights on dim -1
-  int i = out_ndims - 1;
-  TORCH_INTERNAL_ASSERT(strides[4 * i + 0 + 2] == sizeof(index_t), strides[4 * i + 0 + 2], sizeof(index_t));
-  TORCH_INTERNAL_ASSERT(strides[4 * i + 1 + 2] == sizeof(scalar_t), strides[4 * i + 1 + 2], sizeof(scalar_t));
 }
-
 
 // Linear upsampling computation method using TensorIterator for Nd case.
 // 
-// Assumptions:
-// - input and output are of shape (B, C, D1, D2, D3, ..., DN)
-// - channel first is the only supported memory format
-// - upsampling is computed on D_i axes.
-// - zero strides for construced indices and weights on dims D1, D2, ..., DN-1
-// - zero stride for input source (as it is restrided)
-// - non-zero stride for indices and weights on DN dimension
-// 
-// Using these assumptions we iterate over DN dimension and compute the output 
-// using the following tricks for optimizations:
-// - indices are already containing strides
-// - src pointer is advanced once by the constant offset for D1, D2, ..., DN-1
-// - using buffers to prefetch src data before the computations
-// 
 // Single loop function for 1d, 2d and 3d cases.
 // For N dimensions, output value up to Di dimension can be computed as
-///
+//
 // output_i[a] = linear_interp(output_{i+1}[a], w_{i+1}[a], output_{i+1}[a+1], w_{i+1}[a+1])
 // with
 // output_DN[a] = linear_interp(input_DN[a], w_DN[a], input_DN[a+1], w_DN[a+1])
 //
-// This recursive call is implemented with Interp struct using template for 
+// This recursive call is implemented with InterpLinear struct using template for 
 // the loop unrolling on compile time.
-// 
 template <typename scalar_t, typename index_t, int out_ndims>
-void ti_cpu_upsample_linear(TensorIterator& iter) {
-
+void ti_cpu_upsample_linear(at::TensorIterator& iter)
+{
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-
-    scalar_t * dst = (scalar_t *) data[0];
-    scalar_t * src = (scalar_t *) data[1];
-
-    assert_strides_linear<scalar_t, index_t, out_ndims>(strides);
-
-    constexpr int step = 4;
-    constexpr int p2_size = 1 << (out_ndims - 1);
-
-    // temporary buffer for src values
-    scalar_t buffer[2 * p2_size * step];
-
-    // placeholder for pointers on indices for iterated dimension (e.g. -1)
-    index_t * idx_ptrs[2];
-    // placeholder for pointers on all weights: w0 and w1 for each dimension
-    scalar_t * weights_ptrs[2 * out_ndims];
-    // placeholder src pointer with all possible constant offsets added
-    scalar_t * src_offset[p2_size];
-    {
-      // if out_ndims == 1, we do not need to allocate constval_idx_ptrs
-      // however, it is reasonably impossible to allocate an array of constant size 0 on Windows
-      // let's add 1 additional unused entries.
-      constexpr int n = (out_ndims > 1) ? 2 * (out_ndims - 1) : 1;
-      index_t * constval_idx_ptrs[n];
-      int i = 0;
-      for (; i<out_ndims - 1; i++) {
-        constval_idx_ptrs[2 * i + 0] = (index_t *) data[4 * i + 0 + 2];
-        weights_ptrs[2 * i + 0] = (scalar_t *) data[4 * i + 1 + 2];
-        constval_idx_ptrs[2 * i + 1] = (index_t *) data[4 * i + 2 + 2];
-        weights_ptrs[2 * i + 1] = (scalar_t *) data[4 * i + 3 + 2];
-      }
-      idx_ptrs[0] = (index_t *) data[4 * i + 0 + 2];
-      weights_ptrs[2 * i + 0] = (scalar_t *) data[4 * i + 1 + 2];
-      idx_ptrs[1] = (index_t *) data[4 * i + 2 + 2];
-      weights_ptrs[2 * i + 1] = (scalar_t *) data[4 * i + 3 + 2];
-
-      // Add all constant offsets to src
-      int dim_idx = 0;
-      for (int j=0; j<p2_size; j++) {
-        src_offset[j] = src;
-        for (int i=0; i<out_ndims - 1; i++) {
-          dim_idx = (j >> (out_ndims - 2 - i)) % 2;
-          src_offset[j] += *constval_idx_ptrs[2 * i + dim_idx];
-        }
-      }
+    // special-cases to let the compiler apply compile-time input-specific optimizations
+    if ((strides[0] == sizeof(scalar_t) && (strides[1] == 0) &&
+        is_all_zero_stride<out_ndims, 1, scalar_t, index_t>(&strides[2]))) {
+      // contiguous channels-first case
+      basic_loop<scalar_t, index_t, out_ndims>(data, strides, n);
+    } else if ((strides[0] == sizeof(scalar_t) && (strides[1] == sizeof(scalar_t)) &&
+               is_all_zero_stride<out_ndims, -1, scalar_t, index_t>(&strides[2]))) {
+      // contiguous channels-last case
+      basic_loop<scalar_t, index_t, out_ndims>(data, strides, n);
+    } else {
+      // fallback
+      basic_loop<scalar_t, index_t, out_ndims>(data, strides, n);
     }
-    
-    int64_t i = 0;
-    int64_t n_step = n - (n % step);
-    for (; i < n_step; i += step) {
-      interp<out_ndims, scalar_t, index_t, step>(dst + i, buffer, src_offset, idx_ptrs, weights_ptrs);
-      // Here we advance only on the last dimension (i.e. dim -1)
-      idx_ptrs[0] += step;
-      idx_ptrs[1] += step;
-      weights_ptrs[2 * (out_ndims - 1) + 0] += step;
-      weights_ptrs[2 * (out_ndims - 1) + 1] += step;
-    }    
-    for (; i < n; i++) {            
-      interp<out_ndims, scalar_t, index_t, 1>(dst + i, buffer, src_offset, idx_ptrs, weights_ptrs);
-      idx_ptrs[0] += 1;
-      idx_ptrs[1] += 1;
-      weights_ptrs[2 * (out_ndims - 1) + 0] += 1;
-      weights_ptrs[2 * (out_ndims - 1) + 1] += 1;
-    }
-    
   };
-
   iter.for_each(loop);
 }
 
@@ -694,7 +581,7 @@ std::vector<Tensor> ti_compute_indices_weights_linear(
 // - out_ndims is the number of interpolated dims: 1, 2, 3
 // - scale_type is template type for scales, typically c10::optional<double>
 template <typename index_t, int out_ndims, typename scale_type>
-Tensor ti_upsample_linearNd_kernel_impl(
+void ti_upsample_linearNd_kernel_impl(
     Tensor& output,
     const Tensor& input,
     bool align_corners,
@@ -729,10 +616,11 @@ Tensor ti_upsample_linearNd_kernel_impl(
   std::vector<std::vector<Tensor>> indices_weights;
   AT_DISPATCH_FLOATING_TYPES(
     input.scalar_type(), "compute_indices_weights_linear", [&] {
+      auto es = input.element_size();
       for (int i=0; i<out_ndims; i++) {
         indices_weights.emplace_back(
           ti_compute_indices_weights_linear<index_t, scalar_t>(
-            input.size(i + 2), oshape[i + 2], input.stride(i + 2), input.dim(), i + 2, align_corners, scales[i])
+            input.size(i + 2), oshape[i + 2], input.stride(i + 2) * es, input.dim(), i + 2, align_corners, scales[i])
         );
       }
     }
@@ -757,7 +645,6 @@ Tensor ti_upsample_linearNd_kernel_impl(
       ti_cpu_upsample_linear<scalar_t, index_t, out_ndims>(iter);
   });
 
-  return iter.output();
 }
 
 using scale_t = std::vector<c10::optional<double>>;
