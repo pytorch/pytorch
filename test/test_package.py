@@ -3,7 +3,7 @@ import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
-from torch.package.module_environment import set_module_env, ModuleEnv, DefaultImporter
+from torch.package.module_environment import ModuleEnv, DefaultImporter, set_module_env
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory

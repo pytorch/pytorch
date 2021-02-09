@@ -3,7 +3,7 @@ from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
 from types import FunctionType
 from struct import pack
 
-from .module_environment import ModuleEnv, DefaultImporter, ModuleEnvError
+from .module_environment import ModuleEnv, ModuleEnvError
 
 class CustomImportPickler(_Pickler):
     dispatch = _Pickler.dispatch.copy()
