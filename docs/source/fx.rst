@@ -818,11 +818,7 @@ symbolic tracing:
 
         fx.symbolic_trace(f) # Fails!
 
-        def wrapper(flag):
-            return lambda x: f(x, flag)
-
-        new_f = wrapper(flag=True)
-        fx.symbolic_trace(new_f)
+        fx.symbolic_trace(f, concrete_args={'flag': True})
 
 In the case of truly dynamic control flow, the sections of the program
 that contain this code can be traced as calls to the Method (see
@@ -968,7 +964,17 @@ Miscellanea
       ``ones_like`` or ``zeros_like`` may be a viable substitute.
    -  Nondeterministic constructors (``rand``, ``randn``) will have a
       single random value embedded in the trace. This is likely not the
-      intended behavior.
+      intended behavior. One workaround is to wrap ``torch.randn`` in a ``torch.fx.wrap`` function and call that instead.
+    ::
+
+        @torch.fx.wrap
+        def torch_randn(x, shape):
+            return torch.randn(shape)
+
+        def f(x):
+            return x + torch_randn(x, 5)
+        fx.symbolic_trace(f)
+
    -  This behavior may be fixed in a future release.
 
 -  Type annotations
