@@ -4,7 +4,7 @@ from typing import Dict, List, Set, NamedTuple, Tuple
 import torch
 from torch.fx.passes.split_module import split_module
 import operator
-from torch.fx.experimental.partitioner_utils import Partition, \
+from torch.fx._experimental.partitioner_utils import Partition, \
     Device, PartitionerConfig, get_partition_to_latency_mapping,\
     get_latency_of_partitioned_graph, NodeLatency, get_extra_size_of, \
     PartitionMode

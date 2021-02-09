@@ -5,14 +5,14 @@ from typing import Callable, Dict, Union, List
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.experimental import graph_manipulation
-from torch.fx.experimental.accelerator_partitioner import Partitioner
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx._experimental import graph_manipulation
+from torch.fx._experimental.accelerator_partitioner import Partitioner
+from torch.fx._experimental.rewriter import RewritingTracer
+from torch.fx._experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.fx.passes.split_module import split_module
-from torch.fx.experimental.partitioner_utils import (
+from torch.fx._experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
     get_latency_of_partitioned_graph,
@@ -20,8 +20,8 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig,
     PartitionMode
 )
-from torch.fx.experimental.fuser import fuse
-from torch.fx.experimental import merge_matmul
+from torch.fx._experimental.fuser import fuse
+from torch.fx._experimental import merge_matmul
 
 try:
     from torchvision.models import resnet18
@@ -849,7 +849,7 @@ terrible spacing
 
     def test_merge_matmuls(self):
         """
-        A collection of test cases for torch.fx.experimental.merge_matmul,
+        A collection of test cases for torch.fx._experimental.merge_matmul,
         a graph transformation that merges matrix multiplication operations.
         """
         # Utility function for counting matmuls for test assertions.
