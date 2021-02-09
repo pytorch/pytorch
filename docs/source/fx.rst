@@ -807,8 +807,8 @@ code. This is a valid pattern that is supported by symbolic tracing.
 Many instances of dynamic control flow are semantically static control
 flow. These instances can be made to support symbolic tracing by
 removing the data dependencies on input values, for example by moving
-values to ``Module`` attributes or by passing constant values during
-symbolic tracing:
+values to ``Module`` attributes or by binding concrete values to arguments
+during symbolic tracing:
 
 ::
 
