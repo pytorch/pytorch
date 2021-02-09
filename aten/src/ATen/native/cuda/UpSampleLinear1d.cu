@@ -206,16 +206,18 @@ static void upsample_linear1d_backward_out_cuda_template(
 TORCH_IMPL_FUNC(upsample_linear1d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
+    bool align_corners,
     c10::optional<double> scales,
     const Tensor& output
 ) {
-  upsample_linear1d_out_cuda_template(output, input, output_size, scales);
+  upsample_linear1d_out_cuda_template(output, input, output_size, align_corners, scales);
 }
 
 TORCH_IMPL_FUNC(upsample_linear1d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
+    bool align_corners,
     c10::optional<double> scales,
     const Tensor& grad_input
 ) {
@@ -223,7 +225,7 @@ TORCH_IMPL_FUNC(upsample_linear1d_backward_out_cuda) (
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("upsample_linear1d_backward_out_cuda");
   upsample_linear1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, scales);
+      grad_input, grad_output, output_size, input_size, align_corners, scales);
 }
 
 } // namespace native
