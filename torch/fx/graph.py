@@ -30,6 +30,54 @@ def _snake_case(s: str) -> str:
         prev_lower = c.islower()
     return ''.join(chars)
 
+
+def _get_print_name(qualname: str) -> str:
+    """
+    Encodes the following rule:
+    - torch-related functions are printed as fully qualified (e.g. 'torch.sin(…)').
+    - All other functions are printed by their base name (e.g. foo.bar.baz becomes 'baz(…)').
+
+    This is the inverse of the rule in '_get_import_str()'.
+    """
+    base_module = qualname.partition('.')[0]
+    if base_module == 'torch':
+        return qualname
+    return qualname.rpartition('.')[2]
+
+
+def _get_import_str(qualname: str) -> Optional[str]:
+    """
+    Encodes the following import rule:
+    - 'torch' is always imported as a base name (e.g. 'import torch').
+    - 'typing' is imported as a base name (e.g. 'import typing').
+    - Single-atom names are not imported (e.g. 'len', 'getattr').
+    - All other names are imported as 'from foo.bar import baz'.
+
+    This is the inverse of the rule in '_get_print_name()'.
+    """
+    base_module_name = qualname.partition('.')[0]
+    if base_module_name == 'torch' or base_module_name == 'typing':
+        return f'import {base_module_name}'
+
+    module_name, _sep, type_name = qualname.rpartition('.')
+    if len(module_name) == 0:
+        # This was a single-atom qualified name, like 'getattr', or 'len'
+        return None
+
+    return f'from {module_name} import {type_name}'
+
+
+# this is fixed on master, WAR for 1.5
+def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
+    name = orig_method.__name__
+    module = orig_method.__module__
+    if module is not None:
+        return module
+    for guess in [torch, torch.nn.functional]:
+        if getattr(guess, name, None) is orig_method:
+            return guess.__name__
+    raise RuntimeError(f'cannot find module for {orig_method}')
+
 def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
     args_s = ', '.join(repr(a) for a in args)
     kwargs_s = ', '.join(f'{k} = {repr(v)}' for k, v in kwargs.items())
@@ -501,6 +549,7 @@ class Graph:
     def _target_to_str(self, target : Target) -> str:
         if callable(target):
             op = target.__name__
+            self._used_names.setdefault(op)
         else:
             assert isinstance(target, str)
             op = target
@@ -546,27 +595,25 @@ class Graph:
             The string source code generated from this ``Graph``.
         """
         free_vars: List[str] = []
-        modules_used : Set[str] = set()
+        qualnames_used: Set[str] = set()
         body: List[str] = []
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
 
-        def register_modules_used(qualified_name : str):
-            if '.' in qualified_name:
-                module_name = qualified_name.split('.', maxsplit=1)[0]
-                modules_used.add(module_name)
-
         def type_repr(o : Any):
             typename = _type_repr(o)
+
+            # Common case: this is a regular module name like 'foo.bar.baz'
             if all(x.isidentifier() for x in typename.split('.')):
-                register_modules_used(typename)
-            else:
-                # this is a constructor type, e.g. typing.List[torch.Tensor]
-                modules_used.add(o.__module__)
-                for sub_type in o.__args__:
-                    # make sure we have torch.Tensor
-                    type_repr(sub_type)
+                qualnames_used.add(typename)
+                return _get_print_name(typename)
+
+            # this is a constructor type, e.g. typing.List[torch.Tensor]
+            qualnames_used.add(o.__module__)
+            for sub_type in o.__args__:
+                # make sure we have torch.Tensor
+                type_repr(sub_type)
             return typename
 
 
@@ -628,15 +675,16 @@ class Graph:
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
                 qualified_name = _get_qualified_name(node.target)
-                register_modules_used(qualified_name)
-                if qualified_name == 'getattr' and \
+                qualnames_used.add(qualified_name)
+                print_name = _get_print_name(qualified_name)
+                if print_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
                    node.args[1].isidentifier():
                     # pretty print attribute access
                     body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
-                body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{node.name} = {print_name}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
@@ -661,8 +709,13 @@ class Graph:
 
         # repr() for inf and nan floating point values aren't parseable by
         # python as literals. Explicitly import the names from the ``math`` module.
-        import_strs = [f'import {name}' for name in sorted(modules_used)]
-        import_block = '\n'.join(import_strs)
+        import_strs: Set[str] = set()
+        for qualname in qualnames_used:
+            import_str = _get_import_str(qualname)
+            if import_str is not None:
+                import_strs.add(import_str)
+
+        import_block = '\n'.join(sorted(import_strs))
 
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
@@ -672,7 +725,7 @@ class Graph:
 
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
-        fn_code = f"""\
+        fn_code = f"""
 {import_block}
 def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}"""
