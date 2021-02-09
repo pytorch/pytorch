@@ -505,8 +505,17 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
     // Only remove tensor mutation if we know we're going to create speedups
     // with mkldnn. Only supporting functional ops simplifies this pass bc
     // running an op in mkldnn removes the aliasing relationships that
-    // previously existed between input and output
-    RemoveTensorMutation(graph);
+    // previously existed between input and output.
+    RemoveTensorMutation(graph, [](Node* node_to_functionalize) {
+      static std::unordered_set<Symbol> mkldnn_ops = {
+          aten::add_,
+          aten::mul_,
+          aten::relu_,
+          aten::dropout_,
+          aten::sigmoid_,
+      };
+      return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
+    });
     AliasDb db(graph);
     MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
     EliminateDeadCode(graph);

@@ -93,6 +93,9 @@ namespace c10 {
   _(aten, Float)                     \
   _(aten, str)                       \
   _(aten, Delete)                    \
+  _(aten, relu_)                     \
+  _(aten, dropout_)                  \
+  _(aten, sigmoid_)                  \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, layout)                    \
