@@ -47,17 +47,17 @@ TEST(Approx, log_vml) {
 
   test(A_t);
 
-  test(A_t * 0x1p1);
-  test(A_t * 0x1p-1);
+  test(A_t * 2.0f);
+  test(A_t * 0.5f);
 
-  test(A_t * 0x1p2);
-  test(A_t * 0x1p-2);
+  test(A_t * 4.0f);
+  test(A_t * 0.25f);
 
-  test(A_t * 0x1p16);
-  test(A_t * 0x1p-16);
+  test(A_t * powf(2.0f, 16));
+  test(A_t * powf(2.0f, -16));
 
-  test(A_t * 0x1p126);
-  test(A_t * 0x1p-126);
+  test(A_t * powf(2.0f, 126));
+  test(A_t * powf(2.0f, -126));
 
   test(torch::full({32}, INFINITY));
   test(torch::full({32}, NAN));
