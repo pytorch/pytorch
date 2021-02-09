@@ -354,9 +354,17 @@ void TensorSerializer::Serialize(
     } break;
     case TensorProto_DataType_ZERO_COLLISION_HASH: {
       CAFFE_ENFORCE(
-          false,
-          "Serialization for zero collision hash type is supported by specialized serializer ZeroCollisionIdHashSerializer");
+        false,
+        "Serialization for zero collision hash type is supported by "
+        "specialized serializer ZeroCollisionIdHashSerializer");
     } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Serialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferSerialier");
+    } break;
+
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
@@ -653,8 +661,15 @@ void TensorDeserializer::DeserializeToTensor(
     } break;
     case TensorProto_DataType_ZERO_COLLISION_HASH: {
       CAFFE_ENFORCE(
-          false,
-          "Deserialization for zero collision hash type is supported by specialized deserializer ZeroCollisionIdHashDeserializer");
+        false,
+        "Deserialization for zero collision hash type is supported by "
+        "specialized deserializer ZeroCollisionIdHashDeserializer");
+    } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Deserialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferDeserialier");
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
   }
