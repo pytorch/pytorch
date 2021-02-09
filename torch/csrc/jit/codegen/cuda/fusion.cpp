@@ -32,7 +32,7 @@ Fusion* FusionGuard::getCurFusion() {
   return ACTIVE_FUSION;
 }
 
-void swap(Fusion& a, Fusion& b) noexcept {
+TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept {
   FUSER_PERF_SCOPE("Fusion swap");
 
   using std::swap;
