@@ -3,7 +3,7 @@ from typing_extensions import Protocol
 import warnings
 
 import torch
-from ..parameter import is_lazy
+from ..parameter import UninitializedParameter
 
 
 class _LazyProtocol(Protocol):
@@ -181,14 +181,13 @@ class LazyModuleMixin:
         # which is not clean
         for name, param in self._parameters.items():
             if param is not None:
-                if not (is_lazy(param) or keep_vars):
-                    param = param.detach()
-                destination[prefix + name] = param
+                if isinstance(param, UninitializedParameter):
+                    destination[prefix + name] = param
+                else:
+                    destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
-                if not (is_lazy(buf) or keep_vars):
-                    buf = buf.detach()
-                destination[prefix + name] = buf
+                destination[prefix + name] = buf if keep_vars else buf.detach()
 
     def _lazy_load_hook(
             self: _LazyProtocol, state_dict, prefix, local_metadata, strict,
@@ -202,14 +201,15 @@ class LazyModuleMixin:
         See comment in ``torch.nn.Module._register_load_state_dict_pre_hook``
         for the details of the hook specification.
         """
-        for name, param in itertools.chain(self._parameters.items(), self._buffers.items()):
+        local_state = {k: v for k, v in self._parameters.items() if v is not None}
+        for name, param in local_state.items():
             key = prefix + name
-            if key in state_dict and param is not None:
+            if key in state_dict:
                 input_param = state_dict[key]
-                if is_lazy(param):
+                if isinstance(param, UninitializedParameter): 
                     # The current parameter is not initialized but the one being loaded one is
                     # create a new parameter based on the uninitialized one
-                    if not is_lazy(input_param):
+                    if not isinstance(input_param, UninitializedParameter):
                         with torch.no_grad():
                             param.materialize(input_param.shape)
 
@@ -226,9 +226,8 @@ class LazyModuleMixin:
         # This is to avoid the JIT to track this parameter and force
         # custom modules __setstate__ to add it
         params = self._parameters.values()
-        buffers = self._buffers.values()
-        for param in itertools.chain(params, buffers):
-            if is_lazy(param):
+        for param in itertools.chain(params):
+            if isinstance(param, (UninitializedParameter)):
                 return True
         return False
 

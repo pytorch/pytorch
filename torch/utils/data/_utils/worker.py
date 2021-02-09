@@ -7,8 +7,8 @@ static methods.
 import torch
 import random
 import os
+import queue
 from dataclasses import dataclass
-from torch._six import queue
 from torch._utils import ExceptionWrapper
 from typing import Union
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
