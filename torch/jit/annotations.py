@@ -2,6 +2,7 @@ import ast
 import enum
 import inspect
 import re
+import builtins
 import torch
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
@@ -14,7 +15,6 @@ from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
 
 
 from textwrap import dedent
-from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from typing import Type
 
