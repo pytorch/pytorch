@@ -1,3 +1,5 @@
+#ifdef TORCH_ENABLE_LLVM
+
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
@@ -73,3 +75,5 @@ TEST(Approx, log_vml) {
   cg.call({A_t.data_ptr<float>(), B_t.data_ptr<float>(), A_t.numel()});
   ASSERT_TRUE(torch::allclose(B_t, B_ref));
 }
+
+#endif // TORCH_ENABLE_LLVM
