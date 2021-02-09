@@ -182,14 +182,9 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
   IterDomain* axis(int pos) const;
 
-  // Is there an active computeAt TensorView/Axis
+  // Does it share outer axes with other tensors?
   bool hasComputeAt() const {
-    return compute_at_view_ != nullptr;
-  }
-
-  // Return the TensorView we're computing at
-  TensorView* getComputeAtView() const {
-    return compute_at_view_;
+    return this_compute_at_axis_ > 0;
   }
 
   size_t nDims() const;
@@ -199,21 +194,11 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return this_compute_at_axis_;
   }
 
-  // Return compute at axis relative to compute at view
-  unsigned int getRelativeComputeAtAxis() const {
-    return relative_compute_at_axis_;
-  }
-
-  // Return position in compute_at_view that lines up with this->axis(pos)?
-  int getComputeAtRelPos(int pos) const;
-
   // Compute this TensorView relative to another tensor at axis
   TensorView* computeAt(TensorView* consumer, int axis);
 
   void clearComputeAt() {
     this_compute_at_axis_ = 0;
-    relative_compute_at_axis_ = 0;
-    compute_at_view_ = nullptr;
   }
 
   // Split "axis" into 2 axes
@@ -320,11 +305,7 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     domain_ = td;
   }
 
-  // Set all computeAt members without checking any correctness. Useful for
-  // computeAt with outputs relative to eachother
-  void setComputeAt(TensorView* computeAtView, int thisPos, int relPos);
-
-  void setComputeAt(int thisPos);
+  void setComputeAt(unsigned int this_pos);
 
  private:
   int normalizeAxisPos(int pos) const {
@@ -351,9 +332,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
  private:
   TensorDomain* domain_ = nullptr;
-  TensorView* compute_at_view_ = nullptr;
-  // compute at axis in compute at view
-  unsigned int relative_compute_at_axis_ = 0;
   unsigned int this_compute_at_axis_ = 0;
   MemoryType memory_type_ = MemoryType::Local;
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;

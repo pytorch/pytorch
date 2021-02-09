@@ -66,10 +66,10 @@ void IrPrinter::handle(const TensorView* tv) {
     os_ << "T" << tv->name();
     handle(tv->domain());
 
-    if (tv->getComputeAtView() != nullptr) {
+    if (tv->hasComputeAt()) {
       os_ << " compute_at( ";
-      os_ << "T" << tv->getComputeAtView()->name();
-      os_ << ", " << tv->getRelativeComputeAtAxis() << " )";
+      os_ << tv->getThisComputeAtAxis();
+      os_ << " )";
     }
   }
 }

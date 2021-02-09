@@ -1499,15 +1499,15 @@ TEST(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
 
   tv0->computeAt(tv7, 1);
 
-  TORCH_CHECK(tv1->hasComputeAt() && tv1->nDims() == 3);
-  TORCH_CHECK(tv2->getComputeAtView() == tv5 && tv2->nDims() == 3);
-  TORCH_CHECK(tv3->getComputeAtView() == tv5 && tv3->nDims() == 3);
-  TORCH_CHECK(tv4->hasComputeAt() && tv4->nDims() == 3);
-  TORCH_CHECK(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
-  TORCH_CHECK(
-      !tv6->hasComputeAt() && tv6->getThisComputeAtAxis() == 1 &&
-      tv6->nDims() == 3);
-  TORCH_CHECK(!tv7->hasComputeAt());
+  GpuLower gpulw(&fusion);
+
+  // The this-position of the last tensor should be zero.
+  TORCH_CHECK(tv7->nDims() == 3 && tv7->getThisComputeAtAxis() == 0);
+  // The position of every other tensor should be 1.
+  for (auto tv : {tv1, tv2, tv3, tv4, tv5, tv6}) {
+    TORCH_CHECK(tv->nDims() == 3 && tv->getThisComputeAtAxis() == 1);
+    TORCH_CHECK(gpulw.caLoopMap().areMapped(tv7->axis(0), tv->axis(0)));
+  }
 
   for (Val* val : fusion.vals()) {
     if (!fusion.hasInput(val) &&
@@ -1842,10 +1842,16 @@ TEST(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
     TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
   }
 
+  GpuLower gpulw(&fusion);
+
   // Note that tv2 is also computed at tv3.
-  TORCH_CHECK(tv1->getComputeAtView() == computeAtTarget);
-  TORCH_CHECK(!tv2->hasComputeAt() && tv2->getThisComputeAtAxis() == 1);
-  TORCH_CHECK(!tv3->hasComputeAt());
+  for (auto tv : {tv1, tv2}) {
+    TORCH_CHECK(tv->getThisComputeAtAxis() == 1);
+    TORCH_CHECK(
+        gpulw.caLoopMap().areMapped(tv->axis(0), computeAtTarget->axis(0)));
+  }
+
+  TORCH_CHECK(tv3->getThisComputeAtAxis() == 0);
 
   computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
   for (auto tv : affected_tensors) {
@@ -1900,7 +1906,7 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer1_CUDA) {
   // the common consumer of tv2 and tv3, so they are computed at
   // tv4. The indirect propagation of the computeAt should stop at the
   // common consumer, and no further change should occur. More
-  // specifically, tv4 and tv5 should not have a computeAt tensor.
+  // specifically, the computeAT position of tv4 and tv5 should be zero.
   TensorView* computeAtTarget = tv3;
   computeAtTarget->split(0, 128);
   tv1->computeAt(computeAtTarget, 1);
@@ -1910,11 +1916,11 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer1_CUDA) {
     TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
   }
 
-  TORCH_CHECK(tv1->getComputeAtView() == computeAtTarget);
-  TORCH_CHECK(tv2->getComputeAtView() == tv4);
-  TORCH_CHECK(tv3->getComputeAtView() == tv4);
-  TORCH_CHECK(!tv4->hasComputeAt());
-  TORCH_CHECK(!tv5->hasComputeAt());
+  TORCH_CHECK(tv1->getThisComputeAtAxis() == 1);
+  TORCH_CHECK(tv2->getThisComputeAtAxis() == 1);
+  TORCH_CHECK(tv3->getThisComputeAtAxis() == 1);
+  TORCH_CHECK(tv4->getThisComputeAtAxis() == 0);
+  TORCH_CHECK(tv5->getThisComputeAtAxis() == 0);
 
   computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
 
@@ -1994,19 +2000,15 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer2_CUDA) {
     }
     TensorView* tv = val->as<TensorView>();
     TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
+    if (tv == tv5) {
+      TORCH_CHECK(tv->getThisComputeAtAxis() == 0);
+    } else {
+      TORCH_CHECK(tv->getThisComputeAtAxis() == 1);
+    }
   }
 
-  TORCH_CHECK(tv1->getComputeAtView() == tv2);
-  TORCH_CHECK(tv2->getComputeAtView() == tv3);
-  // tv3 and tv4 are computed at tv5
-  TORCH_CHECK(tv3->getComputeAtView() == tv5);
-  TORCH_CHECK(tv4->getComputeAtView() == tv5);
-  TORCH_CHECK(!tv5->hasComputeAt());
-
-  for (Val* val : fusion.vals()) {
-    if (!fusion.hasInput(val) &&
-        val->getValType().value() == ValType::TensorView) {
-      TensorView* tv = val->as<TensorView>();
+  for (auto tv : ir_utils::filterByType<TensorView>(fusion.vals())) {
+    if (!fusion.hasInput(tv)) {
       tv->axis(1)->parallelize(ParallelType::Unroll);
       tv->axis(-1)->parallelize(ParallelType::TIDx);
     }
@@ -2077,25 +2079,17 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer3_CUDA) {
   tv1->computeAt(computeAtTarget, 1);
 
   // All tensors should have the same dimenionality as the target
-  for (Val* val : fusion.vals()) {
-    if (fusion.hasInput(val) ||
-        val->getValType().value() != ValType::TensorView) {
+  for (auto tv : ir_utils::filterByType<TensorView>(fusion.vals())) {
+    if (fusion.hasInput(tv)) {
       continue;
     }
-    TensorView* tv = val->as<TensorView>();
     TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
+    if (tv == tv6) {
+      TORCH_CHECK(tv->getThisComputeAtAxis() == 0);
+    } else {
+      TORCH_CHECK(tv->getThisComputeAtAxis() == 1);
+    }
   }
-
-  TORCH_CHECK(tv1->getComputeAtView() == tv2);
-  TORCH_CHECK(tv2->getComputeAtView() == tv3);
-
-  // tv3 and tv4 are computed at tv5
-  TORCH_CHECK(tv3->getComputeAtView() == tv5);
-  TORCH_CHECK(tv4->getComputeAtView() == tv5);
-
-  // Output tensors should not have computeAt
-  TORCH_CHECK(!tv5->hasComputeAt() && tv5->getThisComputeAtAxis() == 1);
-  TORCH_CHECK(!tv6->hasComputeAt());
 
   for (Val* val : fusion.vals()) {
     if (!fusion.hasInput(val) &&
@@ -2163,14 +2157,12 @@ TEST(NVFuserTest, FusionComputeAtNoCommonConsumer_CUDA) {
   TensorView* affected_tensors[] = {tv1, tv2, tv3, tv4, tv6};
   for (auto tv : affected_tensors) {
     TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
+    if (tv == tv6) {
+      TORCH_CHECK(tv->getThisComputeAtAxis() == 0);
+    } else {
+      TORCH_CHECK(tv->getThisComputeAtAxis() == 1);
+    }
   }
-
-  TORCH_CHECK(tv1->getComputeAtView() == computeAtTarget);
-  TORCH_CHECK(tv2->getComputeAtView() == tv4);
-  TORCH_CHECK(tv3->getComputeAtView() == tv4);
-  TORCH_CHECK(tv4->getComputeAtView() == tv5);
-  TORCH_CHECK(!tv5->hasComputeAt() && tv5->getThisComputeAtAxis() == 1);
-  TORCH_CHECK(!tv6->hasComputeAt());
 
   computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
 
@@ -5735,9 +5727,7 @@ TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
   fusion.addOutput(tv4);
   tv1->computeAt(tv2, -1);
 
-  TORCH_CHECK(
-      (tv1->getComputeAtView() == tv2 || tv1->getComputeAtView() == tv3) &&
-      tv1->getThisComputeAtAxis() == 2 && tv1->getRelativeComputeAtAxis() == 2);
+  TORCH_CHECK(tv1->getThisComputeAtAxis() == 2);
 }
 
 TEST(NVFuserTest, FusionComputeAtExprOrder1_CUDA) {
@@ -8458,9 +8448,8 @@ TEST(NVFuserTest, FusionComputeAtNonterminatingOutput_CUDA) {
 
   tv0->computeAt(tv2, -1);
 
-  TORCH_CHECK(
-      !(tv3->getComputeAtView() == tv4 && tv4->getComputeAtView() == tv3),
-      "ComputeAt cycle detected between tv3 and tv4");
+  TORCH_CHECK(tv3->hasComputeAt());
+  TORCH_CHECK(!tv4->hasComputeAt());
 
   const auto options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -10166,7 +10155,6 @@ TEST(NVFuserTest, FusionIssue477_CUDA) {
   tv0->computeAt(tv4, -3);
 
   TORCH_CHECK(tv1->getThisComputeAtAxis() == 1);
-  TORCH_CHECK(tv1->getRelativeComputeAtAxis() == 2);
 }
 
 TEST(NVFuserTest, FusionIssue484_CUDA) {
@@ -10797,69 +10785,6 @@ __global__ void kernel1(
   TORCH_CHECK(in0.mean(dims).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
 }
 
-TEST(NVFuserTest, FusionGetComputeAtRelPos_CUDA) {
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-
-    auto tv0 = makeSymbolicTensor(1);
-    auto tv1 = broadcast(tv0, {false, true});
-    auto tv2 = broadcast(tv1, {false, true, false});
-    fusion.addInput(tv0);
-    fusion.addOutput(tv2);
-
-    tv1->computeAt(tv2, -1);
-
-    TORCH_CHECK(tv1->getComputeAtRelPos(1) == 2);
-  }
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-
-    auto tv0 = makeSymbolicTensor(1);
-    auto tv1 = broadcast(tv0, {false, true});
-    auto tv2 = broadcast(tv1, {false, true, false});
-    fusion.addInput(tv0);
-    fusion.addOutput(tv2);
-
-    tv2->merge(1, 2);
-    tv1->computeAt(tv2, -1);
-
-    TORCH_CHECK(tv1->getComputeAtRelPos(1) == 1);
-  }
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-
-    auto tv0 = makeSymbolicTensor(1);
-    auto tv1 = broadcast(tv0, {false, true});
-    auto tv2 = broadcast(tv1, {false, true, false});
-    fusion.addInput(tv0);
-    fusion.addOutput(tv2);
-
-    tv2->merge(1, 2);
-    tv1->computeAt(tv2, -1);
-
-    TORCH_CHECK(tv1->getComputeAtRelPos(1) == 1);
-  }
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-
-    auto tv0 = makeSymbolicTensor(1);
-    auto tv1 = add(tv0, new Double(1));
-    auto tv2 = broadcast(tv1, {false, true});
-    auto tv3 = broadcast(tv1, {false, true});
-    fusion.addInput(tv0);
-    fusion.addOutput(tv2);
-    fusion.addOutput(tv3);
-
-    tv0->computeAt(tv3, -1);
-
-    TORCH_CHECK(tv1->getComputeAtRelPos(0) == 0);
-  }
-}
-
 TEST(NVFuserTest, FusionTranspose1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -11108,15 +11033,12 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed1_CUDA) {
 
   tv0->computeAt(tv7, 1);
 
-  TORCH_CHECK(tv1->hasComputeAt() && tv1->nDims() == 3);
-  TORCH_CHECK(tv2->getComputeAtView() == tv5 && tv2->nDims() == 3);
-  TORCH_CHECK(tv3->getComputeAtView() == tv5 && tv3->nDims() == 3);
-  TORCH_CHECK(tv4->hasComputeAt() && tv4->nDims() == 3);
-  TORCH_CHECK(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
-  TORCH_CHECK(
-      !tv6->hasComputeAt() && tv6->getThisComputeAtAxis() == 1 &&
-      tv6->nDims() == 3);
-  TORCH_CHECK(!tv7->hasComputeAt());
+  // The this-position of the last tensor should be zero.
+  TORCH_CHECK(tv7->nDims() == 3 && tv7->getThisComputeAtAxis() == 0);
+  // The position of every other tensor should be 1.
+  for (auto tv : {tv1, tv2, tv3, tv4, tv5, tv6}) {
+    TORCH_CHECK(tv->nDims() == 3 && tv->getThisComputeAtAxis() == 1);
+  }
 
   for (Val* val : fusion.vals()) {
     if (!fusion.hasInput(val) &&

@@ -365,13 +365,6 @@ void IrGraphGenerator::handle(const TensorView* tv) {
   graph_def_ << "    " << getid(tv) << " [label=\"" << label.str()
              << "\", shape=Mrecord, color=brown, " << style << "];\n";
 
-  if (const auto* compute_at_view = tv->getComputeAtView()) {
-    std::stringstream arc_style;
-    arc_style << "[color=red, style=dashed, label=\""
-              << "ComputeAt(" << tv->getRelativeComputeAtAxis() << ")\"]";
-    addArc(tv, compute_at_view, arc_style.str());
-  }
-
   tensor_views_.push_back(tv);
 }
 

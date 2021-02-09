@@ -11,7 +11,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class ComputeAtMap {
+class TORCH_CUDA_CU_API ComputeAtMap {
  public:
   // There's three modes of these iter domain mappings. For indexing, for loop
   // nest mapping/generation, and to figure out the parallelization strategy.
