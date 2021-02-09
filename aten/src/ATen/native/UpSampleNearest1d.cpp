@@ -9,7 +9,7 @@ namespace meta {
 TORCH_META_FUNC(upsample_nearest1d) (
   const Tensor& input, IntArrayRef output_size, c10::optional<double> scales
 ) {
-  auto full_output_size = upsample_1d_common_check(input.sizes(), output_size);
+  auto full_output_size = native::upsample_1d_common_check(input.sizes(), output_size);
 
   // Allow for empty batch size but not other dimensions
   TORCH_CHECK(
@@ -23,7 +23,7 @@ TORCH_META_FUNC(upsample_nearest1d) (
 TORCH_META_FUNC(upsample_nearest1d_backward) (
   const Tensor& grad_output, IntArrayRef output_size, IntArrayRef input_size, c10::optional<double> scales
 ) {
-  auto full_output_size = upsample_1d_common_check(input_size, output_size);
+  auto full_output_size = native::upsample_1d_common_check(input_size, output_size);
 
   check_dim_size(grad_output, 3, 0, full_output_size[0]);
   check_dim_size(grad_output, 3, 1, full_output_size[1]);
