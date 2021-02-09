@@ -5,16 +5,28 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
+#include <pybind11/detail/common.h>
+#include <pybind11/pytypes.h>
 #include <functional>
 #include <utility>
 #include "c10/util/ArrayRef.h"
+
+namespace c10 {
+struct FunctionSchema;
+struct IValue;
+};
 
 namespace torch {
 namespace jit {
 
 struct Value;
+struct tuple_slice;
 
 bool matchesUtility(const c10::FunctionSchema& schema, at::ArrayRef<Value*> inputs);
+Stack createStackForSchema(const c10::FunctionSchema& schema,
+    const tuple_slice& args,
+    const pybind11::kwargs& kwargs,
+    c10::optional<c10::IValue> self);
 
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
@@ -24,10 +36,12 @@ struct OverloadedFunction : public Function {
       c10::QualifiedName qualname,
       c10::FunctionSchema schema,
       std::function<void(Stack&)> callable,
+      at::ClassTypePtr containing_class,
       std::string doc_string = "")
       : name_(std::move(qualname)),
         callable_(std::move(callable)),
         schema_(std::move(schema)),
+        containing_class(std::move(containing_class)),
         doc_string_(std::move(doc_string)) {
     TORCH_INTERNAL_ASSERT(schema_.returns().size() == 1);
   }
@@ -50,6 +64,20 @@ struct OverloadedFunction : public Function {
 
   bool matches(ArrayRef<Value*> inputs) {
     return matchesUtility(getSchema(), inputs);
+  }
+
+  bool matchesPyArgs(const tuple_slice& args, const pybind11::kwargs& kwargs) {
+
+    try {
+      auto stack = torch::jit::createStackForSchema(getSchema(), args, kwargs, c10::nullopt);
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  at::ClassTypePtr getClass() {
+    return containing_class;
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
@@ -136,7 +164,9 @@ struct OverloadedFunction : public Function {
     return *this;
   }
 
-  ~OverloadedFunction() {}
+  ~OverloadedFunction() {
+    std::cout << "DESTROYING\n";
+  }
 
  private:
   c10::QualifiedName name_;
@@ -144,6 +174,8 @@ struct OverloadedFunction : public Function {
   std::function<void(Stack&)> callable_;
 
   c10::FunctionSchema schema_;
+
+  at::ClassTypePtr containing_class;
 
   std::string doc_string_;
 };

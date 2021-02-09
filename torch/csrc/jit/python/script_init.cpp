@@ -1208,7 +1208,7 @@ void initJitScriptBindings(PyObject* module) {
           "get_interface",
           [](const std::shared_ptr<CompilationUnit>& self,
              const std::string& name) { return self->get_interface(name); });
-
+  // TODO change so it does stuff for overload
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
@@ -1217,8 +1217,22 @@ void initJitScriptBindings(PyObject* module) {
             // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
+            try {
+              OverloadedFunction& overload_func = dynamic_cast<OverloadedFunction&>(callee);
+              auto methods = overload_func.getClass()->findOverloadedMethod(overload_func.name());
+              for (auto method: methods) {
+                auto overloaded_method = dynamic_cast<OverloadedFunction*>(method);
+                if (overloaded_method->matchesPyArgs(tuple_slice(std::move(args), 1), std::move(kwargs))) {
+                  return invokeScriptFunctionFromPython(*method, tuple_slice(std::move(args), 1), std::move(kwargs));
+                }
+              }
+
+            } catch(const std::bad_cast& e) {
+
+            }
+
             py::object result = invokeScriptFunctionFromPython(
-                callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+                  callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             return result;
             END_HANDLE_TH_ERRORS_PYBIND
           })
@@ -1295,7 +1309,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("__doc__", [](const StrongFunctionPtr& self) {
         return self.function_->doc_string();
       });
-
+  // TODO: ove rhere too
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
           "__call__",

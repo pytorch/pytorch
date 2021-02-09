@@ -272,10 +272,7 @@ class TestTorchbind(JitTestCase):
             stuff1 = val.increment(4)
             stuff2 = val.increment(4, 5)
             return stuff1, stuff2
-        s = torch.jit.script(f)
-        val1, val2 = s()
-        self.assertEqual(val1, 32)
-        self.assertEqual(val2, 37)
+        self.checkScript(f, ())
 
     def test_torchbind_pass_wrong_type(self):
         with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):

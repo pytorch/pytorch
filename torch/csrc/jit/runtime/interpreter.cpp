@@ -946,8 +946,8 @@ struct CodeImpl {
             for (auto & method : class_type->findOverloadedMethod(node->s(attr::name))) {
               if (auto overloaded_method = dynamic_cast<OverloadedFunction*>(method)) {
                 if (overloaded_method->matches(node->inputs())) {
-                   emitCall(method, node->inputs());
-                    break;
+                  emitCall(method, node->inputs());
+                  break;
                 }
               }
             }

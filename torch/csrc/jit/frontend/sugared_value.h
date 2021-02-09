@@ -463,7 +463,8 @@ struct MethodValue : public SugaredValue {
       if (auto class_type = self_->type()->cast<ClassType>()) {
         Function& method = class_type->getMethod(method_name);
         auto overloaded_methods = class_type->findOverloadedMethod(method_name);
-        if (overloaded_methods.size() > 1) {
+        if (class_type->findOverloadedMethod(method_name).size() > 1 ) {
+          auto overloaded_methods = class_type->findOverloadedMethod(method_name);
           for (auto overloaded_method : overloaded_methods) {
             try {
               overloaded_method->ensure_defined();

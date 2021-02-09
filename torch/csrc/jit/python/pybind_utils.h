@@ -24,6 +24,7 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
+#include "ATen/core/overloaded_function.h"
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -892,6 +893,7 @@ inline py::object runAndInsertCall(
     // we're tracing.
     const std::function<Value*(Graph&, const MatchedSchema& match)>&
         callInserter) {
+
   auto stack =
       createStackForSchema(callee.getSchema(), args, kwargs, std::move(self));
   const auto& tracing_state = tracer::getTracingState();
