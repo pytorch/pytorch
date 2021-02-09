@@ -5,6 +5,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Optional.h>
 #include <ATen/Tensor.h>
+#include <ATen/core/Reduction.h>
 
 namespace at {
 
