@@ -3,10 +3,12 @@ import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
+from torch.package.module_environment import set_module_env, ModuleEnv, DefaultImporter
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
+from torch.fx import symbolic_trace, Graph, GraphModule
 from sys import version_info
 from io import StringIO, BytesIO
 import pickle
@@ -191,7 +193,7 @@ import module_a
 
         f2 = self.temp()
         pe = PackageExporter(f2, verbose=False)
-        pe.importers.insert(0, importer1.import_module)
+        pe.module_env = ModuleEnv([importer1, DefaultImporter])
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
             pe.require_module(loaded1.__module__)
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
@@ -220,7 +222,7 @@ import module_a
         def make_exporter():
             pe = PackageExporter(f2, verbose=False)
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
-            pe.importers.insert(0, importer1.import_module)
+            pe.module_env = ModuleEnv([importer1, DefaultImporter])
             return pe
 
         # This should fail. The 'PackageAObject' type defined from 'importer1'
@@ -357,8 +359,7 @@ import module_a
             # came from imported packages so that it can resolve
             # class names like torchvision.models.resnet.ResNet
             # to their source code.
-
-            e.importers.insert(0, i.import_module)
+            e.module_env = ModuleEnv([i, DefaultImporter])
 
             # e.importers is a list of module importing functions
             # that by default contains importlib.import_module.
@@ -525,6 +526,68 @@ def load():
         packaged_src = inspect.getsourcelines(packaged_class)
         regular_src = inspect.getsourcelines(regular_class)
         self.assertEqual(packaged_src, regular_src)
+
+    def test_package_fx_simple(self):
+        class SimpleTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x + 3.0)
+
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+
+        f = BytesIO()
+        with PackageExporter(f, verbose=False) as pe:
+            pe.save_pickle('model', 'model.pkl', traced)
+
+        f.seek(0)
+        pi = PackageImporter(f)
+        loaded_traced = pi.load_pickle('model', 'model.pkl')
+        input = torch.rand(2, 3)
+        self.assertTrue(torch.allclose(loaded_traced(input), traced(input)))
+
+    def test_package_then_fx(self):
+        from package_a.test_module import SimpleTest
+        model = SimpleTest()
+        f = BytesIO()
+        with PackageExporter(f, verbose=False) as pe:
+            pe.save_pickle('model', 'model.pkl', model)
+
+        f.seek(0)
+        pi = PackageImporter(f)
+        loaded = pi.load_pickle('model', 'model.pkl')
+        with set_module_env(ModuleEnv([pi, DefaultImporter])):
+            traced = symbolic_trace(loaded)
+        input = torch.rand(2, 3)
+        self.assertTrue(torch.allclose(loaded(input), traced(input)))
+
+    def test_package_fx_with_imports(self):
+        import package_a.subpackage
+
+        # Manually construct a graph that invokes a leaf function
+        graph = Graph()
+        a = graph.placeholder('x')
+        b = graph.placeholder('y')
+        c = graph.call_function(package_a.subpackage.leaf_function, (a, b))
+        d = graph.call_function(torch.sin, (c,))
+        graph.output(d)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        f = BytesIO()
+        with PackageExporter(f, verbose=False) as pe:
+            pe.save_pickle('model', 'model.pkl', gm)
+        f.seek(0)
+
+        pi = PackageImporter(f)
+        loaded_gm = pi.load_pickle('model', 'model.pkl')
+        input_x = torch.rand(2, 3)
+        input_y = torch.rand(2, 3)
+
+        self.assertTrue(torch.allclose(loaded_gm(input_x, input_y), gm(input_x, input_y)))
+
+        # Check that the packaged version of the leaf_function dependency is
+        # not the same as in the outer env.
+        packaged_dependency = pi.import_module('package_a.subpackage')
+        self.assertTrue(packaged_dependency is not package_a.subpackage)
 
 
 class ManglingTest(TestCase):

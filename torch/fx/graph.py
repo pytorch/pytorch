@@ -1,6 +1,7 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 
-from typing import Callable, Any, List, Dict, Optional, Tuple, Set
+from typing import Callable, Any, List, Dict, Optional, Tuple, Set, Union
+from torch.package.module_environment import ModuleEnv, get_current_module_env
 import torch
 import keyword
 import re
@@ -44,8 +45,13 @@ def _get_print_name(qualname: str) -> str:
         return qualname
     return qualname.rpartition('.')[2]
 
+# Representation of module dependencies.
+# str -> 'import str'
+# (str1, str2) -> 'from str1 import str2'
+_Import = Union[str, Tuple[str, str]]
 
-def _get_import_str(qualname: str) -> Optional[str]:
+
+def _get_import(qualname: str) -> Optional[_Import]:
     """
     Encodes the following import rule:
     - 'torch' is always imported as a base name (e.g. 'import torch').
@@ -57,14 +63,23 @@ def _get_import_str(qualname: str) -> Optional[str]:
     """
     base_module_name = qualname.partition('.')[0]
     if base_module_name == 'torch' or base_module_name == 'typing':
-        return f'import {base_module_name}'
+        return base_module_name
 
     module_name, _sep, type_name = qualname.rpartition('.')
     if len(module_name) == 0:
         # This was a single-atom qualified name, like 'getattr', or 'len'
         return None
 
-    return f'from {module_name} import {type_name}'
+    return module_name, type_name
+
+
+def _format_import(import_: _Import):
+    if isinstance(import_, str):
+        return f'import {import_}'
+    elif isinstance(import_, tuple):
+        return f'from {import_[0]} import {import_[1]}'
+    else:
+        raise AssertionError(f'unexpected type: {type(import_)}')
 
 
 # this is fixed on master, WAR for 1.5
@@ -177,6 +192,8 @@ class Graph:
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
+        self._imports : Set[_Import] = set()
+        self._module_env: ModuleEnv = get_current_module_env()
 
     @property
     def nodes(self) -> _node_list:
@@ -602,7 +619,7 @@ class Graph:
         maybe_return_annotation : List[str] = ['']
 
         def type_repr(o : Any):
-            typename = _type_repr(o)
+            typename = _type_repr(o, self._module_env)
 
             # Common case: this is a regular module name like 'foo.bar.baz'
             if all(x.isidentifier() for x in typename.split('.')):
@@ -615,7 +632,6 @@ class Graph:
                 # make sure we have torch.Tensor
                 type_repr(sub_type)
             return typename
-
 
         # Run through reverse nodes and record the first instance of a use
         # of a given node. This represents the *last* use of the node in the
@@ -674,7 +690,7 @@ class Graph:
                     assert isinstance(node.args, tuple)
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
-                qualified_name = _get_qualified_name(node.target)
+                qualified_name = _get_qualified_name(node.target, self._module_env)
                 qualnames_used.add(qualified_name)
                 print_name = _get_print_name(qualified_name)
                 if print_name == 'getattr' and \
@@ -707,15 +723,13 @@ class Graph:
             emit_node(node)
             delete_unused_values(node)
 
-        # repr() for inf and nan floating point values aren't parseable by
-        # python as literals. Explicitly import the names from the ``math`` module.
-        import_strs: Set[str] = set()
+        self._imports = set()
         for qualname in qualnames_used:
-            import_str = _get_import_str(qualname)
-            if import_str is not None:
-                import_strs.add(import_str)
+            import_ = _get_import(qualname)
+            if import_ is not None:
+                self._imports.add(import_)
 
-        import_block = '\n'.join(sorted(import_strs))
+        import_block = '\n'.join(sorted([_format_import(i) for i in self._imports]))
 
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
