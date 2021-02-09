@@ -3044,11 +3044,11 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @precisionOverride({torch.float: 1e-03, torch.cfloat: 1e-03})
+    @dtypes(torch.float, torch.cfloat)
+    @precisionOverride({torch.float: 1e-03, torch.cfloat: 1e-02})
     def test_multi_dot(self, device, dtype):
         def check(*shapes):
-            tensors = [torch.randn(shape, device=device, dtype=dtype) for shape in shapes]
+            tensors = [make_tensor(shape, device, dtype, low=None, high=None) for shape in shapes]
             np_arrays = [tensor.cpu().numpy() for tensor in tensors]
             res = torch.linalg.multi_dot(tensors).cpu()
             ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
@@ -3080,23 +3080,38 @@ class TestLinalg(TestCase):
 
         # test discontiguous input
         shapes = [[3, 2], [2, 2], [2, 3], [3, 4]]
-        tensors = [torch.randn(shape, device=device, dtype=dtype) for shape in shapes]
-        tensors[1] = tensors[1].t()
+        tensors = [make_tensor(shape, device, dtype, low=None, high=None, discontiguous=True) for shape in shapes]
         np_arrays = [tensor.cpu().numpy() for tensor in tensors]
-        res = torch.linalg.multi_dot(tensors).cpu()
+        res = torch.linalg.multi_dot(tensors)
         ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
-        self.assertEqual(res, ref)
+        self.assertEqual(res.cpu(), ref)
 
-        # test out variant
-        out = torch.empty(0, device=device, dtype=dtype)
-        torch.linalg.multi_dot(tensors, out=out)
-        self.assertEqual(res, out)
-        out = torch.zeros_like(res.t(), memory_format=torch.contiguous_format).t()
-        self.assertFalse(out.is_contiguous())
-        out_strides = out.stride()
-        torch.linalg.multi_dot(tensors, out=out)
-        self.assertEqual(res, out)
-        self.assertEqual(out_strides, out.stride())
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_multi_dot_errors(self, device, dtype):
+        def check(tensors, out, msg):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.linalg.multi_dot(tensors, out=out)
+
+        a = torch.randn(2)
+
+        check([], None, "expected at least 2 tensors")
+        check([a], None, "expected at least 2 tensors")
+
+        check([torch.tensor(2), a], None, "the first tensor must be 1D or 2D")
+        check([a, torch.tensor(1)], None, "the last tensor must be 1D or 2D")
+
+        check([a, a, a], None, "tensor 1 must be 2D")
+        check([a, torch.randn(2, 2, 2), a], None, "tensor 1 must be 2D")
+
+        check([a, torch.randn(2, dtype=torch.double)], None, "all tensors must have be the same dtype")
+        check([a, torch.randn(2, device='cuda')], None, "all tensors must be on the same device")
+
+        check([a, a], torch.empty(0, dtype=torch.double), "expected out tensor to have dtype")
+        check([a, a], torch.empty(0, device='cuda'), "expected out tensor to be on device")
+
+        check([a, torch.randn(3)], None, "cannot be multiplied")
+        check([a, torch.randn(3, 2), a], None, "cannot be multiplied")
 
     @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
     @skipCUDAIfNoMagma

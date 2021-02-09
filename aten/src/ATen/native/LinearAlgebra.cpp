@@ -17,6 +17,7 @@
 #include <numeric>
 #include <vector>
 #include <limits>
+#include <stack>
 #include <ATen/NamedTensorUtils.h>
 
 #include <c10/util/variant.h>
@@ -264,26 +265,33 @@ namespace {
  * "Introduction to Algorithms, Third Edition", Chapter 15.2,
  * p. 370-378. Note that the book uses 1-based indexing.
  *
+ * The cost of multiplying two matrices with sizes p x q and q x r
+ * is defined here as p * q * r. The optimal multiplication order
+ * is the one that minimizes the total cost.
+ *
  * @param tensors list of 2D tensors
- * @return 2D vector used by #matrix_chain_multiplication
+ * @return 2D list used by #matrix_chain_multiplication
  */
 std::vector<std::vector<int64_t>> matrix_chain_order(
     const std::vector<Tensor>& tensors) {
   const auto n = tensors.size();
 
-  // Tensor i has dimensions p[i] by p[i + 1]
+  // Tensor i has dimensions p[i] x p[i + 1]
   std::vector<int64_t> p(n + 1);
   for (auto i = decltype(n){0}; i < n; ++i) {
     p[i] = tensors[i].size(0);
   }
   p[n] = tensors[n - 1].size(1);
 
-  // Memoization matrices for the cost and order
+  // m[i, j] = k where k is the minimum cost for multiplying tensors i...j
   std::vector<std::vector<int64_t>> m(n, std::vector<int64_t>(n, 0));
+
+  // s[i, j] = k where k is the index at which to split the list such that
+  // optimally multiplying matrices i...k and k...j first and then the resulting
+  // matrices is the optimal order for multiplying matrices i...j.
   std::vector<std::vector<int64_t>> s(n, std::vector<int64_t>(n));
 
-  // For each sublist [i, j] consider the cost of splitting the multiplication
-  // into tensors [0...i] and [j...n] and then multiplying the result of those.
+  // Compute the optimal multiplication order
   for (auto l = decltype(n){1}; l < n; ++l) {
     for (auto i = decltype(n){0}; i < n - l; ++i) {
       const auto j = i + l;
@@ -315,16 +323,14 @@ Tensor matrix_chain_multiplication(
       matrix_chain_multiplication(tensors, order, order[i][j] + 1, j));
 }
 
-} // namespace
-
-Tensor linalg_multi_dot(TensorList _tensors) {
+Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   const auto n = _tensors.size();
-  TORCH_CHECK(n >= 2, "multi_dot() expected at least 2 tensors but got ", n);
+  TORCH_CHECK(n >= 2, "multi_dot(): expected at least 2 tensors but got ", n);
 
   std::vector<int64_t> out_shape;
   std::vector<Tensor> tensors(n);
 
-  // If the first tensor is 1D view it as a row vector
+  // If the first tensor is 1D of size n view it as a row vector (1, n)
   if (_tensors[0].dim() == 1) {
     tensors[0] = _tensors[0].view({1, -1});
   } else if (_tensors[0].dim() == 2) {
@@ -333,11 +339,12 @@ Tensor linalg_multi_dot(TensorList _tensors) {
   } else {
     TORCH_CHECK(
         false,
-        "multi_dot() the first tensor must be 1D or 2D but got ",
-        _tensors[0].dim());
+        "multi_dot(): the first tensor must be 1D or 2D but got ",
+        _tensors[0].dim(),
+        "D");
   }
 
-  // If the last tensor is 1D view it as a column vector
+  // If the last tensor is 1D of size n view it as a column vector (n, 1)
   if (_tensors[n - 1].dim() == 1) {
     tensors[n - 1] = _tensors[n - 1].view({-1, 1});
   } else if (_tensors[n - 1].dim() == 2) {
@@ -346,29 +353,32 @@ Tensor linalg_multi_dot(TensorList _tensors) {
   } else {
     TORCH_CHECK(
         false,
-        "multi_dot() the last tensor must be 1D or 2D but got ",
-        _tensors[0].dim());
+        "multi_dot(): the last tensor must be 1D or 2D but got ",
+        _tensors[0].dim(),
+        "D");
   }
 
   // Ensure middle tensors are 2D
   for (auto i = decltype(n){1}; i < n - 1; ++i) {
     TORCH_CHECK(
         _tensors[i].dim() == 2,
-        "multi_dot() tensor ",
+        "multi_dot(): tensor ",
         i,
         " must be 2D but got ",
-        _tensors[0].dim());
+        _tensors[0].dim(),
+        "D");
     tensors[i] = _tensors[i];
   }
 
-  // Ensure all tensors are on the same device and have the same dtype
+  // Ensure all tensors have the same device and dtype and check
+  // that the shapes can be multiplied
   const auto dtype = tensors[0].dtype();
   const auto device = tensors[0].device();
   bool has_empty_tensor = tensors[0].numel() == 0;
   for (auto i = decltype(n){1}; i < n; ++i) {
     TORCH_CHECK(
         tensors[i].dtype() == dtype,
-        "multi_dot() all tensors have be the same dtype but tensor 0 is ",
+        "multi_dot(): all tensors must have be the same dtype but tensor 0 is ",
         dtype,
         " and tensor ",
         i,
@@ -376,32 +386,108 @@ Tensor linalg_multi_dot(TensorList _tensors) {
         tensors[i].dtype());
     TORCH_CHECK(
         tensors[i].device() == device,
-        "multi_dot() all tensors must be on the same device but tensor 0 is on ",
+        "multi_dot(): all tensors must be on the same device but tensor 0 is on ",
         device,
         " and tensor ",
         i,
         " on ",
         tensors[i].device());
+    TORCH_CHECK(
+        tensors[i - 1].size(-1) == tensors[i].size(0),
+        "multi_dot(): tensors ",
+        i - 1,
+        " and ",
+        i,
+        " with shapes ",
+        _tensors[i - 1].sizes(),
+        " and ",
+        _tensors[i].sizes(),
+        " cannot be multiplied")
      has_empty_tensor |= tensors[i].numel() == 0;
   }
 
+  if (out.defined()) {
+    TORCH_CHECK(
+        dtype == out.dtype(),
+        "multi_dot(): expected out tensor to have dtype ",
+        dtype,
+        " but got ",
+        out.dtype());
+    TORCH_CHECK(
+        device == out.device(),
+        "multi_dot(): expected out tensor to be on device ",
+        device,
+        " but got ",
+        out.device());
+    
+    at::native::resize_output(out, out_shape);
+    
+    // View output as 2D for computations
+    out.resize_({tensors[0].size(0), tensors.back().size(-1)});
+  }
+
+  // The resize_ and view calls below are to ensure the
+  // output shape respects the original dimensionality of
+  // the first and last tensors which we are now viewed as 2D
+
   if (has_empty_tensor) {
-    return at::zeros(out_shape, tensors[0].options());
+    return out.defined() ? out.zero_().resize_(out_shape)
+                         : at::zeros(out_shape, tensors[0].options());
   }
 
   if (tensors.size() == 2) {
-    return at::mm(tensors[0], tensors[1]).view(out_shape);
+    return out.defined()
+        ? at::mm_out(out, tensors[0], tensors[1]).resize_(out_shape)
+        : at::mm(tensors[0], tensors[1]).view(out_shape);
+  }
+
+  if (tensors.size() == 3) {
+    const auto a = tensors[0].size(0);
+    const auto b = tensors[1].size(0);
+    const auto c = tensors[2].size(0);
+    const auto d = tensors[2].size(1);
+
+    // The matrices are of size (a x b), (b x c), (c x d)
+    // cost_1 is the cost of parenthesizing (a x b) and (b x c) and then combining (c x d)
+    // cost_2 is the cost of parenthesizing (b x c) and (c x d) and then combining (a x b)
+    const auto cost_1 = (a * c) * (b + d);
+    const auto cost_2 = (b * d) * (a + c);
+
+    if (cost_1 > cost_2) {
+      return out.defined()
+          ? at::mm_out(out, tensors[0], at::mm(tensors[1], tensors[2]))
+                .resize_(out_shape)
+          : at::mm(tensors[0], at::mm(tensors[1], tensors[2])).view(out_shape);
+    } else {
+      return out.defined()
+          ? at::mm_out(out, at::mm(tensors[0], tensors[1]), tensors[2])
+                .resize_(out_shape)
+          : at::mm(at::mm(tensors[0], tensors[1]), tensors[2]).view(out_shape);
+    }
   }
 
   const auto order = matrix_chain_order(tensors);
-  Tensor result = matrix_chain_multiplication(tensors, order, 0, n - 1);
-  return result.view(out_shape);
+  const int64_t i = 0;
+  const int64_t j = n - 1;
+  if (out.defined()) {
+    return at::mm_out(
+               out,
+               matrix_chain_multiplication(tensors, order, i, order[i][j]),
+               matrix_chain_multiplication(tensors, order, order[i][j] + 1, j))
+        .resize_(out_shape);
+  }
+  return matrix_chain_multiplication(tensors, order, i, j).view(out_shape);
+}
+
+} // namespace
+
+Tensor linalg_multi_dot(TensorList tensors) {
+  Tensor undefined;
+  return multi_dot_impl(tensors, undefined);
 }
 
 Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
-  Tensor res = at::linalg_multi_dot(tensors);
-  at::native::resize_output(result, res.sizes());
-  result.copy_(res);
+  multi_dot_impl(tensors, result);
   return result;
 }
 

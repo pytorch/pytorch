@@ -6,7 +6,7 @@ import operator
 
 import torch
 import numpy as np
-from torch._six import inf, istuple
+from torch._six import inf
 from torch.autograd import Variable
 import collections.abc
 
@@ -355,6 +355,15 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                                     requires_grad=requires_grad),
                         args=(torch.tensor([1, 2, 3]),),
                         kwargs=dict(dim=1)),)
+
+def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
+    test_cases = [[(S,), (S,)]]
+    inputs = []
+    for test_case in test_cases:
+        tensors = [make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
+                   for size in test_case]
+        inputs.append(SampleInput(tensors))
+    return inputs
 
 def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
     test_sizes = [
@@ -1637,6 +1646,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    OpInfo('linalg.multi_dot',
+           aten_name='linalg_multi_dot',
+           op=torch.linalg.multi_dot,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=True,
+           sample_inputs_func=sample_inputs_linalg_multi_dot,
+           decorators=None),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -3414,7 +3431,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if istuple(args):
+    if isinstance(args, tuple):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args

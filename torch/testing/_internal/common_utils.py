@@ -1287,6 +1287,31 @@ class TestCase(expecttest.TestCase):
                         msg += '\n'
                     self.fail(msg)
 
+    @contextmanager
+    def assertWarnsOnceRegex(self, category, regex=''):
+        """Context manager for code that *must always* warn
+
+        This filters expected warnings from the test and fails if
+        the expected warning is not caught. It uses set_warn_always() to force
+        TORCH_WARN_ONCE to behave like TORCH_WARN
+        """
+        pattern = re.compile(regex)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            prev = torch.is_warn_always_enabled()
+            torch.set_warn_always(True)
+            try:
+                yield
+            finally:
+                torch.set_warn_always(prev)
+                if len(ws) == 0:
+                    self.fail('no warning caught')
+                if len(ws) > 1:
+                    self.fail('too many warnings caught: %s' % '\n    '.join([str(w) for w in ws]))
+                self.assertTrue(type(ws[0].message) is category)
+                self.assertTrue(re.match(pattern, str(ws[0].message)),
+                                f'{pattern}, {ws[0].message}')
+
     def assertExpected(self, s, subname=None):
         r"""
         Test that a string matches the recorded contents of a file
@@ -1480,7 +1505,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 
 # Used in test_autograd.py and test_torch.py
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
-                low, high, requires_grad: bool = False) -> torch.Tensor:
+                low, high, requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
     """Returns a tensor of the specified size on the given device and dtype.
        The tensors values are between -9 and 9, inclusive, for most dtypes,
        unless low (high) is not None in which case the values are between
@@ -1493,27 +1518,25 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
     assert high is None or high > -9, "high value too low!"
 
     if dtype is torch.bool:
-        return torch.randint(0, 2, size, device=device, dtype=dtype)
-
+        result = torch.randint(0, 2, size, device=device, dtype=dtype)
     if dtype is torch.uint8:
         low = math.floor(0 if low is None else max(low, 0))
         high = math.ceil(10 if high is None else min(high, 10))
-        return torch.randint(low, high, size, device=device, dtype=dtype)
+        result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
         low = math.floor(-9 if low is None else max(low, -9))
         high = math.ceil(10 if high is None else min(high, 10))
-        return torch.randint(low, high, size, device=device, dtype=dtype)
+        result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         low = -9 if low is None else max(low, -9)
         high = 9 if high is None else min(high, 10)
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            t = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
+            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
-            t = torch.rand(size, device=device, dtype=dtype) * span + low
-        t.requires_grad = requires_grad
-        return t
+            result = torch.rand(size, device=device, dtype=dtype) * span + low
+        result.requires_grad = requires_grad
     else:
         assert dtype in complex_types()
         low = -9 if low is None else max(low, -9)
@@ -1522,10 +1545,14 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
-        c = torch.complex(real, imag)
-        c.requires_grad = requires_grad
-        return c
+        result = torch.complex(real, imag)
+        result.requires_grad = requires_grad
 
+    if discontiguous:
+        result = torch.repeat_interleave(result, 2, dim=-1)
+        result = result[..., ::2]
+
+    return result
 
 def prod_single_zero(dim_size):
     result = torch.randn(dim_size, dim_size)
