@@ -949,7 +949,7 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   // if result is not empty and not in batched column major format
   bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
   copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
-  copy_needed |= !result_equal_expected_shape; // or result does not have the expected shape
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape); // or result does not have the expected shape
   // we have to allocate a temporary tensor
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
@@ -1330,7 +1330,7 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   // if result is not empty and not in batched column major format
   bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
   copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
-  copy_needed |= !result_equal_expected_shape; // or result does not have the expected shape
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape); // or result does not have the expected shape
   // we have to allocate a temporary tensor
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
