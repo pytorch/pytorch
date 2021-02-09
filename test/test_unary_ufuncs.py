@@ -215,6 +215,10 @@ class TestUnaryUfuncs(TestCase):
             if alt is None:
                 continue
 
+            if not callable(alt):
+                # attributes like real, imag are not callable
+                continue
+
             if inplace and not torch.can_cast(expected.dtype, dtype):
                 # Assert that RuntimeError is raised
                 # for inplace variant of Operators that
@@ -417,7 +421,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertTrue(res is output)
             self.assertEqual(output, expected.to(output.dtype))
 
-    @ops(unary_ufuncs, dtypes=OpDTypes.supported)
+    @ops(list(filter(lambda op: op.supports_tensor_out, unary_ufuncs)), dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])

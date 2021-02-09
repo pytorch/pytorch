@@ -231,6 +231,10 @@ class TestCommon(JitCommonTestCase):
             for variant in variants:
                 # Verifies that inplace operations that promote int->float fail
                 #   on tensors with integer dtypes.
+                if not callable(variant):
+                    # attributes like real, imag are not callable
+                    continue
+
                 if (variant in inplace_ops and not torch.can_cast(expected_forward.dtype, dtype)):
                     try:
                         variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
@@ -280,6 +284,10 @@ class TestCommon(JitCommonTestCase):
             # Test traced and scripted consistency
             for func_type, variant in variants.items():
                 if variant is None:
+                    continue
+
+                if not callable(variant):
+                    # attributes like real, imag are not callable
                     continue
 
                 # Create accessor for script function variant

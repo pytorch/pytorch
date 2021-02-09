@@ -15,7 +15,7 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex)
+     all_types_and_complex_and, all_types_and, all_types_and_complex, complex_types)
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
@@ -1637,6 +1637,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    UnaryUfuncInfo('imag',
+                   ref=np.imag,
+                   dtypes=complex_types(),
+                   dtypesIfCPU=complex_types(),
+                   dtypesIfCUDA=complex_types(),
+                   supports_tensor_out=False,
+                   test_inplace_grad=False),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -1756,6 +1763,13 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
+    UnaryUfuncInfo('real',
+                   ref=np.real,
+                   dtypes=complex_types(),
+                   dtypesIfCPU=complex_types(),
+                   dtypesIfCUDA=complex_types(),
+                   supports_tensor_out=False,
+                   test_inplace_grad=False),
     UnaryUfuncInfo('round',
                    ref=np.round,
                    dtypes=floating_types_and(torch.half),
