@@ -104,8 +104,7 @@ variable_list run_backward(
           input.requires_grad(),
           "One of the differentiated Tensors does not require grad");
       if (!grad_fn) {
-        // See python_engine.cpp's run_backward for explanation
-        output_edges.emplace_back(std::make_shared<Identity>(), 0);
+        output_edges.emplace_back();
       } else {
         output_edges.emplace_back(grad_fn, output_nr);
       }

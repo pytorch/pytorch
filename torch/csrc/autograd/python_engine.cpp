@@ -240,8 +240,10 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
       if (!grad_fn) {
         // Since input has no grad_accumulator, its guaranteed to be not reachable.
         // We create a dummy edge with no next edges and a non-nullptr grad_fn so
-        // nodes (like mul by scalar) that have invalid next_edges don't get erroneously
-        // assigned `needed = True` in exec_info
+        // nodes (e.g., mul when an operand is scalar) that have invalid next_edges
+        // don't get erroneously assigned `needed = True` in exec_info. Note that this
+        // doesn't happen in the cpp api because scalars are only wrapped into tensors
+        // in python
         output_edges.emplace_back(std::make_shared<Identity>(), 0);
       } else {
         output_edges.emplace_back(grad_fn, output_nr);
