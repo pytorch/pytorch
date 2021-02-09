@@ -1519,7 +1519,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
 
     if dtype is torch.bool:
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
-    if dtype is torch.uint8:
+    elif dtype is torch.uint8:
         low = math.floor(0 if low is None else max(low, 0))
         high = math.ceil(10 if high is None else min(high, 10))
         result = torch.randint(low, high, size, device=device, dtype=dtype)
@@ -1548,7 +1548,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         result = torch.complex(real, imag)
         result.requires_grad = requires_grad
 
-    if discontiguous:
+    if discontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 

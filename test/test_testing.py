@@ -435,6 +435,17 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
+    def test_make_tensor_discontiguous(self, device, dtype):
+        # The following sizes cannot be discontiguous
+        for size in (tuple(), (0,), (1,), (1, 1)):
+            res = make_tensor(size, device, dtype, low=None, high=None, discontiguous=True)
+            self.assertTrue(res.is_contiguous())
+        # The following sizes should be discontiguous
+        for size in ((2,), (2, 3), (2, 1, 3)):
+            res = make_tensor(size, device, dtype, low=None, high=None, discontiguous=True)
+            self.assertFalse(res.is_contiguous())
+
     def test_assert_messages(self, device):
         self.assertIsNone(self._get_assert_msg(msg=None))
         self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
