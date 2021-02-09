@@ -100,7 +100,7 @@ static void upsample_nearest1d_out_cuda_template(
     return;
   }
 
-  // upsample_1d_shape_check makes sure `nbatch != 0`
+  // upsample_nearest1d meta call makes sure `nbatch != 0`
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
