@@ -347,4 +347,24 @@ static inline void checkUplo(const std::string& uplo) {
     "Expected UPLO argument to be 'L' or 'U', but got ", uplo);
 }
 
+static inline void checkSameDevice(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
+  TORCH_CHECK(
+      result.device() == input.device(),
+      fn_name,
+      ": Expected ", result_name, " and input tensors to be on the same device, but got ",
+      result_name, " on ", result.device(), " and input on ", input.device());
+}
+
+// This functions checks the dtype of result and input tensors.
+// Most linear algebra functions have either floating or complex type, both result (for _out variants) and input should be compatible.
+static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
+  bool is_both_floating_type = at::isFloatingType(result.scalar_type()) && at::isFloatingType(input.scalar_type());
+  bool is_both_complex_type = at::isComplexType(result.scalar_type()) && at::isComplexType(input.scalar_type());
+  TORCH_CHECK(
+      is_both_floating_type || is_both_complex_type,
+      fn_name,
+      ": Expected ", result_name, " and input tensors to have compatible dtype, but got ",
+      result_name, " with dtype ", result.scalar_type(), " and input with dtype ", input.scalar_type());
+}
+
 }}  // namespace at::native
