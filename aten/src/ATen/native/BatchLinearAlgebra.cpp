@@ -940,6 +940,7 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+  bool result_equal_expected_shape = result.sizes().equals(input.sizes());
   bool is_batched_column_major = false;
   if (result.dim() >= 2) {
     is_batched_column_major = result.transpose(-2, -1).is_contiguous();
@@ -947,7 +948,12 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
 
   // if result is not empty and not in batched column major format or does not have the same dtype as input
   // we have to allocate a temporary tensor
-  if ((result.numel() != 0 && !is_batched_column_major) || !result_input_same_type) {
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
+  copy_needed |= !result_equal_expected_shape; // or result does not have the expected shape
+  // we have to allocate a temporary tensor
+  if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = cholesky_inverse_out_info(result_tmp, infos, input, upper);
     at::native::resize_output(result, result_tmp.sizes());
