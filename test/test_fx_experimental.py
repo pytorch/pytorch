@@ -795,10 +795,10 @@ terrible spacing
                 args = test_params['constructor_args']
 
             mod = test_params['constructor'](*args)
-            if not mod.__class__.__name__ in dir(torch.nn):
+            if mod.__class__.__name__ not in dir(torch.nn):
                 continue
 
-            if not 'input_fn' in test_params:
+            if 'input_fn' not in test_params:
                 inputs = torch.randn(test_params['input_size'])
             else:
                 inputs = test_params['input_fn']()
@@ -820,10 +820,9 @@ class {test_classname}(torch.nn.Module):
             """
 
             gbls = {'torch' : torch}
-            lcls = {}
-            exec(test_mod_code, gbls, lcls)
+            exec(test_mod_code, gbls)
 
-            test_class = lcls[test_classname](mod)
+            test_class = gbls[test_classname](mod)
             traced = symbolic_trace(test_class)
 
             traced = NormalizeArgs(traced).transform()
@@ -831,7 +830,7 @@ class {test_classname}(torch.nn.Module):
             stochastic_modules = {'FractionalMaxPool2d', 'FractionalMaxPool3d',
                                   'RReLU'}
 
-            if not mod.__class__.__name__ in stochastic_modules:
+            if mod.__class__.__name__ not in stochastic_modules:
                 self.assertEqual(traced(*inputs), mod(*inputs))
 
             modules = dict(traced.named_modules())
