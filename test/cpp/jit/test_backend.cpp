@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/torch.h>

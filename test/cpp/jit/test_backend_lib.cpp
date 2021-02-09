@@ -6,7 +6,7 @@ namespace jit {
 // necessary to test that the JIT backend registration endpoints and
 // code generation are working correctly. It is not intended to
 // produce numerically correct results.
-class TORCH_API TestBackend : public PyTorchBackendInterface {
+class TestBackend : public PyTorchBackendInterface {
  public:
   // Constructor.
   explicit TestBackend() {}
