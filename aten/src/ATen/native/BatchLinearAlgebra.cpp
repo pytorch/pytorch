@@ -513,79 +513,7 @@ Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& info
 
 // Solves a system of linear equations matmul(input, x) = other in-place
 // LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
-static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other, bool vector_case) {
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
-  TORCH_INTERNAL_ASSERT(result.device() == input.device());
-
-  TORCH_INTERNAL_ASSERT(input.scalar_type() == other.scalar_type());
-  TORCH_INTERNAL_ASSERT(input.device() == other.device());
-
-  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
-  TORCH_INTERNAL_ASSERT(other.dim() >= 1);
-
-  TORCH_INTERNAL_ASSERT(infos.scalar_type() == kInt);
-  TORCH_INTERNAL_ASSERT(infos.device() == input.device());
-
-  // we need to unsqueeze 'other' because 2-dimensional tensors are expected in the implementation
-  Tensor other_ = vector_case ? other.unsqueeze(-1) : other;
-
-  // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
-  // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
-  Tensor other_broadcasted, input_broadcasted;
-  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg_solve");
-
-  auto squeezed_other_broadcasted = at::squeeze(other_broadcasted, -1);
-  auto squeezed_result_shape = squeezed_other_broadcasted.sizes();
-
-  // if result has no elements we can modify it
-  if (result.numel() == 0) {
-    if (vector_case) {
-      result.resize_(squeezed_result_shape);
-    } else {
-      at::native::resize_as_(result, other_broadcasted.transpose(-2, -1), MemoryFormat::Contiguous);
-      result.transpose_(-2, -1);
-    }
-  }
-
-  auto expected_result_shape = vector_case ? squeezed_result_shape : other_broadcasted.sizes();
-  TORCH_INTERNAL_ASSERT(result.sizes().equals(expected_result_shape));
-
-  // result tensor must be in batched column major order (Fortran contiguous) for 2D inputs
-  // or C contiguous for 1D input
-  if (vector_case) {
-    TORCH_INTERNAL_ASSERT(result.is_contiguous());
-  } else {
-    TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
-  }
-
-  // for 1-dimensional 'other', we need to unsqueeze the result before passing to "apply_solve"
-  if (vector_case) {
-    result = result.unsqueeze_(-1);
-  }
-
-  // _linalg_solve_out_helper_ (apply_solve) performs calculations in-place and result must be a copy of other_broadcasted
-  result.copy_(other_broadcasted);
-
-  auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
-
-  infos.resize_({std::max<int64_t>(1, batchCount(input_broadcasted))});
-  // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
-  if (input.numel() == 0) {
-    infos.fill_(0);
-  }
-
-  result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
-
-  // for 1-dimensional 'other', we need to squeeze the result after "apply_solve"
-  if (vector_case) {
-    result = result.squeeze_(-1);
-  }
-
-  return result;
-}
-
-// Solves a system of linear equations matmul(input, x) = other in-place
-Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
   checkSameDevice("linalg_solve", result, input);
   checkSameDevice("linalg_solve", other, input, "other");
   checkLinalgCompatibleDtype("linalg_solve", result, input);
@@ -622,8 +550,6 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
   bool result_equal_expected_shape = result.sizes().equals(expected_shape);
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
 
-  auto infos = at::empty({0}, input.options().dtype(kInt));
-
   // if result is not empty and not in batched column major format
   bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
   copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
@@ -631,15 +557,84 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
   // we have to allocate a temporary tensor
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
-    result_tmp = linalg_solve_out_info(result_tmp, infos, input, other, vector_case);
+    result_tmp = linalg_solve_out_info(result_tmp, infos, input, other);
     at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
-  } else {  // use result's storage directly
-    result = linalg_solve_out_info(result, infos, input, other, vector_case);
+    return result;
   }
+  // else use result's storage directly
+
+  // we need to unsqueeze 'other' because 2-dimensional tensors are expected in the implementation
+  Tensor other_ = vector_case ? other.unsqueeze(-1) : other;
+
+  // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
+  // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
+  Tensor other_broadcasted, input_broadcasted;
+  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg_solve");
+
+  auto squeezed_other_broadcasted = at::squeeze(other_broadcasted, -1);
+  auto squeezed_result_shape = squeezed_other_broadcasted.sizes();
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    if (vector_case) {
+      result.resize_(squeezed_result_shape);
+    } else {
+      at::native::resize_as_(result, other_broadcasted.transpose(-2, -1), MemoryFormat::Contiguous);
+      result.transpose_(-2, -1);
+    }
+  }
+
+  auto expected_result_shape = vector_case ? squeezed_result_shape : other_broadcasted.sizes();
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(expected_result_shape));
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
+  // result tensor must be in batched column major order (Fortran contiguous) for 2D inputs
+  // or C contiguous for 1D input
+  if (vector_case) {
+    TORCH_INTERNAL_ASSERT(result.is_contiguous());
+  } else {
+    TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  }
+
+  // for 1-dimensional 'other', we need to unsqueeze the result before passing to "apply_solve"
+  if (vector_case) {
+    result = result.unsqueeze_(-1);
+  }
+
+  // _linalg_solve_out_helper_ (apply_solve) performs calculations in-place and result must be a copy of other_broadcasted
+  result.copy_(other_broadcasted);
+
+  auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
+
+  TORCH_INTERNAL_ASSERT(infos.scalar_type() == kInt);
+  TORCH_INTERNAL_ASSERT(infos.device() == input.device());
+  infos.resize_({std::max<int64_t>(1, batchCount(input_broadcasted))});
+  // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
+  if (input.numel() == 0) {
+    infos.fill_(0);
+  }
+
+  result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
+
+  // for 1-dimensional 'other', we need to squeeze the result after "apply_solve"
+  if (vector_case) {
+    result = result.squeeze_(-1);
+  }
+
+  return result;
+}
+
+// Solves a system of linear equations matmul(input, x) = other in-place
+Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  auto infos = at::empty({0}, input.options().dtype(kInt));
+  result = linalg_solve_out_info(result, infos, input, other);
 
   // Now check LAPACK/MAGMA error codes
   // batchCheckErrors(Tensor, char*) calls 'infos = infos.to(kCPU)'
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
+  bool vector_case = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
   if (vector_case ? result.dim() > 1 : result.dim() > 2) {
     batchCheckErrors(infos, "linalg_solve");
   } else {
