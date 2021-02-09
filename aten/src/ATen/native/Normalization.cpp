@@ -260,8 +260,13 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
         running_mean_a[f] = momentum * mean + (1 - momentum) * running_mean_a[f];
       }
       if (running_var.defined()) {
-        accscalar_t unbiased_var = var_sum / (n - 1);
-        running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+        if (n > 1) {
+            accscalar_t unbiased_var = var_sum / (n - 1);
+            running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+        }
+        else {
+            running_var_a[f] = 0.0;
+        }
       }
     }
   });

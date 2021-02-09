@@ -37,7 +37,14 @@ void batch_norm_cpu_inference_collect_linear_and_constant_terms(
     scalar_t inv_var = 1 / std::sqrt(var_data[c] + static_cast<scalar_t>(eps));
     scalar_t weight_v = weight_data ? weight_data[c] : 1;
     scalar_t bias_v = bias_data ? bias_data[c] : 0;
-    alpha[c] = inv_var * weight_v;
+    if (var_data[c] == 0.0) {
+      // XXX what should this be if the variance is 0?
+      // Currently try output = bias
+      alpha[c] = 0.0;
+    }
+    else {
+      alpha[c] = inv_var * weight_v;
+    }
     beta[c] = bias_v - mean_data[c] * alpha[c];
   }
 }

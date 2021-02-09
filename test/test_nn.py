@@ -10472,7 +10472,10 @@ class TestNNDeviceType(NNTestCase):
         var = out_reshaped.var(1, unbiased=False)
 
         self.assertEqual(torch.abs(mean.data).mean(), 0, atol=1e-5, rtol=0)
-        self.assertEqual(torch.abs(var.data).mean(), 1, atol=1e-5, rtol=0)
+        if np.prod(input.shape[2:]) <= 1:
+            self.assertEqual(torch.abs(var.data).mean(), 0, atol=1e-5, rtol=0)
+        else:
+            self.assertEqual(torch.abs(var.data).mean(), 1, atol=1e-5, rtol=0)
 
         # check that eval mode doesn't change behavior
         grad_out = torch.randn_like(output)
@@ -10505,13 +10508,14 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(torch.abs(var.data.mean(1) - IN.running_var).mean(), 0, atol=1e-5, rtol=0)
 
         # in eval mode, adding X * std to a channel in input should make the
-        # corresponding channel in output have mean X
+        # corresponding channel in output have mean X (if std>0)
         IN.eval()
-        delta = IN.running_var.sqrt() * torch.arange(c, device=device, dtype=dtype)
-        delta = delta.view(-1, *[1 for _ in range(2, input.dim())])
-        output = IN(input_var + delta)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(output.transpose(0, 1).reshape(c, -1).mean(1), torch.arange(c))
+        if IN.running_var.all():
+            delta = IN.running_var.sqrt() * torch.arange(c, device=device, dtype=dtype)
+            delta = delta.view(-1, *[1 for _ in range(2, input.dim())])
+            output = IN(input_var + delta)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(output.transpose(0, 1).reshape(c, -1).mean(1), torch.arange(c))
 
     def _test_InstanceNorm_cuda_half(self, cls, input, device):
         # THNN
@@ -10936,6 +10940,7 @@ class TestNNDeviceType(NNTestCase):
 
         input = torch.rand(b, c, d)
         self._test_InstanceNorm_general(nn.InstanceNorm1d, input, device)
+        self._test_InstanceNorm_general(nn.InstanceNorm1d, torch.rand(8, 3, 1), device)
 
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm1d, input, device)
@@ -10948,6 +10953,8 @@ class TestNNDeviceType(NNTestCase):
 
         input = torch.rand(b, c, h, w)
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, device)
+
+        self._test_InstanceNorm_general(nn.InstanceNorm2d, torch.rand(8, 3, 1, 1), device)
 
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm2d, input, device)

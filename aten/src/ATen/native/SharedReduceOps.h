@@ -103,6 +103,11 @@ struct WelfordOps {
   inline C10_DEVICE res_t project(acc_t acc) const {
     auto mean = acc.mean;
     combine_t divisor = unbiased ? (acc.nf - 1) : acc.nf;
+    if (acc.nf == 1) {
+        // one observation, variance is 0
+        detail::pair<scalar_t, scalar_t> results{(scalar_t) 0, (scalar_t) mean};
+        return results;
+    }
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;

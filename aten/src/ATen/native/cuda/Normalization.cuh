@@ -301,8 +301,14 @@ __global__ void batch_norm_collect_statistics_kernel(
       running_mean[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_mean[plane] + momentum * avg);
     }
     if (running_var.data() != NULL) {
-      stat_accscalar_t unbiasedVar = var_n / (N - 1);
-      running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
+      if (N == 1) {
+        // Variance of a single observation is 0
+        running_var[plane] = 0.0;
+      }
+      else {
+        stat_accscalar_t unbiasedVar = var_n / (N - 1);
+        running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
+      }
     }
   }
 
