@@ -488,6 +488,7 @@ struct Environment {
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", SpecialFormValue::create(prim::list)},
+          {"dict", SpecialFormValue::create(prim::dict)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
@@ -1267,7 +1268,6 @@ struct to_ir {
     const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
     const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
-
     // If there is no type hint, and this is emitted over an iterable that is
     // unrolled and of length 0, then we emit a List of tensors
     Value* list_value = graph->insertNode(graph->create(prim::ListConstruct, 1))
@@ -2966,7 +2966,21 @@ struct to_ir {
         return iterable_tree;
       }
       case prim::list: {
-        if (apply.inputs().size() == 0) {
+        return emitApplySpecialFormForList(form, apply, type_hint);
+      }
+      case prim::dict: {
+        return emitApplySpecialFormForDict(form, apply, type_hint);
+      }
+      default:
+        TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
+    }
+  }
+
+  std::shared_ptr<SugaredValue> emitApplySpecialFormForList(
+      Symbol& form,
+      Apply& apply,
+      const TypePtr& type_hint = nullptr) {
+          if (apply.inputs().size() == 0) {
           TypePtr type = type_hint ? type_hint : ListType::ofTensors();
           if (!type->cast<ListType>()) {
             throw ErrorReport(apply.range())
@@ -3007,10 +3021,164 @@ struct to_ir {
         auto lc = ListComp::create(apply.range(), ident, ident, iter);
         return std::make_shared<SimpleValue>(
             emitListComprehension(lc, type_hint));
-      }
-      default:
-        TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }
+
+  std::shared_ptr<SugaredValue> emitApplySpecialFormForDict(
+      Symbol& form,
+      Apply& apply,
+      const TypePtr& type_hint = nullptr) {
+    auto treat_as_empty_container = [&]{
+      if (apply.inputs().empty() && !apply.attributes().empty()) {
+        return true;
+      }
+      if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_DICT_LITERAL) {
+        auto dict_lit = DictLiteral(apply.inputs()[0]);
+        return dict_lit.key_inputs().empty() && dict_lit.value_inputs().empty();
+      }
+      if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_LIST_LITERAL) {
+        auto list_lit = ListLiteral(apply.inputs()[0]);
+        return list_lit.inputs().empty();
+      }
+      return false;
+    };
+
+    // If we have a call with an empty container, or if we have a
+    // call with kwargs only
+    if (treat_as_empty_container()) {
+      auto expr_list = List<Expr>::create(apply.range(), {});
+      apply = Apply::create(
+          apply.range(), apply.callee(), expr_list, apply.attributes());
+    }
+
+    // If we have a completely empty call to dict()
+    if (apply.inputs().empty() && apply.attributes().empty()) {
+      TypePtr type = type_hint;
+      if (!type_hint) {
+        type = DictType::create(StringType::get(), TensorType::get());
+      }
+      TORCH_CHECK(type->expect<DictType>(), "Expected a type annotation "
+        "of Dict for dict constructor dict(), got ", type_hint->str());
+      return std::make_shared<SimpleValue>(
+          graph
+              ->insertNode(graph->createDict(
+                  type->expect<DictType>()->getKeyType(),
+                  type->expect<DictType>()->getValueType(),
+                  {},
+                  {}))
+              ->output());
+    }
+
+    // Special case logic for if we have a dict comprehension
+    if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_DICT_COMP) {
+      auto dc = DictComp(apply.inputs()[0]);
+      auto dc_node = emitDictComprehension(dc, type_hint);
+      NamedValue self = NamedValue(dc.range(), "self", dc_node);
+      for (auto kwarg : apply.attributes()) {
+        auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
+        auto k = emitExpr(name);
+        auto v = emitExpr(kwarg.value());
+        NamedValue input_k = NamedValue(kwarg.range(), "", k);
+        NamedValue input_v = NamedValue(kwarg.range(), "", v);
+      emitBuiltinCall(
+        kwarg.range(), *graph, aten::_set_item, {self, input_k, input_v}, {});
+      }
+      return std::make_shared<SimpleValue>(dc_node);
+    }
+
+    // We can't feasibly register all possible key x value
+    // combinations of new prim ops for the case that we use the
+    // constructor with a dict literal. It makes much more sense
+    // to transform the dict literal into a list of tuples so that
+    // we can use the existing constructors
+    if (!apply.inputs().empty() &&
+        apply.inputs()[0].kind() == TK_DICT_LITERAL) {
+      auto dict_lit = DictLiteral(apply.inputs()[0]);
+      std::vector<Expr> zipped;
+      zipped.reserve(dict_lit.key_inputs().size());
+      TORCH_INTERNAL_ASSERT(
+          dict_lit.key_inputs().size() == dict_lit.value_inputs().size());
+      for (auto key_it = dict_lit.key_inputs().begin(),
+                val_it = dict_lit.value_inputs().begin();
+            key_it != dict_lit.key_inputs().end();
+            ++key_it, ++val_it) {
+        auto tuple_inputs =
+            List<Expr>::create(apply.range(), {*key_it, *val_it});
+        auto tuple = TupleLiteral::create(apply.range(), tuple_inputs);
+        zipped.push_back(tuple);
+      }
+      auto ll_values = List<Expr>::create(apply.range(), zipped);
+      auto ll = ListLiteral::create(apply.range(), ll_values);
+      auto expr_list = List<Expr>::create(apply.range(), {ll});
+      // Change `apply` to a new Apply node holding a list of
+      // tuples
+      apply = Apply::create(
+          apply.range(), apply.callee(), expr_list, apply.attributes());
+    }
+
+    // If we have kwargs to include, we'll take a similar approach
+    // to the above logic and standardize the Apply node
+    if (!apply.attributes().empty()) {
+      std::vector<Expr> exprs;
+      // Gather all the existing tuples in the input iterable
+      if (!apply.inputs().empty()) {
+        auto tuple_list = ListLiteral(apply.inputs()[0]).inputs();
+        for (auto tuple : tuple_list) {
+          exprs.push_back(tuple);
+        }
+      }
+      // Create tuples out of each kwarg and gather them as well
+      for (auto attr : apply.attributes()) {
+        auto k = StringLiteral::create(apply.range(), attr.name().name());
+        auto v = attr.value();
+        auto tuple_inputs = List<Expr>::create(apply.range(), {k, v});
+        auto tuple = TupleLiteral::create(apply.range(), tuple_inputs);
+        exprs.push_back(tuple);
+      }
+      auto expr_list = List<Expr>::create(apply.range(), {exprs});
+      auto ll = ListLiteral::create(apply.range(), expr_list);
+      auto new_inputs = List<Expr>::create(apply.range(), {ll});
+      auto new_kwargs = List<Attribute>::create(apply.range(), {});
+      apply = Apply::create(
+          apply.range(), apply.callee(), new_inputs, new_kwargs);
+    }
+
+    checkApplyNumInputs(apply, 1);
+
+    auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+    const std::string& iter_name = createTempName("$_iter");
+    const std::string& key_name = createTempName("$_key");
+    const std::string& value_name = createTempName("$_value");
+
+    auto key = Var::create(
+        apply.range(), Ident::create(apply.range(), key_name));
+    auto value = Var::create(
+        apply.range(), Ident::create(apply.range(), value_name));
+    auto target = TupleLiteral::create(apply.range(), List<Expr>::create(apply.range(), {key, value}));
+    auto iter = Var::create(
+        apply.range(), Ident::create(apply.range(), iter_name));
+
+    environment_stack->setSugaredVar(
+        apply.range(),
+        iter_name,
+        iter_input,
+        /*annotated_type=*/nullptr);
+
+    auto dc = DictComp::create(apply.range(), key, value, target, iter);
+    auto dc_node = emitDictComprehension(dc, type_hint);
+    NamedValue self = NamedValue(dc.range(), "self", dc_node);
+
+    for (auto kwarg : apply.attributes()) {
+      auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
+      auto k = emitExpr(name);
+      auto v = emitExpr(kwarg.value());
+      NamedValue input_k = NamedValue(kwarg.range(), "", k);
+      NamedValue input_v = NamedValue(kwarg.range(), "", v);
+    emitBuiltinCall(
+      kwarg.range(), *graph, aten::_set_item, {self, input_k, input_v}, {});
+    }
+
+    return std::make_shared<SimpleValue>(dc_node);
+
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
