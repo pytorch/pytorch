@@ -3,6 +3,7 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 
+import collections
 from collections import OrderedDict, deque
 import copy
 from itertools import chain
@@ -12,7 +13,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Deque
 import torch
 import torch.distributed as dist
 from torch.nn import Parameter
-from torch._six import container_abcs
 from torch.optim import Optimizer
 import io
 
@@ -37,7 +37,7 @@ def _recursive_copy_to_device(value: Any, non_blocking: bool, device: torch.devi
         values = [_recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for val in value]
         return values if isinstance(value, list) else tuple(values)
 
-    if isinstance(value, container_abcs.Mapping):
+    if isinstance(value, collections.abc.Mapping):
         return {
             key: _recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for key, val in value.items()
         }
