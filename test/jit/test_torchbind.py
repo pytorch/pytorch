@@ -40,11 +40,21 @@ class TestTorchbind(JitTestCase):
             obj2 = torch.jit.script(f)()
             return (cmp_key(obj1), cmp_key(obj2))
 
+        FooAlias = torch.classes._TorchScriptTesting._Foo
+
         def f():
-            val = torch.classes._TorchScriptTesting._Foo(5, 3)
+            val = FooAlias(5, 3)
+            print("hello")
             val.increment(1)
             return val
         test_equality(f, lambda x: x)
+
+        # BUT!! We need to make sure Type annotation works on name alias
+        # The following aren't work properly
+        # @torch.jit.script
+        # def test_fo(fo: FooAlias):
+        #     fo.increment(1)
+        #     return fo
 
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int'"):
             val = torch.classes._TorchScriptTesting._Foo(5, 3)
