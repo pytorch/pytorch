@@ -65,8 +65,26 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 // - Resulting tensor must have the same dtype as the input one
 
 bool will_promote_tensor(const Tensor& tensor, Scalar scalar) {
-  auto result_dtype = at::result_type(tensor, scalar);
-  return result_dtype != tensor.scalar_type();
+  // complex scalar + integral or boolean tensor will result in complex tensor
+  if (scalar.isComplex() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
+    return true;
+  }
+
+  // complex scalar + float tensor will result in complex tensor
+  if (scalar.isComplex() && at::isFloatingType(tensor.scalar_type())) {
+    return true;
+  }
+
+  // float scalar + integral or boolean tensor will result in float tensor
+  if (scalar.isFloatingPoint() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
+    return true;
+  }
+
+  // integral scalar + boolean tensor will result in integral tensor
+  if (scalar.isIntegral(/*includeBool*/ false) && tensor.dtype() == at::kBool) {
+    return true;
+  }
+  return false;
 }
 
 // Please, make sure to call check_foreach_api_restrictions before calling this method. 
