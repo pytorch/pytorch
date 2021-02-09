@@ -350,8 +350,7 @@ void PrepareCopyForONNX(Node* node) {
         graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
             ->output();
 
-    auto* cast =
-          graph->create(::c10::onnx::Cast, 1);
+    auto* cast = graph->create(::c10::onnx::Cast, 1);
     cast->addInput(node->input(1));
     auto aten_type = node->input(0)->type()->cast<TensorType>()->scalarType();
     auto onnx_type = ATenTypeToONNXType(aten_type);
