@@ -456,6 +456,73 @@ TEST(NVFuserTest, KernelExprEvalBindings_CUDA) {
   checkIntValue(evaluator, d, -2);
 }
 
+// Test name-to-node lookup in the Fusion IR
+TEST(NVFuserTest, FusionValueLookup_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto scalar = new Double(-1.0);
+  auto tv1 = mul(tv0, scalar);
+  auto tv2 = add(tv0, new Double(3.0));
+  auto tv3 = mul(tv0, new Double(2.0));
+  auto tv4 = add(tv2, tv1);
+  auto tv5 = add(tv4, tv3);
+  auto tv6 = add(tv0, tv3);
+
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
+
+  // using the value's val type
+  ASSERT_EQ(fusion.lookupValue(*tv0->getValType(), tv0->name()), tv0);
+  ASSERT_EQ(fusion.lookupValue(*scalar->getValType(), scalar->name()), scalar);
+
+  // explicit ValType
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv1->name()), tv1);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv2->name()), tv2);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv3->name()), tv3);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv4->name()), tv4);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv5->name()), tv5);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv6->name()), tv6);
+
+  // misses
+  ASSERT_NE(fusion.lookupValue(ValType::Scalar, tv0->name()), tv0);
+  ASSERT_NE(fusion.lookupValue(ValType::TensorView, tv1->name()), tv0);
+
+  // non-existent names
+  ASSERT_EQ(fusion.lookupValue(ValType::Scalar, 12345), nullptr);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, 12345), nullptr);
+
+  Fusion copy(fusion);
+
+  auto copy_tv1 = copy.lookupValue(ValType::TensorView, tv1->name());
+  auto copy_tv2 = copy.lookupValue(ValType::TensorView, tv2->name());
+  auto copy_tv3 = copy.lookupValue(ValType::TensorView, tv3->name());
+  auto copy_tv4 = copy.lookupValue(ValType::TensorView, tv4->name());
+  auto copy_tv5 = copy.lookupValue(ValType::TensorView, tv5->name());
+  auto copy_tv6 = copy.lookupValue(ValType::TensorView, tv6->name());
+
+  swap(fusion, copy);
+
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv1->name()), copy_tv1);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv2->name()), copy_tv2);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv3->name()), copy_tv3);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv4->name()), copy_tv4);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv5->name()), copy_tv5);
+  ASSERT_EQ(fusion.lookupValue(ValType::TensorView, tv6->name()), copy_tv6);
+
+  fusion.clear();
+
+  ASSERT_EQ(copy.lookupValue(ValType::TensorView, tv1->name()), tv1);
+  ASSERT_EQ(copy.lookupValue(ValType::TensorView, tv2->name()), tv2);
+  ASSERT_EQ(copy.lookupValue(ValType::TensorView, tv3->name()), tv3);
+  ASSERT_EQ(copy.lookupValue(ValType::TensorView, tv4->name()), tv4);
+  ASSERT_EQ(copy.lookupValue(ValType::TensorView, tv5->name()), tv5);
+  ASSERT_EQ(copy.lookupValue(ValType::TensorView, tv6->name()), tv6);
+}
+
 TEST(NVFuserTest, FusionClear_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

@@ -85,7 +85,7 @@ class TORCH_CUDA_CU_API Fusion final {
 
   ~Fusion();
 
-  friend void swap(Fusion& a, Fusion& b) noexcept;
+  TORCH_CUDA_CU_API friend void swap(Fusion& a, Fusion& b) noexcept;
 
   void clear() noexcept;
 
@@ -115,6 +115,9 @@ class TORCH_CUDA_CU_API Fusion final {
 
   //! Replace output with another value
   void replaceOutput(Val* output, Val* replacement);
+
+  //! Lookup the value node with the specified type and name
+  Val* lookupValue(ValType vtype, StmtNameType name) const;
 
   //! Clear Expr's from TV uses that are not required to produce outputs from
   //! inputs
@@ -215,6 +218,10 @@ class TORCH_CUDA_CU_API Fusion final {
   std::unordered_set<Val*> val_set_;
   std::deque<Val*> val_deque_;
   std::unordered_set<Expr*> expr_set_;
+
+  // name-to-node lookup indexes
+  std::unordered_map<ValType, std::unordered_map<StmtNameType, Val*>>
+      lookup_index_;
 
   // Values names counters
   std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_;
