@@ -1963,6 +1963,65 @@ class TestLinalg(TestCase):
         for x, y in zip(cpu_result, device_result):
             self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5, rtol=0)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_svd_errors_and_warnings(self, device, dtype):
+        for svd in [torch.svd, torch.linalg.svd]:
+            # if non-empty out tensor with wrong shape is passed a warning is given
+            a = torch.randn(3, 3, dtype=dtype, device=device)
+            real_dtype = a.real.dtype if dtype.is_complex else dtype
+            out_u = torch.empty(2, 2, dtype=dtype, device=device)
+            out_s = torch.empty(4, 4, dtype=real_dtype, device=device)
+            out_v = torch.empty(6, 6, dtype=dtype, device=device)
+            with warnings.catch_warnings(record=True) as w:
+                # Trigger warning
+                svd(a, out=(out_u, out_s, out_v))
+                # Check warning occurs
+                self.assertEqual(len(w), 3)
+                self.assertTrue("An output with one or more elements was resized" in str(w[-3].message))
+                self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+                self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+            # dtypes should be compatible
+            out_u = torch.empty(0, dtype=torch.int, device=device)
+            out_s = torch.empty(0, dtype=torch.int, device=device)
+            out_v = torch.empty(0, dtype=torch.int, device=device)
+            with self.assertRaisesRegex(RuntimeError, "Expected U to be compatible with"):
+                svd(a, out=(out_u, out_s, out_v))
+
+            out_u = torch.empty(0, dtype=dtype, device=device)
+            if svd == torch.linalg.svd:
+                msg = "Expected VT to be compatible with"
+            else:
+                msg = "Expected V to be compatible with"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                svd(a, out=(out_u, out_s, out_v))
+
+            out_v = torch.empty(0, dtype=dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, "Expected S to be compatible with"):
+                svd(a, out=(out_u, out_s, out_v))
+
+            # device should match
+            if torch.cuda.is_available():
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                out_u = torch.empty(0, device=wrong_device, dtype=dtype)
+                out_s = torch.empty(0, device=wrong_device, dtype=real_dtype)
+                out_v = torch.empty(0, device=wrong_device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    # error from out_u
+                    svd(a, out=(out_u, out_s, out_v))
+
+                out_u = torch.empty(0, device=device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    # error from out_s
+                    svd(a, out=(out_u, out_s, out_v))
+
+                out_s = torch.empty(0, device=device, dtype=real_dtype)
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    # error from out_v
+                    svd(a, out=(out_u, out_s, out_v))
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())

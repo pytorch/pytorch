@@ -1825,6 +1825,9 @@ static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst
 
 std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
                                                      const Tensor& self, bool full_matrices, bool compute_uv) {
+  checkSameDevice("svd", U, self, "U");
+  checkSameDevice("svd", S, self, "S");
+  checkSameDevice("svd", VT, self, "VT");
   checkLinalgCompatibleDtype("linalg_svd", U, self, "U");
   checkLinalgCompatibleDtype("linalg_svd", VT, self, "VT");
   // singular values are always real-valued here
