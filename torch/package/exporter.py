@@ -74,6 +74,7 @@ class PackageExporter:
             self.buffer = f
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
+        self.zip_file.set_min_version(6)
         self.serialized_storages : Dict[str, Any] = {}
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
@@ -427,7 +428,7 @@ node [shape=box];
 
         # Write each tensor to a file named tensor/the_tensor_key in the zip archive
         for key in sorted(self.serialized_storages.keys()):
-            name = 'data/{}'.format(key)
+            name = f'.data/{key}.storage'
             storage = self.serialized_storages[key]
             # location information is saved in python, but to actually
             # get the data from non cpu tensors we need to move them over first
@@ -436,7 +437,7 @@ node [shape=box];
             num_bytes = storage.size() * storage.element_size()
             self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
         contents = ('\n'.join(self.external) + '\n')
-        self._write('extern_modules', contents)
+        self._write('.data/extern_modules', contents)
         del self.zip_file
         if self.buffer:
             self.buffer.flush()
