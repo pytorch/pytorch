@@ -217,11 +217,12 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
 
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
-  std::vector<std::vector<long>> allShapes;
+  std::vector<std::vector<int64_t>> allShapes;
   c10::IntArrayRef shapes = {16, 16};
   for (auto i = 0; i < size; i++) {
     auto tensor = at::ones(shapes, b) * i;
-    allShapes.push_back(shapes.vec());
+    std::vector<int64_t> shapesVec = shapes.vec();
+    allShapes.emplace_back(std::move(shapesVec));
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
@@ -263,10 +264,11 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
   // Try every permutation of root rank and root tensor
   for (auto i = 0; i < size; i++) {
     for (auto j = 0; j < stride; j++) {
-      std::vector<std::vector<long>> allShapes;
+      std::vector<std::vector<int64_t>> allShapes;
       // Initialize inputs
       for (auto k = 0; k < size; k++) {
-        allShapes.push_back(shapes.vec());
+        std::vector<int64_t> shapesVec = shapes.vec();
+        allShapes.emplace_back(std::move(shapesVec));
         inputs[k].resize(stride);
         // This won't work if we ever support sparse CUDA
         at::OptionalDeviceGuard deviceGuard;
@@ -357,10 +359,10 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   // Kick off work
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
   const char * GLOO_A2A_STR = "gloo:all_to_all";
-  std::vector<std::vector<long>> allShapes;
+  std::vector<std::vector<int64_t>> allShapes;
   for (const auto & vec : inputSplits) {
     // Due to concatenation of tensors, shape will actually be the sum
-    long sum = 0;
+    int64_t sum = 0;
     for (const auto & s : vec) sum += s;
     allShapes.push_back({sum});
   }
