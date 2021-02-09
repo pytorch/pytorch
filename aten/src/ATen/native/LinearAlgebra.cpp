@@ -327,6 +327,13 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   const auto n = _tensors.size();
   TORCH_CHECK(n >= 2, "multi_dot(): expected at least 2 tensors but got ", n);
 
+  ScalarType t = _tensors[0].scalar_type();
+  TORCH_CHECK(
+      t == ScalarType::Float || t == ScalarType::Double ||
+          t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
+      "multi_dot(): expected tensors of float, double, cfloat or cdouble types but got ",
+      t);
+
   std::vector<int64_t> out_shape;
   std::vector<Tensor> tensors(n);
 
