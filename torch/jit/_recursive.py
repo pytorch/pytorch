@@ -1,5 +1,6 @@
 import inspect
 import torch
+import types
 import collections
 import textwrap
 import functools
@@ -10,7 +11,6 @@ import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args, get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
 from torch.nn import Module
-from torch._six import get_function_from_type, bind_method
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -528,7 +528,7 @@ def script_model_defines_attr(script_model, attr):
     script_attr = getattr(script_model, attr, None)
     if script_attr is None:
         return False
-    default_attr = get_function_from_type(torch.jit.RecursiveScriptModule, attr)
+    default_attr = getattr(torch.jit.RecursiveScriptModule, attr, None)
     if default_attr is None:
         return False
     return script_attr != default_attr
@@ -597,8 +597,12 @@ def check_module_initialized(mod):
     # This is to avoid importing torch.distributed.nn
     if not hasattr(mod, 'remote_parameters'):
         for name, param in mod._parameters.items():
-            if isinstance(param, torch.nn.parameter.UninitializedParameter):
+            if torch.nn.parameter.is_lazy(param):
                 raise RuntimeError("'{}' has uninitialized parameters {}. Did you forget to run a forward pass?"
+                                   .format(torch.typename(type(mod)), name))
+        for name, buf in mod._buffers.items():
+            if torch.nn.parameter.is_lazy(buf):
+                raise RuntimeError("'{}' has uninitialized buffers {}. Did you forget to run a forward pass?"
                                    .format(torch.typename(type(mod)), name))
 
 def infer_methods_to_compile(nn_module):
@@ -611,7 +615,7 @@ def infer_methods_to_compile(nn_module):
     methods: List[str] = []
     if hasattr(nn_module, 'forward') and not _jit_internal.is_ignored_fn(nn_module.forward):
         forward_func = getattr(nn_module.forward, "__func__", None)
-        module_forward = get_function_from_type(torch.nn.Module, "forward")
+        module_forward = getattr(torch.nn.Module, "forward", None)
         if forward_func != module_forward:
             methods = ['forward']
 
@@ -805,7 +809,7 @@ def lazy_bind(concrete_type, unbound_method):
                 setattr(script_module, name, value)
 
         script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
-        method = bind_method(unbound_method, script_module, torch.jit.RecursiveScriptModule)
+        method = types.MethodType(unbound_method, script_module)
         return method(*args)
 
     # make the lazy binding method "look like" the original method

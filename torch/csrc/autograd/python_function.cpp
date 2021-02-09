@@ -487,7 +487,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   }
 
   flags.is_executable = GradMode::is_enabled() && any_variable_requires_grad(unpacked.input_vars);
-  flags.next_edges = collect_next_edges(unpacked.input_vars);
+  flags.next_edges = (flags.is_executable ? collect_next_edges(unpacked.input_vars) : edge_list());
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
