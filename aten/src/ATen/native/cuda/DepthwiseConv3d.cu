@@ -64,11 +64,11 @@ __global__ void conv_depthwise3d_cuda_kernel(
       for (int k_row = 0; k_row < kH; ++k_row) {
         const int in_row = in_row_start + k_row * dilationH;
         for (int k_col = 0; k_col < kW; ++k_col) {
-          const scalar_t op1 = __ldg(kernel_ptr++);
+          const accscalar_t op1 = *(kernel_ptr++);
           const int in_col = in_col_start + k_col * dilationW;
           if (in_frame >= 0 && in_row >= 0 && in_col >= 0 &&
               in_frame < iT && in_row < iH && in_col < iW) {
-            sum += op1 * __ldg(input_ptr);
+            sum += op1 * *(input_ptr);
           }
           input_ptr += dilationW;
         }
@@ -142,16 +142,16 @@ conv_depthwise3d_cuda_backward_input_kernel(
           const int out_row_raw = out_row_end - k_row * dilationH;
           const int out_row = out_row_raw / strideH;
           for (int k_col = 0; k_col < kW; ++k_col) {
-            const scalar_t op1 = __ldg(kernel_ptr++);
+            const accscalar_t op1 = *(kernel_ptr++);
             const int out_col_raw = out_col_end - k_col * dilationW;
             const int out_col = out_col_raw / strideW;
 
             const int out_offs = (out_frame * oH + out_row) * oW + out_col;
 
-            scalar_t op2 = (scalar_t)0;
+            accscalar_t op2 = (accscalar_t)0;
             if (out_col >= 0 && out_row >= 0 && out_frame >= 0 &&
                 out_col < oW && out_row < oH && out_frame < oT) {
-              op2 = __ldg(gout_ptr + out_offs);
+              op2 = *(gout_ptr + out_offs);
             }
             if (out_frame * strideT == out_frame_raw &&
                 out_row * strideH == out_row_raw &&
@@ -231,16 +231,16 @@ conv_depthwise3d_cuda_backward_weight_kernel(
     int gout_col = laneid - gout_row * oW;
 
     for (; gout_row < oH; ) {
-      const accscalar_t op1 = __ldg(gout_ptr);
+      const accscalar_t op1 = *(gout_ptr);
       gout_ptr += C10_WARP_SIZE;
 
       const int in_col = (gout_col * strideW) + (k_col * dilationW) - paddingW;
       const int in_row = (gout_row * strideH) + (k_row * dilationH) - paddingH;
       const int in_pos = in_row * iW + in_col;
 
-      accscalar_t op2 = (scalar_t)0;
+      accscalar_t op2 = (accscalar_t)0;
       if (in_col >= 0 && in_col < iW && in_row >= 0 && in_row < iH) {
-        op2 = __ldg(input_ptr + in_pos);
+        op2 = *(input_ptr + in_pos);
       }
 
       gout_col += C10_WARP_SIZE;
