@@ -1,7 +1,5 @@
 # Welcome to the PyTorch setup.py.
-#
 # Environment variables you are probably interested in:
-#
 #   DEBUG
 #     build with -O0 and -g (debug symbols)
 #
@@ -26,73 +24,51 @@
 #     files.
 #
 # Environment variables for feature toggles:
-#
 #   USE_CUDNN=0
 #     disables the cuDNN build
-#
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
-#
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
-#
 #   USE_NUMPY=0
 #     disables the NumPy build
-#
 #   BUILD_TEST=0
 #     disables the test build
-#
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
-#
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
-#
 #   USE_NNPACK=0
 #     disables NNPACK build
-#
 #   USE_QNNPACK=0
 #     disables QNNPACK build (quantized 8-bit operators)
-#
 #   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
-#
 #   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
-#
 #   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
-#
 #   BUILD_CAFFE2=0
 #     disable Caffe2 build
-#
 #   USE_IBVERBS
 #     toggle features related to distributed support
-#
 #   USE_OPENCV
 #     enables use of OpenCV for additional operators
-#
 #   USE_OPENMP=0
 #     disables use of OpenMP for parallelization
-#
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
-#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
-#
 #   USE_LMDB
 #     enables use of LMDB for storage
-#
 #   BUILD_BINARY
 #     enables the additional binaries/ build
-#
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
 #     specify the version of PyTorch, rather than the hard-coded version
 #     in this file; used when we're building binaries for distribution
-#
 #   TORCH_CUDA_ARCH_LIST
 #     specify which CUDA architectures to build for.
 #     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
@@ -135,24 +111,19 @@
 #   CUDNN_INCLUDE_DIR
 #   CUDNN_LIBRARY
 #     specify where cuDNN is installed
-#
 #   MIOPEN_LIB_DIR
 #   MIOPEN_INCLUDE_DIR
 #   MIOPEN_LIBRARY
 #     specify where MIOpen is installed
-#
 #   NCCL_ROOT
 #   NCCL_LIB_DIR
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
-#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
-#
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
-#
 #   ATEN_THREADING
 #     ATen parallel backend to use for intra- and inter-op parallelism
 #     possible values:
@@ -276,7 +247,6 @@ else:
         distutils.sysconfig.get_config_var("INSTSONAME"))
 cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 
-
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
@@ -361,7 +331,6 @@ missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
 '''.strip()
-
 
 def check_pydep(importname, module):
     try:
@@ -579,7 +548,6 @@ class concat_license_files():
         """Restore content of f1"""
         with open(self.f1, 'w') as f:
             f.write(self.bsd_text)
-
 
 try:
     from wheel.bdist_wheel import bdist_wheel
@@ -995,3 +963,4 @@ if __name__ == '__main__':
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
+        
