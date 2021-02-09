@@ -1162,6 +1162,14 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
                 torch.linalg.cond(a, p, out=out)
 
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            for p in ['fro', 2]:
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    torch.linalg.cond(a, p, out=out)
+
         # for batched input if at least one matrix in the batch is not invertible,
         # we can't get the result for all other (possibly) invertible matrices in the batch without an explicit for loop.
         # this should change when at::inverse works with silent errors
