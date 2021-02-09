@@ -3,6 +3,7 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Metaprogramming.h>
 #include <ostream>
 
 namespace c10 {
@@ -225,6 +226,13 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::Meta,
 });
 
+// The set of dispatch keys that come after autograd
+// n.b. this relies on the fact that AutogradOther is currently the lowest Autograd key
+constexpr DispatchKeySet after_autograd_keyset = DispatchKeySet(
+        DispatchKeySet::FULL_AFTER,
+        c10::DispatchKey::AutogradOther
+);
+
 // true if t is a backend dispatch key
 C10_API bool isBackendDispatchKey(DispatchKey t);
 
@@ -255,4 +263,25 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // we should remove all Autograd keys before taking highestPriority.
   return (s - autograd_dispatch_keyset).highestPriorityTypeId();
 }
+
+template<class T>
+using is_not_DispatchKeySet = guts::negation<std::is_same<DispatchKeySet, T>>;
+
+// Given a function type, constructs a function_traits type that drops the first parameter
+// type if the first parameter is of type DispatchKeySet.
+// NB: DispatchKeySet is currently explicitly hidden from JIT (mainly to avoid pushing unnecessary
+// arguments on the stack - see Note [ Plumbing Keys Through the Dispatcher] for details).
+// If at any point in the future we need to expose this type to JIT, revisit the usage of this type alias.
+template <class FuncType>
+using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
+  typename guts::infer_function_traits_t<FuncType>::return_type,
+  typename std::conditional_t<
+    std::is_same<
+      DispatchKeySet,
+      typename guts::typelist::head_with_default_t<void, typename guts::infer_function_traits_t<FuncType>::parameter_types>
+    >::value,
+    guts::typelist::drop_if_nonempty_t<typename guts::infer_function_traits_t<FuncType>::parameter_types, 1>,
+    typename guts::infer_function_traits_t<FuncType>::parameter_types
+  >
+>;
 }

@@ -452,7 +452,7 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
       [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val_, scalar_t self_val_) -> scalar_t {
         T_ACC grad_val = static_cast<T_ACC>(grad_val_);
         T_ACC self_val = static_cast<T_ACC>(self_val_);
-        return (self_val >= neg_three && self_val <= three)
+        return (self_val > neg_three && self_val < three)
           ? grad_val * one_sixth
           : zero;
     });
