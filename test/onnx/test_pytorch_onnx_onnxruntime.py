@@ -1780,6 +1780,17 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.arange(3 * 5).to(torch.float).view(3, 5)
         self.run_test(IndexPutModel8(), (x, update))
 
+        class IndexPutModel9(torch.nn.Module):
+            def forward(self, poses):
+                w = 32
+                x = poses[:, :, 0] - (w - 1) // 2
+                boxes = torch.zeros([poses.shape[0], 17, 4])
+                boxes[:, :, 0] = x
+                return boxes
+
+        x = torch.zeros([2, 17, 3], dtype=torch.int64)
+        self.run_test(IndexPutModel9(), (x,))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()  # Ellipses followed by tensor indexing not scriptable
     def test_index_put_ellipsis(self):
