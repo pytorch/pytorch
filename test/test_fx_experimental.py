@@ -23,6 +23,7 @@ from torch.fx.experimental.partitioner_utils import (
 from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeArgs
+from torch.testing._internal.common_nn import module_tests, new_module_tests
 
 try:
     from torchvision.models import resnet18
@@ -751,7 +752,7 @@ terrible spacing
         module_with_submodules(a)
 
     @skipIfNoTorchVision
-    def test_normalize_functional(self):
+    def test_normalize_args(self):
         m = resnet18()
 
         class FunctionalTracer(torch.fx.Tracer):
@@ -778,6 +779,69 @@ terrible spacing
                 nn_class = getattr(torch.nn, submod_class.__name__)
                 if submod_class == nn_class:
                     self.assertEqual(len(node.args), 0)
+
+    def test_normalize_modules_exhaustive(self):
+        """
+        Exhaustively test `NormalizeArgs` on all standard
+        torch.nn Module classes
+        """
+        for test_params in module_tests + new_module_tests:
+            if 'constructor' not in test_params:
+                name = test_params.pop('module_name')
+                test_params['constructor'] = getattr(torch.nn, name)
+            if 'constructor_args' not in test_params:
+                args = ()
+            else:
+                args = test_params['constructor_args']
+
+            mod = test_params['constructor'](*args)
+            if not mod.__class__.__name__ in dir(torch.nn):
+                continue
+
+            if not 'input_fn' in test_params:
+                inputs = torch.randn(test_params['input_size'])
+            else:
+                inputs = test_params['input_fn']()
+
+            if not isinstance(inputs, (tuple, list)):
+                inputs = (inputs,)
+
+            params = ', '.join(f'v{i}' for i in range(len(inputs)))
+
+            test_classname = f'Test{mod.__class__.__name__}'
+            test_mod_code = f"""
+class {test_classname}(torch.nn.Module):
+    def __init__(self, mod):
+        super().__init__()
+        self.mod = mod
+
+    def forward(self, {params}):
+        return self.mod({params})
+            """
+
+            gbls = {'torch' : torch}
+            lcls = {}
+            exec(test_mod_code, gbls, lcls)
+
+            test_class = lcls[test_classname](mod)
+            traced = symbolic_trace(test_class)
+
+            traced = NormalizeArgs(traced).transform()
+
+            stochastic_modules = {'FractionalMaxPool2d', 'FractionalMaxPool3d',
+                                  'RReLU'}
+
+            if not mod.__class__.__name__ in stochastic_modules:
+                self.assertEqual(traced(*inputs), mod(*inputs))
+
+            modules = dict(traced.named_modules())
+            for node in traced.graph.nodes:
+                if node.op == 'call_module':
+                    submod_class = modules[node.target].__class__
+                    nn_class = getattr(torch.nn, submod_class.__name__)
+                    if submod_class == nn_class:
+                        self.assertEqual(len(node.args), 0)
+
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
