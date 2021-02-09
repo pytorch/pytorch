@@ -1082,6 +1082,13 @@ class TestFX(JitTestCase):
         result = interp.run(torch.ones(3, 4), torch.ones(3, 4), torch.rand(3, 4))
         self.assertEqual(result, torch.ones(3, 4) * 2.0)
 
+    @skipIfNoTorchVision
+    def test_interpreter_noop_resnet18(self):
+        rn18 = resnet18()
+        transformed = torch.fx.Transformer(symbolic_trace(rn18)).transform()
+        inp = torch.randn(5, 3, 224, 224)
+        self.assertEqual(transformed(inp), rn18(inp))
+
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
