@@ -402,6 +402,11 @@ class _RemoteTraceback(Exception):
         return self.tb
 
 
+class LocalException(Exception):
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
 class ExceptionWrapper(object):
     r"""Wraps an exception plus traceback to communicate across threads"""
     def __init__(self, exc_info=None, where="in background"):
@@ -411,12 +416,18 @@ class ExceptionWrapper(object):
             exc_info = sys.exc_info()
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
         self.where = where
+        self._exc = None
+
+    @property
+    def exc(self):
+        if self._exc is None:
+            self._exc = LocalException("Re-raise the exception {}".format(self.where))
+            # Exception Chain
+            self._exc.__cause__ = _RemoteTraceback(self.exc_msg)
+        return self._exc
 
     def reraise(self):
         r"""Reraises the wrapped exception in the current thread"""
-        self.exc = Exception("Re-raise the exception {}".format(self.where))
-        # Exception Chain
-        self.exc.__cause__ = _RemoteTraceback(self.exc_msg)
         raise self.exc
 
 
