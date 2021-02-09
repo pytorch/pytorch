@@ -168,7 +168,7 @@ namespace {
 template <typename FnPtr, typename T>
 struct RegisterCUDADispatch {
   RegisterCUDADispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
-    stub.cuda_dispatch_ptr = value;
+    stub.cuda_dispatch_ptr = reinterpret_cast<void*>(value);
   }
 };
 
@@ -176,7 +176,7 @@ template <typename FnPtr, typename T>
 struct RegisterHIPDispatch {
   RegisterHIPDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
     // TODO: make this point at hip_dispatch_ptr
-    stub.cuda_dispatch_ptr = value;
+    stub.cuda_dispatch_ptr = reinterpret_cast<void*>(value);
   }
 };
 } // anonymous namespace
