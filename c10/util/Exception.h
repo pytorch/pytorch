@@ -154,6 +154,12 @@ C10_API void set_warning_handler(WarningHandler* handler) noexcept(true);
 /// Gets the global warning handler.
 C10_API WarningHandler* get_warning_handler() noexcept(true);
 
+/// The TORCH_WARN_ONCE macro is difficult to test for. Use
+/// setWarnAlways(true) to turn it into TORCH_WARN, which can be
+/// tested for more easily.
+C10_API void set_warnAlways(bool) noexcept(true);
+C10_API bool get_warnAlways(void) noexcept(true);
+
 } // namespace Warning
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected
@@ -353,6 +359,7 @@ namespace c10 {
 namespace detail {
 
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
+[[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg);
 
 } // namespace detail
 } // namespace 10
@@ -417,18 +424,25 @@ namespace detail {
 // arguments which are concatenated into the warning message using operator<<
 //
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_WARN_ONCE(...) \
+#define _TORCH_WARN_ONCE(...) \
   C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
     ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, {}, false); \
     return true; \
   }()
 #else
-#define TORCH_WARN_ONCE(...) \
+#define _TORCH_WARN_ONCE(...) \
   C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
     ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false); \
     return true; \
   }()
 #endif
+
+#define TORCH_WARN_ONCE(...) \
+  if (::c10::Warning::get_warnAlways()) { \
+    TORCH_WARN(__VA_ARGS__); \
+  } else { \
+    _TORCH_WARN_ONCE(__VA_ARGS__); \
+  }
 
 // ----------------------------------------------------------------------------
 // Deprecated macros
