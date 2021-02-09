@@ -1639,9 +1639,15 @@ class TestQuantizeFx(QuantizationTestCase):
         m = M2().eval()
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
+        weight, bias = m._packed_weight_0.unpack()
+        # check that random model weight/bias does not match ref weight/bias
+        self.assertNotEqual(weight, ref_weight)
+        self.assertNotEqual(bias, ref_bias)
         m.load_state_dict(state_dict)
-        weight, bias = torch.ops.quantized.conv2d_unpack(m._packed_weight_0)
+        weight, bias = m._packed_weight_0.unpack()
+        # check that weight/bias matches after load the state_dict
         self.assertEqual(weight, ref_weight)
+        self.assertEqual(bias, ref_bias)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
