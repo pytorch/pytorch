@@ -17,6 +17,7 @@ from urllib.parse import quote
 import re
 
 
+
 class PackageExporter:
     """ Exporters allow you to write packages of code, pickled python data, and
     arbitrary binary and text resources into a self-contained package.
@@ -83,6 +84,7 @@ class PackageExporter:
         self.module_env : ModuleEnv = get_current_module_env()
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
+        self._unique_id = 0
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -125,6 +127,12 @@ class PackageExporter:
         else:
             is_package = path.name == '__init__.py'
             self.save_source_string(module_name, _read_file(file_or_directory), is_package, dependencies, file_or_directory)
+
+    def get_unique_id(self) -> str:
+        """Get an id. This id is guaranteed to only be handed out once for this package."""
+        ret = str(self._unique_id)
+        self._unique_id += 1
+        return ret
 
     def save_source_string(self, module_name: str, src: str, is_package: bool = False,
                            dependencies: bool = True, orig_file_name: str = None):
@@ -385,11 +393,6 @@ node [shape=box];
         return qualified_name in self.provided
 
     def _persistent_id(self, obj):
-        # FIXME: the docs say that persistent_id should only return a string
-        # but torch store returns tuples. This works only in the binary protocol
-        # see
-        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
-        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
             obj_key = str(obj._cdata)
@@ -401,6 +404,9 @@ node [shape=box];
                     obj_key,
                     location,
                     obj.size())
+        if hasattr(obj, '__reduce_package__'):
+            return ('reduce_package', *obj.__reduce_package__(self))
+
         return None
 
     def __enter__(self):
