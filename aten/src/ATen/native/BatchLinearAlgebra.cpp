@@ -703,8 +703,7 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
     result.transpose_(-2, -1);
   }
 
-  TORCH_CHECK(result.sizes().equals(input.sizes()),
-    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
   // result tensor must be in batched column major order (Fortran contiguous)
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
@@ -727,14 +726,18 @@ Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
   auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+  bool result_equal_expected_shape = result.sizes().equals(input.sizes());
   bool is_batched_column_major = false;
   if (result.dim() >= 2) {
     is_batched_column_major = result.transpose(-2, -1).is_contiguous();
   }
 
-  // if result is not empty and not in batched column major format or does not have the same dtype as input
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
+  copy_needed |= !result_equal_expected_shape; // or result does not have the expected shape
   // we have to allocate a temporary tensor
-  if ((result.numel() != 0 && !is_batched_column_major) || !result_input_same_type) {
+  if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = linalg_inv_out_info(result_tmp, infos_lu, infos_getri, input);
     at::native::resize_output(result, result_tmp.sizes());

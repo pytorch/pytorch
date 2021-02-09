@@ -2395,7 +2395,7 @@ class TestLinalg(TestCase):
 
         # dtypes should match
         a = torch.eye(2, dtype=dtype, device=device)
-        out = torch.empty_like(a).to(torch.int)
+        out = torch.empty(0, dtype=torch.int, device=device)
         with self.assertRaisesRegex(RuntimeError, "got result with dtype Int"):
             torch.linalg.inv(a, out=out)
 
@@ -2410,6 +2410,19 @@ class TestLinalg(TestCase):
         with warnings.catch_warnings(record=True) as w:
             a = torch.eye(2, dtype=dtype, device=device)
             out = torch.empty(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.linalg.inv(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # if out tensor in batched column major format but with wrong a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            a = torch.eye(2, dtype=dtype, device=device)
+            out = torch.empty(3, 3, dtype=dtype, device=device)
+            out = out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
+            out = out.transpose(-2, -1)
+            self.assertTrue(out.transpose(-2, -1).is_contiguous())
             # Trigger warning
             torch.linalg.inv(a, out=out)
             # Check warning occurs
