@@ -688,42 +688,12 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
 // LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
 static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
-  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
-  TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
-
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
-  TORCH_INTERNAL_ASSERT(result.device() == input.device());
-
-  TORCH_INTERNAL_ASSERT(infos_lu.scalar_type() == kInt);
-  TORCH_INTERNAL_ASSERT(infos_getri.scalar_type() == kInt);
-
-  // if result has no elements we can modify it
-  if (result.numel() == 0) {
-    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
-    result.transpose_(-2, -1);
-  }
-
-  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
-
-  // result tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
-
-  // _linalg_inv_out_helper_ (apply_inverse) performs calculations in-place and result must be a copy of input
-  result.copy_(input);
-
-  // TODO: Replace this helper with DECLARE/DEFINE_DISPATCH
-  result = at::_linalg_inv_out_helper_(result, infos_lu, infos_getri);
-  return result;
-}
-
-// Computes the inverse matrix of 'input', it is is saved to 'result' in-place
-Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
   squareCheckInputs(input);
   checkSameDevice("linalg_inv", result, input);
   checkLinalgCompatibleDtype("linalg_inv", result, input);
 
-  auto infos_lu = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
-  auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  TORCH_INTERNAL_ASSERT(infos_lu.scalar_type() == kInt);
+  TORCH_INTERNAL_ASSERT(infos_getri.scalar_type() == kInt);
 
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
   bool result_equal_expected_shape = result.sizes().equals(input.sizes());
@@ -742,9 +712,36 @@ Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
     result_tmp = linalg_inv_out_info(result_tmp, infos_lu, infos_getri, input);
     at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
-  } else {  // use result's storage directly
-    result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
+    return result;
   }
+  // else  use result's storage directly
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
+  }
+
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
+  // result tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+
+  // _linalg_inv_out_helper_ (apply_inverse) performs calculations in-place and result must be a copy of input
+  result.copy_(input);
+
+  // TODO: Replace this helper with DECLARE/DEFINE_DISPATCH
+  result = at::_linalg_inv_out_helper_(result, infos_lu, infos_getri);
+  return result;
+}
+
+// Computes the inverse matrix of 'input', it is is saved to 'result' in-place
+Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
+  auto infos_lu = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
 
   // Now check LAPACK/MAGMA/cuSOLVER error codes
   if (result.dim() > 2) {
