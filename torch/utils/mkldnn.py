@@ -58,6 +58,7 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
+        x = x.to_mkldnn()
         return torch.mkldnn_convolution(
             x,
             self.weight,
@@ -65,7 +66,7 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
             self.padding,
             self.stride,
             self.dilation,
-            self.groups)
+            self.groups).to_dense()
 
 
 class MkldnnConv1d(_MkldnnConvNd):
@@ -165,6 +166,7 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
+        x = x.to_mkldnn()
         return torch.batch_norm(
             x,
             self.weight,
@@ -175,7 +177,7 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
             self.exponential_average_factor,
             self.eps,
             False,  # cuda_enabled
-        )
+        ).to_dense()
 
 
 def to_mkldnn(module):
