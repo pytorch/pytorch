@@ -103,8 +103,8 @@ nn_functional_tests = [
     ('tanh', (S, S, S), (), '', (True,)),
     ('sigmoid', (S, S, S), (), '', (True,)),
     ('log_softmax', (S, S, S), (0,), '', (True,)),
-    ('linear', (S, S), ((M, S),), '', (True, ['aten::t', 'aten::matmul'])),
-    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::add', 'aten::mm'])),
+    ('linear', (S, S), ((M, S),), '', (True, ['aten::linear'])),
+    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::linear'])),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
@@ -290,14 +290,15 @@ def gen_script_fn_and_args(method_name, func_type, *args, **kwargs):
     CU = torch.jit.CompilationUnit(script)
     return CU.the_method, tensors
 
-# create a script function from (name, func_type, output_process_fn),
-# returns a function takes in (args, kwargs) and runs the compiled function and
-# then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn):
+# create a script function from (name, func_type),
+# returns a function takes in (args, kwargs) and runs the compiled function
+def create_script_fn(self, method_name, func_type):
+    # function returns tuple containing original output and
+    # filtered output to be used in checking gradients 
     def script_fn(*args, **kwargs):
         fn, tensors = gen_script_fn_and_args(method_name, func_type, *args, **kwargs)
         self.assertExportImport(fn.graph, tensors)
-        output = output_process_fn(fn(*tensors))
+        output = fn(*tensors)
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         script_fn.last_graph = fn.graph_for(*tensors)  # type: ignore[attr-defined]
         return output

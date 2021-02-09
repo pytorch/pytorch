@@ -17,6 +17,7 @@ import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
@@ -53,17 +54,31 @@ else:
 
 class Foo:
     def __init__(self, x):
+        # Can be tensor or int
         self.x = x
 
     def __eq__(self, other):
-        return self.__dict__ == other.__dict__
+        def eq(value, other):
+            if isinstance(value, torch.Tensor):
+                return torch.equal(value, other)
+            return value == other
+
+        for attr, value in self.__dict__.items():
+            other_value = other.__dict__[attr]
+            if not eq(value, other_value):
+                return False
+        return True
 
 f = Foo(10)
 f.bar = 1
 
-collectives_object_test_list = [
+foo_cpu_tensor = Foo(torch.randn(3, 3))
+
+
+COLLECTIVES_OBJECT_TEST_LIST = [
     {"key1": 3, "key2": 4, "key3": {"nested": True}},
     f,
+    foo_cpu_tensor,
     "foo",
     [1, 2, True, "string", [4, 5, "nested"]],
 ]
@@ -549,7 +564,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
         def test_barrier_timeout_group(self):
-            timeout = timedelta(seconds=1)
+            timeout = timedelta(seconds=5)
             _, group_id, _ = self._init_group_test(timeout=timeout)
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
@@ -2842,43 +2857,91 @@ class DistributedTest:
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
 
+        def _test_ddp_hook_parity(self, state, hook):
+            rank = self.rank
+            m = torch.nn.Linear(1, 5)
+            try:
+                process_group = state.process_group
+            except AttributeError:
+                process_group = state
+
+            net_with_hook = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(m).to(rank), device_ids=[rank], process_group=process_group
+            )
+            net_with_hook.register_comm_hook(state=state, hook=hook)
+            net_without_hook = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(m).to(rank), device_ids=[rank], process_group=process_group
+            )
+            for i in range(100):
+                # Clear gradients manually.
+                for g in [net_without_hook.module.weight.grad, net_with_hook.module.weight.grad]:
+                    if g is not None:
+                        g.requires_grad_(False)
+                        g.zero_()
+                # Forward + BW
+                batch = torch.tensor([rank]).float().cuda(rank)
+                loss = net_without_hook(batch).sum()
+                loss.backward()
+                # For each worker, the gradient on the weight should be worker_rank.
+                grad = net_without_hook.module.weight.grad
+                avg = grad.clone()
+                expected_grad = sum(i for i in range(dist.get_world_size())) / dist.get_world_size()
+                loss_hook = net_with_hook(batch).sum()
+                loss_hook.backward()
+                grad_hook = net_with_hook.module.weight.grad
+                avg_hook = grad_hook.clone()
+                # Verify hook grad with expected.
+                # Cannot use exact match here due to a very small accuracy loss,
+                # e.g. 1e-05, for powerSGD hook case.
+                assert_func = self.assertEqual if hook == default.allreduce_hook else torch.testing.assert_allclose
+                assert_func(
+                    avg_hook[0, 0],
+                    expected_grad,
+                    msg=f"Expected hook grad of {expected_grad} but got {avg_hook[0, 0]}"
+                )
+                # Verify hook grad with vanilla allreduce
+                assert_func(
+                    avg_hook[0, 0],
+                    avg[0, 0],
+                    msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}"
+                )
+
         @unittest.skipIf(
             BACKEND != "nccl",
             "Only NCCL backend supports DDP communication hook",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
-        def test_DistributedDataParallel_powerSGD_ddp_comm_hook(self):
-            rank = self.rank
+        def test_ddp_hook_parity_allreduce(self):
+            self._test_ddp_hook_parity(state=None, hook=default.allreduce_hook)
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_hook_parity_allreduce_process_group(self):
+            # process_group is passed in to both DDP and comm. hook
+            rank_to_GPU = self._init_multigpu_helper()
+            gpus = [rank_to_GPU[int(r)][0] for r in range(dist.get_world_size())]
+            process_group = torch.distributed.new_group(gpus)
+            self._test_ddp_hook_parity(state=process_group, hook=default.allreduce_hook)
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_hook_parity_powerSGD(self):
             for warm_start in [True, False]:
-                net = torch.nn.parallel.DistributedDataParallel(
-                    torch.nn.Linear(1, 5).to(rank), device_ids=[rank]
+                powersgd_state = powerSGD.PowerSGDState(
+                    process_group=None,
+                    matrix_approximation_rank=1,
+                    warm_start=warm_start,
                 )
-                state = powerSGD.PowerSGDState(
-                    # Use the default process group (dist.group.WORLD) instead of creating a new one.
-                    process_group=None, matrix_approximation_rank=1, warm_start=warm_start
-                )
-                net.register_comm_hook(state=state, hook=powerSGD.powerSGD_hook)
-                # NOTE: batched_powerSGD_hook cannot pass the following test, because it has a much lower accuracy.
-                # E.g., after the compression of batched_powerSGD_hook, a gradient of 0.5 can become 0.8335.
-                for i in range(1000):
-                    # Clear gradients manually.
-                    grad = net.module.weight.grad
-                    if grad is not None:
-                        grad.requires_grad_(False)
-                        grad.zero_()
-                    # Forward + BW
-                    batch = torch.tensor([rank]).float().cuda(rank)
-                    loss = net(batch).sum()
-                    loss.backward()
-                    # For each worker, the gradient on the weight should be worker_rank.
-                    grad = net.module.weight.grad
-                    world_size = int(os.environ["WORLD_SIZE"])
-                    expected_grad = sum(i for i in range(world_size)) / world_size
-                    # Cannot use exact match here due to a very small accuracy loss, e.g., 1e-05.
-                    torch.testing.assert_allclose(
-                        grad[0, 0], expected_grad,
-                        msg=f"Expected gradient of {expected_grad} but got {grad} on rank {self.rank}")
+                self._test_ddp_hook_parity(state=powersgd_state, hook=powerSGD.powerSGD_hook)
 
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
@@ -3152,6 +3215,39 @@ class DistributedTest:
                 global_bs=global_bs,
                 offset=bs_offset)
 
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_ddp_logging_data_cpu(self):
+            group, group_id, rank = self._init_global_test()
+            model_DDP = copy.deepcopy(DDP_NET)
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
+            self.assertEqual(ddp_logging_data.rank, dist.get_rank())
+            self.assertEqual(ddp_logging_data.module_name, 'Net')
+            self.assertEqual(ddp_logging_data.device_ids, [])
+            # output_device is -1 in default if it is not set, e.g.
+            # output_device of CPU training is -1.
+            self.assertEqual(ddp_logging_data.output_device, -1)
+            self.assertEqual(ddp_logging_data.broadcast_buffers, True)
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
+            self.assertEqual(ddp_logging_data.find_unused_parameters, False)
+            self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
+            self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_ddp_logging_data_gpu(self):
+            group, group_id, rank = self._init_global_test()
+            model_DDP = copy.deepcopy(DDP_NET)
+            model_DDP.cuda(rank)
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=[rank])
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.device_ids, [rank])
+            self.assertEqual(ddp_logging_data.output_device, rank)
+
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
             # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
@@ -3378,7 +3474,12 @@ class DistributedTest:
                 next_rank = (self.rank + 1) % int(self.world_size)
                 torch.cuda.set_device(next_rank)
 
-            gather_objects = collectives_object_test_list
+            # If GPU test, add object with GPU tensor
+            if backend == "nccl":
+                COLLECTIVES_OBJECT_TEST_LIST.append(Foo(torch.randn(3, 3, device=0)))
+
+            gather_objects = COLLECTIVES_OBJECT_TEST_LIST
+
             output_gathered = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(
                 output_gathered, gather_objects[self.rank % len(gather_objects)]
@@ -3397,7 +3498,7 @@ class DistributedTest:
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support gather")
         def test_gather_object(self):
             # Ensure stateful objects can be gathered
-            gather_objects = collectives_object_test_list
+            gather_objects = COLLECTIVES_OBJECT_TEST_LIST
             output_gathered = [None for _ in range(dist.get_world_size())]
             gather_on_rank = 0
             my_rank = dist.get_rank()
@@ -3908,20 +4009,28 @@ class DistributedTest:
                 torch.cuda.set_device(next_rank)
 
             src_rank = 0
-            objects = collectives_object_test_list if self.rank == src_rank else [None for _ in collectives_object_test_list]
+            # If GPU test, add object with GPU tensor
+            if backend == "nccl":
+                COLLECTIVES_OBJECT_TEST_LIST.append(Foo(torch.randn(3, 3, device=0)))
+
+            objects = (
+                COLLECTIVES_OBJECT_TEST_LIST
+                if self.rank == src_rank
+                else [None for _ in COLLECTIVES_OBJECT_TEST_LIST]
+            )
 
             # Single object test
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
-                self.assertNotEqual(single_obj_list[0], collectives_object_test_list[0])
+                self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
             dist.broadcast_object_list(single_obj_list, src=0)
-            self.assertEqual(single_obj_list[0], collectives_object_test_list[0])
+            self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
 
             # Multiple input objects test
             if self.rank != src_rank:
-                self.assertNotEqual(objects, collectives_object_test_list)
+                self.assertNotEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
             dist.broadcast_object_list(objects, src=0)
-            self.assertEqual(objects, collectives_object_test_list)
+            self.assertEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4360,9 +4469,9 @@ class DistributedTest:
         def test_scatter_object_list(self):
             src_rank = 0
             scatter_list = (
-                collectives_object_test_list
+                COLLECTIVES_OBJECT_TEST_LIST
                 if self.rank == src_rank
-                else [None for _ in collectives_object_test_list]
+                else [None for _ in COLLECTIVES_OBJECT_TEST_LIST]
             )
             world_size = dist.get_world_size()
             scatter_list = scatter_list[: world_size]
@@ -4375,7 +4484,7 @@ class DistributedTest:
             dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
             self.assertEqual(
                 output_obj_list[0],
-                collectives_object_test_list[self.rank % len(collectives_object_test_list)],
+                COLLECTIVES_OBJECT_TEST_LIST[self.rank % len(COLLECTIVES_OBJECT_TEST_LIST)],
             )
             # Ensure errors are raised upon incorrect arguments.
             with self.assertRaisesRegex(
