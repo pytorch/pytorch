@@ -350,10 +350,17 @@ void PrepareCopyForONNX(Node* node) {
         graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
             ->output();
 
+    auto* cast =
+          graph->create(::c10::onnx::Cast, 1);
+    cast->addInput(node->input(1));
+    auto aten_type = node->input(0)->type()->cast<TensorType>()->scalarType();
+    auto onnx_type = ATenTypeToONNXType(aten_type);
+    cast->i_(attr::to, onnx_type);
+    auto input1 = graph->insertNode(cast)->output();
     auto expanded_value =
-        graph->insert(aten::expand_as, {node->input(1), node->input(0)});
+        graph->insert(aten::expand_as, {input1, node->input(0)});
     expanded_value->node()->setSourceRange(node->sourceRange());
-    expanded_value->copyMetadata(node->input(1));
+    expanded_value->copyMetadata(input1);
 
     auto index_put = graph->insert(
         aten::index_put_,
