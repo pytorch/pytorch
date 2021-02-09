@@ -239,51 +239,15 @@ static void decomposeLinear(Block* b) {
       node->output()->replaceAllUsesWith(matmul_n->output());
       node->destroy();
     } else {
-      auto dim_n =
-          g->create(aten::dim, {node->inputs()[0]}, 1)->insertBefore(node);
-      auto const_2 = g->insertConstant(IValue(2));
-      const_2->node()->moveBefore(node);
-      auto eq_n = g->create(aten::eq, {dim_n->output(), const_2}, 1)
-                      ->insertBefore(node);
-
-      auto if_n = g->create(prim::If, {eq_n->output()}, 1)->insertBefore(node);
-
-      auto true_block = if_n->addBlock();
-      auto false_block = if_n->addBlock();
-
-      {
-        WithInsertPoint guard(true_block->return_node());
-        auto const_1 = g->insertConstant(IValue(1.0));
-        auto t_weight_n = g->create(aten::t, {node->inputs()[1]}, 1)
-                              ->insertBefore(true_block->return_node());
-        auto addmm_n = g->create(
-                            aten::addmm,
-                            {node->inputs()[2],
-                             node->inputs()[0],
-                             t_weight_n->output(),
-                             const_1,
-                             const_1},
-                            1)
-                           ->insertBefore(true_block->return_node());
-        true_block->registerOutput(addmm_n->output());
-      }
-
-      {
-        WithInsertPoint guard(false_block->return_node());
-        auto const_1 = g->insertConstant(IValue(1.0));
-        auto t_weight_n = g->create(aten::t, {node->inputs()[1]}, 1)
-                              ->insertBefore(false_block->return_node());
-        auto matmul_n =
-            g->create(
-                 aten::matmul, {node->inputs()[0], t_weight_n->output()}, 1)
-                ->insertBefore(false_block->return_node());
-        auto add_n =
-            g->create(
-                 aten::add, {matmul_n->output(), node->inputs()[2], const_1}, 1)
-                ->insertBefore(false_block->return_node());
-        false_block->registerOutput(add_n->output());
-      }
-      node->output()->replaceAllUsesWith(if_n->output());
+      WithInsertPoint guard(node);
+      auto const_1 = g->insertConstant(IValue(1.0));
+      auto t_weight_n =
+          g->insertNode(g->create(aten::t, {node->inputs()[1]}, 1));
+      auto matmul_n = g->insertNode(g->create(
+          aten::matmul, {node->inputs()[0], t_weight_n->output()}, 1));
+      auto add_n = g->insertNode(g->create(
+          aten::add, {matmul_n->output(), node->inputs()[2], const_1}, 1));
+      node->output()->replaceAllUsesWith(add_n->output());
       node->destroy();
     }
   }
