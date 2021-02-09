@@ -1427,6 +1427,16 @@ op_db: List[OpInfo] = [
                    dtypes=integral_types_and(torch.bool),
                    dtypesIfCPU=integral_types_and(torch.bool),
                    dtypesIfCUDA=integral_types_and(torch.bool),
+                   dtypesIfROCM=integral_types_and(torch.bool),
+                   skips=(
+                       # File "test_unary_ufuncs.py", line 289, in test_reference_numerics
+                       #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
+                       # KeyError: <class 'numpy.intc'>
+                       # Following error in Windows CI
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.int],
+                                active_if=IS_WINDOWS),
+                   ),
                    assert_autodiffed=True),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
