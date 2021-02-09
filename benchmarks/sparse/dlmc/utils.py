@@ -64,6 +64,19 @@ def gen_matrix(path, device):
 
 
 def load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit=math.inf):
+    """load_spmv_dataset loads a DLMC dataset for a sparse matrix-vector multiplication (SPMV) performance test.
+    Args:
+        dataset_path:
+            path of the dataset from DLMC collection.
+        hidden_size
+            This value allows tensors of varying sizes.
+        sparsity:
+            This value allows tensors of varying sparsities.
+        device:
+            Whether to place the Tensor on a GPU or CPU.
+        n_limit:
+            This value allows a dataset with some limit size.
+    """
     current_folder_path = f"{dataset_path}/{sparsity}"
     path = Path(current_folder_path)
     files = path.glob('**/*.smtx')
@@ -89,6 +102,21 @@ def load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit=math.
 
 
 def load_spmm_dataset(dataset_path, hidden_size, sparsity, spmm_type, device, n_limit=math.inf):
+    """load_spmm_dataset loads a DLMC dataset for a sparse matrix-matrix multiplication (SPMM) performance test.
+    Args:
+        dataset_path:
+            path of the dataset from DLMC collection.
+        hidden_size
+            This value allows tensors of varying sizes.
+        sparsity:
+            This value allows tensors of varying sparsities.
+        spmm_type:
+            This value allows tensors for `sparse @ sparse` or `sparse @ dense` operations.
+        device:
+            Whether to place the Tensor on a GPU or CPU.
+        n_limit:
+            This value allows a dataset with some limit size.
+    """
     current_folder_path = f"{dataset_path}/{sparsity}"
     path = Path(current_folder_path)
     files = path.glob('**/*.smtx')

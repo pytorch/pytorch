@@ -1,8 +1,8 @@
 # Sparse benchmarks
 
-# These benchmarks are for the sparse matrix functionality. 
+# This benchmark is for Sparse matrix-vector multiplication (SPMV) performance test. 
 # They exist for comparing the performance of sparse matrix routines
-# torch.sparse.mm(sparse, sparse)` with different backends (CPU/CUDA)
+# torch.matmul(sparse, vector)` with different backends (CPU/CUDA)
 # and with other frameworks such as scipy. 
 
 import sys
