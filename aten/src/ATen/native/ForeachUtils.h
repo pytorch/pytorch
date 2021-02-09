@@ -128,7 +128,9 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
+
   return can_use_fast_route({tensors1, tensors2}, {});
+
 #endif
 }
 
