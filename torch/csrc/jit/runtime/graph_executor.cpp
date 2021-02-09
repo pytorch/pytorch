@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
+#include <ATen/autocast_mode.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -514,6 +515,18 @@ void GraphExecutorImplBase::run(Stack& stack) {
   C10_LOG_API_USAGE_ONCE("torch.graph_executor.run");
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
+
+  // Autocast must be disabled when we're executing TorchScript
+  // (the Autocast side-effects are transparent to the TorchScript
+  //  interpreter, which means we'd get incorrect type information, leading
+  //  to unpredictable behavior)
+  //
+  // TODO: a better alternative would be to specialize the graph to match
+  //  the current Autocast state
+  //
+  if (at::autocast::is_enabled()) {
+    AT_ERROR("Running TorchScript with Autocast enabled is not supported");
+  }
 
   const ExecutionPlan& plan =
       getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());

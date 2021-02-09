@@ -231,8 +231,6 @@ The stuff below could be codegenned.  Ed said
 Therefore, for the moment, this is all copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 ********************************************************************************************************************/
 
-#define ADD_NS(RAW_OP) at::RAW_OP
-
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
 #define KERNEL(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
@@ -253,158 +251,158 @@ TORCH_LIBRARY_IMPL(_, Autocast, m) {
 
 TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   // fp16
-  KERNEL(ADD_NS(_convolution), "_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv_tbc), "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), fp16)
-  KERNEL(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(addr), "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), fp16)
-  KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
+  KERNEL(at::_convolution, "_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
+  KERNEL(at::_convolution, "_convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool), fp16)
+  KERNEL(at::_convolution_nogroup, "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
+  KERNEL(at::conv1d, "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL(at::conv2d, "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL(at::conv3d, "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL(at::conv_tbc, "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), fp16)
+  KERNEL(at::conv_transpose1d, "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL(at::conv_transpose2d, "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL(at::conv_transpose3d, "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL(at::convolution, "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp16)
+  KERNEL(at::cudnn_convolution, "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL(at::cudnn_convolution_transpose, "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL(at::cudnn_convolution, "cudnn_convolution.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL(at::cudnn_convolution_transpose, "cudnn_convolution_transpose.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL(at::cudnn_convolution, "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), fp16)
+  KERNEL(at::cudnn_convolution_transpose, "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), fp16)
+  KERNEL(at::prelu, "prelu", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL(at::addmm, "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(at::addmv, "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(at::addr, "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(at::matmul, "matmul", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL(at::mm, "mm", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL(at::mv, "mv", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL(at::linear, "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), fp16)
+  KERNEL(at::addbmm, "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(at::baddbmm, "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(at::bmm, "bmm", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL(at::chain_matmul, "chain_matmul", Tensor (TensorList), fp16)
   // The macro doesn't like these (I think it chokes on commas inside <>) so write them manually
   m.impl(TORCH_SELECTIVE_NAME("aten::_thnn_fused_lstm_cell"),
          TORCH_FN((&WrapFunction<CastPolicy::fp16,
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(_thnn_fused_lstm_cell)>::type::call)));
+                                 &at::_thnn_fused_lstm_cell>::type::call)));
   m.impl("_thnn_fused_gru_cell",
          TORCH_FN((&WrapFunction<CastPolicy::fp16,
                                  std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(_thnn_fused_gru_cell)>::type::call)));
+                                 &at::_thnn_fused_gru_cell>::type::call)));
   m.impl("lstm_cell",
          TORCH_FN((&WrapFunction<CastPolicy::fp16,
                                  std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(lstm_cell)>::type::call)));
+                                 &at::lstm_cell>::type::call)));
   m.impl("gru_cell",
          TORCH_FN((&WrapFunction<CastPolicy::fp16,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(gru_cell)>::type::call)));
+                                 &at::gru_cell>::type::call)));
   m.impl("rnn_tanh_cell", // tanh unary op is executed as a cuda math library call.
          TORCH_FN((&WrapFunction<CastPolicy::fp16,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(rnn_tanh_cell)>::type::call)));
+                                 &at::rnn_tanh_cell>::type::call)));
   m.impl("rnn_relu_cell",
          TORCH_FN((&WrapFunction<CastPolicy::fp16,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(rnn_relu_cell)>::type::call)));
+                                 &at::rnn_relu_cell>::type::call)));
   // fp32
-  KERNEL(ADD_NS(acos), "acos", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(asin), "asin", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(cosh), "cosh", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(erfinv), "erfinv", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(exp), "exp", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(expm1), "expm1", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log), "log", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log10), "log10", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log2), "log2", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log1p), "log1p", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(reciprocal), "reciprocal", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(rsqrt), "rsqrt", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(sinh), "sinh", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(tan), "tan", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(pow), "pow.Tensor_Scalar", Tensor (const Tensor &, Scalar), fp32)
-  KERNEL(ADD_NS(pow), "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
-  KERNEL(ADD_NS(pow), "pow.Scalar", Tensor (Scalar, const Tensor &), fp32)
-  KERNEL(ADD_NS(softplus), "softplus", Tensor (const Tensor &, Scalar, Scalar), fp32)
-  KERNEL(ADD_NS(gelu), "gelu", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(layer_norm), "layer_norm", Tensor (const Tensor &, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
+  KERNEL(at::acos, "acos", Tensor (const Tensor &), fp32)
+  KERNEL(at::asin, "asin", Tensor (const Tensor &), fp32)
+  KERNEL(at::cosh, "cosh", Tensor (const Tensor &), fp32)
+  KERNEL(at::erfinv, "erfinv", Tensor (const Tensor &), fp32)
+  KERNEL(at::exp, "exp", Tensor (const Tensor &), fp32)
+  KERNEL(at::expm1, "expm1", Tensor (const Tensor &), fp32)
+  KERNEL(at::log, "log", Tensor (const Tensor &), fp32)
+  KERNEL(at::log10, "log10", Tensor (const Tensor &), fp32)
+  KERNEL(at::log2, "log2", Tensor (const Tensor &), fp32)
+  KERNEL(at::log1p, "log1p", Tensor (const Tensor &), fp32)
+  KERNEL(at::reciprocal, "reciprocal", Tensor (const Tensor &), fp32)
+  KERNEL(at::rsqrt, "rsqrt", Tensor (const Tensor &), fp32)
+  KERNEL(at::sinh, "sinh", Tensor (const Tensor &), fp32)
+  KERNEL(at::tan, "tan", Tensor (const Tensor &), fp32)
+  KERNEL(at::pow, "pow.Tensor_Scalar", Tensor (const Tensor &, Scalar), fp32)
+  KERNEL(at::pow, "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
+  KERNEL(at::pow, "pow.Scalar", Tensor (Scalar, const Tensor &), fp32)
+  KERNEL(at::softplus, "softplus", Tensor (const Tensor &, Scalar, Scalar), fp32)
+  KERNEL(at::gelu, "gelu", Tensor (const Tensor &), fp32)
+  KERNEL(at::layer_norm, "layer_norm", Tensor (const Tensor &, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
   // The macro doesn't like this one (I think it chokes on commas inside <>) so write it manually
   m.impl(TORCH_SELECTIVE_NAME("aten::native_layer_norm"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32,
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
-                                 &ADD_NS(native_layer_norm)>::type::call)));
-  KERNEL(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
-  KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
-  KERNEL(ADD_NS(nuclear_norm), "nuclear_norm", Tensor (const Tensor &, bool), fp32)
-  KERNEL(ADD_NS(nuclear_norm), "nuclear_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
-  KERNEL(ADD_NS(cosine_similarity), "cosine_similarity", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL(ADD_NS(poisson_nll_loss), "poisson_nll_loss", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
-  KERNEL(ADD_NS(cosine_embedding_loss), "cosine_embedding_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(nll_loss), "nll_loss", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
-  KERNEL(ADD_NS(nll_loss2d), "nll_loss2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
-  KERNEL(ADD_NS(hinge_embedding_loss), "hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(kl_div), "kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
-  KERNEL(ADD_NS(l1_loss), "l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(smooth_l1_loss), "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL(ADD_NS(mse_loss), "mse_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(margin_ranking_loss), "margin_ranking_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(multilabel_margin_loss), "multilabel_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(soft_margin_loss), "soft_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(triplet_margin_loss), "triplet_margin_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
-  KERNEL(ADD_NS(multi_margin_loss), "multi_margin_loss", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL(ADD_NS(binary_cross_entropy_with_logits), "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL(ADD_NS(dist), "dist", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
-  KERNEL(ADD_NS(pdist), "pdist", Tensor (const Tensor &, double), fp32)
-  KERNEL(ADD_NS(cdist), "cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
-  KERNEL(ADD_NS(renorm), "renorm", Tensor (const Tensor &, Scalar, int64_t, Scalar), fp32)
+                                 &at::native_layer_norm>::type::call)));
+  KERNEL(at::group_norm, "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
+  KERNEL(at::frobenius_norm, "frobenius_norm", Tensor (const Tensor &), fp32)
+  KERNEL(at::frobenius_norm, "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
+  KERNEL(at::nuclear_norm, "nuclear_norm", Tensor (const Tensor &, bool), fp32)
+  KERNEL(at::nuclear_norm, "nuclear_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
+  KERNEL(at::cosine_similarity, "cosine_similarity", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
+  KERNEL(at::poisson_nll_loss, "poisson_nll_loss", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
+  KERNEL(at::cosine_embedding_loss, "cosine_embedding_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(at::nll_loss, "nll_loss", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
+  KERNEL(at::nll_loss2d, "nll_loss2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
+  KERNEL(at::hinge_embedding_loss, "hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(at::kl_div, "kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
+  KERNEL(at::l1_loss, "l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::smooth_l1_loss, "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
+  KERNEL(at::mse_loss, "mse_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::margin_ranking_loss, "margin_ranking_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(at::multilabel_margin_loss, "multilabel_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::soft_margin_loss, "soft_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::triplet_margin_loss, "triplet_margin_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
+  KERNEL(at::multi_margin_loss, "multi_margin_loss", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const c10::optional<Tensor>&, int64_t), fp32)
+  KERNEL(at::binary_cross_entropy_with_logits, "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t), fp32)
+  KERNEL(at::dist, "dist", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
+  KERNEL(at::pdist, "pdist", Tensor (const Tensor &, double), fp32)
+  KERNEL(at::cdist, "cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
+  KERNEL(at::renorm, "renorm", Tensor (const Tensor &, Scalar, int64_t, Scalar), fp32)
   // fp32_set_opt_dtype
-  KERNEL(ADD_NS(prod), "prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(prod), "prod.dim_int", Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(prod), "prod.dim_Dimname", Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(softmax), "softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(softmax), "softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(log_softmax), "log_softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(log_softmax), "log_softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(cumprod), "cumprod", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(cumprod), "cumprod.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(cumsum), "cumsum", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(cumsum), "cumsum.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::prod, "prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::prod, "prod.dim_int", Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::prod, "prod.dim_Dimname", Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::softmax, "softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::softmax, "softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::log_softmax, "log_softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::log_softmax, "log_softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::cumprod, "cumprod", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::cumprod, "cumprod.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::cumsum, "cumsum", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::cumsum, "cumsum.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // commenting these out because they accept an explicit (not-optional) dtype, and we shouldn't try to flip that even
   // when autocasting.
-  // KERNEL(ADD_NS(norm), "norm.ScalarOpt_dtype", Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_set_opt_dtype)
-  // KERNEL(ADD_NS(norm), "norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
-  // KERNEL(ADD_NS(norm), "norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(sum), "sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(sum), "sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(sum), "sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  // KERNEL(at::norm, "norm.ScalarOpt_dtype", Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_set_opt_dtype)
+  // KERNEL(at::norm, "norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
+  // KERNEL(at::norm, "norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
+  KERNEL(at::sum, "sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::sum, "sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(at::sum, "sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // fp32_append_dtype
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
   // norm does not implicitly promote, but be aware when adding new ops to this policy.
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.Scalar", Tensor (const Tensor &, Scalar), Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_append_dtype)
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.ScalarOpt_dim", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool), Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_append_dtype)
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.names_ScalarOpt_dim", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool), Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_append_dtype)
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "norm.Scalar", Tensor (const Tensor &, Scalar), Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_append_dtype)
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "norm.ScalarOpt_dim", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool), Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_append_dtype)
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "norm.names_ScalarOpt_dim", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool), Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_append_dtype)
   // promote
-  KERNEL(ADD_NS(addcdiv), "addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
-  KERNEL(ADD_NS(addcmul), "addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
-  KERNEL(ADD_NS(atan2), "atan2", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(bilinear), "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&), promote)
-  KERNEL(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
-  KERNEL(ADD_NS(cat), "cat.names", Tensor (TensorList, Dimname), promote)
-  KERNEL(ADD_NS(_cat), "_cat", Tensor (TensorList, int64_t), promote)
-  KERNEL(ADD_NS(cross), "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
-  KERNEL(ADD_NS(dot), "dot", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(equal), "equal", bool (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(index_put), "index_put", Tensor (const Tensor &, const torch::List<c10::optional<Tensor>>&, const Tensor &, bool), promote)
-  KERNEL(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
-  KERNEL(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
+  KERNEL(at::addcdiv, "addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
+  KERNEL(at::addcmul, "addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
+  KERNEL(at::atan2, "atan2", Tensor (const Tensor &, const Tensor &), promote)
+  KERNEL(at::bilinear, "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&), promote)
+  KERNEL(at::cat, "cat", Tensor (TensorList, int64_t), promote)
+  KERNEL(at::cat, "cat.names", Tensor (TensorList, Dimname), promote)
+  KERNEL(at::_cat, "_cat", Tensor (TensorList, int64_t), promote)
+  KERNEL(at::cross, "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
+  KERNEL(at::dot, "dot", Tensor (const Tensor &, const Tensor &), promote)
+  KERNEL(at::equal, "equal", bool (const Tensor &, const Tensor &), promote)
+  KERNEL(at::index_put, "index_put", Tensor (const Tensor &, const torch::List<c10::optional<Tensor>>&, const Tensor &, bool), promote)
+  KERNEL(at::stack, "stack", Tensor (TensorList, int64_t), promote)
+  KERNEL(at::tensordot, "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
 
   m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
