@@ -40,37 +40,6 @@ __device__ inline scalar_t max(scalar_t a, scalar_t b) {
   return a > b ? a : b;
 }
 
-static inline void upsample_1d_shape_check(
-    const Tensor& input,
-    const Tensor& grad_output,
-    int nbatch,
-    int nchannels,
-    int input_width,
-    int output_width) {
-  TORCH_CHECK(
-      input_width > 0 && output_width > 0,
-      "input and output sizes should be greater than 0, but got input (W: ",
-      input_width,
-      ") and output (W: ",
-      output_width,
-      ")");
-
-  if (input.defined()) {
-    // Allow for empty batch size but not other dimensions
-    bool valid_empty = false;
-    valid_empty = input.size(0) == 0 && input.size(1) != 0 && input.size(2) != 0;
-
-    TORCH_CHECK(
-                (input.numel() != 0 || valid_empty) && input.dim() == 3,
-                "Non-empty 3D data tensor expected but got a tensor with sizes ",
-                input.sizes());
-  } else if (grad_output.defined()) {
-    check_dim_size(grad_output, 3, 0, nbatch);
-    check_dim_size(grad_output, 3, 1, nchannels);
-    check_dim_size(grad_output, 3, 2, output_width);
-  }
-}
-
 static inline void upsample_2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,

@@ -121,21 +121,12 @@ static void upsample_linear1d_out_cuda_template(
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_linear1d_out_cuda", {input_arg, output_arg});
 
-  TORCH_CHECK(
-      output_size.size() == 1,
-      "It is expected output_size equals to 1, but got size ",
-      output_size.size());
-
   int output_width = output_size[0];
 
   int nbatch = input.size(0);
   int channels = input.size(1);
   int input_width = input.size(2);
 
-  upsample_1d_shape_check(
-      input, Tensor(), nbatch, channels, input_width, output_width);
-
-  output.resize_({input.size(0), input.size(1), output_width});
   output.zero_();
 
   AT_ASSERT(input_width > 0 && output_width > 0);
