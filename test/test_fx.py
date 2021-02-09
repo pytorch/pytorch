@@ -1402,6 +1402,45 @@ class TestFX(JitTestCase):
         x, y = torch.randn(3, 4), torch.randn(3, 4)
         self.checkGraphModule(foo, (x, y))
 
+    def test_trace_dict_int_keys(self):
+        class ModWithDictArg(torch.nn.Module):
+            def forward(self, d : Dict[int, torch.Tensor]):
+                return d[42]
+
+        class CallsModWithDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = ModWithDictArg()
+
+            def forward(self, x):
+                return self.m({42: x})
+
+        class MyTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                return isinstance(m, ModWithDictArg)
+
+        traced_graph = MyTracer().trace(CallsModWithDict())
+
+    def test_trace_dict_proxy_keys(self):
+        class ModWithDictArg(torch.nn.Module):
+            def forward(self, d : Dict[torch.Tensor, torch.Tensor]):
+                return d[42]
+
+        class CallsModWithDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = ModWithDictArg()
+
+            def forward(self, x):
+                return self.m({x: x})
+
+        class MyTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                return isinstance(m, ModWithDictArg)
+
+        with self.assertRaisesRegex(RuntimeError, 'cannot contain a Proxy'):
+            traced_graph = MyTracer().trace(CallsModWithDict())
+
     def test_direct_param_use(self):
         class TransposeTest(torch.nn.Module):
             def __init__(self):

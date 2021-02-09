@@ -5,7 +5,7 @@ import operator
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
-from .node import Target, Node, Argument, base_types
+from .node import Target, Node, Argument, base_types, map_aggregate
 
 class TracerBase:
     graph: Graph
@@ -61,8 +61,17 @@ class TracerBase:
         elif isinstance(a, dict):
             r = {}
             for k, v in a.items():
-                if not isinstance(k, str):
-                    raise NotImplementedError(f"dictionaries with non-string keys: {a}")
+                # Check for invalid dict keys. We do not want a Proxy to appear
+                # anywhere within the key. Since keys can be collection types,
+                # we iterate through the key with map_aggregate
+                is_invalid = [False] # 1-element array so it's mutable from the lambda
+                def check_invalid(arg):
+                    is_invalid[0] |= isinstance(arg, Proxy)
+                map_aggregate(k, check_invalid)
+                if is_invalid[0]:
+                    raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
+                                       "Proxy. Got key: {k}")
+
                 r[k] = self.create_arg(v)
             return r
         elif isinstance(a, slice):
