@@ -72,10 +72,6 @@ private:
   friend class OperatorHandle;
   template<class> friend class TypedOperatorHandle;
 
-  // Helper utility function for internal use only.
-  template<class Return, class... Args>
-  Return _callWithDispatchKeySet(const TypedOperatorHandle<Return(Args...)>& op, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Args... args) const;
-
 public:
   ~Dispatcher();
 
@@ -134,11 +130,6 @@ public:
   template<class Return, class... Args>
   Return call(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
 
-  // Like call, but override the default DispatchKey calculation code,
-  // instead dispatching straight to the provided DispatchKey
-  template<class Return, class... Args>
-  C10_ALWAYS_INLINE
-  Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
 
   template<class Return, class... Args>
   static Return callWithDispatchKeySlowPath(const TypedOperatorHandle<Return (Args...)>& op, bool pre_sampled, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args);
@@ -218,13 +209,6 @@ public:
   RegistrationHandleRAII addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
 
   void checkInvariants() const;
-
-  /* Check if operator calls with a given dispatch key
-   * need to be observed with RecordFunction.
-   */
-  inline static bool shouldRecord(DispatchKey dispatch_key) {
-    return dispatch_key != DispatchKey::BackendSelect;
-  }
 
   //
   // ------------------------------------------------------------------------
@@ -375,10 +359,6 @@ public:
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  C10_ALWAYS_INLINE Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
-  }
-
   C10_ALWAYS_INLINE Return redispatch(DispatchKeySet currentDispatchKeySet, Args... args) const {
     return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
   }
@@ -394,38 +374,6 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  // No alias dispatch key is allowed at runtime.
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
-  auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeySetUnboxed<Args...>(
-      DispatchKeySet(DispatchKeySet::FULL_AFTER, dispatchKey),
-      args...
-    );
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
-  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
-}
-
-// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
-template<class Return, class... Args>
-C10_ALWAYS_INLINE Return Dispatcher::_callWithDispatchKeySet(const TypedOperatorHandle<Return(Args...)>& op, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Args... args) const {
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  // By default, when there're no high-frequency or non-sampled callbacks,
-  // RecordFunction is pre-sampled as a perf optimization;
-  // shouldRunRecordFunction checks whether RecordFunction should be executed,
-  // and sets pre_sampled boolean argument value to whether pre-sampling was used -
-  // this boolean is passed into RecordFunction to adjust the sampling rates of
-  // the callbacks
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    return callWithDispatchKeySlowPath<Return, Args...>(op, pre_sampled, dispatchKeySet, kernel, std::forward<Args>(args)...);
-  }
-#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
-}
-
-template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<Return(Args...)>& op, bool pre_sampled, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args) {
     // Check if we need to run callbacks registered with RecordFunction
     // If true and callbacks need inputs, we box the arguments and pass
@@ -436,7 +384,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
   if (C10_UNLIKELY(guard.isActive())) {
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-    if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
+    if (op.operatorIterator_->op.isObserved()) {
       if (guard.needsInputs()) {
         runRecordFunction(guard, op, dispatchKey, impl::boxArgs(args...));
       } else {
@@ -458,7 +406,19 @@ C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args.
     );
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
-  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  // By default, when there're no high-frequency or non-sampled callbacks,
+  // RecordFunction is pre-sampled as a perf optimization;
+  // shouldRunRecordFunction checks whether RecordFunction should be executed,
+  // and sets pre_sampled boolean argument value to whether pre-sampling was used -
+  // this boolean is passed into RecordFunction to adjust the sampling rates of
+  // the callbacks
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    return callWithDispatchKeySlowPath<Return, Args...>(op, pre_sampled, dispatchKeySet, kernel, std::forward<Args>(args)...);
+  }
+#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
+  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
@@ -481,7 +441,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (C10_UNLIKELY(guard.isActive())) {
       auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-      if (shouldRecord(dispatchKey) && entry.isObserved()) {
+      if (entry.isObserved()) {
         if (guard.needsInputs()) {
           runRecordFunction(guard, op, dispatchKey, *stack);
         } else {
