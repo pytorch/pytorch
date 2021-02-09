@@ -55,7 +55,7 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
 def gather(outputs, target_device, dim=0):
     r"""
     Gathers tensors from different GPUs on a specified device.
-    (Use 'cpu' for CPU)
+    Use 'cpu' for CPU to avoid a deprecation warning.
     """
     def gather_map(outputs):
         out = outputs[0]
