@@ -1505,7 +1505,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 
 # Used in test_autograd.py and test_torch.py
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
-                low, high, requires_grad: bool = False) -> torch.Tensor:
+                low, high, requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
     """Returns a tensor of the specified size on the given device and dtype.
        The tensors values are between -9 and 9, inclusive, for most dtypes,
        unless low (high) is not None in which case the values are between
@@ -1518,27 +1518,25 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
     assert high is None or high > -9, "high value too low!"
 
     if dtype is torch.bool:
-        return torch.randint(0, 2, size, device=device, dtype=dtype)
-
+        result = torch.randint(0, 2, size, device=device, dtype=dtype)
     if dtype is torch.uint8:
         low = math.floor(0 if low is None else max(low, 0))
         high = math.ceil(10 if high is None else min(high, 10))
-        return torch.randint(low, high, size, device=device, dtype=dtype)
+        result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
         low = math.floor(-9 if low is None else max(low, -9))
         high = math.ceil(10 if high is None else min(high, 10))
-        return torch.randint(low, high, size, device=device, dtype=dtype)
+        result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         low = -9 if low is None else max(low, -9)
         high = 9 if high is None else min(high, 10)
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            t = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
+            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
-            t = torch.rand(size, device=device, dtype=dtype) * span + low
-        t.requires_grad = requires_grad
-        return t
+            result = torch.rand(size, device=device, dtype=dtype) * span + low
+        result.requires_grad = requires_grad
     else:
         assert dtype in complex_types()
         low = -9 if low is None else max(low, -9)
@@ -1547,10 +1545,14 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
-        c = torch.complex(real, imag)
-        c.requires_grad = requires_grad
-        return c
+        result = torch.complex(real, imag)
+        result.requires_grad = requires_grad
 
+    if discontiguous:
+        result = torch.repeat_interleave(result, 2, dim=-1)
+        result = result[..., ::2]
+
+    return result
 
 def prod_single_zero(dim_size):
     result = torch.randn(dim_size, dim_size)
