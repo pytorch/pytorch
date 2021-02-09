@@ -6351,6 +6351,48 @@ else:
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_symeig_out_errors_and_warnings(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = random_hermitian_matrix(3, dtype=dtype, device=device)
+        real_dtype = a.real.dtype if dtype.is_complex else dtype
+        out_w = torch.empty(7, 7, dtype=real_dtype, device=device)
+        out_v = torch.empty(7, 7, dtype=dtype, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.symeig(a, out=(out_w, out_v))
+            # Check warning occurs
+            self.assertEqual(len(w), 2)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should be compatible
+        out_w = torch.empty(0, dtype=real_dtype, device=device)
+        out_v = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected eigenvectors to be compatible with"):
+            torch.symeig(a, out=(out_w, out_v))
+
+        out_w = torch.empty(0, dtype=torch.int, device=device)
+        out_v = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be compatible with"):
+            torch.symeig(a, out=(out_w, out_v))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out_w = torch.empty(0, device=wrong_device, dtype=dtype)
+            out_v = torch.empty(0, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.symeig(a, out=(out_w, out_v))
+            out_w = torch.empty(0, device=device, dtype=dtype)
+            out_v = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.symeig(a, out=(out_w, out_v))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
