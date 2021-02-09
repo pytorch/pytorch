@@ -142,6 +142,8 @@ def prepare_model_outputs(
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
 #   expose FX types.
+# TODO(future PR): align on naming
+# this is equivalent of just the comparison extraction part of `ns.compare_model_outputs`
 def get_matching_activations(
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -189,12 +191,34 @@ def get_matching_activations(
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
 #   expose FX types.
+def prepare_model_with_stubs(
+    name_a: str,
+    gm_a: GraphModule,
+    name_b: str,
+    gm_b: GraphModule,
+    logger_cls: Callable,
+) -> GraphModule:
+    """
+    Same thing as prepare_model_outputs, but for an `a_shadows_b` model.
+    TODO(future PR): real docblock
+    """
+    matched_node_pairs = get_matching_node_pairs(gm_a, gm_b)
+    gm_a_shadows_b = create_a_shadows_b(
+        name_a, gm_a, name_b, gm_b, matched_node_pairs, logger_cls)
+    return gm_a_shadows_b
+
+# Note: this is not a user facing API
+# TODO(future PR): wrap this in a user facing API which does not
+#   expose FX types.
+# TODO(future PR): align on naming
+# this is equivalent of just the comparison extraction part of `ns.compare_model_stub`
 def get_matching_activations_a_shadows_b(
     gm_a_shadows_b: GraphModule,
     logger_cls: Callable,
 ) -> Dict[str, Dict[str, List[torch.Tensor]]]:
     """
     Same thing as get_matching_activations, but for an `a_shadows_b` model.
+    TODO(future PR): real docblock
     """
     results: Dict[str, Dict[str, List[torch.Tensor]]] = \
         collections.defaultdict(dict)
@@ -215,18 +239,3 @@ def get_matching_activations_a_shadows_b(
             else:
                 results[mod.other_node_name + '.stats'][mod.model_name] = mod.stats
     return dict(results)
-
-# Note: this is not a user facing API
-# TODO(future PR): wrap this in a user facing API which does not
-#   expose FX types.
-def prepare_model_with_stubs(
-    name_a: str,
-    gm_a: GraphModule,
-    name_b: str,
-    gm_b: GraphModule,
-    logger_cls: Callable,
-) -> GraphModule:
-    matched_node_pairs = get_matching_node_pairs(gm_a, gm_b)
-    gm_a_shadows_b = create_a_shadows_b(
-        name_a, gm_a, name_b, gm_b, matched_node_pairs, logger_cls)
-    return gm_a_shadows_b
