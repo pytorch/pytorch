@@ -1642,6 +1642,7 @@ op_db: List[OpInfo] = [
                    dtypes=complex_types(),
                    dtypesIfCPU=complex_types(),
                    dtypesIfCUDA=complex_types(),
+                   dtypesIfROCM=complex_types(),
                    supports_tensor_out=False,
                    test_inplace_grad=False),
     OpInfo('linalg.norm',
@@ -1768,6 +1769,7 @@ op_db: List[OpInfo] = [
                    dtypes=complex_types(),
                    dtypesIfCPU=complex_types(),
                    dtypesIfCUDA=complex_types(),
+                   dtypesIfROCM=complex_types(),
                    supports_tensor_out=False,
                    test_inplace_grad=False),
     UnaryUfuncInfo('round',
@@ -2582,8 +2584,6 @@ def method_tests():
         # TorchScript does not recognize -0.0: Issue #46848
         # https://github.com/pytorch/pytorch/issues/46848
         # ('copysign', (S, S), (-0.0,), 'scalar_neg_zero', (False,)),
-        ('real', (S, S, S), NO_ARGS, 'complex'),
-        ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
         ('complex', (S, S, S), ((S, S, S),), ''),
