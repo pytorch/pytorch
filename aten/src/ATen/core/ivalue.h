@@ -769,7 +769,6 @@ struct TORCH_API IValue final {
     return "InvalidTag(" + c10::guts::to_string(static_cast<int>(tag)) + ")";
   }
 
- public:
   // generic v.to<at::Tensor>() implementations
   // that can be used in special functions like pop/push
   // that use template meta-programming.
