@@ -1754,3 +1754,8 @@ if(BUILD_PYTHON)
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
 endif()
+
+if(NOT USE_DEPLOY)
+add_library(torch_deployinterpreter_symbols STATIC ../torch/csrc/deploy/blank_library.cpp)
+endif()
+target_link_libraries(torch_cpu PRIVATE torch_deployinterpreter_symbols)

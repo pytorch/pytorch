@@ -6,6 +6,9 @@
 #include <unistd.h>
 #endif
 
+extern "C" char _binary_libtorch_deployinterpreter_so_start[];
+extern "C" char _binary_libtorch_deployinterpreter_so_end[];
+
 namespace torch {
 
 Package InterpreterManager::load_package(const std::string& uri) {
@@ -51,42 +54,29 @@ MovableObject InterpreterSession::create_movable(PythonObject obj) {
 }
 
 #ifndef _WIN32
-static std::string find_interpreter() {
-  // lookup the path to libtorch_cpu.so using dladdr,
-  // passing any symbol from within the library gives the
-  // path to the shared library
-  Dl_info info;
-  dladdr((void*)find_interpreter, &info);
-  char buf[PATH_MAX];
-  TORCH_INTERNAL_ASSERT(!*stpncpy(buf, info.dli_fname, PATH_MAX));
-  std::string dir = dirname(buf);
-  // the deployinterpreter shared library is in the same directory
-  return dir + "/libtorch_deployinterpreter.so";
-}
 
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
   char library_name[L_tmpnam];
-  library_name_ = library_name;
   std::tmpnam(library_name);
+  library_name_ = library_name;
   {
-    static std::string interp_path = find_interpreter();
-    std::ifstream src(interp_path, std::ios::binary);
     TORCH_CHECK(
-        src.good(),
-        "Could not load libtorch_deployinterpreter.so, was PyTorch built with USE_DEPLOY=ON?");
+        _binary_libtorch_deployinterpreter_so_start[0] != '\0',
+        "Intepreter library libtorch_deployinterpreter.so was not included, was PyTorch built with USE_DEPLOY=ON?");
     std::ofstream dst(library_name, std::ios::binary);
-    dst << src.rdbuf();
+    dst.write(_binary_libtorch_deployinterpreter_so_start, _binary_libtorch_deployinterpreter_so_end - _binary_libtorch_deployinterpreter_so_start);
   }
   handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY);
   if (!handle_) {
     throw std::runtime_error(dlerror());
   }
 
-  // technically, we can unlike the library right after dlopen, and this is
+  // technically, we can unlink the library right after dlopen, and this is
   // better for cleanup because even if we crash the library doesn't stick
   // around. However, its crap for debugging because gdb can't find the
   // symbols if the library is no longer present.
+
   unlink(library_name_.c_str());
 
   void* new_interpreter_impl = dlsym(handle_, "new_interpreter_impl");
