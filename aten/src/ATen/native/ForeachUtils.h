@@ -89,8 +89,26 @@ bool has_same_attributes(Device expected_device, TensorList tensors) {
 }
 
 bool will_promote_tensor(const Tensor& tensor, Scalar scalar) {
-  auto result_dtype = at::result_type(tensor, scalar);
-  return result_dtype != tensor.scalar_type();
+  // complex scalar + integral or boolean tensor will result in complex tensor
+  if (scalar.isComplex() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
+    return true;
+  }
+
+  // complex scalar + float tensor will result in complex tensor
+  if (scalar.isComplex() && at::isFloatingType(tensor.scalar_type())) {
+    return true;
+  }
+
+  // float scalar + integral or boolean tensor will result in float tensor
+  if (scalar.isFloatingPoint() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
+    return true;
+  }
+
+  // integral scalar + boolean tensor will result in integral tensor
+  if (scalar.isIntegral(/*includeBool*/ false) && tensor.dtype() == at::kBool) {
+    return true;
+  }
+  return false;
 }
 
 bool can_use_fast_route(TensorList tensors) {
