@@ -1546,9 +1546,11 @@ class TestQuantizeFx(QuantizationTestCase):
         # ensure it is scriptable
         scripted = torch.jit.script(m)
         scripted_keys = scripted.state_dict().keys()
-        setattr(scripted, "mods1_0_packed_weight_0", m.state_dict()["mods1_0_packed_weight_0"])
+        scripted.mods1_0_packed_weight_0 = m.state_dict()["mods1_0_packed_weight_0"]
         non_packed_weight_keys = [key for key in keys if "_packed_weight" not in key]
-        self.assertTrue(set(scripted_keys) == set(non_packed_weight_keys), "Expected the scripted model to preserve the state_dict for non-packed weight attributes")
+        self.assertTrue(
+            set(scripted_keys) == set(non_packed_weight_keys),
+            "Expected the scripted model to preserve the state_dict for non-packed weight attributes")
         for attr_name in [
                 "mods1_0_input_scale_0", "mods1_0_input_zero_point_0",
                 "mods1_0_scale_0", "mods1_0_zero_point_0",
