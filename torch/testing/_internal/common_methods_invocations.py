@@ -164,7 +164,7 @@ class OpInfo(object):
                  supports_sparse=False,  # supported for sparse
                  check_batched_grad=True,  # check batched grad when doing gradcheck
                  check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
-                 is_differentiable=True,  # if the op supports gradient
+                 is_differentiable=True,  # whether the op can be differentiated by autograd
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
