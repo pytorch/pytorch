@@ -6356,6 +6356,34 @@ else:
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_lu_solve_out_errors_and_warnings(self, device, dtype):
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        LU_data, LU_pivots = torch.lu(a, pivot=True)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            torch.lu_solve(b, LU_data, LU_pivots, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.lu_solve(b, LU_data, LU_pivots, out=out)
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            out = torch.empty(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.lu_solve(b, LU_data, LU_pivots, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
     @precisionOverride({torch.float32: 1e-5, torch.complex64: 1e-5})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
