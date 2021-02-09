@@ -2,11 +2,12 @@ from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
 import builtins
 import importlib
 import inspect
+import io
 import linecache
 from weakref import WeakValueDictionary
-from torch.serialization import _load
 import pickle
 import torch
+from torch.serialization import _get_restore_location, _maybe_decode_ascii
 import _compat_pickle  # type: ignore
 import types
 import os.path
@@ -144,7 +145,42 @@ class PackageImporter:
             Any: the unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
-        return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
+        restore_location = _get_restore_location(map_location)
+        loaded_storages = {}
+
+        def load_tensor(data_type, size, key, location, restore_location):
+            name = f'data/{key}'
+            dtype = data_type(0).dtype
+
+            storage = self.zip_reader.get_storage_from_record(name, size, dtype).storage()
+            loaded_storages[key] = restore_location(storage, location)
+
+        def persistent_load(saved_id):
+            assert isinstance(saved_id, tuple)
+            typename = _maybe_decode_ascii(saved_id[0])
+            data = saved_id[1:]
+
+            assert typename == 'storage', \
+                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+            data_type, key, location, size = data
+            if key not in loaded_storages:
+                load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+            storage = loaded_storages[key]
+            return storage
+
+        # Load the data (which may in turn use `persistent_load` to load tensors)
+        data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
+        unpickler = self.Unpickler(data_file)
+        unpickler.persistent_load = persistent_load
+        result = unpickler.load()
+
+        # TODO from zdevito:
+        #   This stateful weird function will need to be removed in our efforts
+        #   to unify the format. It has a race condition if multiple python
+        #   threads try to read independent files
+        torch._utils._validate_loaded_sparse_tensors()
+
+        return result
 
     def id(self):
         """
