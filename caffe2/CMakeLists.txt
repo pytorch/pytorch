@@ -388,6 +388,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/shared/_utils_internal.py"
     COPYONLY)
 
+  # Generate header with version info
+  configure_file("${TORCH_SRC_DIR}/csrc/api/include/torch/version.h.in"
+    "${TORCH_SRC_DIR}/csrc/api/include/torch/version.h"
+    @ONLY)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"

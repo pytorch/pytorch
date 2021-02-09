@@ -1184,6 +1184,21 @@ void initJITBindings(PyObject* module) {
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)
       .def(
+          "_set_unwrap_func",
+          // Intentionally not releasing GIL as this just does an assign
+          [](PythonFutureWrapper& self, py::function unwrapFunc) {
+            auto functionGuard =
+                std::make_shared<torch::jit::PythonFunctionGuard>(
+                    std::move(unwrapFunc));
+
+            std::function<void(py::object)> pf =
+                [functionGuard(std::move(functionGuard))](
+                    const py::object& inp) {
+                  return functionGuard->func_(inp);
+                };
+            self.unwrap_func = std::move(pf);
+          })
+      .def(
           py::pickle(
               /* __getstate__ */
               [](const PythonFutureWrapper& /* unused */) {

@@ -113,10 +113,10 @@ int ElementCount(int lanes) {
 llvm::ElementCount ElementCount(int lanes) {
 #if LLVM_VERSION_MAJOR <= 11
   return llvm::ElementCount(static_cast<unsigned>(lanes), false);
-#elif LLVM_VERSION_MAJOR == 12
+#elif LLVM_VERSION_MAJOR >= 12
   return llvm::ElementCount::getFixed(lanes);
 #else
-#error Only LLVM versions 8 through 12 are supported.
+#error Only LLVM versions 8 and above are supported.
 #endif
 }
 #endif
@@ -1361,7 +1361,7 @@ struct FunctionCallee {
 };
 
 #else
-#error Only LLVM versions 8 through 12 are supported.
+#error Only LLVM versions 8 and above are supported.
 #endif
 
 } // namespace
