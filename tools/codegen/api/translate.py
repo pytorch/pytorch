@@ -74,6 +74,8 @@ def translate(
         else:
             goal_ctypes.append(g)
 
+    has_tensor_options_in_goals = options_ctype in goal_ctypes
+
     # Add all the bindings to the context
     ctx: Dict[CType, str] = {}
     for b in binding_exprs:
@@ -148,6 +150,10 @@ Check this module for more information.
             memory_format = direct_solve(
                 OptionalCType(BaseCType("MemoryFormat", SpecialArgName.possibly_redundant_memory_format))
             )
+            # No need to join "memory_format" and "options" if the target API takes "options" directly.
+            # Otherwise it will cause the redundant memory_format error.
+            if has_tensor_options_in_goals:
+                return memory_format
             try:
                 options = direct_solve(options_ctype)
                 return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"

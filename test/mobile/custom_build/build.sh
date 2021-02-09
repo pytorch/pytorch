@@ -16,6 +16,9 @@
 # Note that LLVM_DIR environment variable should be set to the location of
 # LLVM-dev toolchain.
 #
+# 3. `TEST_CUSTOM_BUILD_STATIC=1 ./build.sh` - similar as 2) except that it
+# relies on the static dispatch + linker to prune code.
+#
 ###############################################################################
 
 set -ex -o pipefail
@@ -52,6 +55,34 @@ run_default_build() {
 
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
     "${SRC_ROOT}/scripts/build_mobile.sh"
+}
+
+run_custom_build_with_static_dispatch() {
+  LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_custom_libtorch_static"
+  LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
+
+  # The new static dispatch and c10 registration can work together.
+  # It generates static dispatch code for selected backends and
+  # fallback to regular dispatch for the rest. This way, it can be
+  # used to reduce dispatcher's overhead for perf sensitive use cases
+  # without compromising the functionality.
+  #
+  # We can introduce separate flags to disable the fallback to the
+  # regular c10 dispatch, with which the linker can strip out unused
+  # op invocation code.
+  #
+  # Here we omitted the OP_DEPENDENCY flag so it generates registration
+  # code for used ROOT ops only, whose unboxing kernels are still needed
+  # by the JIT runtime. The intermediate ops will be automatically kepted
+  # by the linker as they are statically referenced by the static dispatch
+  # code, for which we can bypass the registration.
+  #
+  # TODO: handle manual registrations.
+  BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
+    "${SRC_ROOT}/scripts/build_mobile.sh" \
+    -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
+    -DSTATIC_DISPATCH_BACKENDS=CPU \
+    -DSELECTED_OP_LIST="${ROOT_OPS}"
 }
 
 run_custom_build_with_dynamic_dispatch() {
@@ -98,6 +129,13 @@ test_default_build() {
   run_predictor
 }
 
+test_custom_build_with_static_dispatch() {
+  prepare_model_and_dump_root_ops
+  run_custom_build_with_static_dispatch
+  build_predictor
+  run_predictor
+}
+
 test_custom_build_with_dynamic_dispatch() {
   prepare_model_and_dump_root_ops
   generate_op_dependency_graph
@@ -108,6 +146,10 @@ test_custom_build_with_dynamic_dispatch() {
 
 if [ -n "${TEST_DEFAULT_BUILD}" ]; then
   test_default_build
+fi
+
+if [ -n "${TEST_CUSTOM_BUILD_STATIC}" ]; then
+  test_custom_build_with_static_dispatch
 fi
 
 if [ -n "${TEST_CUSTOM_BUILD_DYNAMIC}" ]; then

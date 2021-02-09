@@ -113,7 +113,7 @@ if(INTERN_BUILD_ATEN_OPS)
   if(CXX_VSX_FOUND)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_VSX_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "VSX")
-    LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_VSX_FLAGS}") 
+    LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_VSX_FLAGS}")
   endif(CXX_VSX_FOUND)
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
@@ -166,8 +166,16 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
   endif()
 
+  if(STATIC_DISPATCH_BACKENDS)
+    message(STATUS "Custom build with static dispatch backends: ${STATIC_DISPATCH_BACKENDS}")
+    list(APPEND CUSTOM_BUILD_FLAGS
+      --static_dispatch_backends ${STATIC_DISPATCH_BACKENDS})
+  endif()
+
   if(SELECTED_OP_LIST)
-    if(NOT OP_DEPENDENCY)
+    # With static dispatch we can omit the OP_DEPENDENCY flag. It will not calculate the transitive closure
+    # of used ops. It only needs to register used root ops.
+    if(NOT STATIC_DISPATCH_BACKENDS AND NOT OP_DEPENDENCY)
       message(INFO "Use default op dependency graph .yaml file for custom build with dynamic dispatch.")
       set(OP_DEPENDENCY ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/default_op_deps.yaml)
     endif()
@@ -254,4 +262,3 @@ endfunction()
 
 set(NUM_CPU_CAPABILITY_NAMES ${NUM_CPU_CAPABILITY_NAMES} PARENT_SCOPE)
 set(CPU_CAPABILITY_FLAGS ${CPU_CAPABILITY_FLAGS} PARENT_SCOPE)
-

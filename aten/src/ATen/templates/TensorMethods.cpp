@@ -13,6 +13,8 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+${static_dispatch_extra_headers}
+
 namespace at {
 
 using Stream = c10::Stream;
