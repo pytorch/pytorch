@@ -6,6 +6,9 @@
 #include <c10/util/Optional.h>
 #include <algorithm>
 
+#include <ATen/core/qualified_name.h>
+
+
 namespace torch {
 namespace jit {
 
@@ -38,13 +41,16 @@ void NeZha_TryUpdateModule(
         IValue ival(true);
         auto new_constant = it->owningGraph()->insertConstant(ival);
 
-        printf("\n------ NeZha_TryUpdateModule:replaceAllUsesWith - %s------", it->kind().toQualString());
         it->output()->replaceAllUsesWith(new_constant);
-
-        printf("\n------ NeZha_TryUpdateModule:destroy - %s------", it->kind().toQualString());
-        // it->destroy();
         it.destroyCurrent();
     }
+
+    const auto method_name = QualifiedName(*dst_module.type()->name(), "forward");
+    dst_module.type()->unsafeRemoveMethod("forward");
+    dst_module._ivalue()->compilation_unit()->unsafeRemoveMethod(method_name);
+    auto fn = dst_module._ivalue()->compilation_unit()->create_function(
+        method_name, my_graph);
+    dst_module.type()->addMethod(fn);
 }
 
 void NeZha_TryUpdateGraph(
