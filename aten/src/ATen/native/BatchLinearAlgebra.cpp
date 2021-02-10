@@ -687,7 +687,7 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
 
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
 // LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
-static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
+Tensor linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
   squareCheckInputs(input);
   TORCH_INTERNAL_ASSERT(infos_lu.scalar_type() == kInt);
   TORCH_INTERNAL_ASSERT(infos_getri.scalar_type() == kInt);
@@ -722,7 +722,7 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
 Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
   auto infos_lu = at::empty({0}, input.options().dtype(kInt));
   auto infos_getri = at::empty({0}, input.options().dtype(kInt));
-  result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
+  at::native::linalg_inv_out_info(result, infos_lu, infos_getri, input);
 
   // Now check LAPACK/MAGMA/cuSOLVER error codes
   if (result.dim() > 2) {

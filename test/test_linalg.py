@@ -2411,6 +2411,49 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "does not match input device"):
                 torch.linalg.inv(a, out=out)
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64, torch.complex128)
+    def test_inv_infos(self, device, dtype):
+        # if input is not invertible, RuntimeError is raised mentioning the first non-invertible batch
+        # but using infos= variant the RuntimeError is not raised
+        def run_test_singular_input(batch_dim, n):
+            a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
+            a[n, -1, -1] = 0
+            infos_lu = torch.empty(0, dtype=torch.int, device=device)
+            infos_getri = torch.empty(0, dtype=torch.int, device=device)
+            # without infos= this would raise RuntimeError, see test_inv_errors
+            torch.linalg.inv(a, infos=(infos_lu, infos_getri))
+            self.assertEqual(infos_lu[n], 3)
+            if self.device_type == 'cpu':
+                # GETRI function is used on CPU, it gives an error code
+                self.assertEqual(infos_getri[n], 3)
+            else:
+                # GETRS function is used on CUDA, it doesn't give non-zero error code
+                self.assertEqual(infos_getri[n], 0)
+
+        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
+            run_test_singular_input(*params)
+
+        def run_test_autograd():
+            # infos= variant supports autograd
+            a = torch.randn(3, 3, dtype=dtype, device=device, requires_grad=True)
+            a.requires_grad_()
+            infos1 = torch.empty(0, dtype=torch.int, device=device)
+            infos2 = torch.empty(0, dtype=torch.int, device=device)
+            def func(a):
+                return torch.linalg.inv(a, infos=(infos1, infos2))
+            gradcheck(func, a)
+
+            # incindentally out= also works
+            def func_out(a):
+                out = torch.empty(0, dtype=dtype, device=device)
+                out = torch.linalg.inv(a, out=out, infos=(infos1, infos2))
+                return out
+            gradcheck(func_out, a)
+
+        run_test_autograd()
+
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 

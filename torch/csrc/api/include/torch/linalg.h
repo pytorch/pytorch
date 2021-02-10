@@ -108,6 +108,16 @@ inline Tensor& inv_out(Tensor& result, const Tensor& input) {
   return torch::linalg_inv_out(result, input);
 }
 
+inline Tensor inv(Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
+  Tensor out = torch::empty({0}, input.options());
+  return torch::linalg_inv_out_info(out, infos_lu, infos_getri, input);
+}
+
+inline Tensor& inv_out(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
+  torch::linalg_inv_out_info(result, infos_lu, infos_getri, input);
+  return result;
+}
+
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
@@ -260,6 +270,14 @@ inline Tensor inv(const Tensor& input) {
 
 inline Tensor& inv_out(Tensor& result, const Tensor& input) {
   return detail::inv_out(result, input);
+}
+
+inline Tensor inv(Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
+  return detail::inv(infos_lu, infos_getri, input);
+}
+
+inline Tensor inv_out(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
+  return detail::inv_out(result, infos_lu, infos_getri, input);
 }
 
 }} // torch::linalg

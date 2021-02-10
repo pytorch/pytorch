@@ -1,7 +1,10 @@
 import sys
+import functools
 
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore
+
+from typing import Optional, Tuple
 
 Tensor = torch.Tensor
 
@@ -83,8 +86,8 @@ Examples::
     True
 """)
 
-inv = _add_docstr(_linalg.linalg_inv, r"""
-linalg.inv(input, *, out=None) -> Tensor
+_add_docstr(_linalg.linalg_inv, r"""
+linalg.inv(input, *, out=None, infos=None) -> Tensor
 
 Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a 
 batched :attr:`input`. The result satisfies the relation:
@@ -100,7 +103,7 @@ Supports input of float, double, cfloat and cdouble data types.
           used if CUDA version >= 10.1.243, otherwise MAGMA's `getrf` and `getri` routines are used instead.
 
 .. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
-          then a RuntimeError will be thrown.
+          then a RuntimeError will be thrown. If :attr:`infos` is specified the RuntimeError is not thrown.
 
 Args:
     input (Tensor): the square `(n, n)` matrix or the batch of such matrices of size
@@ -108,6 +111,7 @@ Args:
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default is ``None``.
+    info (tuple, optional): Tuple of two tensors to store error codes. Ignored if ``None``. Default is ``None``.
 
 Examples::
 
@@ -145,6 +149,19 @@ Examples::
     >>> torch.max(torch.abs(z - torch.eye(4, dtype=torch.cdouble))) # Max non-zero
     tensor(7.5107e-16, dtype=torch.float64)
 """)
+
+@functools.wraps(_linalg.linalg_inv)
+def inv(input: Tensor, *, out: Tensor = None, infos: Optional[Tuple[Tensor, Tensor]] = None) -> Tensor:
+    if infos is None:
+        return _linalg.linalg_inv(input, out=out)
+    else:
+        # linalg_inv accepts a tuple of two tensors to hold info error codes
+        if len(infos) != 2:
+            raise ValueError("Expected a tuple of two tensor for infos argument")
+        infos_lu, infos_getri = infos
+        if out is None:
+            out = torch.empty(0, dtype=input.dtype, device=input.device)
+        return torch._C._linalg.linalg_inv_out_info(out, infos_lu, infos_getri, input)
 
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor

@@ -9021,6 +9021,14 @@
   dispatch:
     DefaultBackend: linalg_inv_out
 
+# codegen requires all mutable kwargs to be returned
+# so we can't just register another linalg_inv version with a different number of mutables
+- func: linalg_inv_out_info(Tensor(a!) out, Tensor(b!) infos_lu, Tensor(c!) infos_getri, Tensor input) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_inv_out_info
+
 - func: inner(Tensor self, Tensor other) -> Tensor
   variants: function, method
 
