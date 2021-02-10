@@ -364,7 +364,9 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   for (const auto & vec : inputSplits) {
     // Due to concatenation of tensors, shape will actually be the sum
     int64_t sum = 0;
-    for (const auto & s : vec) sum += s;
+    for (const auto & s : vec) {
+      sum += s;
+    }
     allShapes.push_back({sum});
   }
   enableProfilerLegacy(ProfilerConfig(
@@ -418,7 +420,7 @@ void testBarrier(const std::string& path) {
 
   auto event_lists = disableProfilerLegacy();
   const char * GLOO_STR = "gloo:barrier";
-  std::vector<std::vector<long>> allShapes;
+  std::vector<std::vector<int64_t>> allShapes;
   // Barrier does not use tensors, so skip shape checking.
       checkProfiledEvents(
           std::move(event_lists), GLOO_STR, size, allShapes, /* verify_shapes */ false);
@@ -449,7 +451,7 @@ void testSend(const std::string& path) {
   auto selfRank = 0;
   auto dstRank = 1;
   c10::IntArrayRef shapes = {16, 16};
-  std::vector<std::vector<long>> allShapes;
+  std::vector<std::vector<int64_t>> allShapes;
   allShapes.push_back(shapes.vec());
   std::vector<at::Tensor> tensors = {
       at::ones(shapes),
@@ -499,7 +501,7 @@ void testRecv(const std::string& path) {
   auto selfRank = 0;
   auto srcRank = 1;
   c10::IntArrayRef shapes = {16, 16};
-  std::vector<std::vector<long>> allShapes;
+  std::vector<std::vector<int64_t>> allShapes;
   allShapes.push_back(shapes.vec());
   std::vector<at::Tensor> tensors = {
       at::ones(shapes),
