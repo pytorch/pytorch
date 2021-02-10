@@ -377,6 +377,9 @@ class TORCH_API Tensor {
   /// also have other designations.
   bool is_meta() const;
 
+  /// Returns if a `Tensor` has a complex datatype.
+  bool is_complex() const;
+
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
@@ -780,6 +783,8 @@ protected:
 #endif
 
 int64_t get_device(Tensor self);
+
+bool is_complex(const Tensor& self);
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {

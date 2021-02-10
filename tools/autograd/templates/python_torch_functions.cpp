@@ -451,6 +451,8 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
 
 static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs);
 
+static PyObject * THPVariable_is_complex(PyObject* self_, PyObject* args, PyObject* kwargs);
+
 // generated forward declarations start here
 
 ${py_forwards}
@@ -480,6 +482,7 @@ static PyMethodDef torch_functions[] = {
   {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"hsmm", castPyCFunctionWithKeywords(THPVariable_hspmm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"is_complex", castPyCFunctionWithKeywords(THPVariable_is_complex), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"randint", castPyCFunctionWithKeywords(THPVariable_randint), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
@@ -605,6 +608,27 @@ static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* k
 
   if (r.idx == 0) {
     return wrap(r.tensor(0).numel());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_is_complex(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "is_complex(Tensor input)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
+
+  if (r.idx == 0) {
+    return wrap(r.tensor(0).is_complex());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

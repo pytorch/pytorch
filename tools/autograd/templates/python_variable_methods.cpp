@@ -226,6 +226,18 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
+// implemented on the python object to avoid dispatch overhead
+static PyObject * THPVariable_is_complex(PyObject* self, PyObject* args)
+{
+   HANDLE_TH_ERRORS
+   if (check_has_torch_function(self)) {
+     return handle_torch_function(self, "is_complex", args);
+   }
+   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+   return wrap(self_.is_complex());
+   END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_contiguous(const Tensor & self, at::MemoryFormat memory_format) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
@@ -1185,6 +1197,7 @@ PyMethodDef variable_methods[] = {
   {"half", castPyCFunctionWithKeywords(THPVariable_half), METH_VARARGS | METH_KEYWORDS, NULL},
   {"int", castPyCFunctionWithKeywords(THPVariable_int), METH_VARARGS | METH_KEYWORDS, NULL},
   {"is_contiguous", castPyCFunctionWithKeywords(THPVariable_is_contiguous), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"is_complex", THPVariable_is_complex, METH_NOARGS, NULL},
   {"item", THPVariable_item, METH_NOARGS, NULL},
   {"long", castPyCFunctionWithKeywords(THPVariable_long), METH_VARARGS | METH_KEYWORDS, NULL},
   {"map_", castPyCFunctionWithKeywords(THPVariable_map_), METH_VARARGS | METH_KEYWORDS, NULL},

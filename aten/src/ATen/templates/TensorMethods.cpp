@@ -91,6 +91,15 @@ bool Tensor::is_xla() const {
     return impl_->is_xla();
 }
 
+bool Tensor::is_complex() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return at::isComplexType(this->scalar_type());
+}
+
+bool is_complex(const Tensor& self) {
+  return self.is_complex();
+}
+
 NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
