@@ -100,7 +100,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             if (self.using_deprecated_ast
                     and not isinstance(node, ast.NameConstant)):
                 return False
-            if node.value:
+            if node.value:  # type: ignore
                 return False
 
         return True
@@ -116,9 +116,13 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         annotations, we'll be visiting an AnnAssign Node, which has its
         target built in.)
         """
-        if (isinstance(node.value, ast.Call)
-                and node.targets[0].attr in self.class_level_annotations):
-            self.visiting_class_level_ann = True
+        try:
+            if (isinstance(node.value, ast.Call)
+                    and node.targets[0].attr in self.class_level_annotations):
+                self.visiting_class_level_ann = True
+        # `node.targets[0]` didn't have an `attr` attribute
+        except AttributeError:
+            return
         self.generic_visit(node)
         self.visiting_class_level_ann = False
 
