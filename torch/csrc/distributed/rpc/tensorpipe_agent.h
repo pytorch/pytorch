@@ -218,7 +218,7 @@ class TensorPipeAgent : public RpcAgent {
   // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
-  static std::string guessUvAddress();
+  static const std::string& guessAddress();
 
   // For testing purposes.
   size_t timeoutMapSize();

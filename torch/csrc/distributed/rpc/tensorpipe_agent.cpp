@@ -86,28 +86,32 @@ C10_DEFINE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
 
-std::string TensorPipeAgent::guessUvAddress() {
-  tensorpipe::Error error;
-  std::string uvAddress;
-  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
-  if (ifnameEnv != nullptr) {
-    std::tie(error, uvAddress) =
-        tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv);
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for interface "
-                   << ifnameEnv << " (" << error.what() << "), defaulting to "
-                   << kDefaultUvAddress;
-      uvAddress = kDefaultUvAddress;
+const std::string& TensorPipeAgent::guessAddress() {
+  static const std::string uvAddress = []() {
+    tensorpipe::Error error;
+    std::string result;
+    char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+    if (ifnameEnv != nullptr) {
+      std::tie(error, result) =
+          tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv);
+      if (error) {
+        LOG(WARNING) << "Failed to look up the IP address for interface "
+                     << ifnameEnv << " (" << error.what() << "), defaulting to "
+                     << kDefaultUvAddress;
+        return kDefaultUvAddress;
+      }
+    } else {
+      std::tie(error, result) =
+          tensorpipe::transport::uv::lookupAddrForHostname();
+      if (error) {
+        LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                     << error.what() << "), defaulting to "
+                     << kDefaultUvAddress;
+        return kDefaultUvAddress;
+      }
     }
-  } else {
-    std::tie(error, uvAddress) =
-        tensorpipe::transport::uv::lookupAddrForHostname();
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
-                   << error.what() << "), defaulting to " << kDefaultUvAddress;
-      uvAddress = kDefaultUvAddress;
-    }
-  }
+    return result;
+  }();
   return uvAddress;
 }
 
@@ -142,7 +146,7 @@ constexpr int64_t kCudaBasicChannelPriority = 100;
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
   auto context = tensorpipe::transport::uv::create();
-  std::string address = TensorPipeAgent::guessUvAddress();
+  std::string address = TensorPipeAgent::guessAddress();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kUvTransportPriority, std::move(address)});
 }
@@ -183,34 +187,9 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 
 #if TENSORPIPE_HAS_IBV_TRANSPORT
 
-std::string guessIbvAddress() {
-  tensorpipe::Error error;
-  std::string ibvAddress;
-  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
-  if (ifnameEnv != nullptr) {
-    std::tie(error, ibvAddress) =
-        tensorpipe::transport::ibv::lookupAddrForIface(ifnameEnv);
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for interface "
-                   << ifnameEnv << " (" << error.what() << "), defaulting to "
-                   << kDefaultUvAddress;
-      ibvAddress = kDefaultUvAddress;
-    }
-  } else {
-    std::tie(error, ibvAddress) =
-        tensorpipe::transport::ibv::lookupAddrForHostname();
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
-                   << error.what() << "), defaulting to " << kDefaultUvAddress;
-      ibvAddress = kDefaultUvAddress;
-    }
-  }
-  return ibvAddress;
-}
-
 std::unique_ptr<TransportRegistration> makeIbvTransport() {
   auto context = tensorpipe::transport::ibv::create();
-  std::string address = guessIbvAddress();
+  std::string address = TensorPipeAgent::guessAddress();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kIbvTransportPriority, std::move(address)});
 }
@@ -261,7 +240,7 @@ std::unique_ptr<CpuChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
   for (int laneIdx = 0; laneIdx < kNumUvThreads; ++laneIdx) {
     auto context = tensorpipe::transport::uv::create();
-    std::string address = TensorPipeAgent::guessUvAddress();
+    std::string address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
     listeners.push_back(contexts.back()->listen(address));
   }
