@@ -355,6 +355,22 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * Explicitly mark the future as completed with the output value.
    */
   void markCompleted(IValue value) {
+    markCompletedWithDataPtrs(std::move(value));
+  }
+
+  /**
+   * Explicitly mark the future as completed with the output value and DataPtrs.
+   * The data_ptrs contains storage pointers for all tensors in IValue, which
+   * will be passed to postMarkCompletedHook. Some subclass, like CUDAFuture,
+   * uses these DataPtrs to synchronize CUDA streams. You only need to provide
+   * data_ptrs when 1) DataPtrs cannot be extracted through
+   * IValue::getSubValues() or 2) customized DataPtrs extraction is more
+   * efficient.
+   */
+  void markCompletedWithDataPtrs(
+      IValue value,
+      c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
+          data_ptrs = c10::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(
         !completed(),
@@ -363,7 +379,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     completed_ = true;
     value_ = std::move(value);
 
-    postMarkCompletedHook(value_);
+    postMarkCompletedHook(value_, std::move(data_ptrs));
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -490,13 +506,13 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return type_;
   }
 
- protected:
-  // This hook is called by this class's then() method when it prepares the
-  // instance it returns to the caller. It should be overridden by subclasses so
-  // that they can produce an instace of their own type.
+  // This method should be overridden by subclasses so that they can produce an
+  // instace of their own type.
   virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
     return c10::make_intrusive<Future>(type);
   }
+
+ protected:
 
   // This hook will be called by this class (the superclass) when the future is
   // marked completed _with a value_ (hence not in case of error). This is done
@@ -504,7 +520,12 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   // It allows subclasses to further update their state if they so need. For
   // example the CUDAFuture subclass uses it to determine what devices the value
   // resides on and record an event in those devices' current streams.
-  virtual void postMarkCompletedHook(const at::IValue& value) {}
+  // The data_ptrs field contains storage pointers of all tensors in the value,
+  // which is used by the CUDAFuture subclass to synchronize streams.
+  virtual void postMarkCompletedHook(
+      const at::IValue& value,
+      c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
+          data_ptrs) {}
 
   // This hook will be called by the addCallback() and the then() methods before
   // storing the callback for later execution (or before running it inline if
@@ -776,6 +797,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(c10::List<int64_t>, toIntList)
 DEFINE_TO(c10::List<double>, toDoubleList)
+DEFINE_TO(c10::List<c10::complex<double>>, toComplexDoubleList)
 DEFINE_TO(c10::List<bool>, toBoolList)
 DEFINE_TO(c10::List<at::Tensor>, toTensorList)
 DEFINE_TO(c10::impl::GenericList, toList)
@@ -1026,6 +1048,22 @@ inline std::vector<double> IValue::toDoubleVector() const {
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toDoubleVector on null intrusive_ptr IValue");
   return createVectorFromList<double>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
+inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() && {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  return c10::List<c10::complex<double>>(moveToIntrusivePtr<c10::detail::ListImpl>());
+}
+inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() const& {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  return c10::List<c10::complex<double>>(toIntrusivePtr<c10::detail::ListImpl>());
+}
+inline std::vector<c10::complex<double>> IValue::toComplexDoubleVector() const {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toComplexDoubleVector on null intrusive_ptr IValue");
+  return createVectorFromList<c10::complex<double>>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<bool> IValue::toBoolList() && {
