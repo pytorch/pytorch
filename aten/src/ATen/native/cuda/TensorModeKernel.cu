@@ -3,9 +3,14 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorCompare.h>
-#include <c10/cuda/CUDAStream.h>
+#include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/extrema.h>
+#include <thrust/inner_product.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/sequence.h>
+#include <thrust/sort.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/TensorModeKernel.cuh>
@@ -26,7 +31,9 @@ void calculate_mode(
     THLongStorage* position,
     int dim) {
   auto state = globalContext().getTHCState();
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
   auto stream = at::cuda::getCurrentCUDAStream();
+#endif
   // THAssert(THCTensor_(isContiguous)(state, input));
 
   // Because the input is contiguous, we want to get a reference to the
