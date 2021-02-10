@@ -1328,7 +1328,8 @@ op_db: List[OpInfo] = [
            # BFloat16 support on CUDA requires CUDA 11 and SM53
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            *[torch.bfloat16] if CUDA11OrLater else []),
-           dtypesIfROCM=floating_types_and(torch.half),
+           dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16,
+                                           torch.complex64, torch.complex128),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            skips=(
