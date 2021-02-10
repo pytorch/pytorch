@@ -119,15 +119,20 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         # isinstance on typing things doesn't seem to work: isinstance(list, Callable)
         # is also true!
         inferred = False
-        if name in class_annotations and class_annotations[name] != torch.nn.Module.__annotations__["forward"]:
-            ann_to_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
-            attr_type = torch._C.InferredType(ann_to_type)
-        elif isinstance(item, torch.jit.Attribute):
-            ann_to_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
-            attr_type = torch._C.InferredType(ann_to_type)
-        else:
-            attr_type = torch._C._jit_try_infer_type(item)
-            inferred = True
+        try:
+            if name in class_annotations and class_annotations[name] != torch.nn.Module.__annotations__["forward"]:
+                ann_to_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
+                attr_type = torch._C.InferredType(ann_to_type)
+            elif isinstance(item, torch.jit.Attribute):
+                ann_to_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
+                attr_type = torch._C.InferredType(ann_to_type)
+            else:
+                attr_type = torch._C._jit_try_infer_type(item)
+                inferred = True
+        except RuntimeError as re:
+            raise RuntimeError(
+                "Error inferring type for {name}: {item}: {re}".format(name=name, item=item, re=re)
+            )
 
         return attr_type, inferred
 
