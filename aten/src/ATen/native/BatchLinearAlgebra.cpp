@@ -1196,7 +1196,8 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   //   "result shape ", result.sizes(), " does not match input shape ", input.sizes());
   // }
 
-  // cuSOLVER is used for CUDA inputs and it requires 'infos' to reside in GPU memory
+  // cuSOLVER and MAGMA are used for CUDA inputs and cuSOLVER requires 'infos' to reside in GPU memory
+  // MAGMA path doesn't use it
   auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
   // if result is not empty and not in batched column major format we have to allocate a temporary tensor

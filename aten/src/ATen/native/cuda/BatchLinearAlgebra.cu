@@ -2060,7 +2060,8 @@ inline void apply_orgqr_batched_magma(Tensor& self, const Tensor& tau, Tensor& i
   self.mul_(-1);
   self.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1); // self <- self + Ic: m x n + m x n = m x n
 
-  // infos is not used here, make sure that it's filled with zeros
+  // infos is not used in this MAGMA path, make sure that it's filled with zeros,
+  // otherwise error is thrown for non-zero values later when the content of infos is checked
   infos.fill_(0);
 #endif
 }
