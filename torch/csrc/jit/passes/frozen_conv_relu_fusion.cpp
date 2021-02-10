@@ -10,19 +10,17 @@ namespace {
 void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
 
-  rewriter.RegisterDefaultPatterns();
-
-  std::string add_relu_0 = R"(
-    graph(%a, %b, %alpha):
-        %add_res = aten::add(%a, %b, %alpha)
-        %res = aten::relu(%add_res)
+  std::string conv_relu = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %c = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        %res = aten::relu(%c)
         return (%res))";
-  std::string add_relu_fused = R"(
-    graph(%a, %b, %alpha):
-        %res = aten::_add_relu(%a, %b, %alpha)
+  // TODO: add an operator for conv2d_relu
+  std::string conv_relu_fused = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %res = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
         return (%res))";
-  rewriter.RegisterRewritePattern(add_relu_0, add_relu_fused);
-
+  rewriter.RegisterRewritePattern(conv_relu, conv_relu_fused);
   rewriter.runOnGraph(graph);
 }
 }
