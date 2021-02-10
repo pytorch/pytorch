@@ -7,7 +7,7 @@ from ._custom_import_pickler import create_custom_import_pickler
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
-from .module_environment import ModuleEnv, get_current_module_env
+from .module_environment import ModuleEnv
 from .importer import BaseImporter
 import types
 from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, Optional
@@ -15,7 +15,6 @@ from pathlib import Path
 import linecache
 from urllib.parse import quote
 import re
-
 
 
 class PackageExporter:
@@ -81,7 +80,7 @@ class PackageExporter:
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
-        self.module_env : ModuleEnv = get_current_module_env()
+        self.module_env : ModuleEnv = ModuleEnv()
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
         self._unique_id = 0

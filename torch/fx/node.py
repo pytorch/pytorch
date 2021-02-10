@@ -23,22 +23,19 @@ Argument = Optional[Union[
 ]]
 
 # this is fixed on master, WAR for 1.5
-def _find_module_of_method(orig_method: Callable[..., Any], module_env) -> str:
+def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
     name = orig_method.__name__
     module = orig_method.__module__
-    if module is None:
-        for guess in [torch, torch.nn.functional]:
-            if getattr(guess, name, None) is orig_method:
-                return guess.__name__
-
-    # TODO better way to detect wrapped functions?
-    if hasattr(orig_method, '__fx_wrapped__'):
-        return module_env.get_name(orig_method.__wrapped__)[0]  # type: ignore
-    return module_env.get_name(orig_method)[0]
+    if module is not None:
+        return module
+    for guess in [torch, torch.nn.functional]:
+        if getattr(guess, name, None) is orig_method:
+            return guess.__name__
+    raise RuntimeError(f'cannot find module for {orig_method}')
 
 # Borrowed from CPython typing module
 # https://github.com/python/cpython/blob/f90dc36c15d7fee0efaf6d39e97be0bdf2683e93/Lib/typing.py#L156
-def _type_repr(obj, module_env):
+def _type_repr(obj):
     """Return the repr() of an object, special-casing types (internal helper).
     If obj is a type, we return a shorter version than the default
     type.__repr__, based on the module and qualified name, which is
@@ -52,25 +49,20 @@ def _type_repr(obj, module_env):
     if isinstance(obj, type) and obj.__module__ != 'typing':
         if obj.__module__ == 'builtins':
             return obj.__qualname__
-        module_name, name = module_env.get_name(obj)
-        return f'{module_name}.{name}'
+        return f'{obj.__module__}.{obj.__qualname__}'
     if obj is ...:
         return('...')
     if isinstance(obj, types.FunctionType):
         return obj.__name__
     return repr(obj)
 
-def _get_qualified_name(func: Callable[..., Any], module_env) -> str:
+def _get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
     name = func.__name__
-    if func.__module__ is not None and 'torch._ops' in func.__module__:
-        # WAR for bug in how torch.ops assigns module
-        module = func.__module__
-        module = module.replace('torch._ops', 'torch.ops')
-    else:
-        module = _find_module_of_method(func, module_env)
+    module = _find_module_of_method(func)
+    module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
     return f'{module}.{name}'
 
 def _format_arg(arg) -> str:
@@ -305,12 +297,12 @@ class Node:
                 # qualname. Not sure if this happens for any members of `operator`
                 # or `builtins`. This fallback path is not as good, since e.g.
                 # things in `operator` have `_operator` as their __module__.
-                return _get_qualified_name(target, self.graph._module_env)
+                return _get_qualified_name(target)
             if target.__module__ == 'builtins':
                 return f'builtins.{target.__name__}'
             elif target.__module__ == '_operator':
                 return f'operator.{target.__name__}'
-        return _get_qualified_name(target, self.graph._module_env)
+        return _get_qualified_name(target)
 
     def format_node(self,
                     placeholder_names: List[str] = None,
@@ -343,30 +335,26 @@ class Node:
                 return a  descriptive string representation of the
                 current Node.
         """
-
-        def type_repr(name):
-            return _type_repr(name, self.graph._module_env)
-
         if self.op == 'placeholder':
             assert isinstance(self.target, str)
             arg_str = self.target
-            arg_str += arg_str + f': {type_repr(self.type)}' if self.type else ''
+            arg_str += arg_str + f': {_type_repr(self.type)}' if self.type else ''
             if placeholder_names:
                 placeholder_names.append(arg_str)
                 return None
-            maybe_typename = f'{type_repr(self.type)} ' if self.type else ''
+            maybe_typename = f'{_type_repr(self.type)} ' if self.type else ''
             default_val = '(default=' + str(self.args[0]) + ')' if self.args else ''
             return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
         elif self.op == 'get_attr':
-            maybe_typename = f'{type_repr(self.type)} ' if self.type is not None else ''
+            maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
             return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}]'
         elif self.op == 'output':
             if self.type and maybe_return_typename:
-                maybe_return_typename[0] = f' -> {type_repr(self.type)}'
+                maybe_return_typename[0] = f' -> {_type_repr(self.type)}'
             return f'return {self.args[0]}'
         else:
-            maybe_typename = f'{type_repr(self.type)} ' if self.type is not None else ''
+            maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
             return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
@@ -402,6 +390,7 @@ class Node:
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
+    assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
 
 def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:

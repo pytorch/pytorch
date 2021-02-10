@@ -404,7 +404,6 @@ def _create_wrapped_func(orig_fn):
         if proxy is not None:
             return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
         return orig_fn(*args, **kwargs)
-    wrapped.__fx_wrapped__ = True
 
     return wrapped
 

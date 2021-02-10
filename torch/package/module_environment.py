@@ -1,7 +1,7 @@
 import importlib
 import sys
 from contextlib import contextmanager
-from pickle import _getattribute  # type: ignore
+from pickle import _getattribute, _Pickler  # type: ignore
 from types import ModuleType
 from typing import Any, List, Optional, Tuple
 
@@ -103,6 +103,15 @@ class ModuleEnv:
         Raises:
             ModuleEnvError: `check_obj()` has failed.
         """
+        if name is None and obj and _Pickler.dispatch.get(type(obj)) is None:
+            # Honor the string return variant of __reduce__, which will give us
+            # a global name to search for in this environment.
+            # TODO: I guess we should do copyreg too?
+            reduce = getattr(obj, "__reduce__", None)
+            if reduce is not None:
+                rv = reduce()
+                if isinstance(rv, str):
+                    name = rv
         if name is None:
             name = getattr(obj, "__qualname__", None)
         if name is None:
@@ -218,21 +227,3 @@ class ModuleEnv:
                 except AttributeError:
                     pass
         return "__main__"
-
-
-_current_module_env = ModuleEnv()
-
-
-def get_current_module_env() -> ModuleEnv:
-    return _current_module_env
-
-
-@contextmanager
-def set_module_env(module_env: ModuleEnv):
-    global _current_module_env
-    orig = _current_module_env
-    _current_module_env = module_env
-    try:
-        yield _current_module_env
-    finally:
-        _current_module_env = orig
