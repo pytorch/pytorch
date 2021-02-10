@@ -1,6 +1,5 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
-#include <ATen/native/vulkan/ops/Packing.h>
 #include <torch/library.h>
 
 namespace at {
@@ -47,14 +46,9 @@ Tensor mean(
     output_sizes.push_back(1);
   }
 
-  vTensor v_output_packed{
+  vTensor v_output{
     context,
-    {
-      v_input_sizes[Layout::Activation4D::batch] *
-      v_input_sizes[Layout::Activation4D::channels],
-      1,
-      1
-    },
+    output_sizes,
     v_input.options(),
   };
 
@@ -65,16 +59,13 @@ Tensor mean(
       const struct Block final {
         uvec3 extents;
         int32_t range;
-        ivec2 iextents;
+        uvec3 iextents;
       } block {
-        v_output_packed.extents(),
+        v_output.extents(),
         safe_downcast<int32_t>(
             v_input_sizes[Layout::Activation4D::width] *
             v_input_sizes[Layout::Activation4D::height]),
-        {
-          safe_downcast<int32_t>(v_input_sizes[Layout::Activation4D::width]),
-          safe_downcast<int32_t>(v_input_sizes[Layout::Activation4D::height]),
-        },
+        v_input.extents()
       };
 
       context->dispatch(
@@ -84,11 +75,11 @@ Tensor mean(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(mean2d),
+          keepdim ? VK_KERNEL(mean) : VK_KERNEL(mean2d),
           v_input.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output_packed.image(
+          v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
@@ -107,9 +98,11 @@ Tensor mean(
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 
+  /*
   api::Command::Buffer& output_unpack_buffer = command_pool.stream();
   vTensor v_output = unpack_image1x1(v_output_packed, output_sizes, context, output_unpack_buffer);
   command_pool.submit(context->gpu().queue, output_unpack_buffer);
+  */
 
   return convert(v_output);
 }
