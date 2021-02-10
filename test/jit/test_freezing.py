@@ -1543,27 +1543,32 @@ class TestFrozenOptimizations(JitTestCase):
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
 
-    def test_freeze_remove_feature_dropout(self):
+    def test_freeze_conv_relu_fusion(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self, num_classes: int = 1000) -> None:
                 super(Net, self).__init__()
-                self.dropout = nn.Dropout2d(0.5)
+                self.conv = nn.Sequential(
+                    nn.Conv2d(1, 4, kernel_size=3, stride=1, padding=1),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(kernel_size=2, stride=2),
+                )
 
-            def forward(self, x):
-                return self.dropout(x)
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.conv(x)
+                return x
 
         mod = torch.jit.script(Net())
         # set optimize to False here, by default freezing runs optimize_frozen_module
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
         # inspect frozen mod
-        FileCheck().check("aten::feature_dropout").run(frozen_mod.graph)
+        FileCheck().check("aten::relu").run(frozen_mod.graph)
         torch.jit.optimize_frozen_module(frozen_mod)
-        FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
+        # FileCheck().check_not("aten::relu").run(frozen_mod.graph)
 
         script_mod = torch.jit.script(mod)
         script_mod.eval()
 
-        input = torch.randn(2, 2)
+        input = torch.randn(10, 1, 8, 8)
         output_s = script_mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
