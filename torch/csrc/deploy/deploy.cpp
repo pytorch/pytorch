@@ -62,6 +62,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
         _binary_libtorch_deployinterpreter_so_start,
         _binary_libtorch_deployinterpreter_so_end -
             _binary_libtorch_deployinterpreter_so_start);
+
   }
   handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY);
   if (!handle_) {

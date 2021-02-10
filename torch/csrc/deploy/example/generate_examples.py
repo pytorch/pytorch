@@ -4,21 +4,33 @@ Generate the example files that torchpy_test uses.
 from pathlib import Path
 import torch
 import torchvision
+import argparse
 
 from torch.package import PackageExporter
 
-from examples import Simple
+from .examples import Simple
 
 
 def save(name, model, model_jit, eg):
     with PackageExporter(str(p / name)) as e:
+        e.mock('iopath.**')
         e.save_pickle('model', 'model.pkl', model)
         e.save_pickle('model', 'example.pkl', eg)
     model_jit.save(str(p / (name + '_jit')))
 
+
+parser = argparse.ArgumentParser(description="Generate Examples")
+parser.add_argument("--install_dir", help="Root directory for all output files")
+parser.add_argument("--fbcode_dir", help="Root directory for all output files")
+
+
 if __name__ == "__main__":
-    p = Path(__file__).parent / "generated"
-    p.mkdir(exist_ok=True)
+    args = parser.parse_args()
+    if args.install_dir is None:
+        p = Path(__file__).parent / "generated"
+        p.mkdir(exist_ok=True)
+    else:
+        p = Path(args.install_dir)
 
     resnet = torchvision.models.resnet18()
     resnet.eval()

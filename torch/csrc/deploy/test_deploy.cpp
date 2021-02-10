@@ -36,14 +36,19 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
 const char* simple = "torch/csrc/deploy/example/generated/simple";
 const char* simple_jit = "torch/csrc/deploy/example/generated/simple_jit";
 
+const char* path(const char* envname, const char* path) {
+  const char* e = getenv(envname);
+  return e ? e : path;
+}
+
 TEST(TorchpyTest, SimpleModel) {
-  compare_torchpy_jit(simple, simple_jit);
+  compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
 
 TEST(TorchpyTest, ResNet) {
   compare_torchpy_jit(
-      "torch/csrc/deploy/example/generated/resnet",
-      "torch/csrc/deploy/example/generated/resnet_jit");
+      path("RESNET", "torch/csrc/deploy/example/generated/resnet"),
+      path("RESNET_JIT", "torch/csrc/deploy/example/generated/resnet_jit"));
 }
 
 TEST(TorchpyTest, Movable) {
@@ -60,9 +65,9 @@ TEST(TorchpyTest, Movable) {
 
 TEST(TorchpyTest, MultiSerialSimpleModel) {
   torch::InterpreterManager manager(3);
-  torch::Package p = manager.load_package(simple);
+  torch::Package p = manager.load_package(path("SIMPLE", simple));
   auto model = p.load_pickle("model", "model.pkl");
-  auto ref_model = torch::jit::load(simple_jit);
+  auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
   auto input = torch::ones({10, 20});
   size_t ninterp = 3;
@@ -86,9 +91,9 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   size_t nthreads = 3;
   torch::InterpreterManager manager(nthreads);
 
-  torch::Package p = manager.load_package(simple);
+  torch::Package p = manager.load_package(path("SIMPLE", simple));
   auto model = p.load_pickle("model", "model.pkl");
-  auto ref_model = torch::jit::load(simple_jit);
+  auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
   auto input = torch::ones({10, 20});
 

@@ -142,7 +142,19 @@ sys.modules['maskrcnn_benchmark'] = r
 # print("path:", sys.path)
 # print("prefix:", sys.prefix)
 import torch # has to be done serially otherwise things will segfault
-import torch.version # for some reason torch doesn't import this and cuda fails?
+try:
+  import torch.version # for some reason torch doesn't import this and cuda fails?
+except ModuleNotFoundError:
+  # fbcode built doesn't have version.py, workaround by faking its info...
+  from types import ModuleType
+  _v = torch.version = sys.modules['torch.version'] = ModuleType('torch.version')
+  _v.__version__ = '1.8.0a0+fake'
+  _v.debug = False
+  _v.cuda = '10.1'
+  _v.git_version = 'fake'
+  _v.hip = None
+
+
 if torch.cuda.is_available():
   torch.zeros(1).cuda() # force cuda init...
 import warnings
@@ -247,10 +259,6 @@ struct InitLockAcquire {
 
 struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
   ConcreteInterpreterImpl() {
-    // some dependency in mkl requires this...
-    void* result = dlopen("libz.so", RTLD_GLOBAL | RTLD_LAZY);
-    assert(result);
-
 #define APPEND_INIT(name) PyImport_AppendInittab(#name, PyInit_##name);
     FOREACH_LIBRARY(APPEND_INIT)
 #undef APPEND_INIT
