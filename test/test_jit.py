@@ -765,7 +765,6 @@ class TestJit(JitTestCase):
             jitted._flush_compilation_cache()
             with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
                 states = jitted.get_debug_state() # noqa
-                
 
     def test_numel(self):
         @torch.jit.script
