@@ -218,21 +218,3 @@ class ModuleEnv:
                 except AttributeError:
                     pass
         return "__main__"
-
-
-_current_module_env = ModuleEnv()
-
-
-def get_current_module_env() -> ModuleEnv:
-    return _current_module_env
-
-
-@contextmanager
-def set_module_env(module_env: ModuleEnv):
-    global _current_module_env
-    orig = _current_module_env
-    _current_module_env = module_env
-    try:
-        yield _current_module_env
-    finally:
-        _current_module_env = orig
