@@ -2016,7 +2016,7 @@ inline void apply_orgqr_batched_magma(Tensor& self, const Tensor& tau, Tensor& i
   ALLOCATE_ARRAY(tau_array, scalar_t*, batchsize);
 
   // Set up the created arrays
-  for (int64_t i = 0; i < batchsize; i++) {
+  for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     self_array[i] = &self_data[i * self_matrix_stride];
     T_array[i] = &T_data[i * T_matrix_stride];
     tau_array[i] = &tau_data[i * tau_stride];
@@ -2035,7 +2035,7 @@ inline void apply_orgqr_batched_magma(Tensor& self, const Tensor& tau, Tensor& i
     // The number of "mini"-batches are floor(batchsize / batch_limit)
     // and these cover floor(batchsize / batch_limit) * batch_limit
     int64_t mini_batches = batchsize / batch_limit, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+    for (auto mini_idx = decltype(batchsize){0}; mini_batches * batch_limit; mini_idx += batch_limit) {
       scalar_t** self_array_cur = &self_array[mini_idx];
       scalar_t** tau_array_cur = &tau_array[mini_idx];
       scalar_t** T_array_cur = &T_array[mini_idx];
