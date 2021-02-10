@@ -219,10 +219,10 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
   std::vector<std::vector<int64_t>> allShapes;
-  c10::IntArrayRef shapes = {16, 16};
+  std::vector<int64_t> shapes = {16, 16};
   for (auto i = 0; i < size; i++) {
     auto tensor = at::ones(shapes, b) * i;
-    std::vector<int64_t> shapesVec = shapes.vec();
+    std::vector<int64_t> shapesVec = shapes;
     allShapes.emplace_back(std::move(shapesVec));
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
@@ -261,14 +261,14 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
   auto tests = CollectiveTest::initialize(path, size);
 
   std::vector<std::vector<at::Tensor>> inputs(size);
-  c10::IntArrayRef shapes = {16, 16};
+  std::vector<int64_t> shapes = {16, 16};
   // Try every permutation of root rank and root tensor
   for (auto i = 0; i < size; i++) {
     for (auto j = 0; j < stride; j++) {
       std::vector<std::vector<int64_t>> allShapes;
       // Initialize inputs
       for (auto k = 0; k < size; k++) {
-        std::vector<int64_t> shapesVec = shapes.vec();
+        std::vector<int64_t> shapesVec = shapes;
         allShapes.emplace_back(std::move(shapesVec));
         inputs[k].resize(stride);
         // This won't work if we ever support sparse CUDA
@@ -450,9 +450,9 @@ void testSend(const std::string& path) {
   // test that waiting for work to be sent can be aborted successfully.
   auto selfRank = 0;
   auto dstRank = 1;
-  c10::IntArrayRef shapes = {16, 16};
+  std::vector<int64_t> shapes{16, 16};
   std::vector<std::vector<int64_t>> allShapes;
-  allShapes.push_back(shapes.vec());
+  allShapes.push_back(shapes);
   std::vector<at::Tensor> tensors = {
       at::ones(shapes),
   };
@@ -500,9 +500,9 @@ void testRecv(const std::string& path) {
   // test that waiting for work to be received can be aborted successfully.
   auto selfRank = 0;
   auto srcRank = 1;
-  c10::IntArrayRef shapes = {16, 16};
+  std::vector<int64_t> shapes = {16, 16};
   std::vector<std::vector<int64_t>> allShapes;
-  allShapes.push_back(shapes.vec());
+  allShapes.push_back(shapes);
   std::vector<at::Tensor> tensors = {
       at::ones(shapes),
   };
