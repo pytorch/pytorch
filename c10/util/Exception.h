@@ -197,20 +197,6 @@ class C10_API OnnxfiBackendSystemError : public Error {
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
 
-namespace detail {
-
-// Return x if it is non-empty; otherwise return y.
-inline std::string if_empty_then(const std::string& x, const std::string& y) {
-  if (x.empty()) {
-    return y;
-  } else {
-    return x;
-  }
-}
-
-}
-
-
 } // namespace c10
 
 // Private helper macro for implementing TORCH_INTERNAL_ASSERT and TORCH_CHECK
@@ -344,9 +330,9 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
   }
 #else
 #define TORCH_CHECK_MSG(cond, type, ...)                              \
-  ::c10::detail::if_empty_then(                                       \
-      ::c10::str(__VA_ARGS__),                                        \
-      "Expected " #cond " to be true, but got false.  "               \
+  (::c10::detail::varargs_count(__VA_ARGS__) != 0                     \
+    ? ::c10::str(__VA_ARGS__)                                         \
+    : "Expected " #cond " to be true, but got false.  "               \
       "(Could this error message be improved?  If so, "               \
       "please report an enhancement request to PyTorch.)"             \
   )
@@ -364,14 +350,24 @@ namespace detail {
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg);
 
+// See https://stackoverflow.com/a/50283329
+template <typename... Args>
+constexpr std::size_t varargs_count(Args&&... args) {
+  return sizeof...(Args);
+}
+
 } // namespace detail
-} // namespace 10
+} // namespace c10
 
 #define TORCH_CHECK(cond, ...)                                          \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
     ::c10::detail::torchCheckFail(                                      \
         __func__, __FILE__, static_cast<uint32_t>(__LINE__),            \
-        ([&]() C10_NOINLINE { return TORCH_CHECK_MSG(cond, "", __VA_ARGS__); })()); \
+      /* When there are no varargs, we needn't call out to a lambda     \
+         function just to grab a couple C string constants. */          \
+        ::c10::detail::varargs_count(__VA_ARGS__) == 0                  \
+        ? TORCH_CHECK_MSG(cond, "")                                     \
+        : ([&]() C10_NOINLINE { return TORCH_CHECK_MSG(cond, "", __VA_ARGS__); })()); \
   }
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
