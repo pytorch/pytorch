@@ -779,11 +779,11 @@ const std::vector<std::string> functions = {
                 return grad_output / other, None
             return self / other, backward
 
-        def div_2(self, other, *, rounding_mode: str):
+        def div_2(self, other, *, rounding_mode: Optional[str]):
             result = torch.div(self, other, rounding_mode=rounding_mode)
             self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
             def backward(grad_output):
-                if rounding_mode == "true":
+                if rounding_mode is None:
                     grad_self = (grad_output / other)._grad_sum_to_size(self_size)
                     grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other_size)
                 else:
@@ -794,10 +794,10 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
-        def div_3(self, other: number, *,  rounding_mode: str):
+        def div_3(self, other: number, *, rounding_mode: Optional[str]):
             result = torch.div(self, other, rounding_mode=rounding_mode)
             def backward(grad_output):
-                if rounding_mode == "true":
+                if rounding_mode is None:
                     grad_self = (grad_output / other)
                 else:
                     grad_self = torch.zeros_like(self, memory_format=1)
