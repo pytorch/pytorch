@@ -1,5 +1,6 @@
 import enum
 
+import torch
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
@@ -34,14 +35,17 @@ class NodeIOType(enum.Enum):
 def get_node_io_type(node: Node, gm: GraphModule) -> NodeIOType:
     if node.op == 'call_function':
         fp32_fun_target_names = ('torch.nn.functional', 'torch.nn')
+        # hack alert: this is not ready for production
+        # TODO(future PR): use a real mapping
+        fp32_funs = (torch.cat,)
         int8_fun_target_names = ('torch._ops.quantized',)
         # For now, hacky check to see which op is in which namespace
         # TODO(future PR): use a real mapping
-        if node.target.__module__ in fp32_fun_target_names:
+        if node.target.__module__ in fp32_fun_target_names or node.target in fp32_funs:
             return NodeIOType.FP32
         else:
             assert node.target.__module__ in int8_fun_target_names, \
-                'unknown node target %s' % node.target
+                'unknown node target %s with module %s' % (node.target, node.target.__module__)
             return NodeIOType.INT8
     else:
         assert node.op == 'call_module'

@@ -748,3 +748,149 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+
+    def _get_sparsenn_toy_model(self):
+        class DenseTopMLP(nn.Module):
+
+            def __init__(self, dense_dim, dense_out, embedding_dim, top_out_in, top_out_out) -> None:
+                super(DenseTopMLP, self).__init__()
+
+                self.dense_mlp = nn.Sequential(
+                    nn.Linear(dense_dim, dense_out) #nn.Sigmoid()
+                )
+                self.top_mlp = nn.Sequential(
+                    nn.Linear(dense_out + embedding_dim, top_out_in),
+                    #nn.Sigmoid(),
+                    nn.Linear(top_out_in, top_out_out),
+                    #nn.Sigmoid(),
+                )
+
+            def forward(
+                self,
+                sparse_feature: torch.Tensor,
+                dense: torch.Tensor,
+            ) -> torch.Tensor:
+                dense_feature = self.dense_mlp(dense)
+                features = torch.cat([dense_feature] + [sparse_feature], dim=1)
+
+                out = self.top_mlp(features)
+                return out
+
+        # thin wrapper around embedding bag, because tracing inside nn.Embedding
+        # bag is not supported at the moment and this is top level
+        class EmbBagWrapper(nn.Module):
+            def __init__(self, num_embeddings, embedding_dim):
+                super().__init__()
+                self.emb_bag = nn.EmbeddingBag(num_embeddings, embedding_dim, mode='sum')
+
+            def forward(self, indices, offsets):
+                return self.emb_bag(indices, offsets)
+
+        class SparseNN(nn.Module):
+            _NUM_EMBEDDINGS = 10
+            _EMBEDDING_DIM = 5
+            _DENSE_DIM = 4
+            _DENSE_OUTPUT = 2
+            _TOP_OUT_IN = 2
+            _TOP_OUT_OUT = 2
+            _TOP_MLP_DIM = 1
+
+            def __init__(self) -> None:
+                super(SparseNN, self).__init__()
+
+                self.model_sparse = EmbBagWrapper(self._NUM_EMBEDDINGS, self._EMBEDDING_DIM)
+                self.dense_top = DenseTopMLP(self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN, self._TOP_OUT_OUT)
+
+            def forward(
+                self,
+                sparse_indices: torch.Tensor,
+                sparse_offsets: torch.Tensor,
+                dense: torch.Tensor,
+            ) -> torch.Tensor:
+
+                sparse_feature = self.model_sparse(sparse_indices, sparse_offsets)
+                out = self.dense_top(sparse_feature, dense)
+
+                return out
+
+        return SparseNN()
+
+    def test_sparsenn_compare_activations(self):
+        sparse_nn = self._get_sparsenn_toy_model().eval()
+
+        # quantize the embeddings and the dense part separately, using FX graph mode
+        sparse_nn.dense_top = prepare_fx(
+            sparse_nn.dense_top,
+            {'': torch.quantization.default_qconfig},
+        )
+        sparse_nn.model_sparse = prepare_fx(
+            sparse_nn.model_sparse,
+            {'': torch.quantization.float_qparams_weight_only_qconfig},
+        )
+
+        # calibrate
+        idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.LongTensor([0, 4])
+        x = torch.randn(2, 4)
+        sparse_nn(idx, offsets, x)
+
+        # convert
+        sparse_nn_q = copy.deepcopy(sparse_nn)
+        sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
+        sparse_nn_q.model_sparse = convert_fx(sparse_nn_q.model_sparse)
+
+        # TODO(future PR): consider adding an "undo" transformation
+        # to get the original models back from NS models, to prevent the need
+        # for the user to create new models for each iteration of NS API calls
+
+        # test out compare activations API
+
+        sparse_nn.dense_top, sparse_nn_q.dense_top = prepare_model_outputs(
+            'fp32_prepared', sparse_nn.dense_top, 'int8', sparse_nn_q.dense_top, OutputLogger)
+
+        # calibrate
+        sparse_nn(idx, offsets, x)
+        sparse_nn_q(idx, offsets, x)
+
+        # inspect results
+        act_compare_dict = get_matching_activations(sparse_nn, sparse_nn_q, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 3)
+        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+
+    def test_sparsenn_shadow(self):
+        sparse_nn = self._get_sparsenn_toy_model().eval()
+
+        # quantize the embeddings and the dense part separately, using FX graph mode
+        sparse_nn.dense_top = prepare_fx(
+            sparse_nn.dense_top,
+            {'': torch.quantization.default_qconfig},
+        )
+        sparse_nn.model_sparse = prepare_fx(
+            sparse_nn.model_sparse,
+            {'': torch.quantization.float_qparams_weight_only_qconfig},
+        )
+
+        # calibrate
+        idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.LongTensor([0, 4])
+        x = torch.randn(2, 4)
+        sparse_nn(idx, offsets, x)
+
+        # convert
+        sparse_nn_q = copy.deepcopy(sparse_nn)
+        sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
+        sparse_nn_q.model_sparse = convert_fx(sparse_nn_q.model_sparse)
+
+        # test out compare shadow activations API
+        sparse_nn_q.dense_top = prepare_model_with_stubs(
+            'fp32_prepared', sparse_nn.dense_top,
+            'int8', sparse_nn_q.dense_top, OutputLogger)
+
+        # calibrate
+        sparse_nn_q(idx, offsets, x)
+
+        # check activation result correctness
+        act_compare_dict = get_matching_activations_a_shadows_b(
+            sparse_nn_q, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 3)
+        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
