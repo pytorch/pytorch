@@ -976,6 +976,13 @@ auto Engine::execute(const edge_list& roots,
       "If you have to use this function, make sure to reset the .grad fields of "
       "your parameters to None after use to break the cycle and avoid the leak.");
   }
+
+  // accumulate_grad is true if and only if the frontend call was to
+  // grad(), not backward(). grad() returns the sum of the gradients
+  // w.r.t. the inputs and thus needs the inputs to be present.
+  TORCH_CHECK_VALUE(accumulate_grad || !outputs.empty(),
+                    "grad requires non-empty inputs.");
+
   // A fresh first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
   // allocated already, i.e. consecutive backward calls, re-entrant backward calls),

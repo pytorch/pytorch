@@ -160,6 +160,13 @@ TEST(CustomAutogradTest, GradUnreachableDiscoveryTest) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutogradAPITests, EmptyInput) {
+  Variable x = torch::ones({1}, torch::requires_grad());
+  ASSERT_THROWS_WITH(grad({x * 2}, /*inputs=*/{}, {x}),
+                     "grad requires non-empty inputs.");
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, RetainGrad) {
   auto input = torch::rand({1, 3}, torch::requires_grad());
   auto h1 = input * 3;
