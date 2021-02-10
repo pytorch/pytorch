@@ -3,6 +3,7 @@ import torch.fx
 import inspect
 from typing import Any, Dict, Optional, Tuple
 from torch.fx.node import Argument, Target
+from torch._jit_internal import boolean_dispatched
 
 from torch.fx import Transformer
 
@@ -22,7 +23,19 @@ class NormalizeArgs(Transformer):
 
     def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         if self.normalize_functionals and target.__module__ == 'torch.nn.functional':
-            new_kwargs = self._args_kwargs_to_normalized_kwargs(target, args, kwargs)
+            target_for_analysis = target
+            if target in boolean_dispatched:
+                # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have
+                # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
+                # branches of the dispatch have exactly the same signature. If they do, use the `true`
+                # branch signature for analysis. Otherwise, leave this un-normalized
+                dispatched = boolean_dispatched[target]
+                if_true, if_false = dispatched['if_true'], dispatched['if_false']
+                if inspect.signature(if_true).parameters != inspect.signature(if_false).parameters:
+                    return super().call_function(target, args, kwargs)
+                target_for_analysis = if_true
+
+            new_kwargs = self._args_kwargs_to_normalized_kwargs(target_for_analysis, args, kwargs)
 
             if new_kwargs:
                 # FIXME: `target(**kwargs)` doesn't keep things specified as kwargs
@@ -45,7 +58,7 @@ class NormalizeArgs(Transformer):
     def _args_kwargs_to_normalized_kwargs(self, target : Target, args : Tuple[Argument, ...],
                                           kwargs : Dict[str, Any]) -> Optional[Dict[str, Any]]:
         assert not isinstance(target, str)
-        sig = inspect.signature(target)
+        sig = inspect.signature(inspect.unwrap(target))
         # Don't currently support positional-only
         # or varargs (*args, **kwargs) signatures
         supported_parameter_types = {

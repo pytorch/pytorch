@@ -772,7 +772,7 @@ terrible spacing
 
         modules = dict(traced.named_modules())
         for node in traced.graph.nodes:
-            if node.target == torch.nn.functional.relu:
+            if node.op == 'call_function' and node.target.__module__ == 'torch.nn.functional':
                 self.assertEqual(len(node.args), 0)
             if node.op == 'call_module':
                 submod_class = modules[node.target].__class__
