@@ -642,9 +642,9 @@ pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc.
 Arguments:
     host_name (str): The hostname or IP Address the server store should run on.
     port (int): The port on which the server store should listen for incoming requests.
-    world_size (int): The total number of store users (number of clients + 1 for the server).
-    is_master (bool): True when initializing the server store, False for client stores.
-    timeout (timedelta): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`.
+    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
+    is_master (bool, optional): True when initializing the server store, False for client stores. Default is False.
+    timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
 
 Example::
     >>> import torch.distributed as dist
