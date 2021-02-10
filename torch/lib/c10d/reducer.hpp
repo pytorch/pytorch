@@ -108,18 +108,6 @@ class Reducer {
   // Saves thread local state to be used by autograd engine callbacks.
   void save_thread_local_state();
 
-  // Set logging data that can be got during DistributedDataParallel
-  // construction time.
-  void set_construction_logging_data(
-      const std::string& module_name,
-      const std::vector<int>& device_ids,
-      int output_device,
-      bool broadcast_buffers);
-
-  // An Interface for users to get DDPLoggingData and log them
-  // in the applications.
-  c10::DDPLoggingData get_ddp_logging_data();
-
  protected:
   // Forward declaration.
   struct Bucket;
