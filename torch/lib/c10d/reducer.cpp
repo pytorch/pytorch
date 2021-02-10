@@ -48,7 +48,8 @@ Reducer::Reducer(
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       divFactor_(kUnsetDivFactor),
-      comm_hook_(nullptr) {
+      comm_hook_(nullptr),
+      thread_local_state_(at::ThreadLocalState()) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
@@ -96,6 +97,7 @@ Reducer::Reducer(
         // evidence that the parameter has participated in an iteration.
         auto grad_accumulator =
             torch::autograd::impl::grad_accumulator(variable);
+
 
 #ifndef _WIN32
         using torch::distributed::autograd::ThreadLocalDistAutogradContext;
@@ -515,6 +517,9 @@ void Reducer::push_rebuilt_params(const VariableIndex& index) {
 void Reducer::autograd_hook(VariableIndex index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
 
+  // Carry over thread local state from main thread. This allows for thread-local
+  // flags such as profiler enabled to be configure correctly.
+  at::ThreadLocalStateGuard g(thread_local_state_);
   // See Note [Skip allreducing local_used_maps_dev]
   if (find_unused_parameters_) {
     // Since it gets here, this param has been used for this iteration. We want
@@ -1173,6 +1178,11 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       }
     }
   }
+}
+
+void Reducer::save_thread_local_state() {
+  std::lock_guard<std::mutex> guard(mutex_);
+  thread_local_state_ = at::ThreadLocalState();
 }
 
 void Reducer::finalize_backward() {
