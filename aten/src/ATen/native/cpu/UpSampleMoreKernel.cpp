@@ -513,7 +513,7 @@ void upsample_bilinear2d_kernel_impl(
 }
 
 void upsample_trilinear3d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     bool align_corners,
     c10::optional<double> scales_d,
@@ -552,7 +552,7 @@ void upsample_bilinear2d_backward_kernel_impl(
 }
 
 void upsample_trilinear3d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
     c10::optional<double> scales_d,

@@ -64,10 +64,10 @@ inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>
 using scale_t = c10::optional<double>;
 using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
-using upsampling_nearest3d = void(*)(Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+using upsampling_nearest3d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_linear1d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
 using upsampling_bilinear2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
-using upsampling_trilinear3d = void(*)(Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
 DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel);
@@ -145,6 +145,48 @@ static std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, I
   return {nbatch, channels, output_height, output_width};
 }
 
+static std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+  TORCH_CHECK(
+      output_size.size() == 3,
+      "It is expected output_size equals to 3, but got size ",
+      output_size.size());
+
+  TORCH_CHECK(
+      input_size.size() == 5,
+      "It is expected input_size equals to 5, but got size ",
+      input_size.size());
+
+  int64_t output_depth = output_size[0];
+  int64_t output_height = output_size[1];
+  int64_t output_width = output_size[2];
+
+  int64_t nbatch = input_size[0];
+  int64_t channels = input_size[1];
+  int64_t input_depth = input_size[2];
+  int64_t input_height = input_size[3];
+  int64_t input_width = input_size[4];
+
+  TORCH_CHECK(
+      input_depth > 0 && input_height > 0 && input_width > 0 &&
+          output_depth > 0 && output_height > 0 && output_width > 0,
+      "Input and output sizes should be greater than 0, but got input (D: ",
+      input_depth,
+      ", H: ",
+      input_height,
+      ", W: ",
+      input_width,
+      ") output (D: ",
+      output_depth,
+      ", H: ",
+      output_height,
+      ", W: ",
+      output_width,
+      ")");
+
+
+  return {nbatch, channels, output_depth, output_height, output_width};
+}
+
 static inline void upsample_2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
@@ -182,51 +224,6 @@ static inline void upsample_2d_shape_check(
     check_dim_size(grad_output, 4, 1, nchannels);
     check_dim_size(grad_output, 4, 2, output_height);
     check_dim_size(grad_output, 4, 3, output_width);
-  }
-}
-
-static inline void upsample_3d_shape_check(
-    const Tensor& input,
-    const Tensor& grad_output,
-    int64_t nbatch,
-    int64_t nchannels,
-    int64_t input_depth,
-    int64_t input_height,
-    int64_t input_width,
-    int64_t output_depth,
-    int64_t output_height,
-    int64_t output_width) {
-  TORCH_CHECK(
-      input_depth > 0 && input_height > 0 && input_width > 0 &&
-          output_depth > 0 && output_height > 0 && output_width > 0,
-      "Input and output sizes should be greater than 0, but got input (D: ",
-      input_depth,
-      ", H: ",
-      input_height,
-      ", W: ",
-      input_width,
-      ") output (D: ",
-      output_depth,
-      ", H: ",
-      output_height,
-      ", W: ",
-      output_width,
-      ")");
-
-  if (input.defined()) {
-    // Allow for empty batch size but not other dimensions
-    bool valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
-      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
-    TORCH_CHECK(
-                (input.numel() != 0 || valid_empty) && input.dim() == 5,
-                "Non-empty 5D data tensor expected but got a tensor with sizes ",
-                input.sizes());
-  } else if (grad_output.defined()) {
-    check_dim_size(grad_output, 5, 0, nbatch);
-    check_dim_size(grad_output, 5, 1, nchannels);
-    check_dim_size(grad_output, 5, 2, output_depth);
-    check_dim_size(grad_output, 5, 3, output_height);
-    check_dim_size(grad_output, 5, 4, output_width);
   }
 }
 
