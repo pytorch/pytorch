@@ -1672,13 +1672,13 @@ reciprocal(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
+.. math::
+    \text{out}_{i} = \frac{1}{\text{input}_{i}}
+
 .. note::
     Unlike NumPy's reciprocal, torch.reciprocal supports integral inputs. Integral
     inputs to reciprocal are automatically :ref:`promoted <type-promotion-doc>` to
     the default scalar type.
-
-.. math::
-    \text{out}_{i} = \frac{1}{\text{input}_{i}}
 """ + r"""
 Args:
     {input}
