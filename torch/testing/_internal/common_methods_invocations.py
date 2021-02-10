@@ -178,7 +178,7 @@ class OpInfo(object):
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
         self.dtypesIfCUDA = set(dtypesIfCUDA) if dtypesIfCUDA is not None else self.dtypes
-        self.dtypesIfROCM = set(dtypesIfROCM) if dtypesIfROCM is not None else self.dtypes
+        self.dtypesIfROCM = set(dtypesIfROCM) if dtypesIfROCM is not None else self.dtypesIfCUDA
         self._default_test_dtypes = set(default_test_dtypes) if default_test_dtypes is not None else None
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1427,7 +1427,6 @@ op_db: List[OpInfo] = [
                    dtypes=integral_types_and(torch.bool),
                    dtypesIfCPU=integral_types_and(torch.bool),
                    dtypesIfCUDA=integral_types_and(torch.bool),
-                   dtypesIfROCM=integral_types_and(torch.bool),
                    skips=(
                        # File "test_unary_ufuncs.py", line 289, in test_reference_numerics
                        #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
