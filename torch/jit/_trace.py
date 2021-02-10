@@ -946,7 +946,6 @@ def trace_module(
                 argument_names = get_callable_argument_names(func)
 
             example_inputs = make_tuple(example_inputs)
-
             module._c._create_method_from_trace(
                 method_name,
                 func,
@@ -984,6 +983,8 @@ def trace_module(
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
+
+    print('--------return module')
 
     return module
 
