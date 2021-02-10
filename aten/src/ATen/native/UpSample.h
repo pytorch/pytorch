@@ -66,7 +66,7 @@ using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, 
 using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
 using upsampling_nearest3d = void(*)(Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_linear1d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
-using upsampling_bilinear2d = void(*)(Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using upsampling_bilinear2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using upsampling_trilinear3d = void(*)(Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
@@ -107,6 +107,42 @@ static std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, I
       ")");
 
   return {nbatch, channels, output_width};
+}
+
+static std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+  TORCH_CHECK(
+      output_size.size() == 2,
+      "It is expected output_size equals to 2, but got size ",
+      output_size.size());
+
+  TORCH_CHECK(
+      input_size.size() == 4,
+      "It is expected input_size equals to 4, but got size ",
+      input_size.size());
+
+  int64_t output_height = output_size[0];
+  int64_t output_width = output_size[1];
+
+  int64_t nbatch = input_size[0];
+  int64_t channels = input_size[1];
+  int64_t input_height = input_size[2];
+  int64_t input_width = input_size[3];
+
+  TORCH_CHECK(
+      input_height > 0 && input_width > 0 && output_height > 0 &&
+          output_width > 0,
+      "Input and output sizes should be greater than 0,"
+      " but got input (H: ",
+      input_height,
+      ", W: ",
+      input_width,
+      ") output (H: ",
+      output_height,
+      ", W: ",
+      output_width,
+      ")");
+
+  return {nbatch, channels, output_height, output_width};
 }
 
 static inline void upsample_2d_shape_check(

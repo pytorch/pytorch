@@ -181,7 +181,7 @@ void cpu_upsample_linear(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_linear_channels_last(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     bool align_corners,
     const scale_type& scales) {
@@ -496,7 +496,7 @@ void upsample_linear1d_kernel_impl(
 }
 
 void upsample_bilinear2d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     bool align_corners,
     c10::optional<double> scales_h,
@@ -541,7 +541,7 @@ void upsample_linear1d_backward_kernel_impl(
 }
 
 void upsample_bilinear2d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
     c10::optional<double> scales_h,
