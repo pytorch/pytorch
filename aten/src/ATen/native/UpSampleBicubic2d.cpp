@@ -312,7 +312,7 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cpu) (
 using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
-Tensor upsample_bicubic2d_cpu(
+Tensor upsample_bicubic2d(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     bool align_corners,
@@ -323,7 +323,7 @@ Tensor upsample_bicubic2d_cpu(
   return at::upsample_bicubic2d(input, osize, align_corners, scale_h, scale_w);
 }
 
-Tensor upsample_bicubic2d_backward_cpu(
+Tensor upsample_bicubic2d_backward(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,
