@@ -68,7 +68,7 @@ struct TORCH_API DispatchStub;
  * DispatchStubImpl::choose_cpu_impl() in case none is found by
  * DispatchStubImpl::get_call_ptr() in cpu_dispatch_ptr.
  */
-struct CPUImplFunctionHolder {
+struct TORCH_API CPUImplFunctionHolder {
   void *DEFAULT;
 #ifdef HAVE_AVX_CPU_DEFINITION
   void *AVX;
