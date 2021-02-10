@@ -698,6 +698,7 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(
     return std::forward_as_tuple(values, indices);
   }
 
+  TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
   sort_stub(kCPU, values, indices, dim, descending, stable.value());
 
   return std::forward_as_tuple(values, indices);

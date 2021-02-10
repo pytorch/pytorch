@@ -308,6 +308,7 @@ std::tuple<Tensor &,Tensor &> _th_sort_out_stable(Tensor & values, Tensor & indi
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
+    TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
     TORCH_CHECK(!stable.value(), "stable=True is not implemented on CUDA yet.");
 
     switch (dispatch_scalar_type) {
@@ -378,6 +379,7 @@ std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, co
 std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
     // DeviceGuard omitted
 
+    TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
     TORCH_CHECK(!stable.value(), "stable=True is not implemented on CUDA yet.");
 
     auto dispatch_scalar_type = infer_scalar_type(self);
