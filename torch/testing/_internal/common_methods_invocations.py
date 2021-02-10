@@ -357,11 +357,19 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         kwargs=dict(dim=1)),)
 
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
-    tensors = (
-        make_tensor((1, 2), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((2, 1), device, dtype, low=None, high=None, requires_grad=requires_grad),
-    )
-    return (SampleInput(tensors),)
+    test_cases = [
+        [(2,), (2,)],
+        [(1, 2), (2, 1)],
+        [(2, 3), (3, 2), (2, 4)],
+    ]
+
+    result = []
+    for test_case in test_cases:
+        tensors = tuple(make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
+                        for size in test_case)
+        result.append(SampleInput(tensors))
+
+    return tuple(result)
 
 def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
     test_sizes = [

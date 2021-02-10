@@ -1,26 +1,25 @@
 #include <ATen/ATen.h>
-#include <ATen/ExpandUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/LinearAlgebra.h>
-#include <ATen/native/IndexingUtils.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Parallel.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
-#include <ATen/core/grad_mode.h>
+#include <c10/util/irange.h>
+#include <c10/util/variant.h>
 #include <functional>
+#include <limits>
 #include <numeric>
 #include <vector>
-#include <limits>
-#include <stack>
-#include <ATen/NamedTensorUtils.h>
-
-#include <c10/util/variant.h>
 
 namespace at {
 namespace native {
@@ -259,7 +258,7 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
 namespace {
 
 /**
- * @brief Computes the optimal order to multiply the input tensors
+ * @brief Computes the optimal matrix chain multiplication order
  *
  * Follows the dynamic programming algorithm from Cormen et al,
  * "Introduction to Algorithms, Third Edition", Chapter 15.2,
@@ -270,15 +269,14 @@ namespace {
  * is the one that minimizes the total cost.
  *
  * @param tensors list of 2D tensors
- * @return 2D list used by #matrix_chain_multiplication
+ * @return the optimal order (2D list used by #matrix_chain_multiplication)
  */
-std::vector<std::vector<int64_t>> matrix_chain_order(
-    const std::vector<Tensor>& tensors) {
-  const auto n = tensors.size();
+std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
+  const size_t n = tensors.size();
 
   // Tensor i has dimensions p[i] x p[i + 1]
   std::vector<int64_t> p(n + 1);
-  for (auto i = decltype(n){0}; i < n; ++i) {
+  for (const auto i : c10::irange<size_t>(n)) {
     p[i] = tensors[i].size(0);
   }
   p[n] = tensors[n - 1].size(1);
@@ -292,11 +290,11 @@ std::vector<std::vector<int64_t>> matrix_chain_order(
   std::vector<std::vector<int64_t>> s(n, std::vector<int64_t>(n));
 
   // Compute the optimal multiplication order
-  for (auto l = decltype(n){1}; l < n; ++l) {
-    for (auto i = decltype(n){0}; i < n - l; ++i) {
+  for (const auto l : c10::irange<size_t>(1, n)) {
+    for (const auto i : c10::irange<size_t>(n - l)) {
       const auto j = i + l;
       m[i][j] = std::numeric_limits<int64_t>::max();
-      for (auto k = decltype(n){i}; k < j; ++k) {
+      for (const auto k : c10::irange<size_t>(i, j)) {
         const auto q = m[i][k] + m[k + 1][j] + p[i] * p[k + 1] * p[j + 1];
         if (q < m[i][j]) {
           m[i][j] = q;
@@ -311,7 +309,7 @@ std::vector<std::vector<int64_t>> matrix_chain_order(
 
 // Multiplies the tensors following the order from #matrix_chain_order
 Tensor matrix_chain_multiplication(
-    const std::vector<Tensor>& tensors,
+    TensorList tensors,
     const std::vector<std::vector<int64_t>>& order,
     int64_t i,
     int64_t j) {
@@ -323,8 +321,9 @@ Tensor matrix_chain_multiplication(
       matrix_chain_multiplication(tensors, order, order[i][j] + 1, j));
 }
 
+// Implements torch.linalg.multi_dot
 Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
-  const auto n = _tensors.size();
+  const size_t n = _tensors.size();
   TORCH_CHECK(n >= 2, "multi_dot(): expected at least 2 tensors but got ", n);
 
   ScalarType t = _tensors[0].scalar_type();
@@ -339,7 +338,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
 
   // If the first tensor is 1D of size n view it as a row vector (1, n)
   if (_tensors[0].dim() == 1) {
-    tensors[0] = _tensors[0].view({1, -1});
+    tensors[0] = _tensors[0].unsqueeze(0);
   } else if (_tensors[0].dim() == 2) {
     tensors[0] = _tensors[0];
     out_shape.push_back(tensors[0].size(0));
@@ -353,7 +352,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
 
   // If the last tensor is 1D of size n view it as a column vector (n, 1)
   if (_tensors[n - 1].dim() == 1) {
-    tensors[n - 1] = _tensors[n - 1].view({-1, 1});
+    tensors[n - 1] = _tensors[n - 1].unsqueeze(-1);
   } else if (_tensors[n - 1].dim() == 2) {
     tensors[n - 1] = _tensors[n - 1];
     out_shape.push_back(tensors[n - 1].size(1));
@@ -366,7 +365,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   }
 
   // Ensure middle tensors are 2D
-  for (auto i = decltype(n){1}; i < n - 1; ++i) {
+  for (const auto i : c10::irange<size_t>(1, n - 1)) {
     TORCH_CHECK(
         _tensors[i].dim() == 2,
         "multi_dot(): tensor ",
@@ -382,7 +381,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   const auto dtype = tensors[0].dtype();
   const auto device = tensors[0].device();
   bool has_empty_tensor = tensors[0].numel() == 0;
-  for (auto i = decltype(n){1}; i < n; ++i) {
+  for (const auto i : c10::irange<size_t>(1, n)) {
     TORCH_CHECK(
         tensors[i].dtype() == dtype,
         "multi_dot(): all tensors must have be the same dtype but tensor 0 is ",
@@ -410,8 +409,10 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
         " and ",
         _tensors[i].sizes(),
         " cannot be multiplied")
-     has_empty_tensor |= tensors[i].numel() == 0;
+    has_empty_tensor |= tensors[i].numel() == 0;
   }
+
+  Tensor result;
 
   if (out.defined()) {
     TORCH_CHECK(
@@ -426,11 +427,11 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
         device,
         " but got ",
         out.device());
-    
+
     at::native::resize_output(out, out_shape);
-    
+
     // View output as 2D for computations
-    out.resize_({tensors[0].size(0), tensors.back().size(-1)});
+    result = out.view({tensors[0].size(0), tensors.back().size(-1)});
   }
 
   // The resize_ and view calls below are to ensure the
@@ -438,16 +439,18 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   // the first and last tensors which we are now viewed as 2D
 
   if (has_empty_tensor) {
-    return out.defined() ? out.zero_().resize_(out_shape)
+    return out.defined() ? result.zero_()
                          : at::zeros(out_shape, tensors[0].options());
   }
 
   if (tensors.size() == 2) {
-    return out.defined()
-        ? at::mm_out(out, tensors[0], tensors[1]).resize_(out_shape)
-        : at::mm(tensors[0], tensors[1]).view(out_shape);
+    return out.defined() ? at::mm_out(result, tensors[0], tensors[1])
+                         : at::mm(tensors[0], tensors[1]).view(out_shape);
   }
 
+  // Why the separate implementation for 3 matrices?
+  // The logic for three matrices is much faster when done directly
+  // Requires 1 comparison to 4 comparisons and lesser arithmetic operations
   if (tensors.size() == 3) {
     const auto a = tensors[0].size(0);
     const auto b = tensors[1].size(0);
@@ -455,20 +458,19 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
     const auto d = tensors[2].size(1);
 
     // The matrices are of size (a x b), (b x c), (c x d)
-    // cost_1 is the cost of parenthesizing (a x b) and (b x c) and then combining (c x d)
-    // cost_2 is the cost of parenthesizing (b x c) and (c x d) and then combining (a x b)
+    // cost_1 is the cost of parenthesizing (a x b) and (b x c) and then
+    // combining (c x d) cost_2 is the cost of parenthesizing (b x c) and (c x
+    // d) and then combining (a x b)
     const auto cost_1 = (a * c) * (b + d);
     const auto cost_2 = (b * d) * (a + c);
 
     if (cost_1 > cost_2) {
       return out.defined()
-          ? at::mm_out(out, tensors[0], at::mm(tensors[1], tensors[2]))
-                .resize_(out_shape)
+          ? at::mm_out(result, tensors[0], at::mm(tensors[1], tensors[2]))
           : at::mm(tensors[0], at::mm(tensors[1], tensors[2])).view(out_shape);
     } else {
       return out.defined()
-          ? at::mm_out(out, at::mm(tensors[0], tensors[1]), tensors[2])
-                .resize_(out_shape)
+          ? at::mm_out(result, at::mm(tensors[0], tensors[1]), tensors[2])
           : at::mm(at::mm(tensors[0], tensors[1]), tensors[2]).view(out_shape);
     }
   }
@@ -476,12 +478,12 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   const auto order = matrix_chain_order(tensors);
   const int64_t i = 0;
   const int64_t j = n - 1;
+
   if (out.defined()) {
     return at::mm_out(
-               out,
-               matrix_chain_multiplication(tensors, order, i, order[i][j]),
-               matrix_chain_multiplication(tensors, order, order[i][j] + 1, j))
-        .resize_(out_shape);
+        result,
+        matrix_chain_multiplication(tensors, order, i, order[i][j]),
+        matrix_chain_multiplication(tensors, order, order[i][j] + 1, j));
   }
   return matrix_chain_multiplication(tensors, order, i, j).view(out_shape);
 }
@@ -496,6 +498,19 @@ Tensor linalg_multi_dot(TensorList tensors) {
 Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
   multi_dot_impl(tensors, result);
   return result;
+}
+
+Tensor chain_matmul(TensorList matrices) {
+  checkAllSameDim(matrices, 2);
+
+  TORCH_CHECK(
+      matrices.size() > 0, "chain_matmul: Expected one or more matrices");
+  if (matrices.size() == 1) {
+    return matrices[0];
+  }
+
+  Tensor undefined;
+  return multi_dot_impl(matrices, undefined);
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
@@ -2374,93 +2389,6 @@ Tensor& linalg_tensorsolve_out(Tensor& result, const Tensor& self, const Tensor&
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
-}
-
-static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
-  if (i == j)
-    return matrices[i];
-  else
-    return at::mm(_chain_matmul_general(matrices, order, i, order[i][j]), _chain_matmul_general(matrices, order, order[i][j] + 1, j));
-}
-
-// Why the separate implementation for 3 matrices?
-// The logic for three matrices is much faster when done directly
-// Requires 1 comparison to 4 comparisons and lesser arithmetic operations
-static inline Tensor _chain_matmul_three_matrices(TensorList matrices) {
-  int64_t a = matrices[0].size(0);  // This is the first dimension
-  int64_t b = matrices[1].size(0);  // This is the common dimension between the first two matrices
-  int64_t c = matrices[2].size(0);  // This is the common dimension between the last two matrices
-  int64_t d = matrices[2].size(1);  // This is the last dimension
-
-  // The matrices are of size (a x b), (b x c), (c x d)
-  // cost_1 is the cost of parenthesizing (a x b) and (b x c) and then combining (c x d)
-  // cost_2 is the cost of parenthesizing (b x c) and (c x d) and then combining (a x b)
-  int64_t cost_1 = (a * c) * (b + d);
-  int64_t cost_2 = (b * d) * (a + c);
-
-  if (cost_1 > cost_2) {
-    return at::mm(matrices[0], at::mm(matrices[1], matrices[2]));
-  } else {
-    return at::mm(at::mm(matrices[0], matrices[1]), matrices[2]);
-  }
-}
-
-Tensor chain_matmul(TensorList matrices) {
-  checkAllSameDim(matrices, 2);
-
-  TORCH_CHECK(matrices.size() > 0, "chain_matmul: Expected one or more matrices");
-  if (matrices.size() == 1) {
-    return matrices[0];
-  } else if (matrices.size() == 2) {
-    return at::mm(matrices[0], matrices[1]);
-  } else if (matrices.size() == 3) {
-    return _chain_matmul_three_matrices(matrices);
-  } else {
-
-    // Following the algorithm in Chapter 15.2 : Introduction to Algorithms, Cormen et al.
-    // Minor modifications have been made to accommodate zero-indexing
-    auto n = matrices.size();
-
-    // Dim vector - the length of which is n + 1. Note that for matrix multiplication, there
-    // needs to a common dimension between the multiplicands, hence for n matrices, there are
-    // n + 1 values. The values p_{i} and p_{i + 1} correspond to the dimensions of matrix i in
-    // the chain (zero-indexed)
-    std::vector<int64_t> p;
-    p.push_back(matrices[0].size(0));
-    for (size_t i = 0; i < n; i++) {
-      p.push_back(matrices[i].size(1));
-    }
-
-    // Cost matrix - an element m[i, j] of this matrix corresponds to the minimum cost of
-    // parenthesizing matrices A_{i} to A_{j}. By this definition m[i, i] = 0 for all i
-    // m[i, j] is filled using the substructure property of the algorithm, meaning:
-    // m[i, j] = min_{i <= k < j} m[i, k] + m[k, j] + p_{i-1}p_{k}p_{j}
-    std::vector<std::vector<int64_t>> m(n, std::vector<int64_t>(n, 0));
-
-    // Auxiliary table for constructing the order
-    // s[i, j] stores the index k at which the optimal split is obtained
-    std::vector<std::vector<int64_t>> s(n, std::vector<int64_t>(n));
-
-    // j and q are used repetitively in the algorithm below
-    int64_t j, q;
-
-    for (int64_t l = 1; l < n; l++) {
-      for (int64_t i = 0; i < n - l; i++) {
-        j = i + l;
-        m[i][j] = std::numeric_limits<int64_t>::max();
-        for (int64_t k = i; k < j; k++) {
-          q = m[i][k] + m[k + 1][j] + p[i] * p[k + 1] * p[j + 1];
-          if (q < m[i][j]) {
-            m[i][j] = q;
-            s[i][j] = k;
-          }
-        }
-      }
-    }
-
-    // We use the result from the algorithm to compute the matrix chain product via recursion
-    return _chain_matmul_general(matrices, s, 0, n - 1);
-  }
 }
 
 /*

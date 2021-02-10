@@ -1512,7 +1512,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
        max(-9, low) and min(9, high).
        For unsigned types the values are between 0 and 9, and for complex
        dtypes the real and imaginary parts are each between -9 and 9,
-       independently."""
+       independently.
+       The discontiguous flag is ignored for sizes that result in a tensor
+       with a single element because these cannot be made discontiguous"""
 
     assert low is None or low < 9, "low value too high!"
     assert high is None or high > -9, "high value too low!"
