@@ -8,6 +8,7 @@ from typing import (
     Any, BinaryIO, Callable, ContextManager, Dict, Iterable, Iterator, List,
     NamedTuple, Optional, overload, Sequence, Tuple, TypeVar, Type, Union,
     Generic, Set, AnyStr)
+from typing_extensions import Literal
 from torch._six import inf
 
 from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Device, Number, Storage
@@ -497,6 +498,8 @@ def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
 def _set_cudnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicCuDNN
 def _get_deterministic_algorithms() -> _bool: ...  # THPModule_deterministicAlgorithms
 def _set_deterministic_algorithms(arg: _bool) -> None: ...  # THPModule_setDeterministicAlgorithms
+def _get_warnAlways() -> _bool: ...  # THPModule_warnAlways
+def _set_warnAlways(arg: _bool) -> None: ...  # THPModule_setWarnAlways
 def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
 def _set_cudnn_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuDNN
 def _get_cublas_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuBLAS
@@ -588,6 +591,7 @@ class PyTorchFileWriter(object):
     def __init__(self, buffer: BinaryIO) -> None: ...
     def write_record(self, name: str, data: bytes, size: _int) -> None: ...
     def write_end_of_file(self) -> None: ...
+    def set_min_version(self, version: _int) -> None: ...
     ...
 
 def _jit_get_inline_everything_mode() -> _bool: ...
