@@ -855,6 +855,14 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     Operator(
+         "aten::dict() -> Dict(str, Tensor)",
+         [](Stack* stack) {
+           auto dict =
+               c10::impl::GenericDict(StringType::get(), TensorType::get());
+           push(stack, dict);
+         },
+         aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__getitem__.str(str s, int index) -> str"),
