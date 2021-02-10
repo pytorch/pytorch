@@ -404,9 +404,12 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   {
     std::unique_lock<std::mutex> lock(timeoutMapMutex_);
     auto it = messageIdToTimeout_.find(messageId);
-    TORCH_INTERNAL_ASSERT(
-        it != messageIdToTimeout_.end(),
-        "Couldn't find messageId in timeout map");
+    if (it == messageIdToTimeout_.end()) {
+      // Already removed from the map by pollTimeoutRpcs(), no need to
+      // process further.
+      return;
+    }
+
     auto& expirationTime = it->second;
 
     auto& timedOutFuturesVector = timeoutMap_[expirationTime];
@@ -965,7 +968,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
 
         pipeRead(
             clientPipe.pipe_,
-            [this, &clientPipe, messageIdR = messageId](
+            [this, &clientPipe](
                 const tensorpipe::Error& error,
                 Message&& responseMessage,
                 std::shared_ptr<LazyStreamContext> ctx) {
@@ -992,10 +995,11 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                 std::string errorMsg = error.what();
                 for (auto& p : pendingMsgs) {
                   markFutureWithError(std::move(p.second), errorMsg);
+
+                  // Remove entry from timeoutMap_.
+                  removeFromTimeoutMap(p.first);
                 }
 
-                // Remove entry from timeoutMap_.
-                removeFromTimeoutMap(responseMessage.id());
                 return;
               }
 
@@ -1072,10 +1076,15 @@ void TensorPipeAgent::pollTimeoutRpcs() {
     // outside the lock.
     std::vector<TimeoutMessageMetadata> timedOutFutures =
         std::move(timeoutMap_.begin()->second);
+
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
     timeoutMap_.erase(timeoutMap_.begin());
 
+    for (auto& timeoutMetadata : timedOutFutures) {
+      // Remove from messageIdToTimeout map.
+      messageIdToTimeout_.erase(timeoutMetadata.messageId);
+    }
     lock.unlock();
 
     // Set an error on futures added to the timedOutFutures vector. We do this
@@ -1087,9 +1096,6 @@ void TensorPipeAgent::pollTimeoutRpcs() {
       auto err = makeRPCError(errorMsg, RPCErrorType::TIMEOUT);
       markFutureWithError(
           std::move(timeoutMetadata.responseFuture), std::move(err));
-
-      // Remove from messageIdToTimeout map.
-      messageIdToTimeout_.erase(timeoutMetadata.messageId);
     }
   }
 }
