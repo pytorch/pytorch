@@ -1,3 +1,5 @@
+#include <c10/util/irange.h>
+
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
@@ -839,7 +841,7 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
 
   // All available new positions
   std::set<int> all_positions;
-  for (decltype(ndims) i{0}; i < ndims; i++)
+  for (const auto i : c10::irange(ndims))
     all_positions.insert(i);
 
   // Check what positions haven't been specified.
@@ -1012,7 +1014,7 @@ std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
 
   bool rfactor_found = false;
   bool reduction_found = false;
-  for (decltype(nDims()) i{0}; i < nDims(); i++) {
+  for (const auto i : c10::irange(nDims())) {
     if (axis(i)->isReduction()) {
       if (axes_set.find(i) != axes_set.end()) {
         rfactor_found = true;

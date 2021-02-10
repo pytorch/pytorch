@@ -10,6 +10,8 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
 
+#include <c10/util/irange.h>
+
 #include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
@@ -1381,7 +1383,7 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, const std::string&
   }
 
   // Now call lapackSyevd for each matrix in the batched input
-  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
+  for (const auto i: c10::irange(batch_size)) {
     scalar_t* v_working_ptr = &v_data[i * v_matrix_stride];
     value_t* w_working_ptr = &w_data[i * w_stride];
     lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_working_ptr, lda, w_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, lrwork, iwork.data_ptr<int>(), liwork, &info);

@@ -1,3 +1,5 @@
+#include <c10/util/irange.h>
+
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
 
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -30,7 +32,7 @@ void validateIr(Fusion* fusion) {
   fusion->validateInputs();
 
   for (auto tv : used_tvs) {
-    for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
+    for (const auto i : c10::irange(tv->nDims())) {
       IterDomain* id = tv->getComputeAtAxis(i).first;
 
       if (id->isBlockDim()) {
