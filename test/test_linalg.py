@@ -2441,6 +2441,7 @@ class TestLinalg(TestCase):
             a.requires_grad_()
             infos1 = torch.empty(0, dtype=torch.int, device=device)
             infos2 = torch.empty(0, dtype=torch.int, device=device)
+
             def func(a):
                 return torch.linalg.inv(a, infos=(infos1, infos2))
             gradcheck(func, a)
