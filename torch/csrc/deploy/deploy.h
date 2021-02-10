@@ -69,14 +69,14 @@ class TORCH_API Interpreter {
 struct Package;
 
 struct TORCH_API LoadBalancer {
-  LoadBalancer(size_t n) : locks_(new uint64_t[8 * n]), n_(n) {
+  LoadBalancer(size_t n) : uses_(new uint64_t[8 * n]), allocated_(n), n_(n) {
     // 8*... to avoid false sharing of atomics on the same cache line
-    memset(locks_, 0, 8 * n_ * sizeof(uint64_t));
+    memset(uses_.get(), 0, 8 * n_ * sizeof(uint64_t));
   }
   void setResourceLimit(size_t n) {
+    TORCH_INTERNAL_ASSERT(n <= allocated_);
     n_ = n;
   }
-#ifndef _WIN32
   int acquire() {
     thread_local int last = 0;
     size_t minusers = SIZE_MAX;
@@ -85,16 +85,21 @@ struct TORCH_API LoadBalancer {
       if (last >= n_) {
         last = 0;
       }
-      uint64_t prev =
-          __atomic_fetch_add(&locks_[8 * last], 1ULL, __ATOMIC_SEQ_CST);
-      if (prev == 0) {
+      uint64_t prev = 0;
+      bool acquired = __atomic_compare_exchange_n(
+          &uses_[8 * last],
+          &prev,
+          1ULL,
+          false,
+          __ATOMIC_SEQ_CST,
+          __ATOMIC_SEQ_CST);
+      if (acquired) {
         // fast path, we found an interpreter with no users
         return last;
-      } else {
-        // slow path, we don't want to use this interpreter because it is being
-        // used by someone else.
-        __atomic_fetch_sub(&locks_[8 * last], 1ULL, __ATOMIC_SEQ_CST);
       }
+      // slow path, we don't want to use this interpreter because it is being
+      // used by someone else.
+
       if (prev < minusers) {
         minusers = prev;
         min_idx = last;
@@ -103,22 +108,17 @@ struct TORCH_API LoadBalancer {
     // we failed to find a completely free interpreter. heuristically use the
     // one with the least number of user (note that this may have changed since
     // then, so this is only a heuristic).
-    __atomic_fetch_add(&locks_[8 * min_idx], 1ULL, __ATOMIC_SEQ_CST);
+    __atomic_fetch_add(&uses_[8 * min_idx], 1ULL, __ATOMIC_SEQ_CST);
     return min_idx;
   }
   void free(int where) {
-    __atomic_fetch_sub(&locks_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
+    __atomic_fetch_sub(&uses_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
   }
-#else
-  int acquire() {
-    TORCH_INTERNAL_ASSERT(false, "NYI: windows acquire");
-  }
-  void free(int where) {
-    TORCH_INTERNAL_ASSERT(false, "NYI: windows free");
-  }
-#endif
+
  private:
-  uint64_t* locks_;
+  std::unique_ptr<uint64_t[]>
+      uses_; // the approximate count of the number of users of interpreter
+  size_t allocated_;
   size_t n_;
 };
 

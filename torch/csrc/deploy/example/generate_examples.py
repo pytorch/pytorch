@@ -3,13 +3,14 @@ Generate the example files that torchpy_test uses.
 """
 from pathlib import Path
 import torch
-import torchvision
 import argparse
 
 from torch.package import PackageExporter
 
-from .examples import Simple
-
+try:
+    from .examples import Simple, resnet18
+except ImportError:
+    from examples import Simple, resnet18
 
 def save(name, model, model_jit, eg):
     with PackageExporter(str(p / name)) as e:
@@ -32,7 +33,7 @@ if __name__ == "__main__":
     else:
         p = Path(args.install_dir)
 
-    resnet = torchvision.models.resnet18()
+    resnet = resnet18()
     resnet.eval()
     resnet_eg = torch.rand(1, 3, 224, 224)
     resnet_traced = torch.jit.trace(resnet, resnet_eg)

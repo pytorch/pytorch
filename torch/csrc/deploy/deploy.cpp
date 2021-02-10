@@ -53,17 +53,18 @@ MovableObject InterpreterSession::create_movable(PythonObject obj) {
 
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
-  char library_name[L_tmpnam];
-  std::tmpnam(library_name);
+  char library_name[] = "/tmp/torch_deployXXXXXX";
+  int fd = mkstemp(library_name);
+  TORCH_INTERNAL_ASSERT(fd != -1, "failed to create temporary file");
   library_name_ = library_name;
-  {
-    std::ofstream dst(library_name, std::ios::binary);
-    dst.write(
-        _binary_libtorch_deployinterpreter_so_start,
-        _binary_libtorch_deployinterpreter_so_end -
-            _binary_libtorch_deployinterpreter_so_start);
-
-  }
+  FILE* dst = fdopen(fd, "wb");
+  TORCH_INTERNAL_ASSERT(dst);
+  size_t size = _binary_libtorch_deployinterpreter_so_end -
+      _binary_libtorch_deployinterpreter_so_start;
+  TORCH_INTERNAL_ASSERT(
+      size ==
+      fwrite(_binary_libtorch_deployinterpreter_so_start, 1, size, dst));
+  fclose(dst);
   handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY);
   if (!handle_) {
     throw std::runtime_error(dlerror());
