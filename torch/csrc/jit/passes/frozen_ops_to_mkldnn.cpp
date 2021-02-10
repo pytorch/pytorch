@@ -35,7 +35,7 @@ using Tensor = at::Tensor;
 namespace {
 
 Operation ConstantMKLDNNTensorOp(const Node* node) {
-  auto t = node->t(attr::value);
+  const auto& t = node->t(attr::value);
   return [t](Stack* stack) {
     push(stack, t);
     return 0;
@@ -45,14 +45,14 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 // This is registered as its own op instead of as prim::Constant bc it does not
 // serialize which is an invariant of prim::Constant
 // TODO: make mkldnn tensor serialize...
-RegisterOperators MKLDNNConstantOp({
+const RegisterOperators MKLDNNConstantOp({
     torch::jit::Operator(
         prim::ConstantMKLDNNTensor,
         ConstantMKLDNNTensorOp,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-Node* createConstantMKLDNNTensorOp(Graph* g, Tensor mkldnn_tensor) {
+Node* createConstantMKLDNNTensorOp(Graph* g, const Tensor& mkldnn_tensor) {
   TORCH_INTERNAL_ASSERT(mkldnn_tensor.is_mkldnn());
   auto op = g->create(prim::ConstantMKLDNNTensor);
   op->t_(attr::value, mkldnn_tensor);
@@ -77,7 +77,7 @@ void replaceInputWithMKLDNNTensor(Node* n, size_t index) {
 
 void replaceInputWithMKLDNNTensor(
     Node* n,
-    std::string name,
+    const std::string& name,
     const at::Tensor& mkldnn_tensor) {
   Value* input = n->namedInput(name);
   auto mkldnn_tensor_value =
@@ -88,7 +88,7 @@ void replaceInputWithMKLDNNTensor(
   n->replaceInputWith(input, mkldnn_tensor_value);
 }
 
-void replaceInputWithMKLDNNTensor(Node* n, std::string name) {
+void replaceInputWithMKLDNNTensor(Node* n, const std::string& name) {
   Value* input = n->namedInput(name);
   auto mkldnn_tensor = constant_as<Tensor>(input)->to_mkldnn();
   replaceInputWithMKLDNNTensor(n, name, mkldnn_tensor);
@@ -325,7 +325,7 @@ class MKLDNNSubgraphSlicer {
     }
     // unary ops we dont need to prove anything else than
     // the input is mkldnn supported
-    if (n->kind() == aten::relu || aten::sigmoid) {
+    if (n->kind() == aten::relu || n->kind() == aten::sigmoid) {
       return true;
     }
     if (n->kind() == aten::add) {

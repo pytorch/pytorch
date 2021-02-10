@@ -316,18 +316,22 @@ void initPythonIRBindings(PyObject* module_) {
           "inputs",
           [](Graph& g) {
             return py::make_iterator(g.inputs().begin(), g.inputs().end());
-          })
+          },
+          py::keep_alive<0, 1>())
       .def(
           "outputs",
           [](Graph& g) {
             return py::make_iterator(g.outputs().begin(), g.outputs().end());
-          })
-      // TODO: Iterator invalidation might make this hazardous
+          },
+          py::keep_alive<0, 1>())
+      // We keep the graph alive while the iterator lives. Destroying
+      // nodes might still be hazardous.
       .def(
           "nodes",
           [](Graph& g) {
             return py::make_iterator(g.nodes().begin(), g.nodes().end());
-          })
+          },
+          py::keep_alive<0, 1>())
       .def(
           "findNode",
           [](Graph& g, const std::string& kind, bool recurse) {
@@ -396,7 +400,7 @@ void initPythonIRBindings(PyObject* module_) {
 #undef GS
 
 #define VS(name) def(#name, &Value ::name)
-  py::class_<Value, std::unique_ptr<Value, py::nodelete>>(m, "Value")
+  py::class_<Value, unwrapping_shared_ptr<Value>>(m, "Value")
       .def(
           "__repr__",
           [](Value& n) {
@@ -439,7 +443,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
 
-  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
+  py::class_<Block, unwrapping_shared_ptr<Block>>(m, "Block")
       .def(
           "nodes",
           [](Block& b) {
@@ -484,7 +488,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
 
 #define NS(name) def(#name, &Node ::name)
-  py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
+  py::class_<Node, unwrapping_shared_ptr<Node>>(m, "Node")
       .def(
           "__repr__",
           [](Node& n) {
@@ -769,6 +773,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
+  py::class_<ComplexType, Type, std::shared_ptr<ComplexType>>(m, "ComplexType")
+      .def_static("get", &ComplexType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get)
       .def_static("getInferred", &TensorType::getInferred);
@@ -804,6 +810,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def_static("ofFloats", &ListType::ofFloats)
+      .def_static("ofComplexDoubles", &ListType::ofComplexDoubles)
       .def_static("ofBools", &ListType::ofBools)
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
@@ -866,6 +873,27 @@ void initPythonIRBindings(PyObject* module_) {
           names.emplace_back(fn.name());
         }
         return names;
+      });
+  using ::c10::InferredType;
+  py::class_<InferredType, std::shared_ptr<InferredType>>(m, "InferredType")
+      .def(py::init([](std::shared_ptr<Type> type) {
+        return std::make_shared<InferredType>(std::move(type));
+      }))
+      .def(py::init([](std::string reason) {
+        return std::make_shared<InferredType>(std::move(reason));
+      }))
+      .def(
+          "type",
+          [](const std::shared_ptr<InferredType>& self) {
+            return self->type();
+          })
+      .def(
+          "success",
+          [](const std::shared_ptr<InferredType>& self) {
+            return self->success();
+          })
+      .def("reason", [](const std::shared_ptr<InferredType>& self) {
+        return self->reason();
       });
 
   py::class_<Use>(m, "Use")

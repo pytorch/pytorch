@@ -1137,7 +1137,7 @@ class Module:
                 # This is used to avoid copying uninitialized parameters into
                 # non-lazy modules, since they dont have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
-                is_param_lazy = isinstance(param, torch.nn.parameter.UninitializedParameter)
+                is_param_lazy = torch.nn.parameter.is_lazy(param)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
                 if not is_param_lazy and len(param.shape) == 0 and len(input_param.shape) == 1:
                     input_param = input_param[0]

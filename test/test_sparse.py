@@ -11,10 +11,9 @@ import random
 from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
-from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops)
@@ -28,6 +27,8 @@ if TEST_SCIPY:
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+# batched grad doesn't support sparse
+gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 def cpu_only(inner):
     @functools.wraps(inner)
@@ -1465,9 +1466,11 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        y1 = x1 // 37.5
+        with self.maybeWarnsRegex(UserWarning, 'floor_divide'):
+            y1 = x1 // 37.5
         y2 = x1.clone()
-        y2.floor_divide_(37.5)
+        with self.maybeWarnsRegex(UserWarning, 'floor_divide'):
+            y2.floor_divide_(37.5)
         expected = self.safeToDense(x1) // 37.5
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)

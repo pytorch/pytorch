@@ -111,8 +111,13 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "index_put", [&] {
     if (accumulate) {
-      bool use_parallel_for = ((iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
-      if (iter.dtype() == ScalarType::Float && use_parallel_for) {
+      // See Note [Enabling Deterministic Operations]
+      // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
+      // must enable serial execution if deterministic algorithms are enabled.
+      bool is_deterministic = at::globalContext().deterministicAlgorithms();
+      bool use_parallel_for = (!is_deterministic) && (
+        (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
+      if (use_parallel_for && iter.dtype() == ScalarType::Float) {
         cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
           cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
         });
@@ -128,6 +133,70 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
         *(scalar_t*)(dst + offset) = *(scalar_t*)src;
       });
     }
+  });
+}
+
+void index_fill_kernel(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
+  Scalar source) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    iter.dtype(), "index_fill_cpu", [&] {
+    auto fill_val = source.to<scalar_t>();
+    auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+      auto* self_data_bytes = data[0];
+      auto* index_data_bytes = data[1];
+      for (int64_t elem = 0; elem < n; ++elem) {
+        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+        auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+        if (idx < -self_dim_size || idx >= self_dim_size) {
+          TORCH_CHECK_INDEX(false,
+            "index ", idx, " is out of bounds for dimension ",
+            dim, " with size ", self_dim_size);
+        }
+        if (idx < 0) {
+          idx += self_dim_size;
+        }
+
+        self_data[idx * self_dim_stride] = fill_val;
+
+        self_data_bytes += strides[0];
+        index_data_bytes += strides[1];
+      }
+    };
+    auto handle_zero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+      auto* self_data_bytes = data[0];
+      auto* index_data_bytes = data[1];
+      auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+      if (idx < -self_dim_size || idx >= self_dim_size) {
+        TORCH_CHECK_INDEX(false,
+          "index ", idx, " is out of bounds for dimension ",
+          dim, " with size ", self_dim_size);
+      }
+      if (idx < 0) {
+        idx += self_dim_size;
+      }
+      for (int64_t elem = 0; elem < n; ++elem) {
+        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+
+        self_data[idx * self_dim_stride] = fill_val;
+
+        self_data_bytes += strides[0];
+      }
+    };
+
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      auto idx_stride = strides[1];
+      if (idx_stride) {
+        handle_nonzero_idx_stride(data, strides, n);
+      }
+      else {
+        handle_zero_idx_stride(data, strides, n);
+      }
+    };
+    iter.for_each(loop);
   });
 }
 
@@ -192,15 +261,20 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
 }
 
 void masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
-  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Bool, ScalarType::BFloat16,
-    iter.dtype(), "masked_scatter", [&] {
-      auto mask_dtype = iter.input_dtype(0);
-      if (mask_dtype == ScalarType::Bool) {
-        cpu_masked_scatter_kernel<scalar_t, bool>(iter, source);
-      } else {
-        cpu_masked_scatter_kernel<scalar_t, unsigned char>(iter, source);
-      }
-    });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool,
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      iter.dtype(),
+      "masked_scatter",
+      [&] {
+        auto mask_dtype = iter.input_dtype(0);
+        if (mask_dtype == ScalarType::Bool) {
+          cpu_masked_scatter_kernel<scalar_t, bool>(iter, source);
+        } else {
+          cpu_masked_scatter_kernel<scalar_t, unsigned char>(iter, source);
+        }
+      });
 }
 
 template <typename scalar_t, typename mask_t, typename func_t>
@@ -284,6 +358,7 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
 REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
