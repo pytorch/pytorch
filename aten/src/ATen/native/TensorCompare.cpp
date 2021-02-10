@@ -16,6 +16,7 @@ DEFINE_DISPATCH(min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 DEFINE_DISPATCH(_aminmax_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(isposinf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(isneginf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(mode_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
@@ -295,7 +296,8 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
   return at::native::mode_out(self, dim, keepdim, values, indices);
 }
 
-std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim, Tensor& values, Tensor& indices) {
+std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim,
+                                       Tensor& values, Tensor& indices) {
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "mode only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -308,7 +310,8 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
   } else {
     auto result = [&]() {
       NoNamesGuard guard;
-      return at::_mode_out(values, indices, self, dim, keepdim);
+      mode_stub(self.device().type(), values, indices, self, dim, keepdim);
+      return std::tuple<Tensor &,Tensor &>{values, indices};
     }();
     namedinference::propagate_names_for_reduction(std::get<0>(result), self, dim, keepdim);
     namedinference::propagate_names_for_reduction(std::get<1>(result), self, dim, keepdim);
