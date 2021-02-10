@@ -17,8 +17,8 @@ import sys
 # * If there's a triply-nested template
 # But this should be sufficient to detect and fix most problem
 # instances and can be refined before the test is made binding
-kernel_launch_regex = re.compile(r"""
-    ^.*>>>        # Identifies kernel launch
+kernel_launch_pattern = r"""
+    >>>           # Identifies kernel launch
     \s*           # Maybe some whitespace (includes newlines)
     \([^;]+\);    # And then arguments in parens and semi-colon
     (?!           # Negative lookahead: we trigger if we don't find the launch guard
@@ -29,7 +29,9 @@ kernel_launch_regex = re.compile(r"""
         \s*                                  # Maybe some whitespace (includes newlines)
         C10_CUDA_KERNEL_LAUNCH_CHECK\(\);  # Kernel launch guard!
     )             # End negative lookahead
-""", flags=re.MULTILINE | re.VERBOSE)
+"""
+
+kernel_launch_regex = re.compile(kernel_launch_pattern, flags=re.MULTILINE | re.VERBOSE)
 
 
 def check_code_for_cuda_kernel_launches(code, filename=None):
