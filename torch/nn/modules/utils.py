@@ -1,13 +1,12 @@
 
-from torch._six import container_abcs
-
+import collections
 from itertools import repeat
 from typing import List
 
 
 def _ntuple(n):
     def parse(x):
-        if isinstance(x, container_abcs.Iterable):
+        if isinstance(x, collections.abc.Iterable):
             return x
         return tuple(repeat(x, n))
     return parse

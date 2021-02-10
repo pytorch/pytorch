@@ -1,6 +1,5 @@
 import torch
-from collections import defaultdict
-from torch._six import container_abcs
+from collections import defaultdict, abc
 import warnings
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
@@ -176,7 +175,7 @@ class GradScaler(object):
                     assert self._scale is not None
                     stash.append(_MultiDeviceReplicator(self._scale))
                 return val * stash[0].get(val.device)
-            elif isinstance(val, container_abcs.Iterable):
+            elif isinstance(val, abc.Iterable):
                 iterable = map(apply_scale, val)
                 if isinstance(val, list) or isinstance(val, tuple):
                     return type(val)(iterable)

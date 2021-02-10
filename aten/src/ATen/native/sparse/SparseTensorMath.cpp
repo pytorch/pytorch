@@ -283,7 +283,7 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
 }
 
 SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, SparseTensor& r) {
-  return div_out_sparse_zerodim(t, value, "true", r);
+  return div_out_sparse_zerodim(t, value, /*rounding_mode=*/c10::nullopt, r);
 }
 
 Tensor div_sparse(const Tensor& self, const Tensor& value) {
