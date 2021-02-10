@@ -7,7 +7,6 @@ import torch.nn.intrinsic as nni
 from torch.quantization import get_default_qconfig, default_dynamic_qconfig
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
-from torch.quantization import get_default_qconfig
 from torch.quantization._numeric_suite_fx import (
     remove_qconfig_observer_fx,
     compare_model_outputs_fx,

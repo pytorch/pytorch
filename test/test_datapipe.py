@@ -5,6 +5,8 @@ import tempfile
 import warnings
 import tarfile
 import zipfile
+import numpy as np
+from PIL import Image
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
@@ -12,6 +14,11 @@ from torch.utils.data import IterDataPipe, RandomSampler
 from typing import List, Tuple, Dict, Any, Type
 
 import torch.utils.data.datapipes as dp
+
+from torch.utils.data.datapipes.utils.decoder import (
+    basichandlers as decoder_basichandlers,
+    imagehandler as decoder_imagehandler)
+
 
 def create_temp_dir_and_files():
     # The temp dir and files within it will be released and deleted in tearDown().
@@ -151,6 +158,57 @@ class TestIterableDataPipeBasic(TestCase):
         for i in range(0, count):
             self.assertEqual(os.path.basename(data_refs[i][0]), os.path.basename(self.temp_files[i]))
             self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
+
+
+    def test_routeddecoder_iterable_datapipe(self):
+        temp_dir = self.temp_dir.name
+        temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
+        img = Image.new('RGB', (2, 2), color='red')
+        img.save(temp_pngfile_pathname)
+        datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
+        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe3 = dp.iter.RoutedDecoder(datapipe2, handlers=[decoder_imagehandler('rgb')])
+        datapipe3.add_handler(decoder_basichandlers)
+
+        for rec in datapipe3:
+            ext = os.path.splitext(rec[0])[1]
+            if ext == '.png':
+                expected = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
+                self.assertTrue(np.array_equal(rec[1], expected))
+            else:
+                self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
+
+
+    def test_groupbykey_iterable_datapipe(self):
+        temp_dir = self.temp_dir.name
+        temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
+        file_list = [
+            "a.png", "b.png", "c.json", "a.json", "c.png", "b.json", "d.png",
+            "d.json", "e.png", "f.json", "g.png", "f.png", "g.json", "e.json",
+            "h.txt", "h.json"]
+        with tarfile.open(temp_tarfile_pathname, "w:gz") as tar:
+            for file_name in file_list:
+                file_pathname = os.path.join(temp_dir, file_name)
+                with open(file_pathname, 'w') as f:
+                    f.write('12345abcde')
+                tar.add(file_pathname)
+
+        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
+        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
+        datapipe4 = dp.iter.GroupByKey(datapipe3, group_size=2)
+
+        expected_result = [("a.png", "a.json"), ("c.png", "c.json"), ("b.png", "b.json"), ("d.png", "d.json"), (
+            "f.png", "f.json"), ("g.png", "g.json"), ("e.png", "e.json"), ("h.json", "h.txt")]
+
+        count = 0
+        for rec, expected in zip(datapipe4, expected_result):
+            count = count + 1
+            self.assertEqual(os.path.basename(rec[0][0]), expected[0])
+            self.assertEqual(os.path.basename(rec[1][0]), expected[1])
+            self.assertEqual(rec[0][1].read(), b'12345abcde')
+            self.assertEqual(rec[1][1].read(), b'12345abcde')
+        self.assertEqual(count, 8)
 
 
 class IDP_NoLen(IterDataPipe):
