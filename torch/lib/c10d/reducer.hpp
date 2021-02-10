@@ -2,7 +2,7 @@
 
 #include <atomic>
 #ifdef USE_CUDA
-#include <cuda_runtime.h>
+#include <ATen/cuda/CUDAEvent.h>
 #endif
 #include <memory>
 #include <mutex>
@@ -10,9 +10,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <c10d/comm.hpp>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/comm.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -67,7 +67,7 @@ class Reducer {
   // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
- // Cannot combine with the call of `register_builtin_comm_hook`.
+  // Cannot combine with the call of `register_builtin_comm_hook`.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
   // Registers a built-in C++ comm hook to the reducer. This function can only
@@ -233,7 +233,8 @@ class Reducer {
     // participating variables after reduction has completed.
     std::vector<torch::autograd::Variable> variables;
 
-    // Per-variable offset/length into the flat bucket contents tensor and grad bucket.
+    // Per-variable offset/length into the flat bucket contents tensor and grad
+    // bucket.
     std::vector<size_t> offsets;
     std::vector<size_t> lengths;
 
@@ -323,7 +324,7 @@ class Reducer {
   // Map the index of a variable to its location in the bucket structure.
   std::vector<VariableLocator> variable_locators_;
 
-  // track the number of iterations trained by users
+  // track the number of iterations to synchronize grads in training so far.
   long num_iterations_;
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
@@ -333,7 +334,8 @@ class Reducer {
   struct CPUTimer {
     // The timestamp of forward call start time in each iteration.
     int64_t forward_start_time;
-    // The timestamp of backward computation start and end time in each iteration.
+    // The timestamp of backward computation start and end time in each
+    // iteration.
     int64_t backward_compute_start_time;
     int64_t backward_compute_end_time;
     // The timestamp of first communication call start time in each iteration.
@@ -344,17 +346,21 @@ class Reducer {
 
   CPUTimer cpu_timer_{};
 
-  #ifdef USE_CUDA
+#ifdef USE_CUDA
   // GPU events to record event start and end time.
   struct GPUTimer {
-    cudaEvent_t forward_start;
-    cudaEvent_t backward_compute_start;
-    cudaEvent_t backward_compute_end;
-    cudaEvent_t backward_comm_start;
-    cudaEvent_t backward_comm_end;
+    at::cuda::CUDAEvent forward_start = at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_compute_start =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_compute_end =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_comm_start =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_comm_end =
+        at::cuda::CUDAEvent(cudaEventDefault);
   };
-  GPUTimer gpu_timer_{};
-  #endif
+  GPUTimer gpu_timer_;
+#endif
 
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of

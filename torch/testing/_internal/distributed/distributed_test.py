@@ -3295,7 +3295,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.bucket_cap_mb, 1.5)
             self.assertEqual(
                 ddp_logging_data.bucket_sizes,
-                [params[1].numel() * p.element_size(), params[0].numel() * p.element_size()])
+                [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()])
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")

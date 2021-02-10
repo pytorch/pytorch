@@ -7,7 +7,7 @@ class Logger {
   explicit Logger(std::shared_ptr<c10d::Reducer> reducer);
   // Set logging data that can be got during DistributedDataParallel
   // construction time.
-  void set_construction_logging_data(
+  void set_construction_data_and_log(
       const std::string& module_name,
       const std::vector<int>& device_ids,
       int output_device,
@@ -33,8 +33,8 @@ class Logger {
 #ifdef USE_CUDA
   void calculate_avg_gpu_time(
       int64_t& avg_time,
-      cudaEvent_t gpu_start,
-      cudaEvent_t gpu_end);
+      at::cuda::CUDAEvent& gpu_start,
+      at::cuda::CUDAEvent& gpu_end);
 #endif
   // Set stats that can be collected only during
   // training loop. It is called at beginning of forward call.
