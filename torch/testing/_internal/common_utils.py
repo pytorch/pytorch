@@ -43,7 +43,7 @@ from typing import cast, Any, Dict, Iterable, Iterator, Optional
 from torch.testing._internal import expecttest
 from torch.testing import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
-     floating_types_and, integral_types, complex_types)
+     floating_types_and, integral_types, complex_types, integral_types_and)
 
 import torch
 import torch.cuda
@@ -1710,6 +1710,9 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     singular = kwargs.get("singular", False)
+    values_domain = kwargs.get("domain", None)
+    uncoalesced = kwargs.get("uncoalesced", False)
+    requires_grad = kwargs.get("requires_grad", False)
 
     k = min(rows, columns)
     nonzero_elements = max(min(rows, columns), int(rows * columns * density))
@@ -1718,12 +1721,40 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     column_indices = [i % columns for i in range(nonzero_elements)]
     random.shuffle(column_indices)
     indices = [row_indices, column_indices]
-    values = torch.randn(nonzero_elements, dtype=dtype, device=device)
-    # ensure that the diagonal dominates
-    values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
+    if dtype in integral_types():
+        requires_grad = False
+        if values_domain is None:
+            low, high = (-100, 100)
+        else:
+            low, high = values_domain
+            low = round(low)
+            high = round(min(high, 1e5))  # if high=inf, clamp to 1e5
+
+        if dtype is torch.uint8:
+            low = max(low, 0)
+            high = min(high, 255)
+
+        values = torch.randint(low, high, size=(nonzero_elements, ), dtype=dtype, device=device)
+    elif dtype == torch.bool:
+        requires_grad = False
+        values = torch.randint(0, 2, size=(nonzero_elements, ), dtype=dtype, device=device)
+    else:
+        if values_domain is None:
+            values = torch.randn(nonzero_elements, dtype=dtype, device=device)
+            # ensure that the diagonal dominates
+            values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
+        else:
+            low, high = values_domain
+            high = min(high, 1e5)  # if high=inf, clamp to 1e5
+            values = (high - low) * torch.rand(nonzero_elements, dtype=dtype, device=device) + low
+
     indices_tensor = torch.tensor(indices)
-    A = torch.sparse_coo_tensor(indices_tensor, values, (rows, columns), device=device)
-    return A.coalesce()
+    A = torch.sparse_coo_tensor(
+        indices_tensor, values, (rows, columns), device=device, requires_grad=requires_grad
+    )
+    if not uncoalesced:
+        A = A.coalesce() 
+    return A
 
 
 def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):

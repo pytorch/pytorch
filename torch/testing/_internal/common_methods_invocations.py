@@ -23,7 +23,7 @@ from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
-     random_symmetric_pd_matrix, make_nonzero_det,
+     random_symmetric_pd_matrix, random_sparse_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN)
@@ -304,24 +304,27 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad):
 
 
 def sparse_sample_inputs_unary(op_info, device, dtype, requires_grad):
-    """
-    TODO: Let's elaborate in this docstring on what kind of sparse tensors are generated.
+    """This function generates 2D sparse COO matrices with 20% density. 
+    Generated values are bound to domain if op_info.domain is provided.
+    Generated COO matrices are coalesced and uncoalesced of random shape.
     """
     if not op_info.supports_sparse:
         raise RuntimeError("This op does not support sparse input")
 
-    low, high = self.domain
-    low = -10 if low is None else low + self._domain_eps
-    high = 10 if high is None else high - self._domain_eps
-
-    numel = 10
-    t1 = torch.sparse_coo_tensor(
-        indices=torch.arange(numel).unsqueeze(0),
-        values=torch.linspace(low, high, steps=numel),
-        size=[numel, ],
-        device=device,
-        dtype=dtype,
+    # generate 2D random coalesced/uncoalesced sparse matrix with density of 20%
+    random_shape = torch.randint(100, 200, size=(2, )).tolist()
+    low, high = op_info.domain
+    domain = None if (low is None and high is None) else (low + op_info._domain_eps, high - op_info._domain_eps)
+    t1 = random_sparse_matrix(
+        *random_shape, density=0.2, device=device, dtype=dtype, requires_grad=requires_grad, 
+        uncoalesced=False, domain=domain
     )
+    output = (SampleInput(t1), )
+    t2 = random_sparse_matrix(
+        *random_shape, density=0.2, device=device, dtype=dtype, requires_grad=requires_grad, 
+        uncoalesced=True, domain=domain
+    )
+    return (SampleInput(t1), SampleInput(t2))
 
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
@@ -353,7 +356,6 @@ class UnaryUfuncInfo(OpInfo):
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
                  sample_inputs_func=sample_inputs_unary,
-                 supports_sparse=False,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -361,7 +363,6 @@ class UnaryUfuncInfo(OpInfo):
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
                                              sample_inputs_func=sample_inputs_func,
-                                             supports_sparse=supports_sparse,
                                              **kwargs)
         self.ref = ref
         self.domain = domain
@@ -373,59 +374,6 @@ class UnaryUfuncInfo(OpInfo):
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
         self._domain_eps = 1e-5
-
-    def sample_sparse_inputs(self, device, dtype, requires_grad=False, **kwargs):
-        """Returns an iterable of SampleInputs."""
-        if not self.supports_sparse:
-            raise RuntimeError("This op does not support sparse input")
-
-        low, high = self.domain
-        low = -10 if low is None else low + self._domain_eps
-        high = 10 if high is None else high - self._domain_eps
-        is_coalesced = kwargs.get("is_coalesced", False)
-
-        numel = 10
-        t1 = torch.sparse_coo_tensor(
-            indices=torch.arange(numel).unsqueeze(0),
-            values=torch.linspace(low, high, steps=numel),
-            size=[numel, ],
-            device=device,
-            dtype=dtype,
-        )
-        # hybrid sparse input
-        size = [10, 12, 4]
-        numel = 8
-        i1 = torch.randint(0, size[0], size=(numel, ))
-        i2 = torch.randint(0, size[1], size=(numel, ))
-        indices = torch.stack([i1, i2], dim=0)
-        values = torch.linspace(low, high, steps=numel * size[2]).reshape(numel, -1)
-        t2 = torch.sparse_coo_tensor(
-            indices=indices,
-            values=values,
-            size=size,
-            device=device,
-            dtype=dtype
-        )
-
-        # empty sparse tensor
-        t3 = torch.sparse_coo_tensor(
-            indices=torch.zeros([2, 0]),
-            values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
-            size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
-            device=device,
-            dtype=dtype
-        )
-
-        if is_coalesced:
-            t1 = t1.coalesce()
-            t2 = t2.coalesce()
-            t3 = t3.coalesce()
-
-        return (
-            SampleInput(t1),
-            SampleInput(t2),
-            SampleInput(t3),
-        )
 
 
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
@@ -1796,7 +1744,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   sample_inputs_func=sample_),
+                   sparse_sample_inputs_func=sparse_sample_inputs_unary),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
                    domain=(0, float('inf')),
@@ -2042,23 +1990,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    handles_complex_extremals=False,
                    sparse_sample_inputs_func=sparse_sample_inputs_unary),
-    UnaryUfuncInfo('sign',
-                   ref=np.sign,
-                   dtypes=all_types_and(torch.bool, torch.half),
-                   dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   skips=(
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.bool, torch.float16, torch.bfloat16, torch.float, torch.double]),
-                       # Reference: https://github.com/pytorch/pytorch/issues/49206
-                       SkipInfo('TestUnaryUfuncs', 'test_non_contig',
-                                dtypes=[torch.bfloat16, ]),
-                       SkipInfo('TestUnaryUfuncs', 'test_contig_vs_every_other',
-                                dtypes=[torch.bfloat16, ]),
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                dtypes=[torch.bfloat16, ]),                                
-                   ),
-                   supports_sparse=False),  # Temporary disabled until https://github.com/pytorch/pytorch/pull/43330
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
            op=torch.linalg.inv,

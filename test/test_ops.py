@@ -173,8 +173,8 @@ class TestCommon(JitCommonTestCase):
         variant_exception_during_backwards = False
         try:
             forward_result.sum().backward()
-            variant_grad = input.grad
-            input.grad = None
+            variant_grad = input[0].grad
+            input[0].grad = None
         except Exception as e:
             if not expected_exception:
                 self.fail("Unexpected exception during backwards!")
@@ -222,8 +222,8 @@ class TestCommon(JitCommonTestCase):
             expected_grad = None
             try:
                 expected_forward.sum().backward()
-                expected_grad = sample.input.grad
-                sample.input.grad = None
+                expected_grad = sample.input[0].grad
+                sample.input[0].grad = None
             except Exception as e:
                 exception_during_backwards = True
 

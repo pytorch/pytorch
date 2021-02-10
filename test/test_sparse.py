@@ -10,7 +10,7 @@ import random
 from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, clone_input_helper
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from torch.testing._internal.common_methods_invocations import sparse_unary_ufuncs
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops
@@ -3027,52 +3027,157 @@ class TestSparseOneOff(TestCase):
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
-    @ops(sparse_unary_ufuncs)
-    def test_sparse_consistency_dense_to_sparse(self, device, dtype, op):
+    # @ops(sparse_unary_ufuncs)
+    # def test_sparse_consistency_dense_to_sparse(self, device, dtype, op):
 
-        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+    #     unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+    #     if dtype in unsupportedTypes:
+    #         self.skipTest('Skipped! Unsupported dtypes for Sparse')
+
+    #     if device == "cpu" and dtype == torch.float16:
+    #         # SparseTensor.cpp: sparse_to_dense, "to_dense() not supported for float16 on CPU"
+    #         self.skipTest('Skipped! to_dense() not supported for float16 on CPU')
+
+    #     samples = op.sample_inputs(device, dtype)
+
+    #     if len(samples) == 0:
+    #         self.skipTest("Skipped! No sample inputs!")
+
+    #     sample = samples[0]
+
+    #     if len(sample.input) > 1:
+    #         self.skipTest("Skipped! Testing unary ops, one input is expected")
+    #     sample = sample.input[0]
+
+    #     expected = op(sample)
+    #     assert torch.is_tensor(expected)
+    #     output = op(sample.to_sparse())
+    #     assert torch.is_tensor(output)
+    #     self.assertEqual(output.to_dense(), expected)
+
+    # def _test_sparse_unary_op_on_input(self, sparse_tensor, device, dtype, op):
+    #     dense_tensor = sparse_tensor.to_dense()
+    #     expected_output = op(dense_tensor)
+    #     out_dtype = expected_output.dtype
+
+    #     sparse_tensor_copy = sparse_tensor.clone()
+    #     self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+
+    #     sparse_tensor_copy = sparse_tensor.clone()
+    #     self.assertEqual(expected_output, op.method_variant(sparse_tensor_copy).to_dense())
+
+    #     if op.supports_tensor_out:
+    #         sparse_tensor_out = torch.zeros_like(sparse_tensor).to(dtype=out_dtype)
+    #         op(sparse_tensor, out=sparse_tensor_out)
+    #         self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
+    #     if op.inplace_variant is not None and out_dtype == sparse_tensor.dtype:
+    #         if op.sparse_op_info.get("supports_inplace_on_uncoalesced", False) or sparse_tensor.is_coalesced():
+    #             sparse_tensor_copy = sparse_tensor.clone()
+    #             op.inplace_variant(sparse_tensor_copy)
+    #             self.assertEqual(expected_output, sparse_tensor_copy.to_dense())
+    #         else:
+    #             with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+    #                 op.inplace_variant(sparse_tensor)
+
+    #     if op.operator_variant is not None:
+    #         sparse_tensor_copy = sparse_tensor.clone()
+    #         self.assertEqual(expected_output, op.operator_variant(sparse_tensor_copy).to_dense())
+
+    # def _test_sparse_unary_op(self, sparse_inputs, device, dtype, op):
+    #     for sparse_input in sparse_inputs:
+    #         sparse_tensor = sparse_input.input[0]
+    #         self._test_sparse_unary_op_on_input(sparse_tensor, device, dtype, op)
+
+    #         for a_op in op.aliases:
+    #             # Add required attributes from base op
+    #             a_op.supports_tensor_out = op.supports_tensor_out
+    #             a_op.sparse_op_info = op.sparse_op_info
+    #             self._test_sparse_unary_op_on_input(sparse_tensor, device, dtype, a_op)
+
+    def _skip_helper(self, dtype):
+        unsupportedTypes = [torch.bfloat16, torch.bool, torch.complex64, torch.complex128]
         if dtype in unsupportedTypes:
-            self.skipTest('Skipped! Unsupported dtypes for Sparse')
+            self.skipTest(f'Skipped! "coalesce" not implemented for {dtype}')
 
-        if device == "cpu" and dtype == torch.float16:
-            # SparseTensor.cpp: sparse_to_dense, "to_dense() not supported for float16 on CPU"
-            self.skipTest('Skipped! to_dense() not supported for float16 on CPU')
+    def _get_dense_and_sparse_samples(self, device, dtype, op):
+        test_backward = op.test_complex_grad or not dtype.is_complex
+        samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
+        sparse_samples = op.sparse_sample_inputs(device, dtype, requires_grad=test_backward)
+        if sparse_samples is not None:
+            samples += sparse_samples
+        return samples
 
-        samples = op.sample_inputs(device, dtype)
+    def _test_forward(self, sample, op):
+        dense_sample_input = tuple(
+            (i.to_dense() if i.layout != torch.strided else i) for i in sample.input
+        )
+        sparse_sample_input = tuple(
+            (i.to_sparse() if i.layout == torch.strided else i) for i in sample.input
+        )
+
+        expected_forward = op(*dense_sample_input, *sample.args, **sample.kwargs)
+        sparse_forward = op(*sparse_sample_input, *sample.args, **sample.kwargs)
+        self.assertEqual(sparse_forward.to_dense(), expected_forward)
+
+    @ops(sparse_unary_ufuncs)
+    def test_function_consistency(self, device, dtype, op):
+        self._skip_helper(dtype)
+        # Checks sparse/dense consistency for funtion only
+        samples = self._get_dense_and_sparse_samples(device, dtype, op)
 
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
+        for sample in samples:
+            self._test_forward(sample, op)
+            # We can not check grads for sparse yet
+
+    @ops(sparse_unary_ufuncs)
+    def test_method_variant_consistency(self, device, dtype, op):
+        self._skip_helper(dtype)
+        # Checks sparse/dense consistency for method variant only
+        samples = self._get_dense_and_sparse_samples(device, dtype, op)
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        method = op.get_method()
+        if method is None:
+            self.skipTest("Skipped! No method variant op")
+
+        # Note: check on a single sample
         sample = samples[0]
+        self._test_forward(sample, method)
+        # We can not check grads for sparse yet
 
-        if len(sample.input) > 1:
-            self.skipTest("Skipped! Testing unary ops, one input is expected")
-        sample = sample.input[0]
+    @ops(sparse_unary_ufuncs)
+    def test_inplace_variant_consistency(self, device, dtype, op):
+        self._skip_helper(dtype)
+        # Checks sparse/dense consistency for inplace method variant only
+        samples = self._get_dense_and_sparse_samples(device, dtype, op)
 
-        expected = op(sample)
-        assert torch.is_tensor(expected)
-        output = op(sample.to_sparse())
-        assert torch.is_tensor(output)
-        self.assertEqual(output.to_dense(), expected)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
 
-    def _test_sparse_unary_op_on_input(self, sparse_tensor, device, dtype, op):
-        dense_tensor = sparse_tensor.to_dense()
-        expected_output = op(dense_tensor)
-        out_dtype = expected_output.dtype
+        inplace = op.get_inplace()
+        if inplace is None:
+            self.skipTest("Skipped! No inplace variant op")
 
-        sparse_tensor_copy = sparse_tensor.clone()
-        self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+        for sample in samples:
+            dense_sample_input = tuple(
+                (i.to_dense() if i.layout != torch.strided else i) for i in sample.input
+            )
+            sparse_sample_input = tuple(
+                (i.to_sparse() if i.layout == torch.strided else i) for i in sample.input
+            )
+            expected_forward = op(*dense_sample_input, *sample.args, **sample.kwargs)
+        
+        
+            sparse_forward = op(*sparse_sample_input, *sample.args, **sample.kwargs)
+            self.assertEqual(sparse_forward.to_dense(), expected_forward)
 
-        sparse_tensor_copy = sparse_tensor.clone()
-        self.assertEqual(expected_output, op.method_variant(sparse_tensor_copy).to_dense())
-
-        if op.supports_tensor_out:
-            sparse_tensor_out = torch.zeros_like(sparse_tensor).to(dtype=out_dtype)
-            op(sparse_tensor, out=sparse_tensor_out)
-            self.assertEqual(expected_output, sparse_tensor_out.to_dense())
-
-        if op.inplace_variant is not None and out_dtype == sparse_tensor.dtype:
-            if op.sparse_op_info.get("supports_inplace_on_uncoalesced", False) or sparse_tensor.is_coalesced():
+            if op.supports_inplace_on_uncoalesced or sparse_tensor.is_coalesced():
                 sparse_tensor_copy = sparse_tensor.clone()
                 op.inplace_variant(sparse_tensor_copy)
                 self.assertEqual(expected_output, sparse_tensor_copy.to_dense())
@@ -3080,56 +3185,45 @@ class TestSparseUnaryUfuncs(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
                     op.inplace_variant(sparse_tensor)
 
-        if op.operator_variant is not None:
-            sparse_tensor_copy = sparse_tensor.clone()
-            self.assertEqual(expected_output, op.operator_variant(sparse_tensor_copy).to_dense())
+            pass
+            # We can not check grads for sparse yet
+            
 
-    def _test_sparse_unary_op(self, sparse_inputs, device, dtype, op):
-        for sparse_input in sparse_inputs:
-            sparse_tensor = sparse_input.input[0]
-            self._test_sparse_unary_op_on_input(sparse_tensor, device, dtype, op)
+    # @ops(sparse_unary_ufuncs)
+    # def test_sparse_consistency_sparse_to_dense(self, device, dtype, op):
 
-            for a_op in op.aliases:
-                # Add required attributes from base op
-                a_op.supports_tensor_out = op.supports_tensor_out
-                a_op.sparse_op_info = op.sparse_op_info
-                self._test_sparse_unary_op_on_input(sparse_tensor, device, dtype, a_op)
+    #     if dtype in [torch.bfloat16, torch.bool, torch.complex64, torch.complex128]:
+    #         # to_dense() will call coalesce() -> RuntimeError: "coalesce" not implemented
+    #         self.skipTest('Skipped! "coalesce" not implemented for {}'.format(dtype))
 
-    @ops(sparse_unary_ufuncs)
-    def test_sparse_consistency_sparse_to_dense(self, device, dtype, op):
+    #     if dtype in [torch.half, ] and device == "cpu":
+    #         # to_dense() not supported for float16 on CPU
+    #         self.skipTest('Skipped! "coalesce" not implemented for {} on cpu'.format(dtype))
 
-        if dtype in [torch.bfloat16, torch.bool, torch.complex64, torch.complex128]:
-            # to_dense() will call coalesce() -> RuntimeError: "coalesce" not implemented
-            self.skipTest('Skipped! "coalesce" not implemented for {}'.format(dtype))
+    #     # op is common_methods_invocations.UnaryUfuncInfo
+    #     sparse_inputs = op.sample_sparse_inputs(device, dtype)
 
-        if dtype in [torch.half, ] and device == "cpu":
-            # to_dense() not supported for float16 on CPU
-            self.skipTest('Skipped! "coalesce" not implemented for {} on cpu'.format(dtype))
+    #     if len(sparse_inputs) == 0:
+    #         self.skipTest("Skipped! No sample inputs!")
 
-        # op is common_methods_invocations.UnaryUfuncInfo
-        sparse_inputs = op.sample_sparse_inputs(device, dtype)
+    #     self._test_sparse_unary_op(sparse_inputs, device, dtype, op)
 
-        if len(sparse_inputs) == 0:
-            self.skipTest("Skipped! No sample inputs!")
+    # @ops(sparse_unary_ufuncs)
+    # def test_sparse_consistency_sparse_to_dense_coalesced(self, device, dtype, op):
 
-        self._test_sparse_unary_op(sparse_inputs, device, dtype, op)
+    #     if dtype in [torch.bfloat16, torch.bool, torch.complex64, torch.complex128]:
+    #         self.skipTest('Skipped! "coalesce" not implemented for {}'.format(dtype))
 
-    @ops(sparse_unary_ufuncs)
-    def test_sparse_consistency_sparse_to_dense_coalesced(self, device, dtype, op):
+    #     if dtype in [torch.half] and device == "cpu":
+    #         self.skipTest('Skipped! "coalesce" not implemented for {} on cpu'.format(dtype))
 
-        if dtype in [torch.bfloat16, torch.bool, torch.complex64, torch.complex128]:
-            self.skipTest('Skipped! "coalesce" not implemented for {}'.format(dtype))
+    #     # op is common_methods_invocations.UnaryUfuncInfo
+    #     sparse_inputs = op.sample_sparse_inputs(device, dtype, is_coalesced=True)
 
-        if dtype in [torch.half] and device == "cpu":
-            self.skipTest('Skipped! "coalesce" not implemented for {} on cpu'.format(dtype))
+    #     if len(sparse_inputs) == 0:
+    #         self.skipTest("Skipped! No sample inputs!")
 
-        # op is common_methods_invocations.UnaryUfuncInfo
-        sparse_inputs = op.sample_sparse_inputs(device, dtype, is_coalesced=True)
-
-        if len(sparse_inputs) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
-        self._test_sparse_unary_op(sparse_inputs, device, dtype, op)
+    #     self._test_sparse_unary_op(sparse_inputs, device, dtype, op)
 
 
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
