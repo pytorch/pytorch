@@ -1301,6 +1301,24 @@ TEST(LLVM, BitwiseOps) {
   ASSERT_EQ(cg.value<int>(), 11);
 }
 
+TEST(LLVM, ArithmeticRightShift) {
+  KernelScope ks;
+  auto a = CharImm::make(-4);
+  auto b = CharImm::make(1);
+  ExprHandle f = a >> b;
+  LLVMExprEval cg(f);
+  ASSERT_EQ(cg.value<int8_t>(), -2);
+}
+
+TEST(LLVM, LogicalRightShift) {
+  KernelScope ks;
+  auto a = ByteImm::make(0xfc);
+  auto b = ByteImm::make(1);
+  ExprHandle f = a >> b;
+  LLVMExprEval cg(f);
+  ASSERT_EQ(cg.value<uint8_t>(), 0x7e);
+}
+
 TEST(LLVM, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
