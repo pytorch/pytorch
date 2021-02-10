@@ -63,7 +63,9 @@ void Logger::set_construction_data_and_log(
     const std::vector<int>& device_ids,
     int output_device,
     bool broadcast_buffers) {
-  // Data that can be got during DistributedDataParallel construction time
+  // No lock is needed, as it will be called in DistributedDataParallel
+  // constructor.
+  // Data that can be got during DistributedDataParallel construction time.
   ddp_logging_data_->module_name = module_name;
   ddp_logging_data_->world_size = reducer_->process_group_->getSize();
   ddp_logging_data_->rank = reducer_->process_group_->getRank();
@@ -132,6 +134,8 @@ void Logger::calculate_avg_gpu_time(
 #endif
 
 void Logger::set_runtime_stats() {
+  // Sync with reducer's data
+  std::lock_guard<std::mutex> lock(reducer_->mutex_);
   // set runtime stats after 1st iteration is complete.
   if (reducer_->num_iterations_ == 0) {
     return;
@@ -218,6 +222,7 @@ void Logger::set_runtime_stats() {
 }
 
 c10::DDPLoggingData Logger::get_ddp_logging_data() {
+  std::lock_guard<std::mutex> lock(reducer_->mutex_);
   return *ddp_logging_data_;
 }
 

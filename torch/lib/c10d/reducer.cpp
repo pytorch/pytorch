@@ -696,6 +696,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     if (num_buckets_ready_ == 1) {
       if (replicas_[0][0].is_cuda()) {
         #ifdef USE_CUDA
+        // No need to set_device() here, as autograd thread has already set
+        // it properly
         gpu_timer_.backward_comm_start.record();
         #endif
       } else {
@@ -985,6 +987,10 @@ void Reducer::prepare_for_forward() {
   num_iterations_++;
   if (replicas_[0][0].is_cuda()) {
     #ifdef USE_CUDA
+    // Create and record event on the replicas_[0][0].device().
+    // If application is running on single process multiple devices,
+    // one event on one device is sufficient.
+    at::cuda::set_device(replicas_[0][0].device().index());
     gpu_timer_.forward_start.record();
     #endif
   } else {
@@ -1012,6 +1018,10 @@ void Reducer::prepare_for_backward(
 
   if (replicas_[0][0].is_cuda()) {
     #ifdef USE_CUDA
+    // Create and record event on the replicas_[0][0].device().
+    // If application is running on single process multiple devices,
+    // one event on one device is sufficient.
+    at::cuda::set_device(replicas_[0][0].device().index());
     gpu_timer_.backward_compute_start.record();
     #endif
   }
@@ -1213,6 +1223,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 void Reducer::finalize_backward() {
   if (replicas_[0][0].is_cuda()) {
     #ifdef USE_CUDA
+    // No need to set_device() here, as autograd thread has already set
+    // it properly
     gpu_timer_.backward_compute_end.record();
     #endif
   } else {
@@ -1292,6 +1304,8 @@ void Reducer::finalize_backward() {
 
   if (replicas_[0][0].is_cuda()) {
     #ifdef USE_CUDA
+    // No need to set_device() here, as autograd thread has already set
+    // it properly
     gpu_timer_.backward_comm_end.record();
     #endif
   } else {
