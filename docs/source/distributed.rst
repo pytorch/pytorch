@@ -59,10 +59,9 @@ included if you build PyTorch from source. (e.g.building PyTorch on a host that 
 installed.)
 
 .. warning ::
-    As of PyTorch v1.8, Windows support for the distributed package covers collective
-    communications with Gloo backend, `FileStore`, `Tcp Store`and `DistributedDataParallel`.
-    Therefore, the `init_method` argument in :func:`init_process_group` can point to a file.
-    This works for both local and shared file systems:
+    As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
+    If  the `init_method` argument of :func:`init_process_group` points to a file it must adhere
+    to the following schema:
 
     - Local file system, ``init_method="file:///d:/tmp/some_file"``
     - Shared file system, ``init_method="file://////{machine_name}/{share_folder_name}/some_file"``
