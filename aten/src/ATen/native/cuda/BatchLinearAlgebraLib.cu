@@ -333,12 +333,11 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-
   for (int i = 0; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
     int* info_working_ptr = &infos_data[i];
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     at::cuda::solver::orgqr<scalar_t>(
       handle, m, n, k,
       self_working_ptr,
