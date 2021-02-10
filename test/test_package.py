@@ -3,7 +3,7 @@ import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
-from torch.package.module_environment import ModuleEnv, DefaultImporter
+from torch.package.module_environment import ModuleEnv, DefaultImporter, ModuleEnvError
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -558,6 +558,38 @@ def load():
         traced = symbolic_trace(loaded)
         input = torch.rand(2, 3)
         self.assertTrue(torch.allclose(loaded(input), traced(input)))
+
+    def test_package_fx_package(self):
+        from package_a.test_module import SimpleTest
+        model = SimpleTest()
+        f = BytesIO()
+        with PackageExporter(f, verbose=False) as pe:
+            pe.save_pickle('model', 'model.pkl', model)
+
+        f.seek(0)
+        pi = PackageImporter(f)
+        loaded = pi.load_pickle('model', 'model.pkl')
+        traced = symbolic_trace(loaded)
+
+        # re-save the package exporter
+        f2 = BytesIO()
+        # This should fail, because we are referencing some globals that are
+        # only in the package.
+        with self.assertRaises(ModuleEnvError):
+            with PackageExporter(f2, verbose=False) as pe:
+                pe.save_pickle('model', 'model.pkl', traced)
+
+        f2.seek(0)
+        with PackageExporter(f2, verbose=False) as pe:
+            # Make the package available to the exporter's environment.
+            pe.module_env = ModuleEnv([pi, DefaultImporter])
+            pe.save_pickle('model', 'model.pkl', traced)
+        f2.seek(0)
+        pi2 = PackageImporter(f2)
+        loaded2 = pi2.load_pickle('model', 'model.pkl')
+
+        input = torch.rand(2, 3)
+        self.assertTrue(torch.allclose(loaded(input), loaded2(input)))
 
     def test_package_fx_with_imports(self):
         import package_a.subpackage
