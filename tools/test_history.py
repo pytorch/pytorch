@@ -5,64 +5,100 @@ import bz2
 import json
 import subprocess
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3  # type: ignore[import]
 
 
 def get_git_commit_history(
+    *,
     path: str,
-    branch: str = "master"
+    ref: str
 ) -> List[Tuple[str, datetime]]:
-    rc = subprocess.check_output(['git', '-C', path, 'log', '--pretty=format:%H %ct', branch]).decode("latin-1")
-    return [(x[0], datetime.fromtimestamp(int(x[1]))) for x in [line.split(" ") for line in rc.split("\n")]]
+    rc = subprocess.check_output(
+        ['git', '-C', path, 'log', '--pretty=format:%H %ct', ref],
+    ).decode("latin-1")
+    return [
+        (x[0], datetime.fromtimestamp(int(x[1])))
+        for x in [line.split(" ") for line in rc.split("\n")]
+    ]
 
 
 def get_ossci_json(
+    *,
     bucket: Any,
     sha: str,
-    config: str = 'pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2'
+    job: str
 ) -> Any:
-    objs = list(bucket.objects.filter(Prefix=f"test_time/{sha}/{config}"))
+    objs = list(bucket.objects.filter(Prefix=f"test_time/{sha}/{job}"))
     if len(objs) == 0:
         return {}
     return json.loads(bz2.decompress(objs[0].get()['Body'].read()))
 
 
-def search_for_commit(
+def case_status(case: Dict[str, Any]) -> Optional[str]:
+    for k in {'errored', 'failed', 'skipped'}:
+        if case[k]:
+            return k
+    return None
+
+
+def make_column(
+    *,
+    bucket: Any,
+    sha: str,
+    job: str,
+    suite_name: str,
+    test_name: str,
+    digits: int,
+) -> str:
+    decimals = 3
+    num_length = digits + 1 + decimals
+
+    data = get_ossci_json(bucket=bucket, sha=sha, job=job)
+    suite = data.get('suites', {}).get(suite_name)
+    if suite:
+        testcase_times = {
+            case['name']: case
+            for case in suite['cases']
+        }
+        case = testcase_times.get(test_name)
+        if case:
+            status = case_status(case)
+            if status:
+                return f'{status.rjust(num_length)} '
+            else:
+                return f'{case["seconds"]:{num_length}.{decimals}f}s'
+    return ' ' * (num_length + 1)
+
+
+def display_history(
+    *,
     bucket: Any,
     commits: List[Tuple[str, datetime]],
+    jobs: List[str],
     suite_name: str,
     test_name: str,
     delta: int,
-) -> Optional[str]:
-    last_sha = None
+    digits: int,
+) -> None:
     prev_time = datetime.now()
     for sha, time in commits:
         if (prev_time - time).total_seconds() < delta * 3600:
             continue
-        data = get_ossci_json(bucket, sha)
-        suites = data['suites'] if 'suites' in data else {}
-        if suite_name not in suites:
-            data = get_ossci_json(bucket, sha, 'pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test')
-            suites = data['suites'] if 'suites' in data else {}
-            if suite_name not in suites:
-                print(f"{time} {sha}: Can't find {suite_name} in {suites.keys()}")
-                continue
-        testcase_times = {case['name']: case['seconds'] for case in suites[suite_name]['cases']}
-        if test_name not in testcase_times:
-            break
-        last_sha = sha
         prev_time = time
-        print(f"{time} {sha} {testcase_times[test_name]}")
-    return last_sha
-
-
-def positive_integer(value: str) -> int:
-    parsed = int(value)
-    if parsed < 1:
-        raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
-    return parsed
+        columns = [
+            make_column(
+                bucket=bucket,
+                sha=sha,
+                job=job,
+                suite_name=suite_name,
+                test_name=test_name,
+                digits=digits,
+            )
+            for job in jobs
+        ]
+        print(f"{time} {sha} {' '.join(columns)}".rstrip())
 
 
 if __name__ == "__main__":
@@ -77,16 +113,21 @@ if __name__ == "__main__":
         default='.',
     )
     parser.add_argument(
+        '--ref',
+        help='starting point (most recent Git ref) to display history for',
+        default='master',
+    )
+    parser.add_argument(
         '--delta',
-        type=positive_integer,
-        default=12,
+        type=int,
         help='minimum number of hours between rows',
+        default=12,
     )
     parser.add_argument(
         '--digits',
-        type=positive_integer,
-        default=3,
+        type=int,
         help='number of digits to display before the decimal point',
+        default=4,
     )
     parser.add_argument(
         'suite',
@@ -103,10 +144,17 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    pytorch_git_path = args.pytorch or '.'
-    commits = get_git_commit_history(pytorch_git_path)
+    commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
 
     s3 = boto3.resource("s3")
     bucket = s3.Bucket('ossci-metrics')
 
-    last_sha = search_for_commit(bucket, commits, args.suite, args.test, delta=args.delta)
+    display_history(
+        bucket=bucket,
+        commits=commits,
+        jobs=args.job,
+        suite_name=args.suite,
+        test_name=args.test,
+        delta=args.delta,
+        digits=args.digits,
+    )
