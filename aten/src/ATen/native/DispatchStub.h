@@ -61,14 +61,36 @@ CPUCapability get_cpu_capability();
 template <typename FnPtr, typename T>
 struct TORCH_API DispatchStub;
 
+/**
+ * The CPUImplFunctionHolder struct holds pointers for default implementations
+ * of CPU dispatch methods that are specialized for a given architecture. The
+ * actual method is chosen in decreasing order of preference by
+ * DispatchStubImpl::choose_cpu_impl() in case none is found by
+ * DispatchStubImpl::get_call_ptr() in cpu_dispatch_ptr.
+ */
+struct CPUImplFunctionHolder {
+  void *DEFAULT;
+#ifdef HAVE_AVX_CPU_DEFINITION
+  void *AVX;
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+  void *AVX2;
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+  void *VSX;
+#endif
+};
+
+/**
+ * The sole purpose of this class is to outline methods that don't need to be
+ * specialized or otherwise inlined and duplicated (by the compiler due to
+ * template expansion), since it causes size bloat if there are a significant
+ * number of specialization of the DispatchStub<> class.
+ */
 struct TORCH_API DispatchStubImpl {
-  virtual void* choose_cpu_fn() = 0;
-  virtual ~DispatchStubImpl() = default;
+  void* get_call_ptr(DeviceType device_type, CPUImplFunctionHolder(*cpu_impl_data)());
+  void* choose_cpu_impl(const CPUImplFunctionHolder &data);
 
-protected:
-  void* get_call_ptr_impl(DeviceType device_type);
-
-public:
   // Fixing dispatch error in Windows debug builds.
   // See https://github.com/pytorch/pytorch/issues/22681 for more details.
   #if defined(_MSC_VER) && defined(_DEBUG)
@@ -83,7 +105,7 @@ public:
 };
 
 template <typename rT, typename T, typename... Args>
-struct TORCH_API DispatchStub<rT (*)(Args...), T>: public DispatchStubImpl {
+struct TORCH_API DispatchStub<rT (*)(Args...), T> {
   using FnPtr = rT (*) (Args...);
 
   DispatchStub() = default;
@@ -92,7 +114,7 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T>: public DispatchStubImpl {
 
 private:
   FnPtr get_call_ptr(DeviceType device_type) {
-    return reinterpret_cast<FnPtr>(get_call_ptr_impl(device_type));
+    return reinterpret_cast<FnPtr>(impl.get_call_ptr(device_type, cpu_impl_data_provider));
   }
 
 public:
@@ -102,33 +124,20 @@ public:
     return (*call_ptr)(std::forward<ArgTypes>(args)...);
   }
 
-  void* choose_cpu_fn() override {
-    return reinterpret_cast<void*>(choose_cpu_impl());
-  }
-
-  FnPtr choose_cpu_impl() {
-    auto capability = static_cast<int>(get_cpu_capability());
-    (void)capability;
-#ifdef HAVE_AVX2_CPU_DEFINITION
-    if (capability >= static_cast<int>(CPUCapability::AVX2)) {
-      TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
-      return AVX2;
-    }
-#endif
+  static CPUImplFunctionHolder cpu_impl_data_provider() {
+    CPUImplFunctionHolder ret{
+      reinterpret_cast<void*>(DEFAULT)
 #ifdef HAVE_AVX_CPU_DEFINITION
-    if (capability >= static_cast<int>(CPUCapability::AVX)) {
-      TORCH_INTERNAL_ASSERT(AVX, "DispatchStub: missing AVX kernel");
-      return AVX;
-    }
+      , reinterpret_cast<void*>(AVX)
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX2)
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-    if (capability >= static_cast<int>(CPUCapability::VSX)) {
-      TORCH_INTERNAL_ASSERT(VSX, "DispatchStub: missing VSX kernel");
-      return VSX;
-    }
+      , reinterpret_cast<void*>(VSX)
 #endif
-    TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
-    return DEFAULT;
+    };
+    return ret;
   }
 
   static FnPtr DEFAULT;
@@ -141,6 +150,8 @@ public:
 #ifdef HAVE_VSX_CPU_DEFINITION
   static FnPtr VSX;
 #endif
+private:
+  DispatchStubImpl impl;
 };
 
 namespace {

@@ -51,14 +51,15 @@ CPUCapability get_cpu_capability() {
   return capability;
 }
 
-void* DispatchStubImpl::get_call_ptr_impl(DeviceType device_type) {
+void* DispatchStubImpl::get_call_ptr(DeviceType device_type, CPUImplFunctionHolder(*cpu_impl_data)()) {
   switch (device_type) {
     case DeviceType::CPU: {
       // Use memory_order_relaxed here since even if two threads race,
       // they will still compute the same value for cpu_dispatch_ptr.
       auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
       if (!fptr) {
-        fptr = choose_cpu_fn();
+        CPUImplFunctionHolder data = cpu_impl_data();
+        fptr = choose_cpu_impl(data);
         cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
       }
       return fptr;
@@ -75,6 +76,31 @@ void* DispatchStubImpl::get_call_ptr_impl(DeviceType device_type) {
     default:
       AT_ERROR("DispatchStub: unsupported device type", device_type);
   }
+}
+
+void* DispatchStubImpl::choose_cpu_impl(const CPUImplFunctionHolder &data) {
+  auto capability = static_cast<int>(get_cpu_capability());
+  (void)capability;
+#ifdef HAVE_AVX2_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::AVX2)) {
+    TORCH_INTERNAL_ASSERT(data.AVX2, "DispatchStub: missing AVX2 kernel");
+    return data.AVX2;
+  }
+#endif
+#ifdef HAVE_AVX_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::AVX)) {
+    TORCH_INTERNAL_ASSERT(data.AVX, "DispatchStub: missing AVX kernel");
+    return data.AVX;
+  }
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::VSX)) {
+    TORCH_INTERNAL_ASSERT(data.VSX, "DispatchStub: missing VSX kernel");
+    return data.VSX;
+  }
+#endif
+  TORCH_INTERNAL_ASSERT(data.DEFAULT, "DispatchStub: missing default kernel");
+  return data.DEFAULT;
 }
 
 }}  // namespace at::native
