@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN)
+     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_maybe_warns)
 
 from distutils.version import LooseVersion
 
@@ -161,6 +161,7 @@ class OpInfo(object):
                  aten_name=None,  # name of the corresponding aten:: operator
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  variant_test_name='',  # additional string to include in the test name
+                 supports_autograd=True,  # support for autograd
                  supports_sparse=False,  # supported for sparse
                  check_batched_grad=True,  # check batched grad when doing gradcheck
                  check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
@@ -204,6 +205,7 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = ['aten::' + self.name]
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
+        self.supports_autograd = supports_autograd
         self.supports_sparse = supports_sparse
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
@@ -1195,6 +1197,20 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad):
 
     return samples
 
+def sample_inputs_floor_divide(op_info, device, dtype, requires_grad):
+    lhs = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    rhs = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    # Avoid integer divide by 0
+    if not (dtype.is_floating_point or dtype.is_complex):
+        rhs[rhs == 0] = 1
+
+    return [
+        SampleInput((lhs, rhs)),
+        SampleInput((lhs, rhs[0])),
+        SampleInput((lhs), args=(3.14,)),
+    ]
+
+
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad):
     samples = (
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -1637,6 +1653,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    OpInfo('floor_divide',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_floor_divide,
+           decorators=[_wrap_maybe_warns("floor_divide is deprecated, and will be removed")],
+           supports_autograd=False,
+           ),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
