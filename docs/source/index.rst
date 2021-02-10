@@ -71,6 +71,8 @@ Features described in this documentation are classified by release status:
    onnx
    optim
    complex_numbers
+   ddp_comm_hooks
+   pipeline
    quantization
    rpc
    torch.random <random>
@@ -95,8 +97,8 @@ Features described in this documentation are classified by release status:
    :caption: Libraries
 
    torchaudio <https://pytorch.org/audio/stable>
-   torchtext <https://pytorch.org/text>
-   torchvision <https://pytorch.org/vision>
+   torchtext <https://pytorch.org/text/stable>
+   torchvision <https://pytorch.org/vision/stable>
    TorchElastic <https://pytorch.org/elastic/>
    TorchServe <https://pytorch.org/serve>
    PyTorch on XLA Devices <http://pytorch.org/xla/>
