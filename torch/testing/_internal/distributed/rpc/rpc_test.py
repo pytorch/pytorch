@@ -69,7 +69,7 @@ EXPECTED_REMOTE_EVENTS = [
     "aten::add",
     "aten::mul",
     "aten::relu",
-    "aten::threshold",
+    "aten::clamp_min",
     "aten::sigmoid",
 ]
 
