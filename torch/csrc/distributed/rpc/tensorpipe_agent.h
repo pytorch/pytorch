@@ -35,9 +35,6 @@ class Pipe;
 
 namespace transport {
 class Context;
-namespace uv {
-class Context;
-} // namespace uv
 } // namespace transport
 
 namespace channel {
@@ -221,8 +218,7 @@ class TensorPipeAgent : public RpcAgent {
   // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
-  static std::string guessUvAddress(
-      tensorpipe::transport::uv::Context& uvContext);
+  static std::string guessUvAddress();
 
   // For testing purposes.
   size_t timeoutMapSize();

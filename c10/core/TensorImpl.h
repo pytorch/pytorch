@@ -1763,13 +1763,6 @@ protected:
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // The set of DispatchKeys which describe this tensor.  NB: this
-  // does NOT include Autograd (historically, it did, but
-  // not anymore!)
-  //
-  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
-  DispatchKeySet key_set_;
-
   // Tensor is contiguous
   bool is_contiguous_ = true;
 
@@ -1834,6 +1827,13 @@ protected:
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
+
+  // The set of DispatchKeys which describe this tensor.  NB: this
+  // does NOT include Autograd (historically, it did, but
+  // not anymore!)
+  //
+  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
+  DispatchKeySet key_set_;
 };
 
 // Note [TensorImpl size constraints]
@@ -1866,6 +1866,7 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
+//    named tensor metadata pointer
 //    version counter pointer
 //    PyObject pointer
 //    SizesAndStrides size/pointer
@@ -1881,13 +1882,11 @@ protected:
 //    SizesAndStrides strides (pre-allocated 4)
 //    storage offset
 //    numel
-//    data type
-//    (optional) device
-//    tensor type id
-//    miscellaneous bitfield
+//    data type, device_opt, is_contiguous, bitfields
+//    DispatchKeySet
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 24,
+              sizeof(TensorImpl) == sizeof(int64_t) * 23,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
