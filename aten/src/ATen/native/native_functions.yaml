@@ -8177,14 +8177,12 @@
 - func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    CPU: upsample_linear1d_cpu
-    CUDA: upsample_linear1d_cuda
+    DefaultBackend: upsample_linear1d
 
 - func: upsample_linear1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    CPU: upsample_linear1d_backward_cpu
-    CUDA: upsample_linear1d_backward_cuda
+    DefaultBackend: upsample_linear1d
 
 - func: upsample_bilinear2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
