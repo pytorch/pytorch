@@ -166,12 +166,11 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         if not self._is_empty_container(node.value, ann_type):
             return
 
-        warnings.warn("The TorchScript type system doesn't support"
-                           " instance-level annotations on empty"
-                           " non-base types in `__init__`. Instead, "
-                           " either 1) use a type annotation in the "
-                           "class body, or 2) wrap the type in "
-                           "`torch.jit.Attribute`.")
+        warnings.warn("The TorchScript type system doesn't support "
+                      "instance-level annotations on empty non-base "
+                      "types in `__init__`. Instead, either 1) use a "
+                      "type annotation in the class body, or 2) wrap "
+                      "the type in `torch.jit.Attribute`.")
 
     def visit_Call(self, node):
         """
@@ -223,9 +222,8 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         if not self._is_empty_container(node.args[1], ann_type):
             return
 
-        warnings.warn("The TorchScript type system doesn't support"
-                           " instance-level annotations on empty"
-                           " non-base types in `__init__`. Instead, "
-                           " either 1) use a type annotation in the "
-                           "class body, or 2) wrap the type in "
-                           "`torch.jit.Attribute`.")
+        warnings.warn("The TorchScript type system doesn't support "
+                      "instance-level annotations on empty non-base "
+                      "types in `__init__`. Instead, either 1) use a "
+                      "type annotation in the class body, or 2) wrap "
+                      "the type in `torch.jit.Attribute`.")
