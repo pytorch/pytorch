@@ -386,13 +386,11 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
                    source.dim(), "), destination dimensionality (", self.dim(), ")");
   }
 
-  // Should this be TORCH_CHECK?
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected LongTensor for index");
-
-  // Added in accordance with index_fill_
-  if (!self.is_complex() && source.is_complex()) {
-    TORCH_CHECK(false, "index_copy_(): Converting complex source Tensor to non-complex type is forbidden");
-  }
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected a long tensor for index, but got ", index.scalar_type())
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(), "index_copy_(): self and source expected to have the same dtype, but got (self) ", self.scalar_type(), " and (source) ", source.scalar_type());
+  TORCH_CHECK(self.device() == source.device() && self.device() == index.device(),
+      "index_copy_(): self, index and source expected to be in the same device, but got (self) ",
+      self.device(), ", (index) ", index.device(), ", and (source) ", source.device());
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
@@ -418,22 +416,18 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   return at::_index_copy_(self, dim, index, source);
 }
 
-Tensor & _index_copy_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  // TODO Why doesn't this one have `at::NoNamesGuard guard;`?
-  // Handle the case when `self` is 0-dim
-  if (self.dim() == 0) {
-    self.unsqueeze_(-1);
-  }
+Tensor & _index_copy_impl_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  // Handle the case when self / source is 0-dim
+  Tensor self_nonzero = self.dim() == 0 ? self.unsqueeze(0) : self;
+  Tensor source_nonzero = source.dim() == 0 ? source.unsqueeze(0) : source;
 
   // The only different between the following  tensor iterator and that of index_fill_ is that
-  // this one has also source as an input. Maybe refactor?
-  // TODO These two functions could be implemented as a more general one that takes one tensor
-  // with shape broadcastable to that of the original tensor with `len(index)` in dimension `dim`
+  // this one has also source as an input. We should refactor it when if constexpr is available (C++17)
 
   // Prepare `index` for TensorIterator.
   // It is restrided to be broadcastable over `self` in TensorIterator.
-  auto index_sizes = std::vector<int64_t>(self.dim(), 1);
-  auto index_strides = std::vector<int64_t>(self.dim(), 0);
+  auto index_sizes = std::vector<int64_t>(self_nonzero.dim(), 1);
+  auto index_strides = std::vector<int64_t>(self_nonzero.dim(), 0);
   index_sizes[dim] = index.numel();
   index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
   auto index_restrided = index.as_strided(
@@ -448,11 +442,11 @@ Tensor & _index_copy_cpu_(Tensor & self, int64_t dim, const Tensor & index, cons
   // match as required by TensorIterator (input shape should
   // strictly broadcast over output shape, i.e.
   // output.shape[i] >= input.shape[i] for i in range(dims)).
-  auto self_sizes = self.sizes().vec();
-  auto self_strides = self.strides().vec();
+  auto self_sizes = self_nonzero.sizes().vec();
+  auto self_strides = self_nonzero.strides().vec();
   self_sizes[dim] = index.numel();
   self_strides[dim] = 0;
-  auto self_restrided = self.as_strided(self_sizes, self_strides);
+  auto self_restrided = self_nonzero.as_strided(self_sizes, self_strides);
 
   auto iter = TensorIteratorConfig()
     // We do not check for overlap because `self` is restrided
@@ -463,18 +457,17 @@ Tensor & _index_copy_cpu_(Tensor & self, int64_t dim, const Tensor & index, cons
     .resize_outputs(false)
     .add_output(self_restrided)
     .add_input(index_restrided)
-    .add_input(source)
+    .add_input(source_nonzero)
     .build();
 
-  auto self_dim_size = self.size(dim);
-  auto self_dim_stride = self.stride(dim);
+  auto self_dim_size = self_nonzero.size(dim);
+  auto self_dim_stride = self_nonzero.stride(dim);
   index_copy_stub(
     iter.device_type(),
     iter,
     dim,
     self_dim_size,
-    self_dim_stride,
-    source);
+    self_dim_stride);
 
   return self;
 }
@@ -801,7 +794,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Sca
   }
 
   if (!self.is_complex() && source.isComplex()) {
-    TORCH_CHECK(false, "index_fill_(): Converting complex Scalar to non-complex type is forbidden");
+    TORCH_CHECK(false, "index_fill_(): Converting complex Scalar to non-complex type is not supported");
   }
 
   // Handle the case when `self` is 0-dim

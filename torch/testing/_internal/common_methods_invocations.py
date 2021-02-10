@@ -856,6 +856,39 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
+# Missing to test the nondeterminism of the operation
+# https://github.com/pytorch/pytorch/issues/53352
+def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
+    def make_arg(shape, low=None, high=None, dtype=dtype):
+        return make_tensor(shape, device=device, dtype=dtype,
+                           low=low, high=high,
+                           requires_grad=requires_grad)
+
+    t = make_arg((S, S))
+    s = make_arg((S, S))
+    # non-contiguous input
+    t01 = t.transpose(0, 1)
+    # non-contiguous input
+    s01 = s.transpose(0, 1)
+
+    # idx is a permutation of 0...S-1 for this function to be deterministic
+    idx = torch.randperm(S, device=device, dtype=torch.int64)
+    # non-contiguous index
+    idx_nonctg = torch.repeat_interleave(idx, 2, dim=-1)[::2]
+    # index_copy_ does not support negative indices
+    # idx_neg = -idx - 1
+    samples = [SampleInput((tensor, 1, idx, source))
+               for tensor, idx, source in product([t, t01], [idx, idx_nonctg], [s, s01])]
+
+    # Add scalar cases
+    scalar_sizes = [(), (1,)]
+    ts = (make_arg(size) for size in scalar_sizes)
+    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
+    ss = (make_arg(size) for size in scalar_sizes)
+
+    samples.extend(SampleInput((t, 0, idx, s)) for t, idx, s in product(ts, idxs, ss))
+    return samples
+
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (
         SampleInput(
@@ -3126,6 +3159,16 @@ op_db: List[OpInfo] = [
            skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            supports_out=False,
            sample_inputs_func=sample_inputs_index_fill),
+    OpInfo('index_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           test_inplace_grad=False,
+           supports_out=False,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/49707
+               # Fails on cpu throwing: RuntimeError: "index_select" not implemented for 'Half' / 'BFloat16'
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float16, torch.bfloat16]),
+           ),
+           sample_inputs_func=sample_inputs_index_copy),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
@@ -3976,11 +4019,6 @@ def method_tests():
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', (), [0]),
-        ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim_alert_nondeterministic', (), [0],
-            [skipMeta, expectedAlertNondeterministic('index_copy')]),
-        ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
-        ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
         ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', (), [0]),
         ('index_fill', (S, S), (0, index_variable(2, S), ()), 'variable_dim', (), [0]),
         ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', (), [0]),
