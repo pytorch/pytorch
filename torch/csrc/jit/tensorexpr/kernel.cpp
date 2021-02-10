@@ -1843,6 +1843,119 @@ Tensor* TensorExprKernel::computeSoftmax(
     }
   }
 
+  c10::optional<Dtype> dtype = ToDtype(ScalarType::Float);
+  auto maybe_dtype = v->node()->get(attr::dtype);
+  if (maybe_dtype && !maybe_dtype->isNone()) {
+    dtype = ToDtype(static_cast<ScalarType>(maybe_dtype->toInt()));
+  }
+
+  // If softmax dimension is the inner-most dimension, then generate optimized
+  // code directly.
+  if (softmax_dim == static_cast<size_t>(rank - 1) && !log_softmax) {
+    auto dt = dtype.value();
+    auto softmax_dim_expr = output_dims[softmax_dim].dim().node();
+
+    const Expr* outer_dim_expr = new IntImm(1);
+    for (auto& d : non_softmax_dims) {
+      outer_dim_expr = new Mul(outer_dim_expr, d.dim().node());
+    }
+    outer_dim_expr = IRSimplifier::simplify(outer_dim_expr);
+    const Expr* full_dim_expr = new Mul(outer_dim_expr, softmax_dim_expr);
+    full_dim_expr = IRSimplifier::simplify(full_dim_expr);
+
+    auto input = tensors_.at(v->node()->inputs()[0]->unique());
+    auto output_buf =
+        new Buf(new Var("aten_softmax", kHandle), {full_dim_expr}, dt);
+
+    auto v_max = new Var("aten_softmax_max", kHandle);
+    auto v_exp = new Var("aten_softmax_exp", kHandle);
+    auto v_sum = new Var("aten_softmax_sum", kHandle);
+
+    auto b_max = new Buf(v_max, {outer_dim_expr}, dt);
+    auto b_exp = new Buf(v_exp, {full_dim_expr}, dt);
+    auto b_sum = new Buf(v_sum, {outer_dim_expr}, dt);
+
+    auto v_outer_for = new Var("i0", ToDtype(ScalarType::Int));
+    auto outer_for_block = new Block(
+        {new Store(b_max, {v_outer_for}, new FloatImm(0.0), new IntImm(1))});
+
+    auto v_inner_for_max = new Var("i1_0", ToDtype(ScalarType::Int));
+    auto input_load_idx =
+        new Add(new Mul(v_outer_for, softmax_dim_expr), v_inner_for_max);
+    auto inner_for_max = new For(
+        v_inner_for_max,
+        new IntImm(0),
+        softmax_dim_expr,
+        {new Store(
+            b_max,
+            {v_outer_for},
+            new Max(
+                new Load(input->buf(), {input_load_idx}, new IntImm(1)),
+                new Load(b_max, {v_outer_for}, new IntImm(1)),
+                true),
+            new IntImm(1))});
+    outer_for_block->append_stmt(inner_for_max);
+
+    auto sum_init =
+        new Store(b_sum, {v_outer_for}, new FloatImm(0.0), new IntImm(1));
+    outer_for_block->append_stmt(sum_init);
+
+    auto v_inner_for_sum = new Var("i1_1", ToDtype(ScalarType::Int));
+    auto exp_store_idx =
+        new Add(new Mul(v_outer_for, softmax_dim_expr), v_inner_for_sum);
+    auto store_exp = new Store(
+        b_exp,
+        {exp_store_idx},
+        new Intrinsics(
+            kExp,
+            new Sub(
+                new Load(input->buf(), {exp_store_idx}, new IntImm(1)),
+                new Load(b_max, {v_outer_for}, new IntImm(1)))),
+        new IntImm(1));
+    auto store_sum = new Store(
+        b_sum,
+        {v_outer_for},
+        new Add(
+            new Load(b_sum, {v_outer_for}, new IntImm(1)),
+            new Load(b_exp, {exp_store_idx}, new IntImm(1))),
+        new IntImm(1));
+    auto inner_for_sum = new For(
+        v_inner_for_sum,
+        new IntImm(0),
+        softmax_dim_expr,
+        new Block({store_exp, store_sum}));
+    outer_for_block->append_stmt(inner_for_sum);
+
+    auto v_inner_for_softmax = new Var("i1_2", ToDtype(ScalarType::Int));
+    auto softmax_store_idx =
+        new Add(new Mul(v_outer_for, softmax_dim_expr), v_inner_for_softmax);
+    auto store_softmax = new Store(
+        output_buf,
+        {softmax_store_idx},
+        new Div(
+            new Load(b_exp, {softmax_store_idx}, new IntImm(1)),
+            new Load(b_sum, {v_outer_for}, new IntImm(1))),
+        new IntImm(1));
+    auto inner_for_softmax = new For(
+        v_inner_for_softmax, new IntImm(0), softmax_dim_expr, store_softmax);
+    outer_for_block->append_stmt(inner_for_softmax);
+
+    auto outer_for =
+        new For(v_outer_for, new IntImm(0), outer_dim_expr, outer_for_block);
+    auto block = new Block({outer_for});
+
+    // Add Alloc and Free statements.
+    block->prepend_stmt(new Allocate(v_max, dt, {outer_dim_expr}));
+    block->append_stmt(new Free(v_max));
+    block->prepend_stmt(new Allocate(v_exp, dt, {full_dim_expr}));
+    block->append_stmt(new Free(v_exp));
+    block->prepend_stmt(new Allocate(v_sum, dt, {outer_dim_expr}));
+    block->append_stmt(new Free(v_sum));
+
+    std::cout << "softmax block: " << *block << std::endl;
+    return new Tensor(output_buf, block);
+  }
+
   // Softmax implementation includes two reductions, one to find the max and
   // the other to calculate the sum along the softmax dim. These reductions
   // will have the softmax dimension as the inner most loop. So, the innermost
@@ -1880,12 +1993,6 @@ Tensor* TensorExprKernel::computeSoftmax(
     }
     return new_indices;
   };
-
-  c10::optional<Dtype> dtype = ToDtype(ScalarType::None);
-  auto maybe_dtype = v->node()->get(attr::dtype);
-  if (maybe_dtype && !maybe_dtype->isNone()) {
-    dtype = ToDtype(static_cast<ScalarType>(maybe_dtype->toInt()));
-  }
 
   auto max = Reduce(
       "aten_softmax_max",

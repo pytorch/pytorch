@@ -46,7 +46,7 @@ class SoftmaxBench(benchmark.Benchmark):
         return [
             [480, 20],
             [1 << 15, 32],
-            [128, 1 << 16],
+            [128, 1 << 11],
         ]
 
 

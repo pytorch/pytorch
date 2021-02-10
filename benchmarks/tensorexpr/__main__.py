@@ -116,6 +116,11 @@ Works only with Python3.\n A few examples:
         action='store_true',
         help="Disable shape randomization in dynamic benchmarks.",
     )
+    parser.add_argument(
+        "--enable_reductions",
+        action='store_true',
+        help="Enable reductions in TE fuser."
+    )
 
     args = parser.parse_args()
 
@@ -138,6 +143,19 @@ Works only with Python3.\n A few examples:
         torch._C._jit_set_profiling_mode(True)
     else :
         raise ValueError("Undefined fuser: {}".format(args.cuda_fuser))
+
+    if args.enable_reductions:
+        import torch
+        torch._C._jit_set_profiling_executor(True)
+        torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_set_texpr_reductions_enabled(True)
+    else:
+        import torch
+        torch._C._jit_set_profiling_executor(False)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_set_texpr_reductions_enabled(False)
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)
