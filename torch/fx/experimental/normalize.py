@@ -29,6 +29,7 @@ class NormalizeArgs(Transformer):
                 # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
                 # branches of the dispatch have exactly the same signature. If they do, use the `true`
                 # branch signature for analysis. Otherwise, leave this un-normalized
+                assert not isinstance(target, str)
                 dispatched = boolean_dispatched[target]
                 if_true, if_false = dispatched['if_true'], dispatched['if_false']
                 if inspect.signature(if_true).parameters != inspect.signature(if_false).parameters:
