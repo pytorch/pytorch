@@ -208,6 +208,10 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
   }
 }
 
+inline const char* if_empty_then(CompileTimeEmptyString, const char *s) {
+  return s;
+}
+
 }
 
 
@@ -364,14 +368,23 @@ namespace detail {
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg);
 
+template <typename... Args>
+constexpr std::size_t varargs_count(Args&&... args) {
+  return sizeof...(Args);
+}
+
 } // namespace detail
-} // namespace 10
+} // namespace c10
 
 #define TORCH_CHECK(cond, ...)                                          \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
     ::c10::detail::torchCheckFail(                                      \
         __func__, __FILE__, static_cast<uint32_t>(__LINE__),            \
-        ([&]() C10_NOINLINE { return TORCH_CHECK_MSG(cond, "", __VA_ARGS__); })()); \
+      /* When there are no varargs, we needn't call out to a lambda     \
+         function just to grab a couple C string constants. */          \
+        ::c10::detail::varargs_count(__VA_ARGS__) == 0                  \
+        ? TORCH_CHECK_MSG(cond, "")                                     \
+        : ([&]() C10_NOINLINE { return TORCH_CHECK_MSG(cond, "", __VA_ARGS__); })()); \
   }
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
