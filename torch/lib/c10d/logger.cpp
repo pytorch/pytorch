@@ -177,7 +177,7 @@ void Logger::set_runtime_stats_and_log() {
       return;
     }
 
-    // set_runtime_stats is called at the beginning of forward call,
+    // set_runtime_stats_and_log is called at the beginning of forward call,
     // when it is cheap to synchronize the cuda events of previous iteration,
     // as mostly all cuda operations are finished in previous iteration.
     reducer_->gpu_timer_.forward_start.synchronize();
