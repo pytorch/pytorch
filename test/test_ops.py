@@ -115,13 +115,8 @@ class TestGradients(TestCase):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     def _skip_helper(self, op, dtype):
-<<<<<<< HEAD
-        if not op.is_differentiable:
-            self.skipTest("Skipped! Op is not differentiable")
-=======
         if not op.supports_autograd:
             self.skipTest("Skipped! autograd not supported")
->>>>>>> 3cf78395cbc32fa9c83b585c9ec63f960b32d17f
         if not op.test_complex_grad and dtype.is_complex:
             self.skipTest("Skipped! complex grad tests marked to skip.")
 
@@ -198,12 +193,7 @@ class TestCommon(JitCommonTestCase):
     #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-<<<<<<< HEAD
-        test_backward = op.is_differentiable and (op.test_complex_grad or not dtype.is_complex)
-
-=======
         test_backward = op.supports_autograd and op.test_complex_grad or not dtype.is_complex
->>>>>>> 3cf78395cbc32fa9c83b585c9ec63f960b32d17f
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
