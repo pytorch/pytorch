@@ -2090,7 +2090,7 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_batch_norm_relu(self):
         # hypothesis too slow for this test, create test cases manually
-        max_sides = (3, 4, 5)
+        max_sides = (2, 3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
@@ -2114,7 +2114,7 @@ class TestQuantizedOps(TestCase):
                 bias = torch.rand(c).float()
                 eps = 0.001
                 qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-                if len(X.shape) == 3:
+                if len(X.shape) == 2 or len(X.shape) == 3:
                     qy = torch.ops.quantized.batch_norm1d_relu(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
                 elif len(X.shape) == 4:
@@ -2141,7 +2141,7 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_batch_norm(self):
         # hypothesis too slow for this test, create test cases manually
-        max_sides = (3, 4, 5)
+        max_sides = (2, 3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
@@ -2165,13 +2165,13 @@ class TestQuantizedOps(TestCase):
                 bias = torch.rand(c).float()
                 eps = 0.001
                 qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-                if len(X.shape) == 3:
+                if len(X.shape) == 2 or len(X.shape) == 3:
                     qy = torch.ops.quantized.batch_norm1d(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
-                if len(X.shape) == 4:
+                elif len(X.shape) == 4:
                     qy = torch.ops.quantized.batch_norm2d(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
-                if len(X.shape) == 5:
+                elif len(X.shape) == 5:
                     qy = torch.ops.quantized.batch_norm3d(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
@@ -2190,6 +2190,12 @@ class TestQuantizedOps(TestCase):
         X = torch.ones((0, 2, 4, 4), dtype=torch.float32)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch.quint8)
+
+        # upsample_nearest2d
+        qY = torch.nn.functional.upsample_nearest(qX, scale_factor=2)
+        np.testing.assert_equal(qY.size(), (0, 2, 8, 8),
+                                "Quantized upsample_nearsest2d with batch size 0 failed.")
+
         # relu
         qY = torch.nn.functional.relu(qX)
         np.testing.assert_equal(qY.size(), qX.size(),
@@ -3220,7 +3226,6 @@ class TestQuantizedEmbeddingOps(TestCase):
 
 
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
-    @skipIfNoFBGEMM
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
@@ -3275,7 +3280,6 @@ class TestQuantizedEmbeddingOps(TestCase):
     """ Tests the correctness of the quantized embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
-    @skipIfNoFBGEMM
     def test_embedding_byte(self, num_embeddings, embedding_dim):
         quant_op = torch.ops.quantized.embedding_byte
         prepack_op = torch.ops.quantized.embedding_bag_prepack
@@ -3306,7 +3310,6 @@ class TestQuantizedEmbeddingOps(TestCase):
         torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
 
 
-    @skipIfNoFBGEMM
     def test_embedding_2d_indices(self):
         """
         Tests the case where 2D indices are passed into the operator
@@ -3329,7 +3332,6 @@ class TestQuantizedEmbeddingOps(TestCase):
         qresult = quant_op(packed_weight, indices, pruned_weights=False)
         torch.testing.assert_allclose(ref, qresult, atol=0.05, rtol=1e-3)
 
-    @skipIfNoFBGEMM
     def test_embedding_bag_2d_indices(self):
         """
         Tests the case where 2D indices are passed into the operator

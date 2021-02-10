@@ -176,7 +176,7 @@ Tensor mm(
   {
     if C10_LIKELY(v_mat1.has_image() && v_mat2.has_image()) {
       const struct Block final {
-        uvec3 size;
+        uvec3 extents;
         int32_t K;
       } block {
         v_output.extents(),
@@ -299,7 +299,7 @@ Tensor LinearOpContext::run(
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
       const struct Block final {
-        uvec3 size;
+        uvec3 extents;
         int32_t K;
         vec2 multiplier;
       } block {

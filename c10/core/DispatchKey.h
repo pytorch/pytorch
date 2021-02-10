@@ -18,6 +18,8 @@ namespace c10 {
 // DispatchKeySet.  Higher bit indexes get handled by dispatching first (because
 // we "count leading zeros" when we extract the highest priority dispatch
 // key.)
+//
+// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -54,13 +56,15 @@ enum class DispatchKey : uint8_t {
   CPU, // registered at build/aten/src/ATen/RegisterCPU.cpp
   CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
-       // CUDA]
-  FPGA, // Xilinx support lives out of tree at https://gitlab.com/pytorch-complex/vitis_kernels
+  // CUDA]
+  FPGA, // Xilinx support lives out of tree at
+        // https://gitlab.com/pytorch-complex/vitis_kernels
   MSNPU, // unused externally, but tested at
-         // test/cpp_extensions/msnpu_extension.cpp
+  // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
   Vulkan,
   Metal,
+  XPU, // For out of tree Intel's heterogeneous computing plug-in
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -75,10 +79,11 @@ enum class DispatchKey : uint8_t {
   // based on the dtype of the tensor.
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
+  QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
   ComplexCPU, // lives out of tree at
-              // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
+  // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
   ComplexCUDA, // and
-               // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
+  // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
   // tested at test/cpp_extensions/complex_registration_extension.cpp
   // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
@@ -102,7 +107,8 @@ enum class DispatchKey : uint8_t {
   SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
   SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
   SparseHIP, // TODO: I think this is not actually used, due to Note
-             // [Masquerading as CUDA]
+  // [Masquerading as CUDA]
+  SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
@@ -218,7 +224,9 @@ enum class DispatchKey : uint8_t {
   AutogradCPU,
   AutogradCUDA,
   AutogradXLA,
-  AutogradNestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+  AutogradNestedTensor, // lives out of tree at
+                        // https://github.com/pytorch/nestedtensor
+  AutogradXPU,
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,
@@ -276,8 +284,9 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
-  Math,  // registered at build/aten/src/ATen/RegisterMath.cpp
-  DefaultBackend,  // registered at build/aten/src/ATen/RegisterDefaultBackend.cpp
+  Math, // registered at build/aten/src/ATen/RegisterMath.cpp
+  DefaultBackend, // registered at
+                  // build/aten/src/ATen/RegisterDefaultBackend.cpp
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.

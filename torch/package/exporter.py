@@ -5,15 +5,16 @@ import pickletools
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
+from ._mangling import is_mangled
+from ._stdlib import is_stdlib_module
 import types
 import importlib
-from typing import List, Any, Callable, Dict, Tuple, Union, Iterable
-from distutils.sysconfig import get_python_lib
+from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, Optional
 from pathlib import Path
 import linecache
-import sys
 from urllib.parse import quote
 import re
+
 
 class PackageExporter:
     """ Exporters allow you to write packages of code, pickled python data, and
@@ -56,16 +57,24 @@ class PackageExporter:
     """
 
 
-    def __init__(self, filename: str, verbose: bool = True):
+    def __init__(self, f: Union[str, Path, BinaryIO], verbose: bool = True):
         """
         Create an exporter.
 
         Args:
-            filename: e.g. my_package.zip
+            f: The location to export to. Can be a  string/Path object containing a filename,
+                or a Binary I/O object.
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
         """
-        self.zip_file = torch._C.PyTorchFileWriter(filename)
+        if isinstance(f, (Path, str)):
+            f = str(f)
+            self.buffer: Optional[BinaryIO] = None
+        else:  # is a byte buffer
+            self.buffer = f
+
+        self.zip_file = torch._C.PyTorchFileWriter(f)
+        self.zip_file.set_min_version(6)
         self.serialized_storages : Dict[str, Any] = {}
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
@@ -162,8 +171,15 @@ class PackageExporter:
             for dep in dep_list.keys():
                 self.require_module_if_not_provided(dep)
 
-    def _import_module(self, module_name):
-        return import_module_from_importers(module_name, self.importers)
+    def _import_module(self, module_name: str):
+        try:
+            return import_module_from_importers(module_name, self.importers)
+        except ModuleNotFoundError as e:
+            if not is_mangled(module_name):
+                raise
+            msg = (f"Module not found: '{module_name}'. Modules imported "
+                   "from a torch.package cannot be re-exported directly.")
+            raise ModuleNotFoundError(msg) from None
 
     def _module_exists(self, module_name: str) -> bool:
         try:
@@ -209,7 +225,6 @@ node [shape=box];
         and call `save_module` otherwise. Clients can subclass this object
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
-
 
         root_name = module_name.split('.', maxsplit=1)[0]
         if self._can_implicitly_extern(root_name):
@@ -394,6 +409,9 @@ node [shape=box];
         self.close()
 
     def _write(self, filename, str_or_bytes):
+        if is_mangled(filename):
+            raise RuntimeError(f"Tried to save a torch.package'd module as '{filename}'. "
+                               "Directly saving torch.package'd modules is not allowed.")
         if isinstance(str_or_bytes, str):
             str_or_bytes = str_or_bytes.encode('utf-8')
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
@@ -410,7 +428,7 @@ node [shape=box];
 
         # Write each tensor to a file named tensor/the_tensor_key in the zip archive
         for key in sorted(self.serialized_storages.keys()):
-            name = 'data/{}'.format(key)
+            name = f'.data/{key}.storage'
             storage = self.serialized_storages[key]
             # location information is saved in python, but to actually
             # get the data from non cpu tensors we need to move them over first
@@ -419,9 +437,10 @@ node [shape=box];
             num_bytes = storage.size() * storage.element_size()
             self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
         contents = ('\n'.join(self.external) + '\n')
-        self._write('extern_modules', contents)
+        self._write('.data/extern_modules', contents)
         del self.zip_file
-
+        if self.buffer:
+            self.buffer.flush()
 
     def _filename(self, package, resource):
         package_path = package.replace('.', '/')
@@ -430,30 +449,16 @@ node [shape=box];
 
     def _can_implicitly_extern(self, module_name: str):
         return module_name == 'torch' or (module_name not in _DISALLOWED_MODULES
-                                          and _is_builtin_or_stdlib_module(self._import_module(module_name)))
+                                          and is_stdlib_module(module_name))
 
 # even though these are in the standard library, we do not allow them to be
 # automatically externed since they offer a lot of system level access
 _DISALLOWED_MODULES = ['sys', 'io']
 
-def _is_builtin_or_stdlib_module(module: types.ModuleType) -> bool:
-    if module.__name__ in sys.builtin_module_names:
-        return True
-    filename = getattr(module, '__file__', None)
-    if filename is None:
-        return False
-    standard_lib = get_python_lib(standard_lib=True)
-    # this is often a subdirectory of standard_lib so we have to check
-    # that the file is in the standard_lib directory but not in this one
-    installed_libs = get_python_lib(standard_lib=False)
-    in_standard_lib = filename.startswith(standard_lib + '/')
-    in_installed_libs = filename.startswith(installed_libs + '/')
-    return in_standard_lib and not in_installed_libs
-
 _MOCK_IMPL = """\
 from _mock import MockedObject
 def __getattr__(attr: str):
-    return MockedObject(__name__ + '.' + attr)
+    return MockedObject(__name__ + '.' + attr, _suppress_err=True)
 """
 
 def _read_file(filename: str) -> str:

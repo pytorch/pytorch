@@ -31,7 +31,7 @@ void initPythonCustomClassBindings(PyObject* module) {
   py::class_<ScriptClass>(m, "ScriptClass")
       .def("__call__", &ScriptClass::__call__)
       .def_property_readonly("__doc__", [](const ScriptClass& self) {
-        return self.class_type_.type_->expect<ClassType>()->doc_string();
+        return self.class_type_.type_->expectRef<ClassType>().doc_string();
       });
 
   // This function returns a ScriptClass that wraps the constructor

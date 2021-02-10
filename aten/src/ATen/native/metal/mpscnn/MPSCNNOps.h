@@ -34,7 +34,11 @@ Tensor& relu_(Tensor& input);
 
 Tensor sigmoid(const Tensor& input);
 
+Tensor& hardsigmoid_(Tensor& input);
+
 Tensor& hardtanh_(Tensor& input, Scalar min_val, Scalar max_val);
+
+Tensor& hardswish_(Tensor& input);
 
 Tensor t(const Tensor& input);
 

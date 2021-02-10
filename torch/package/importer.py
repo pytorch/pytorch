@@ -1,16 +1,22 @@
-from typing import List, Callable, Dict, Optional, Any, Union
+from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
 import builtins
 import importlib
-from torch.serialization import _load
+import inspect
+import io
+import linecache
+from weakref import WeakValueDictionary
 import pickle
 import torch
+from torch.serialization import _get_restore_location, _maybe_decode_ascii
 import _compat_pickle  # type: ignore
 import types
 import os.path
+from pathlib import Path
 
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
 from ._mock_zipreader import MockZipReader
+from ._mangling import PackageMangler, demangle
 
 class PackageImporter:
     """Importers allow you to load code written to packages by PackageExporter.
@@ -26,19 +32,19 @@ class PackageImporter:
     a locally-installed package, but then fails when the package is copied to another machine.
     """
 
-    modules : Dict[str, Optional[types.ModuleType]]
     """The dictionary of already loaded modules from this package, equivalent to `sys.modules` but
     local to this importer.
     """
+    modules : Dict[str, Optional[types.ModuleType]]
 
-    def __init__(self, filename: Union[str, torch._C.PyTorchFileReader],
+    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
                  module_allowed: Callable[[str], bool] = lambda module_name: True):
-        """Open `filename` for importing. This checks that the imported package only requires modules
+        """Open `file_or_buffer` for importing. This checks that the imported package only requires modules
         allowed by `module_allowed`
 
         Args:
-            filename (str): archive to load. Can also be a directory of the unzipped files in the archive
-                for easy debugging and editing.
+            file_or_buffer: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
+                or a string or os.PathLike object containing a file name.
             module_allowed (Callable[[str], bool], optional): A method to determine if a externally provided module
                 should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
                 does not support. Defaults to allowing anything.
@@ -47,15 +53,18 @@ class PackageImporter:
             ImportError: If the package will use a disallowed module.
         """
         self.zip_reader : Any
-        if isinstance(filename, torch._C.PyTorchFileReader):
+        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
             self.filename = '<pytorch_file_reader>'
-            self.zip_reader = filename
-        else:
-            self.filename = filename
+            self.zip_reader = file_or_buffer
+        elif isinstance(file_or_buffer, (Path, str)):
+            self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
                 self.zip_reader = MockZipReader(self.filename)
+        else:
+            self.filename = '<binary>'
+            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
 
         self.root = _PackageNode(None)
         self.modules = {}
@@ -63,7 +72,7 @@ class PackageImporter:
 
         for extern_module in self.extern_modules:
             if not module_allowed(extern_module):
-                raise ImportError(f"package '{filename}' needs the external module '{extern_module}' "
+                raise ImportError(f"package '{file_or_buffer}' needs the external module '{extern_module}' "
                                   f"but that module has been disallowed")
             self._add_extern(extern_module)
 
@@ -74,6 +83,8 @@ class PackageImporter:
         self.patched_builtins['__import__'] = self.__import__
         # allow pickles from archive using `import resources`
         self.modules['resources'] = self  # type: ignore
+
+        self._mangler = PackageMangler()
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
@@ -134,29 +145,83 @@ class PackageImporter:
             Any: the unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
-        return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
+        restore_location = _get_restore_location(map_location)
+        loaded_storages = {}
 
+        def load_tensor(data_type, size, key, location, restore_location):
+            name = f'.data/{key}.storage'
+            dtype = data_type(0).dtype
+
+            storage = self.zip_reader.get_storage_from_record(name, size, dtype).storage()
+            loaded_storages[key] = restore_location(storage, location)
+
+        def persistent_load(saved_id):
+            assert isinstance(saved_id, tuple)
+            typename = _maybe_decode_ascii(saved_id[0])
+            data = saved_id[1:]
+
+            assert typename == 'storage', \
+                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+            data_type, key, location, size = data
+            if key not in loaded_storages:
+                load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+            storage = loaded_storages[key]
+            return storage
+
+        # Load the data (which may in turn use `persistent_load` to load tensors)
+        data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
+        unpickler = self.Unpickler(data_file)
+        unpickler.persistent_load = persistent_load
+        result = unpickler.load()
+
+        # TODO from zdevito:
+        #   This stateful weird function will need to be removed in our efforts
+        #   to unify the format. It has a race condition if multiple python
+        #   threads try to read independent files
+        torch._utils._validate_loaded_sparse_tensors()
+
+        return result
+
+    def id(self):
+        """
+        Returns internal identifier that torch.package uses to distinguish PackageImporter instances.
+        Looks like:
+            <torch_package_0>
+        """
+        return self._mangler.parent_name()
 
     def _read_extern(self):
-        return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
+        return self.zip_reader.get_record('.data/extern_modules').decode('utf-8').splitlines(keepends=False)
 
     def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
+        mangled_filename = self._mangler.mangle(filename) if filename else None
         spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
+        module.__name__ = self._mangler.mangle(name)
         ns = module.__dict__
         ns['__spec__'] = spec
         ns['__loader__'] = self
-        ns['__file__'] = filename
+        ns['__file__'] = mangled_filename
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
+
+        # Add this module to our private global registry. It should be unique due to mangling.
+        assert module.__name__ not in _package_imported_modules
+        _package_imported_modules[module.__name__] = module
 
         # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
         self._install_on_parent(parent, name, module)
 
         if filename is not None:
-            code = self._compile_source(filename)
+            assert mangled_filename is not None
+            # pre-emptively install the source in `linecache` so that stack traces,
+            # `inspect`, etc. work.
+            assert filename not in linecache.cache  # type: ignore
+            linecache.lazycache(mangled_filename, ns)
+
+            code = self._compile_source(filename, mangled_filename)
             exec(code, ns)
 
         return module
@@ -174,16 +239,17 @@ class PackageImporter:
                 return module
         return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore
 
-    def _compile_source(self, fullpath):
+    def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
         source = _normalize_line_endings(source)
-        return compile(source, fullpath, 'exec', dont_inherit=True)
+        return compile(source, mangled_filename, 'exec', dont_inherit=True)
 
     # note: named `get_source` so that linecache can find the source
     # when this is the __loader__ of a module.
     def get_source(self, module_name) -> str:
-        module = self.import_module(module_name)
-        return self.zip_reader.get_record(module.__file__).decode('utf-8')
+        # linecache calls `get_source` with the `module.__name__` as the argument, so we must demangle it here.
+        module = self.import_module(demangle(module_name))
+        return self.zip_reader.get_record(demangle(module.__file__)).decode('utf-8')
 
     def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
         if not parent:
@@ -254,13 +320,14 @@ class PackageImporter:
         import implementation is desired.
 
         """
+        module_name = demangle(module.__name__)
         # The hell that is fromlist ...
         # If a package was imported, try to import stuff from fromlist.
         if hasattr(module, '__path__'):
             for x in fromlist:
                 if not isinstance(x, str):
                     if recursive:
-                        where = module.__name__ + '.__all__'
+                        where = module_name + '.__all__'
                     else:
                         where = "``from list''"
                     raise TypeError(f"Item in {where} must be str, "
@@ -270,7 +337,7 @@ class PackageImporter:
                         self._handle_fromlist(module, module.__all__,
                                               recursive=True)
                 elif not hasattr(module, x):
-                    from_name = '{}.{}'.format(module.__name__, x)
+                    from_name = '{}.{}'.format(module_name, x)
                     try:
                         self._gcd_import(from_name)
                     except ModuleNotFoundError as exc:
@@ -303,7 +370,8 @@ class PackageImporter:
                 cut_off = len(name) - len(name.partition('.')[0])
                 # Slice end needs to be positive to alleviate need to special-case
                 # when ``'.' not in name``.
-                return self.modules[module.__name__[:len(module.__name__) - cut_off]]
+                module_name = demangle(module.__name__)
+                return self.modules[module_name[:len(module_name) - cut_off]]
         else:
             return self._handle_fromlist(module, fromlist)
 
@@ -330,7 +398,8 @@ class PackageImporter:
         package = self._get_package(package)
         resource = _normalize_path(resource)
         assert package.__loader__ is self
-        return f"{package.__name__.replace('.', '/')}/{resource}"
+        name = demangle(package.__name__)
+        return f"{name.replace('.', '/')}/{resource}"
 
     def _get_or_create_package(self, atoms: List[str]) -> 'Union[_PackageNode, _ExternNode]':
         cur = self.root
@@ -402,3 +471,16 @@ class _ModuleNode(_PathNode):
 
 class _ExternNode(_PathNode):
     pass
+
+# A private global registry of all modules that have been package-imported.
+_package_imported_modules: WeakValueDictionary = WeakValueDictionary()
+
+# `inspect` by default only looks in `sys.modules` to find source files for classes.
+# Patch it to check our private registry of package-imported modules as well.
+_orig_getfile = inspect.getfile
+def patched_getfile(object):
+    if inspect.isclass(object):
+        if object.__module__ in _package_imported_modules:
+            return _package_imported_modules[object.__module__].__file__
+    return _orig_getfile(object)
+inspect.getfile = patched_getfile

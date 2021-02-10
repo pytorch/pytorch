@@ -1,40 +1,34 @@
-from .node import Node, Argument, Target, map_arg
+from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
-import builtins
 import torch
-import types
 import keyword
 import re
+import builtins
 
 def _shadows_builtin_name(name: str) -> bool:
-    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan'}
+    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan', 'NoneType'}
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
 
 def _snake_case(s: str) -> str:
-    return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
+    """
+    Transforms the given string ``s`` to a Python-style variable name
 
-def get_qualified_name(func: Callable[..., Any]) -> str:
-    # things like getattr just appear in builtins
-    if getattr(builtins, func.__name__, None) is func:
-        return func.__name__
-    name = func.__name__
-    module = _find_module_of_method(func)
-    module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
-    return f'{module}.{name}'
-
-# this is fixed on master, WAR for 1.5
-def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
-    name = orig_method.__name__
-    module = orig_method.__module__
-    if module is not None:
-        return module
-    for guess in [torch, torch.nn.functional]:
-        if getattr(guess, name, None) is orig_method:
-            return guess.__name__
-    raise RuntimeError(f'cannot find module for {orig_method}')
+    Examples:
+        ``mod.snake_case`` -> ``mod.snake_case``
+        ``mod.pascalCase``-> ``mod.pascal_case``
+        ``mod.ALL_CAPS`` -> ``mod.all_caps``
+    """
+    chars = []
+    prev_lower = False
+    for c in s:
+        if prev_lower and c.isupper():
+            chars.append('_')
+        chars.append(c.lower())
+        prev_lower = c.islower()
+    return ''.join(chars)
 
 def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
     args_s = ', '.join(repr(a) for a in args)
@@ -52,29 +46,6 @@ def _format_target(base: str, target: str) -> str:
         else:
             r = f'{r}.{e}'
     return r
-
-# Borrowed from CPython typing module
-# https://github.com/python/cpython/blob/f90dc36c15d7fee0efaf6d39e97be0bdf2683e93/Lib/typing.py#L156
-def _type_repr(obj):
-    """Return the repr() of an object, special-casing types (internal helper).
-    If obj is a type, we return a shorter version than the default
-    type.__repr__, based on the module and qualified name, which is
-    typically enough to uniquely identify a type.  For everything
-    else, we fall back on repr(obj).
-    """
-    # HACK: In Python 3.6, type aliases from ``typing`` are instances of ``type``, but in
-    # later Python versions, type aliases are not instances of ``type``!! We want
-    # all type aliases to fall through to ``repr``, so if we have a type that is
-    # in the module typing, don't go down this path.
-    if isinstance(obj, type) and obj.__module__ != 'typing':
-        if obj.__module__ == 'builtins':
-            return obj.__qualname__
-        return f'{obj.__module__}.{obj.__qualname__}'
-    if obj is ...:
-        return('...')
-    if isinstance(obj, types.FunctionType):
-        return obj.__name__
-    return repr(obj)
 
 class _InsertPoint:
     def __init__(self, graph, new_insert):
@@ -141,11 +112,11 @@ class Graph:
 
         graph(x):
             %linear_weight : [#users=1] = self.linear.weight
-            %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
+            %add_1 : [#users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
             %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
             %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-            %sum_1 : [#users=1] = call_function[target=<built-in method sum of type object at 0x7ff2da9dc300>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
-            %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
+            %sum_1 : [#users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
+            %topk_1 : [#users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
             return topk_1
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
@@ -656,7 +627,7 @@ class Graph:
                     assert isinstance(node.args, tuple)
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
-                qualified_name = get_qualified_name(node.target)
+                qualified_name = _get_qualified_name(node.target)
                 register_modules_used(qualified_name)
                 if qualified_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
@@ -718,50 +689,29 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         # over value
         maybe_return_typename : List[str] = ['']
 
-        def format_arg(arg) -> str:
-            if isinstance(arg, list):
-                items = ', '.join(format_arg(a) for a in arg)
-                return f'[{items}]'
-            elif isinstance(arg, tuple):
-                items = ', '.join(format_arg(a) for a in arg)
-                maybe_comma = ',' if len(arg) == 1 else ''
-                return f'({items}{maybe_comma})'
-            elif isinstance(arg, dict):
-                items_str = ', '.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
-                return f'{{{items_str}}}'
-
-            if isinstance(arg, Node):
-                return '%' + str(arg)
-            else:
-                return str(arg)
-
-        def format_node(n : Node) -> Optional[str]:
-            if n.op == 'placeholder':
-                assert isinstance(n.target, str)
-                arg_str = n.target
-                arg_str += arg_str + f': {_type_repr(n.type)}' if n.type is not None else ''
-                placeholder_names.append(arg_str)
-                return None
-            elif n.op == 'get_attr':
-                maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = self.{n.target}'
-            elif n.op == 'output':
-                if n.type is not None:
-                    maybe_return_typename[0] = f' -> {_type_repr(n.type)}'
-                return f'return {n.args[0]}'
-            else:
-                maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={n.target}](' \
-                       f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
-
-
-        node_strs = [format_node(node) for node in self.nodes]
+        node_strs = [node.format_node(placeholder_names) for node in self.nodes]
         param_str = ', '.join(placeholder_names)
         s = f'graph({param_str}){maybe_return_typename[0]}:'
         for node_str in node_strs:
             if node_str:
                 s += '\n    ' + node_str
         return s
+
+    def print_tabular(self):
+        """
+        Prints the intermediate representation of the graph in tabular
+        format.
+        """
+        try:
+            from tabulate import tabulate
+        except ImportError:
+            print("`print_tabular` relies on the library `tabulate`, "
+                  "which could not be found on this machine. Run `pip "
+                  "install tabulate` to install the library.")
+        node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
+                      for n in self.nodes]
+        print(tabulate(node_specs,
+              headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
     def lint(self, root : Optional[torch.nn.Module] = None):
         """

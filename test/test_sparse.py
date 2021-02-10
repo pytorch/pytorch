@@ -10,12 +10,11 @@ import random
 from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from torch.testing._internal.common_methods_invocations import sparse_unary_ufuncs
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops
 from numbers import Number
-from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
 
 if TEST_SCIPY:
@@ -25,6 +24,8 @@ if TEST_SCIPY:
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+# batched grad doesn't support sparse
+gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 def cpu_only(inner):
     @functools.wraps(inner)
@@ -672,7 +673,6 @@ class TestSparse(TestCase):
         self.assertEqual(None, x1.grad)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_Sparse_to_Sparse_copy_multi_gpu(self):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
         sparse_dims = 3
@@ -1228,7 +1228,6 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 0, 0)
         test_shape(1000, 100, 0, 20)
 
-    @skipIfRocm
     def test_hsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]
@@ -1353,7 +1352,6 @@ class TestSparse(TestCase):
                 x.norm(**kwargs)
 
 
-    @skipIfRocm
     def test_sparse_sum(self):
 
         def run_tests(S, td=None):
@@ -2506,7 +2504,6 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
-    @skipIfRocm
     def test_softmax(self):
         import torch.nn.functional as F
 
@@ -2798,7 +2795,6 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2])
         test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
-    @skipIfRocm
     def test_sparse_matmul(self):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors. 

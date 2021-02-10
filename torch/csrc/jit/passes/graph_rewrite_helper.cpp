@@ -9,7 +9,7 @@ namespace jit {
 namespace graph_rewrite_helper {
 
 std::string getFuncName(Value* func_value) {
-  auto func = func_value->type()->expect<FunctionType>()->function();
+  auto func = func_value->type()->expectRef<FunctionType>().function();
   const auto& qname = func->qualname();
   const auto& name = qname.qualifiedName();
   auto rdot_idx = name.rfind('.');
