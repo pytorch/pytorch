@@ -161,6 +161,13 @@ option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
+# BUILD_SPLIT_CUDA must also be exported as an environment variable before building, with
+# `export BUILD_SPLIT_CUDA=1` because cpp_extension.py can only work properly if this variable
+# also exists in the environment.
+# This option is incompatible with CUDA_SEPARABLE_COMPILATION.
+cmake_dependent_option(
+    BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
+    "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -219,7 +226,13 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
-option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+
+if(NOT DEFINED USE_VULKAN)
+  cmake_dependent_option(
+      USE_VULKAN "Use Vulkan GPU backend" ON
+      "ANDROID" OFF)
+endif()
+
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
@@ -249,8 +262,9 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
-option(USE_DEPLOY "Enable torch::deploy embedded python interpreter" OFF)
-
+cmake_dependent_option(
+    USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
+    "BUILD_PYTHON" OFF)
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
@@ -600,8 +614,6 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 14)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-narrowing")
@@ -919,3 +931,8 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
+
+# ---[ Torch Deploy
+if(USE_DEPLOY)
+  add_subdirectory(torch/csrc/deploy)
+endif()

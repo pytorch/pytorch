@@ -14,11 +14,11 @@ import warnings
 from textwrap import dedent
 import torch
 import sys
+import builtins
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
-from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
@@ -194,6 +194,9 @@ def get_closure(fn):
 # functions will be defined at a global scope like MyGlobalClass. In cases
 # where they are not, it is possible to work around issues by declaring the
 # values global in the function.
+# In Python 3.9 declaring class as global will make it invisible to
+# `inspect.getsource`, see https://bugs.python.org/issue42666 .
+# This could be worked around by manualy adding it to `global()` dictionary.
 
 
 
@@ -238,7 +241,9 @@ def get_annotation_str(annotation):
     elif isinstance(annotation, ast.Attribute):
         return '.'.join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
-        return f"{get_annotation_str(annotation.value)}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
+        # In Python3.9+ subscript indicies are not wrapped in ast.Index
+        subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore
+        return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ','.join([get_annotation_str(elt) for elt in annotation.elts])
     elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
@@ -595,10 +600,11 @@ def _copy_to_script_wrapper(fn):
 
 def module_has_exports(mod):
     for name in dir(mod):
-        item = getattr(mod, name)
-        if callable(item):
-            if get_torchscript_modifier(item) is FunctionModifiers.EXPORT:
-                return True
+        if hasattr(mod, name):
+            item = getattr(mod, name)
+            if callable(item):
+                if get_torchscript_modifier(item) is FunctionModifiers.EXPORT:
+                    return True
     return False
 
 def should_drop(fn):

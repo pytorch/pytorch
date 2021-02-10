@@ -52,8 +52,6 @@ from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
-from torch.autograd import gradcheck
-from torch.autograd.gradcheck import gradgradcheck
 
 torch.backends.disable_global_flags()
 
@@ -641,8 +639,10 @@ def freeze_rng_state():
 def set_default_dtype(dtype):
     saved_dtype = torch.get_default_dtype()
     torch.set_default_dtype(dtype)
-    yield
-    torch.set_default_dtype(saved_dtype)
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
@@ -817,6 +817,19 @@ class TestCase(expecttest.TestCase):
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
     _precision: float = 0
 
+    # checker to early terminate test suite if unrecoverable failure occurs.
+    def _should_stop_test_suite(self):
+        if torch.cuda.is_initialized():
+            # CUDA device side error will cause subsequence test cases to fail.
+            # stop entire test suite if catches RuntimeError during torch.cuda.synchronize().
+            try:
+                torch.cuda.synchronize()
+            except RuntimeError as rte:
+                return True
+            return False
+        else:
+            return False
+
     @property
     def precision(self) -> float:
         return self._precision
@@ -877,6 +890,11 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
+    def run(self, result=None):
+        super().run(result=result)
+        # Early terminate test if necessary.
+        if self._should_stop_test_suite():
+            result.stop()
 
     def setUp(self):
 
@@ -1286,6 +1304,31 @@ class TestCase(expecttest.TestCase):
                             str(w.message), w.category, w.filename, w.lineno, w.line)
                         msg += '\n'
                     self.fail(msg)
+
+    @contextmanager
+    def assertWarnsOnceRegex(self, category, regex=''):
+        """Context manager for code that *must always* warn
+
+        This filters expected warnings from the test and fails if
+        the expected warning is not caught. It uses set_warn_always() to force
+        TORCH_WARN_ONCE to behave like TORCH_WARN
+        """
+        pattern = re.compile(regex)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            prev = torch.is_warn_always_enabled()
+            torch.set_warn_always(True)
+            try:
+                yield
+            finally:
+                torch.set_warn_always(prev)
+                if len(ws) == 0:
+                    self.fail('no warning caught')
+                if len(ws) > 1:
+                    self.fail('too many warnings caught: %s' % '\n    '.join([str(w) for w in ws]))
+                self.assertTrue(type(ws[0].message) is category)
+                self.assertTrue(re.match(pattern, str(ws[0].message)),
+                                f'{pattern}, {ws[0].message}')
 
     def assertExpected(self, s, subname=None):
         r"""
@@ -1894,11 +1937,42 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
-def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, check_batched_grad=False):
+
+def gradcheck(fn, inputs, **kwargs):
+    # Wrapper around gradcheck that enables certain keys by default.
+    # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
+    # forward-mode AD are tested by default. We create this wrapper because we'd like to keep new checks
+    # to be disabled to default for the public-facing api to avoid breaking user code.
+    #
+    # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
+    keys_enabled_by_default = (
+        "check_batched_grad",)
+
+    for key in keys_enabled_by_default:
+        kwargs[key] = kwargs.get(key, True)
+
+    return torch.autograd.gradcheck(fn, inputs, **kwargs)
+
+
+def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
+    # Wrapper around gradgradcheck that enables certain keys by default
+    # See gradcheck above for an explanation of why we need something like this.
+    #
+    # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
+    keys_enabled_by_default = (
+        "check_batched_grad",)
+
+    for key in keys_enabled_by_default:
+        kwargs[key] = kwargs.get(key, True)
+
+    return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
+
+
+def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, **kwargs):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
-    test_case.assertTrue(gradcheck(apply_fn, inputs, check_batched_grad=check_batched_grad))
-    test_case.assertTrue(gradgradcheck(apply_fn, inputs, check_batched_grad=check_batched_grad))
+    test_case.assertTrue(gradcheck(apply_fn, inputs, **kwargs))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs, **kwargs))
 
 
 @contextmanager
@@ -1917,3 +1991,12 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.double: 1e-5,
                       torch.half: 1e-2,
                       torch.bfloat16: 1e-1}
+
+
+def _wrap_maybe_warns(regex):
+    def decorator(fn):
+        def inner(self, *args, **kwargs):
+            with self.maybeWarnsRegex(UserWarning, regex):
+                fn(self, *args, **kwargs)
+        return inner
+    return decorator

@@ -1375,7 +1375,7 @@ class TestFrozenOptimizations(JitTestCase):
     def test_conv_bn_folding(self):
         conv_bias = [True, False]
         module_pairs = [(nn.Conv1d, nn.BatchNorm1d), (nn.Conv2d, nn.BatchNorm2d), (nn.Conv3d, nn.BatchNorm3d)]
-        use_tracing = [False]
+        use_tracing = [True, False]
 
         for use_bias, modules, tracing in product(conv_bias, module_pairs, use_tracing):
             class ConvBN(torch.nn.Module):
@@ -1402,11 +1402,7 @@ class TestFrozenOptimizations(JitTestCase):
                 scripted_mod = torch.jit.trace(mod_eager, (inp))
             else:
                 scripted_mod = torch.jit.script(mod_eager)
-            self.run_pass("inline", scripted_mod.graph)
-            print(scripted_mod.graph)
-            out = torch.jit._script.RecursiveScriptModule(torch._C._freeze_module(scripted_mod._c, preserveParameters=True))
-            print(out.graph)
-            return
+
             self.run_pass("inline", scripted_mod.graph)
             self.run_pass("peephole", scripted_mod.graph)
             self.run_pass("constant_propagation", scripted_mod.graph)
@@ -1523,6 +1519,56 @@ class TestFrozenOptimizations(JitTestCase):
         # optimize_frozen_module should be run
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
+
+    def test_freeze_remove_dropout(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.dropout = nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        mod = torch.jit.script(Net())
+        # set optimize to False here, by default freezing runs optimize_frozen_module
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        # inspect frozen mod
+        FileCheck().check("aten::dropout").run(frozen_mod.graph)
+        torch.jit.optimize_frozen_module(frozen_mod)
+        FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
+
+        script_mod = torch.jit.script(mod)
+        script_mod.eval()
+
+        input = torch.randn(2)
+        output_s = script_mod.forward(input)
+        output_f = frozen_mod.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_remove_feature_dropout(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.dropout = nn.Dropout2d(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        mod = torch.jit.script(Net())
+        # set optimize to False here, by default freezing runs optimize_frozen_module
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        # inspect frozen mod
+        FileCheck().check("aten::feature_dropout").run(frozen_mod.graph)
+        torch.jit.optimize_frozen_module(frozen_mod)
+        FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
+
+        script_mod = torch.jit.script(mod)
+        script_mod.eval()
+
+        input = torch.randn(2, 2)
+        output_s = script_mod.forward(input)
+        output_f = frozen_mod.forward(input)
+        self.assertEqual(output_s, output_f)
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_conv_to_mkldnn(self):
