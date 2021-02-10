@@ -22,7 +22,6 @@ torch.set_default_dtype(torch.double)
 
 from torch import nn
 from torch._six import inf, nan
-from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
@@ -4128,6 +4127,16 @@ for shape in [(1,), ()]:
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
+
+    def test_checkpoint_valid_reset_on_error(self):
+        a = torch.randn(2, 2, requires_grad=True)
+
+        with self.assertRaisesRegex(Exception, "Checkpointing is not compatible with .grad()"):
+            b = checkpoint(torch.exp, a).sum()
+            torch.autograd.grad(b, (a,))
+
+        c = checkpoint(torch.exp, a).sum()
+        c.backward()
 
     def _test_reentrant_with_callbacks(self, install_callbacks_in_depths):
         counter = {}

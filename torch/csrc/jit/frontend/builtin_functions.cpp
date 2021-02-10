@@ -66,6 +66,8 @@ def list_with_default(out_size: List[int], defaults: List[int]):
   return out_size
 def _assert(condition : bool, message : str):
   assert condition, message
+def type(self: Tensor, dtype: int, non_blocking: bool=False, copy: bool=False) -> Tensor:
+  return self.to(dtype, non_blocking, copy)
 )SCRIPT";
 
 // an additional overload for Tensor variant of _assert
