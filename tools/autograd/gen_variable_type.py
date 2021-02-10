@@ -263,8 +263,8 @@ auto ${val} = ${arg}.value_or(${default});
 """)
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate("""\
-std::function<at::Tensor(const at::Tensor&)> func=nullptr;
 /*
+std::function<at::Tensor(const at::Tensor&)> func=nullptr;
 if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
   ${replay_view_func}
 }
@@ -799,7 +799,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
                 base_type_call=base_type_call)
 
-            call += wrap_output(f, unpacked_bindings, 'tmp')
+            #call += wrap_output(f, unpacked_bindings, 'tmp')
         else:
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                 base_type_call=base_type_call)
@@ -864,7 +864,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         assert inplace
         body.append('reset_grad_accumulator(self);')
     if not returns_void:
-        body.append(f'return {get_return_value(f)};')
+        if get_return_value(f) in ('result', 'grad_theta', 'grid', 'output'):
+            body.append(f'return tmp;')
+        else:
+            body.append(f'return {get_return_value(f)};')
     return body
 
 @with_native_function
