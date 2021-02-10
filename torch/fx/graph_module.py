@@ -8,7 +8,6 @@ from .graph import Graph
 import copy
 import sys
 import traceback
-import math
 from pathlib import Path
 import os
 import warnings
@@ -35,11 +34,9 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def _forward_from_src(src : str):
-    # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
-    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
-    exec_with_source(src, gbls)
-    return gbls['forward']
+def _forward_from_src(src: str, globals: Dict[str, Any]):
+    exec_with_source(src, globals)
+    return globals['forward']
 
 
 def deserialize_graphmodule(body : dict) -> torch.nn.Module:
@@ -56,12 +53,10 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
-    try:
-        CodeOnlyModule.forward = _forward_from_src(body['_code'])
-    except KeyError:
-        # BC: attribute name was changed from `code` to `_code` to facilitate
-        # making `code` into a property and adding a docstring to it
-        CodeOnlyModule.forward = _forward_from_src(body['code'])
+    # Try to retrieve the forward source in a backward-compatible way
+    import_block = body.get('_import_block', '')
+    fn_src = body.get('_code') or body['code']
+    CodeOnlyModule.forward = _forward_from_src(import_block + fn_src, {})
 
     from .symbolic_trace import Tracer
 
@@ -292,9 +287,13 @@ class {module_name}(torch.nn.Module):
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
-        self._code = self._graph.python_code(root_module='self')
+        python_code = self._graph.python_code(root_module='self')
+        self._code = python_code.fn_src
+        self._import_block = python_code.import_block
+        globals = python_code.globals
+
         cls = type(self)
-        cls.forward = _forward_from_src(self._code)
+        cls.forward = _forward_from_src(self._code, globals)
 
         cls_call = cls.__call__
 
