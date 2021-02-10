@@ -13,7 +13,7 @@ endif()
 
 # Debug messages - if you want to get a list of source files and examine
 # target information enable the following by `set(ADD_DEBUG_INFO TRUE)`.
-set(ADD_DEBUG_INFO TRUE)
+set(ADD_DEBUG_INFO FALSE)
 if(ADD_DEBUG_INFO)
   include(../cmake/DebugHelper.cmake)
 endif()
