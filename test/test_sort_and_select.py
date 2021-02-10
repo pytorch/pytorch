@@ -113,6 +113,13 @@ class TestSortAndSelect(TestCase):
         self.assertIsOrdered('descending', x, res2val, res2ind,
                              'random with NaNs')
 
+    @onlyCUDA
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    def test_stable_sort_fails_on_CUDA(self, device, dtype):
+        x = torch.tensor([1, 0, 1, 0], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "stable=True is not implemented on CUDA yet."):
+            x.sort(stable=True)
+
     @onlyCPU
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
