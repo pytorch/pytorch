@@ -153,11 +153,11 @@ commands:
                 git config --global user.email "circleci.ossci@gmail.com"
                 git config --global user.name "CircleCI"
                 git config remote.origin.url https://github.com/pytorch/pytorch.git
-                git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+                git config --add remote.origin.fetch +refs/heads/release/1.8:refs/remotes/origin/release/1.8
+                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/release/1.8:refs/remotes/origin/release/1.8 --depth=100 --quiet
                 # PRs generated from ghstack has format CIRCLE_PR_BASE_BRANCH=gh/xxx/1234/base
                 if [[ "${CIRCLE_PR_BASE_BRANCH}" == "gh/"* ]]; then
-                  CIRCLE_PR_BASE_BRANCH=master
+                  CIRCLE_PR_BASE_BRANCH=release/1.8
                 fi
                 export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/$CIRCLE_PR_BASE_BRANCH`
                 echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
