@@ -7,7 +7,6 @@ set -eux -o pipefail
 
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
-
 # Set up Python
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   # There was a bug that was introduced in conda-package-handling >= 1.6.1 that makes archives
@@ -35,6 +34,10 @@ if [[ "\$python_nodot" = *39* ]]; then
   NUMPY_PIN=">=1.20"
 fi
 
+if [[ "$DESIRED_CUDA" == "cu112" ]]; then
+  EXTRA_CONDA_FLAGS="-c=conda-forge"
+fi
+
 # Install the package
 # These network calls should not have 'retry's because they are installing
 # locally and aren't actually network calls
@@ -56,7 +59,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       ninja \
       dataclasses \
       typing-extensions \
-      protobuf \
+      defaults::protobuf \
       six
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
@@ -69,7 +72,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       fi
       retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
     fi
-    retry conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
+    conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"

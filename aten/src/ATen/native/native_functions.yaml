@@ -227,7 +227,8 @@
 #     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 7) Add entries to test/test_op_aliases.py's "alias_infos"
+# 7) Add aliases argument to existing OpInfo/UnaryUfuncInfo or create new OpInfo/UnaryUfuncInfo entry 
+# in op_db list in torch/testing/_internal/common_methods_invocations.py
 #
 # See torch.absolute, an alias for torch.abs, as an example.
 
@@ -2734,10 +2735,10 @@
     SparseCPU: sparse_sparse_matmul_cpu
     SparseCUDA: sparse_sparse_matmul_cuda
 
-- func: _sparse_matrix_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
+- func: _sparse_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
   dispatch:
-    SparseCPU: sparse_matrix_mask_helper_cpu
-    SparseCUDA: sparse_matrix_mask_helper_cuda
+    SparseCPU: sparse_mask_helper_cpu
+    SparseCUDA: sparse_mask_helper_cuda
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
