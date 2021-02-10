@@ -58,7 +58,7 @@ distributed (NCCL only when building with CUDA). MPI is an optional backend that
 included if you build PyTorch from source. (e.g.building PyTorch on a host that has MPI
 installed.)
 
-.. warning ::
+.. note ::
     As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
     If  the `init_method` argument of :func:`init_process_group` points to a file it must adhere
     to the following schema:
