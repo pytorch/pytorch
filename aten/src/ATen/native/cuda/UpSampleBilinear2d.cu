@@ -152,7 +152,7 @@ __global__ void upsample_bilinear2d_backward_out_frame(
 }
 
 static void upsample_bilinear2d_out_cuda_template(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
@@ -197,7 +197,7 @@ static void upsample_bilinear2d_out_cuda_template(
 }
 
 static void upsample_bilinear2d_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
