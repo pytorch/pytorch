@@ -946,6 +946,7 @@ def trace_module(
                 argument_names = get_callable_argument_names(func)
 
             example_inputs = make_tuple(example_inputs)
+            print('--------_create_method_from_trace for ' + method_name)
             module._c._create_method_from_trace(
                 method_name,
                 func,

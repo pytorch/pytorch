@@ -1067,9 +1067,12 @@ void initJitScriptBindings(PyObject* module) {
                     &self,
                     argument_names));
             const auto method_name = QualifiedName(*self.type()->name(), name);
+            printf("\n--------_create_method_from_trace::QualifiedName, %s", name.c_str());
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
+            printf("\n--------_create_method_from_trace::create_function, %s", fn->name().c_str());
             self.type()->addMethod(fn);
+            printf("\n--------_create_method_from_trace::addMethod");
             didFinishEmitModule(self);
           },
           py::arg("name"),
