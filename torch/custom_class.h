@@ -33,12 +33,11 @@ struct arg {
   }
 
   // Explicit constructor.
-  explicit arg(std::string name) : name_(std::move(name)), value_set_(false) {}
+  explicit arg(std::string name) : name_(std::move(name)), value_(c10::nullopt) {}
   // Assignment operator. This enables the pybind-like syntax of
   // torch::arg("name") = value.
   arg& operator=(const c10::IValue& rhs) {
     value_ = rhs;
-    value_set_ = true;
     return *this;
   }
 
@@ -48,9 +47,7 @@ struct arg {
   // IValue's default constructor makes it None, which is not distinguishable from
   // an actual, user-provided default value that is None. This boolean
   // helps distinguish between the two cases.
-  bool value_set_;
-  // The provided default value of the argument.
-  c10::IValue value_;
+  c10::optional<c10::IValue> value_;
 };
 
 /// This function is used in conjunction with `class_::def()` to register
@@ -354,7 +351,7 @@ class class_ {
             std::move(default_args_v[i].name_),
             arg.type(),
             arg.N(),
-            default_args_v[i].value_set_? std::move(default_args_v[i].value_) : c10::nullopt));
+            default_args_v[i].value_.has_value() ? std::move(*default_args_v[i].value_) : c10::nullopt));
       }
 
       schema = schema.cloneWithArguments(new_args);
