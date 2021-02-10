@@ -9,7 +9,7 @@ layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOut
 layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput;
 layout(set = 0, binding = 2) uniform PRECISION restrict           Block {
   ivec4 size;
-  ivec2 isize;
+  ivec3 isize;
 } uBlock;
 
 shared vec4 sh_mem[64];
@@ -21,7 +21,7 @@ void main() {
   const ivec3 tid = ivec3(gl_LocalInvocationID);
   const ivec3 group_size = ivec3(gl_WorkGroupSize);
 
-  if (pos.z < uBlock.size.z) {
+  if (pos.z < uBlock.isize.z) {
     vec4 sum = vec4(0);
 
     for (int y = tid.y; y < uBlock.isize.y; y+=group_size.y) {
@@ -35,7 +35,7 @@ void main() {
   memoryBarrierShared();
   barrier();
 
-  if (tid.y > 0 || tid.x > 0 || pos.z >= uBlock.size.z) {
+  if (tid.y > 0 || tid.x > 0 || pos.z >= uBlock.isize.z) {
     return;
   }
 
@@ -46,8 +46,32 @@ void main() {
     }
   }
 
-  imageStore(
-      uOutput,
-      pos,
-      total / uBlock.size.w);
+  vec4 outtex = total / uBlock.size.w;
+  int zout = 4*pos.z;
+  int width = uBlock.size.x;
+
+  ivec3 posx = ivec3(zout%width, zout/width, 0);
+  vec4 outx = vec4(outtex.x, 0, 0, 0);
+
+  ivec3 posy = ivec3((zout+1)%width, (zout+1)/width, 0);
+  vec4 outy = vec4(outtex.y, 0, 0, 0);
+
+  ivec3 posz = ivec3((zout+2)%width, (zout+2)/width, 0);
+  vec4 outz = vec4(outtex.z, 0, 0, 0);
+
+  ivec3 posw = ivec3((zout+3)%width, (zout+3)/width, 0);
+  vec4 outw = vec4(outtex.w, 0, 0, 0);
+
+  if (all(lessThan(posx, uBlock.size.xyz))) {
+    imageStore(uOutput, posx, outx);
+  }
+  if (all(lessThan(posy, uBlock.size.xyz))) {
+    imageStore(uOutput, posy, outy);
+  }
+  if (all(lessThan(posz, uBlock.size.xyz))) {
+    imageStore(uOutput, posz, outz);
+  }
+  if (all(lessThan(posw, uBlock.size.xyz))) {
+    imageStore(uOutput, posw, outw);
+  }
 }

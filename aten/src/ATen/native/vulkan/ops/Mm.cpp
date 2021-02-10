@@ -1,6 +1,5 @@
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
-#include <ATen/native/vulkan/ops/Packing.h>
 
 namespace at {
 namespace native {
@@ -281,21 +280,17 @@ Tensor LinearOpContext::run(
       unpacked_.weight.sizes()[Layout::Parameter::width],
   };
 
-  vTensor v_output_packed {
+  vTensor v_output {
       context,
       {
-        4,
-        div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
-        div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
+        1,
+        v_input.sizes()[Layout::Parameter::height],
+        unpacked_.weight.sizes()[Layout::Parameter::width],
       },
       input.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
-
-  api::Command::Buffer& input_pack_buffer = command_pool.stream();
-  vTensor v_input_packed = pack_image2d_h2w2(v_input, context, input_pack_buffer);
-  command_pool.submit(context->gpu().queue, input_pack_buffer);
 
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
@@ -308,7 +303,7 @@ Tensor LinearOpContext::run(
           int32_t K;
           vec2 multiplier;
         } block {
-            v_output_packed.extents(),
+            v_output.extents(),
             safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
             {
               alpha,
@@ -326,20 +321,23 @@ Tensor LinearOpContext::run(
                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             },
             VK_KERNEL(addmm),
-            v_output_packed.extents(),
+            {
+              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
+              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              1,
+            },
             {8, 8, 1},
             // Write-only access bypasses synchronization but inserts appropriate
             // barriers if necessary.
-            v_output_packed.image(
+            v_output.image(
                 command_buffer,
                 vTensor::Stage::Compute,
                 vTensor::Access::Write),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
-            v_input_packed.image(
+            v_input.image(
                 command_buffer,
-                vTensor::Stage::Compute,
-                vTensor::Access::Read),
+                vTensor::Stage::Compute),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
             packed_.v_weight.image(
@@ -359,7 +357,7 @@ Tensor LinearOpContext::run(
           uvec3 size;
           int32_t K;
         } block_no_bias {
-            v_output_packed.extents(),
+            v_output.extents(),
             safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
         };
 
@@ -372,20 +370,23 @@ Tensor LinearOpContext::run(
                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             },
             VK_KERNEL(mm),
-            v_output_packed.extents(),
+            {
+              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
+              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              1,
+            },
             {8, 8, 1},
             // Write-only access bypasses synchronization but inserts appropriate
             // barriers if necessary.
-            v_output_packed.image(
+            v_output.image(
                 command_buffer,
                 vTensor::Stage::Compute,
                 vTensor::Access::Write),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
-            v_input_packed.image(
+            v_input.image(
                 command_buffer,
-                vTensor::Stage::Compute,
-                vTensor::Access::Read),
+                vTensor::Stage::Compute),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
             packed_.v_weight.image(
@@ -401,10 +402,6 @@ Tensor LinearOpContext::run(
     }
   }
   command_pool.submit(context->gpu().queue, command_buffer);
-
-  api::Command::Buffer& output_unpack_buffer = command_pool.stream();
-  vTensor v_output = unpack_image2d_h2w2(v_output_packed, output_sizes, context, output_unpack_buffer);
-  command_pool.submit(context->gpu().queue, output_unpack_buffer);
 
   return convert(v_output);
 }
