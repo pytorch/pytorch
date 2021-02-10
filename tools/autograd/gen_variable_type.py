@@ -264,9 +264,11 @@ auto ${val} = ${arg}.value_or(${default});
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate("""\
 std::function<at::Tensor(const at::Tensor&)> func=nullptr;
+/*
 if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
   ${replay_view_func}
 }
+*/
 """)
 
 REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate("""\
@@ -801,7 +803,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         else:
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                 base_type_call=base_type_call)
-        call = enforce_same_tensorimpl_and_storage(call, unpacked_bindings)
+        #call = enforce_same_tensorimpl_and_storage(call, unpacked_bindings)
         return call
 
     def emit_history() -> str:
@@ -840,20 +842,20 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     unpack_args_stats, unpacked_bindings = unpack_args(f)
 
     body.extend(unpack_args_stats)
-    if requires_derivative:
-        body.extend(emit_any_requires_grad())
-        body.extend(emit_check_inplace())
-        body.extend(setup_derivative(differentiable_inputs))
+    #if requires_derivative:
+    #    body.extend(emit_any_requires_grad())
+    #    body.extend(emit_check_inplace())
+    #    body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))
 
     body.append(emit_call(f, unpacked_bindings))
     body.extend(emit_increment_version(f))
-    if requires_derivative:
-        # set_flags has to appear after version_counter, because rebase_history
-        # requires that the counter is incremented before it is called
-        body.append(emit_history())
-        body.append(emit_save_outputs())
-        body.extend(emit_check_if_in_complex_autograd_allowlist())
+    #if requires_derivative:
+    #    # set_flags has to appear after version_counter, because rebase_history
+    #    # requires that the counter is incremented before it is called
+    #    body.append(emit_history())
+    #    body.append(emit_save_outputs())
+    #    body.extend(emit_check_if_in_complex_autograd_allowlist())
     if base_name in RESET_GRAD_ACCUMULATOR:
         # `inplace` implies that there is exactly one output named `self`,
         # so we can keep the generated code easy. If you need to
