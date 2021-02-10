@@ -5,7 +5,7 @@ import collections
 try:
     import numpy as np
 except ModuleNotFoundError:
-    np = None
+    np = None  # type: ignore[assignment]
 from torch._six import string_classes
 
 
