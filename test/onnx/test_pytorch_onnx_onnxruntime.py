@@ -6831,6 +6831,34 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_add_(self):
+        @torch.jit.script
+        def check_init(input_data, hidden_size):
+            # type: (torch.Tensor, int) -> torch.Tensor
+            batch_size = input_data.size(0)
+            spatial_size_0 = input_data.size(2)
+            spatial_size_1 = input_data.size(3)
+            # generate empty prev_state, if None is provided
+            state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            state = torch.zeros(state_size, device=input_data.device)
+            if input_data.size(0) == 1:
+                state[1] += torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            return state
+
+        class Example(torch.nn.Module):
+            def __init__(self, hidden_size):
+                super().__init__()
+                self.hidden_size = hidden_size
+
+            def forward(self, input_data):
+                state = check_init(input_data, self.hidden_size)
+                return state
+
+        model = Example(10)
+        random_data = torch.rand((1, 5, 30, 30))
+        self.run_test(model, (random_data))
+
     @disableScriptTest()
     def test_unsafe_chunk(self):
         class ChunkModel(torch.nn.Module):

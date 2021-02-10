@@ -137,6 +137,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
     else:
         torch._C._jit_pass_remove_inplace_ops(graph)
+        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
+        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
@@ -144,6 +146,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # without implementing symbolics for all of them
     if _disable_torch_constant_prop is False:
         torch._C._jit_pass_constant_propagation(graph)
+
     _split_tensor_list_constants(graph, graph)
     # run dce to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
@@ -167,8 +170,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # This pass does a preprocess, and prepares the nodes such that enough context can be received
         # by the symbolic function.
         torch._C._jit_pass_onnx_preprocess(graph)
-        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
-        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lint(graph)

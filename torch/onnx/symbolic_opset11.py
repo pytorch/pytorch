@@ -61,7 +61,10 @@ def select(g, self, dim, index):
 
 
 def index_put(g, self, indices_list_value, values, accumulate=False):
-    indices_list = sym_help._unpack_list(indices_list_value)
+    if sym_help._is_packed_list(indices_list_value):
+        indices_list = sym_help._unpack_list(indices_list_value)
+    else:
+        indices_list = [indices_list_value]
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         args = [self] + indices_list + [values, accumulate]
         return g.op("ATen", *args, operator_s='index_put')
@@ -172,13 +175,14 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #               = onnx::ScatterND(%0, %22, %34)
         #   return (%35)
 
-        bool_inp = list(index.node().inputs())[0]
-        if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
-            rank = sym_help._get_tensor_rank(values)
-            if rank is not None and rank == 0:
-                from torch.onnx.symbolic_opset9 import masked_fill
-                return masked_fill(g, self, bool_inp, values)
-            return masked_scatter(g, self, bool_inp, values)
+        if len(list(index.node().inputs())) > 0:
+            bool_inp = list(index.node().inputs())[0]
+            if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
+                rank = sym_help._get_tensor_rank(values)
+                if rank is not None and rank == 0:
+                    from torch.onnx.symbolic_opset9 import masked_fill
+                    return masked_fill(g, self, bool_inp, values)
+                return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = sym_help._unsqueeze_helper(g, index, [-1])
     sub_data_shape = sym_help._slice_helper(

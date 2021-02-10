@@ -672,6 +672,40 @@ void PrepareCopyForONNX(Node* node) {
   }
 }
 
+void PrepareInplaceOps(Node* node, MutationRemover& mr) {
+  if (!mr.inplaceOpVariant(node))
+    return;
+
+  auto name = node->schema().name();
+  bool inplace_op = name.at(name.size() - 1) == '_';
+  if (!inplace_op)
+    return;
+
+  auto new_schema = name.substr(0, name.size() - 1);
+
+  Node* input_node = node->inputs().at(0)->node();
+  if (input_node->kind() != aten::select && input_node->kind() != aten::slice)
+    return;
+
+  auto graph = node->owningGraph();
+  WithInsertPoint guard(node);
+
+  auto new_add = graph->insert(
+      Symbol::fromQualString(new_schema),
+      {node->inputs().at(0), node->inputs().at(1), node->inputs().at(2)});
+
+  auto new_select = graph->insert(
+      aten::select,
+      {input_node->inputs().at(0),
+       input_node->inputs().at(1),
+       input_node->inputs().at(2)});
+
+  auto false_val_ = graph->insertConstant(false);
+  auto new_copy = graph->insert(aten::copy_, {new_select, new_add, false_val_});
+
+  PrepareCopyForONNX(new_copy->node());
+}
+
 // aten::pop is inplace. The tensor list input is updated.
 // This pass creates an aten::__getitem__ op to return the original output from
 // aten::pop. Then it makes the original aten::pop operator return the updated
@@ -990,26 +1024,45 @@ void trackAndRegisterAttributesInBlocks(
 std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
     Block* block,
     const std::shared_ptr<Graph>& graph,
-    const Module& module_,
     std::unordered_map<std::string, Value*>& allAttrValues,
-    std::unordered_map<std::string, Value*>& setAttrValues) {
+    std::unordered_map<std::string, Value*>& setAttrValues,
+    MutationRemover& mr,
+    Module* module_ = nullptr) {
   Node* m = *block->nodes().begin();
   WithInsertPoint guard(m);
-
   std::unordered_map<std::string, Value*> nextSetAttrValues = {};
 
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // node n can be destroyed
 
-    if (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr) {
+    if (nullptr != module_ &&
+        (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr)) {
+      Module moduleClone = module_->clone(true);
       trackAndRegisterAttributesInBlocks(
-          n, graph, module_, allAttrValues, setAttrValues, nextSetAttrValues);
+          n,
+          graph,
+          moduleClone,
+          allAttrValues,
+          setAttrValues,
+          nextSetAttrValues);
+    } else if (n->kind() == aten::copy_) {
+      PrepareCopyForONNX(n);
+    } else if (mr.inplaceOpVariant(n)) {
+      PrepareInplaceOps(n, mr);
+    } else if (n->kind() == aten::index_put || n->kind() == aten::index_put_) {
+      PrepareIndexPutForONNX(n);
+    } else if (n->kind() == aten::pop) {
+      PrepareListPopForONNX(n);
+    } else if (n->kind() == aten::insert || n->kind() == aten::append) {
+      PrepareListAppendAndInsertForONNX(n);
+    } else if (n->kind() == aten::Delete) {
+      PrepareListDeleteForONNX(n);
     } else { // for prim::If and prim::Loop nodes with blocks.
       for (Block* sub_block : n->blocks()) {
         std::unordered_map<std::string, Value*> map_ =
             registerInplaceOpAsBlockOutputs(
-                sub_block, graph, module_, allAttrValues, setAttrValues);
+                sub_block, graph, allAttrValues, setAttrValues, mr, module_);
         std::unordered_map<std::string, Value*>::iterator mapIt;
         for (mapIt = map_.begin(); mapIt != map_.end(); mapIt++) {
           setAttrValues[mapIt->first] = mapIt->second;
@@ -1022,15 +1075,15 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
 
 void RegisterInplaceOpAsBlockOutputs(
     Module* module,
-    const std::shared_ptr<Graph>& graph) {
+    const std::shared_ptr<Graph>& graph,
+    MutationRemover& mr) {
   // A map of names and values of referenced attributes, to avoid duplicates.
   std::unordered_map<std::string, Value*> allAttrValues = {};
   // A map of names and values of set attributes, to track mutations.
   std::unordered_map<std::string, Value*> setAttrValues = {};
 
-  Module moduleClone = module->clone(true);
   registerInplaceOpAsBlockOutputs(
-      graph->block(), graph, moduleClone, allAttrValues, setAttrValues);
+      graph->block(), graph, allAttrValues, setAttrValues, mr, module);
   EliminateDeadCode(graph->block());
 }
 
@@ -1046,10 +1099,9 @@ void RemoveInplaceOpsForONNX(
   MutationRemover mr(graph);
   ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
-  if (model)
-    RegisterInplaceOpAsBlockOutputs(model, graph);
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
+  RegisterInplaceOpAsBlockOutputs(model, graph, mr);
 }
 
 } // namespace jit
