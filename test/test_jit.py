@@ -752,18 +752,19 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Not implemented for Simple or Legacy')
     def test_flush_compilation_cache(self):
-        m = nn.Linear(10, 10)
+        def foo(x):
+            return x + 2
         x = torch.rand(1, 10)
         with enable_profiling_mode_for_profiling_tests():
-            jitted = checkScript(m, (x,))
-            jitted.get_method('forward') # noqa
+            jitted = self.checkScript(foo, (x,))
             # shouldn't throw
-            states = get_debug_state()
+            states = jitted.get_debug_state()
             # after flushing there shouldn't be
             # no opt plan
-            fwd._flush_compilation_cache()
+
+            jitted._flush_compilation_cache()
             with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
-                states = get_debug_state() # noqa
+                states = jitted.get_debug_state() # noqa
                 
 
     def test_numel(self):
