@@ -825,10 +825,12 @@ class IrParser {
                 bias = value_map[node->input(3)->unique()]->as<TensorView>();
               }
 
-              auto eps = constant_as<float>(node->input(4));
-              TORCH_INTERNAL_ASSERT(
-                  eps.has_value(), "The EPS parameter is required.");
-              const float kEps = eps.value();
+              Val* eps_ptr;
+              if (auto eps = constant_as<float>(node->input(4))) {
+                eps_ptr = new Double(eps.value());
+              } else {
+                eps_ptr = value_map[node->input(4)->unique()];
+              }
 
               const size_t kNormShapeNumDims = norm_shape->vec().size();
               const size_t kOuterNumDims = input->nDims() - kNormShapeNumDims;
@@ -863,7 +865,7 @@ class IrParser {
               auto var_sum = sum(x_mean_sub_pow, inner_reduction_axes);
               auto var_sum_bcast = broadcast(var_sum, inner_broadcast_mask);
               auto var = div(var_sum_bcast, num_features);
-              auto var_eps = add(var, new Double(kEps));
+              auto var_eps = add(var, eps_ptr);
               auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
               auto output = mul(x_mean_sub, rvar);
 
@@ -992,17 +994,23 @@ class IrParser {
 
             if (output_mask[0]) {
               value_map.emplace(node->output(0)->unique(), grad_in);
+            } else {
+              value_map.emplace(node->output(0)->unique(), nullptr);
             }
 
             if (output_mask[1] && weight != nullptr) {
               auto grad_weight = sum(mul(grad_out, x_hat),
               outer_reduction_axes);
               value_map.emplace(node->output(1)->unique(), grad_weight);
+            } else {
+              value_map.emplace(node->output(1)->unique(), TensorViewBuilder().build());
             }
 
             if (output_mask[2] && bias != nullptr) {
               auto grad_bias = sum(grad_out, outer_reduction_axes);
               value_map.emplace(node->output(2)->unique(), grad_bias);
+            } else {
+              value_map.emplace(node->output(2)->unique(), TensorViewBuilder().build());
             }
           },
           // TODO: #ProfileIValue List should update this
@@ -1684,10 +1692,31 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     return true;
   }
 
+  static auto native_layer_norm_schema = 
+      getOperatorForLiteral(
+          "aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)")->schema();
+  static auto layer_norm_schema = 
+      getOperatorForLiteral(
+          "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")->schema();
+  if (node->matches(native_layer_norm_schema) ||
+      node->matches(layer_norm_schema)) {
+    switch (offset) {
+      case 1:
+        profileIntList(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
   static auto native_layer_norm_backward_schema = getOperatorForLiteral(
           "aten::native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")->schema();
   if (node->matches(native_layer_norm_backward_schema)) {
     switch (offset) {
+      case 2:
+        profileIntList(pr, node, offset);
+        return true;
       case 7:
         profileBoolList(pr, node, offset);
         return true;

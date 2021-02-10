@@ -481,6 +481,7 @@ std::vector<at::Tensor> FusionSegmentRuntime::runSegmentWithInput(
 
   if (!executors_[group_id].compiled()) {
     std::unique_ptr<Fusion> fusion_seg = segmented_fusion_->makeFusion(sg);
+    fusion_seg->printMath();
     CompileOptions options;
     options.device = c10::Device(DeviceType::CUDA, device_index);
     scheduler_entry->schedule(fusion_seg.get());
@@ -512,6 +513,8 @@ std::vector<at::Tensor> FusionSegmentRuntime::runWithInput(
   for (size_t i = 0; i < inputs.size(); i++) {
     tensor_map.emplace(segmented_fusion_->inputs()[i], inputs[i]);
   }
+
+  segmented_fusion_->completeFusion().printMath();
 
   // Keep track of groups that has run
   std::vector<bool> group_ran(segmented_fusion_->groups().size(), false);
@@ -566,7 +569,12 @@ std::vector<at::Tensor> FusionSegmentRuntime::runWithInput(
   // Produce final global output
   std::vector<IValue> fusion_outputs;
   for (auto output : segmented_fusion_->outputs()) {
-    fusion_outputs.push_back(tensor_map.at(output));
+    if (auto iter = tensor_map.find(output); iter != tensor_map.end()) {
+      fusion_outputs.push_back(iter->second);
+    } else {
+      // TODO: be care with this and do a type check
+      fusion_outputs.push_back(at::Tensor());
+    }
   }
 
   std::vector<at::Tensor> fusion_output_tensors;
