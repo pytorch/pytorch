@@ -296,14 +296,16 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
     ::c10::detail::torchCheckFail(                              \
         __func__, __FILE__, static_cast<uint32_t>(__LINE__),    \
-        ::c10::str(                                             \
-            #cond " INTERNAL ASSERT FAILED at "                 \
-            C10_STRINGIZE(__FILE__)                             \
-            ":"                                                 \
-            C10_STRINGIZE(__LINE__)                             \
-            ", please report a bug to PyTorch. ",               \
-            ::c10::str(__VA_ARGS__)                             \
-        ));                                                     \
+        ([&]() C10_NOINLINE {                                   \
+          return ::c10::str(                                    \
+              #cond " INTERNAL ASSERT FAILED at "               \
+              C10_STRINGIZE(__FILE__)                           \
+              ":"                                               \
+              C10_STRINGIZE(__LINE__)                           \
+              ", please report a bug to PyTorch. ",             \
+              ::c10::str(__VA_ARGS__)                           \
+          );                                                    \
+        })());                                                  \
   }
 #endif
 
@@ -369,7 +371,7 @@ namespace detail {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
     ::c10::detail::torchCheckFail(                                      \
         __func__, __FILE__, static_cast<uint32_t>(__LINE__),            \
-        TORCH_CHECK_MSG(cond, "", __VA_ARGS__));                        \
+        ([&]() C10_NOINLINE { return TORCH_CHECK_MSG(cond, "", __VA_ARGS__); })()); \
   }
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
