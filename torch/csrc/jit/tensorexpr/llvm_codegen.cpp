@@ -627,7 +627,11 @@ void LLVMCodeGenImpl::visit(const Rshift* v) {
   bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
-    value_ = irb_.CreateLShr(lhs, rhs);
+    if (v->lhs()->dtype().is_signed()) {
+      value_ = irb_.CreateAShr(lhs, rhs);
+    } else {
+      value_ = irb_.CreateLShr(lhs, rhs);
+    }
   } else {
     throw malformed_input("llvm_codgen: bad type in Rshift", v);
   }
