@@ -642,9 +642,9 @@ jobs:
           export CIRCLE_JOB="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          python test/print_test_stats.py --upload-to-s3 test
+          python torch/testing/_internal/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           EOL
-          echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
+          echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
 
           echo "Retrieving test reports"
@@ -6625,6 +6625,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm3.10-py3.6"
           image_name: "pytorch-linux-bionic-rocm3.10-py3.6"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-rocm4.0.1-py3.6"
+          image_name: "pytorch-linux-bionic-rocm4.0.1-py3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
