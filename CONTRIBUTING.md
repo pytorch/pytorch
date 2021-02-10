@@ -89,6 +89,12 @@ git submodule sync --recursive
 git submodule update --init --recursive
 ```
 
+2.2. Install missing Python modules:
+
+```bash
+pip install -r requirements.txt
+```
+
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
 
 
