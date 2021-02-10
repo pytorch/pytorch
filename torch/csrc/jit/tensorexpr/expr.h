@@ -305,6 +305,7 @@ TORCH_API ExprHandle log(const ExprHandle& v);
 TORCH_API ExprHandle fast_tanh(const ExprHandle& v);
 TORCH_API ExprHandle fast_sigmoid(const ExprHandle& v);
 TORCH_API ExprHandle fast_log(const ExprHandle& v);
+TORCH_API ExprHandle log_vml(const ExprHandle& v);
 TORCH_API ExprHandle log2(const ExprHandle& v);
 TORCH_API ExprHandle log10(const ExprHandle& v);
 TORCH_API ExprHandle log1p(const ExprHandle& v);
