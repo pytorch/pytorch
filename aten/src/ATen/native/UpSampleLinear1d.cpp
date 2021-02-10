@@ -77,7 +77,7 @@ TORCH_IMPL_FUNC(upsample_linear1d_backward_out_cpu) (
 using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
-Tensor upsample_linear1d_cpu(
+Tensor upsample_linear1d(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     bool align_corners,
@@ -87,7 +87,7 @@ Tensor upsample_linear1d_cpu(
   return at::upsample_linear1d(input, osize, align_corners, scale_w);
 }
 
-Tensor upsample_linear1d_backward_cpu(
+Tensor upsample_linear1d_backward(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,
