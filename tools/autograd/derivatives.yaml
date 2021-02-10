@@ -303,18 +303,6 @@
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   self: cholesky_inverse_backward(grad, self, upper, result)
 
-- name: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
-  self: not_implemented("fbgemm_linear_int8_weight_fp32_activation only supported for inference")
-
-- name: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
-  self: not_implemented("fbgemm_linear_int8_weight only supported for inference")
-
-- name: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
-  self: not_implemented("fbgemm_linear_fp16_weight_fp32_activation only supported for inference")
-
-- name: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
-  self: not_implemented("fbgemm_linear_fp16_weight only supported for inference")
-
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
@@ -567,7 +555,6 @@
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
-  indices: TensorList()
 
 - name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   self: grad

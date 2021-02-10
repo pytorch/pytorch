@@ -1191,36 +1191,6 @@ class AbstractTestCases:
             for method in ["add", "multiply"]:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
 
-        def test_masked_fill(self):
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                for dt in torch.testing.get_all_dtypes():
-                    for dtype in [torch.uint8, torch.bool]:
-                        num_dest = 10
-                        dst = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt)
-                        mask = torch.rand(num_dest).mul(2).floor().to(dtype)
-                        val = random.random()
-                        dst2 = dst.clone()
-
-                        dst.masked_fill_(mask, val)
-                        for i in range(num_dest):
-                            if mask[i]:
-                                dst2[i] = val
-                        self.assertEqual(dst, dst2, atol=0, rtol=0)
-
-                        # test non-contiguous case
-                        dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
-                        dst2 = dst.clone()
-                        dst.masked_fill_((dst > 0).to(dtype), val)
-                        dst2.masked_fill_((dst2 > 0).to(dtype), val)
-                        self.assertEqual(dst, dst2, atol=0, rtol=0)
-
-                self.assertEqual(len(w), 36)
-
-                warn = 'masked_fill_ received a mask with dtype torch.uint8,'
-                for wi in w:
-                    self.assertEqual(str(wi.message)[0:52], str(warn))
-
         def test_structseq_repr(self):
             a = torch.arange(250).reshape(5, 5, 10)
             expected = """
@@ -3295,6 +3265,27 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
+    @onlyCPU
+    def test_warn_always_caught(self, device):
+        # Check that we can catch a TORCH_WARN_ONCE warning twice
+        # since assertWarnsOnceRegex uses set_warn_always(True) which changes
+        # TORCH_WARN_ONCE to TORCH_WARN
+        a = np.arange(10)
+        a.flags.writeable = False
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+            torch.from_numpy(a)
+
+        # OK, got it once, now try again
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+            torch.from_numpy(a)
+
+        # Make sure emitting two warnings, even if they pass the regex, will fail
+        # the assertWarnsOnceRegex context manager which only allows a single warning
+        with self.assertRaisesRegex(AssertionError, '.*too many.*non-writeable.*'):
+            with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+                torch.from_numpy(a)
+                torch.from_numpy(a)
+
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64
@@ -4758,6 +4749,46 @@ class TestTorchDeviceType(TestCase):
                 torch.masked_select(v, m, out=out_dc)
                 self.assertEqual(out_dc, expected, atol=0, rtol=0)
 
+    @dtypes(*product(torch.testing.get_all_dtypes(), (torch.uint8, torch.bool)))
+    def test_masked_fill(self, device, dtypes):
+        dtype = dtypes[0]
+        mask_dtype = dtypes[1]
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            num_dest = 10
+            dst = torch.zeros(num_dest, dtype=dtype)
+            mask = torch.randint(2, (num_dest,), dtype=mask_dtype)
+            val = random.random()
+            dst2 = dst.clone()
+
+            dst.masked_fill_(mask, val)
+            for i in range(num_dest):
+                if mask[i]:
+                    dst2[i] = val
+            self.assertEqual(dst, dst2, atol=0, rtol=0)
+
+            # test non-contiguous case
+            dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
+            dst2 = dst.contiguous()
+            if dtype.is_complex:
+                mask = dst.abs() > 0
+            else:
+                mask = dst > 0
+            self.assertTrue(not dst.is_contiguous())
+            self.assertTrue(dst2.is_contiguous())
+            dst.masked_fill_(mask.to(mask_dtype), val)
+            dst2.masked_fill_(mask.to(mask_dtype), val)
+            self.assertEqual(dst, dst2, atol=0, rtol=0)
+
+            if mask_dtype == torch.uint8:
+                self.assertEqual(len(w), 3)
+
+                warn = 'masked_fill_ received a mask with dtype torch.uint8,'
+                for wi in w:
+                    self.assertEqual(str(wi.message)[0:52], str(warn))
+            else:
+                self.assertEqual(len(w), 0)
 
     def test_masked_fill_bool_tensor(self, device):
         dst = torch.tensor([True, False, True], device=device)
@@ -6762,12 +6793,6 @@ tensor_op_tests = [
     ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('chunk', 'dim', _medium_2d, lambda t, d: [4, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('chunk', 'neg_dim', _medium_2d, lambda t, d: [4, -2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('clamp', 'neg', _medium_2d, lambda t, d: [-1, 5], 1e-5, 1e-2, 1e-5, _signed_types, [torch.bfloat16]),
-    ('clamp', 'pos', _medium_2d, lambda t, d: [1, 5], 1e-5, 1e-2, 1e-5, _unsigned_types, [torch.bfloat16]),
-    ('clamp_min', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=True), [torch.bfloat16]),
-    ('clamp_max', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=True), [torch.bfloat16]),
     ('clone', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('conj', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types_no_half, [torch.bfloat16], False),
@@ -6989,7 +7014,6 @@ tensor_op_tests = [
     ('rad2deg', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('deg2rad', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
