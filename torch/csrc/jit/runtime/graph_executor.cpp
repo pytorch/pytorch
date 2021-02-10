@@ -763,10 +763,10 @@ GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
 }
 
-void GraphExecutor::flushCompilationCache() {
+void GraphExecutor::debugFlushCompilationCache() {
   if (auto ppImpl =
           std::dynamic_pointer_cast<ProfilingGraphExecutorImpl>(pImpl)) {
-    ppImpl->flushCompilationCache();
+    ppImpl->debugFlushCompilationCache();
   } else {
     // we are deprecating legacy executor
     TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");

@@ -14,7 +14,8 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
-  void flushCompilationCache() {
+  void debugFlushCompilationCache() {
+    std::lock_guard<std::mutex> lock(compile_mutex);
     pr_.reset();
     fallback_plan_.reset();
     profiling_plan_.reset();

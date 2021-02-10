@@ -751,7 +751,7 @@ class TestJit(JitTestCase):
             self.checkModule(m, (inp,))
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Not implemented for Simple or Legacy')
-    def test_flush_compilation_cache(self):
+    def test_debug_flush_compilation_cache(self):
         def foo(x):
             return x + 2
         x = torch.rand(1, 10)
@@ -762,7 +762,7 @@ class TestJit(JitTestCase):
             # after flushing there shouldn't be
             # no opt plan
 
-            jitted._flush_compilation_cache()
+            jitted._debug_flush_compilation_cache()
             with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
                 states = jitted.get_debug_state() # noqa
 
