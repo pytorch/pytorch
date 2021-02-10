@@ -835,7 +835,7 @@ class TestDataLoader(TestCase):
         while True:
             try:
                 next(it)
-            except NotImplementedError:
+            except (NotImplementedError, LocalException):
                 errors += 1
             except StopIteration:
                 self.assertEqual(errors,
