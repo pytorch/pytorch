@@ -6543,7 +6543,7 @@
 
 - func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_index_copy_
+    CPU: _index_copy_cpu_
     CUDA: legacy::cuda::_th_index_copy_
 
 - func: _cumsum(Tensor self, int dim) -> Tensor

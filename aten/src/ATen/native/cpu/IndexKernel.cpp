@@ -214,6 +214,42 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
   iter.for_each(loop);
 }
 
+void index_copy_kernel(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
+  const Tensor & source) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    iter.dtype(), "index_copy_cpu", [&] {
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      auto* self_data_bytes = data[0];
+      auto* index_data_bytes = data[1];
+      auto* source_data_bytes = data[2];
+      for (int64_t elem = 0; elem < n; ++elem) {
+        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+        auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+        auto* source = reinterpret_cast<scalar_t*>(source_data_bytes);
+        if (idx < -self_dim_size || idx >= self_dim_size) {
+          TORCH_CHECK_INDEX(false,
+            "index ", idx, " is out of bounds for dimension ",
+            dim, " with size ", self_dim_size);
+        }
+        if (idx < 0) {
+          idx += self_dim_size;
+        }
+
+        self_data[idx * self_dim_stride] = *source;
+
+        self_data_bytes += strides[0];
+        index_data_bytes += strides[1];
+        source_data_bytes += strides[2];
+      }
+    };
+    iter.for_each(loop);
+  });
+}
+
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
     iter.dtype(), "masked_fill", [&] {
@@ -354,6 +390,7 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
 REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);

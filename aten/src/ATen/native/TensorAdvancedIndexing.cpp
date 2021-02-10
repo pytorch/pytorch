@@ -69,6 +69,7 @@ namespace at { namespace native {
 
 DEFINE_DISPATCH(index_stub);
 DEFINE_DISPATCH(index_fill_stub);
+DEFINE_DISPATCH(index_copy_stub);
 DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
 DEFINE_DISPATCH(masked_fill_stub);
@@ -385,7 +386,13 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
                    source.dim(), "), destination dimensionality (", self.dim(), ")");
   }
 
+  // Should this be TORCH_CHECK?
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected LongTensor for index");
+
+  // Added in accordance with index_fill_
+  if (!self.is_complex() && source.is_complex()) {
+    TORCH_CHECK(false, "index_copy_(): Converting complex source Tensor to non-complex type is forbidden");
+  }
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
@@ -411,10 +418,70 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   return at::_index_copy_(self, dim, index, source);
 }
 
+Tensor & _index_copy_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  // TODO Why doesn't this one have `at::NoNamesGuard guard;`?
+  // Handle the case when `self` is 0-dim
+  if (self.dim() == 0) {
+    self.unsqueeze_(-1);
+  }
+
+  // The only different between the following  tensor iterator and that of index_fill_ is that
+  // this one has also source as an input. Maybe refactor?
+  // TODO These two functions could be implemented as a more general one that takes one tensor
+  // with shape broadcastable to that of the original tensor with `len(index)` in dimension `dim`
+
+  // Prepare `index` for TensorIterator.
+  // It is restrided to be broadcastable over `self` in TensorIterator.
+  auto index_sizes = std::vector<int64_t>(self.dim(), 1);
+  auto index_strides = std::vector<int64_t>(self.dim(), 0);
+  index_sizes[dim] = index.numel();
+  index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
+  auto index_restrided = index.as_strided(
+    index_sizes, index_strides);
+
+  // Prepare `self` for TensorIterator.
+  // Restride `self` to not advance in dimension `dim`.
+  // We do not use squash_dim here because `index` will
+  // need to advance in this dimension.
+  // Note that self_sizes[dim] is set to index.numel().
+  // This is done so that self_sizes[dim] and index_sizes[dim]
+  // match as required by TensorIterator (input shape should
+  // strictly broadcast over output shape, i.e.
+  // output.shape[i] >= input.shape[i] for i in range(dims)).
+  auto self_sizes = self.sizes().vec();
+  auto self_strides = self.strides().vec();
+  self_sizes[dim] = index.numel();
+  self_strides[dim] = 0;
+  auto self_restrided = self.as_strided(self_sizes, self_strides);
+
+  auto iter = TensorIteratorConfig()
+    // We do not check for overlap because `self` is restrided
+    // with zero stride. Zero strides trigger memory overlap assert
+    // within TensorIterator.
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_output(self_restrided)
+    .add_input(index_restrided)
+    .add_input(source)
+    .build();
+
+  auto self_dim_size = self.size(dim);
+  auto self_dim_stride = self.stride(dim);
+  index_copy_stub(
+    iter.device_type(),
+    iter,
+    dim,
+    self_dim_size,
+    self_dim_stride,
+    source);
+
+  return self;
+}
+
 Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
 }
-
 
 Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   dim = maybe_wrap_dim(dim, self.dim());
