@@ -133,7 +133,7 @@ jobs:
             hostname
             export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=1g --ipc=host -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
           echo "id=${id}" >> "${BASH_ENV}"
 
@@ -201,9 +201,9 @@ jobs:
           export CIRCLE_JOB="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          python test/print_test_stats.py --upload-to-s3 test
+          python torch/testing/_internal/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           EOL
-          echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
+          echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
 
           echo "Retrieving test reports"
