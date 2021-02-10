@@ -8,7 +8,7 @@ from torch.utils.data.datapipes.iter.groupbykey import GroupByKeyIterDataPipe as
 # Functional DataPipe
 from torch.utils.data.datapipes.iter.batch import BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch
 from torch.utils.data.datapipes.iter.callable import \
-    (CallableIterDataPipe as Callable, CollateIterDataPipe as Collate)
+    (MapIterDataPipe as Map, CollateIterDataPipe as Collate)
 from torch.utils.data.datapipes.iter.selecting import \
     (FilterIterDataPipe as Filter)
 from torch.utils.data.datapipes.iter.sampler import \
@@ -16,4 +16,4 @@ from torch.utils.data.datapipes.iter.sampler import \
 
 
 __all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFormTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
-           'Batch', 'BucketBatch', 'Callable', 'Collate', 'Filter', 'Sampler']
+           'Batch', 'BucketBatch', 'Collate', 'Filter', 'Map', 'Sampler']
