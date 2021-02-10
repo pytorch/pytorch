@@ -11,6 +11,13 @@ if(MSVC)
   include(../cmake/public/utils.cmake)
 endif()
 
+# Debug messages - if you want to get a list of source files and examine
+# target information enable the following by `set(ADD_DEBUG_INFO TRUE)`.
+set(ADD_DEBUG_INFO TRUE)
+if(ADD_DEBUG_INFO)
+  include(../cmake/DebugHelper.cmake)
+endif()
+
 # ATen parallelism settings
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
@@ -188,7 +195,7 @@ endif()
 
 # Debug messages - if you want to get a list of source files, enable the
 # following.
-if(FALSE)
+if(ADD_DEBUG_INFO)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
     message(STATUS "  " ${tmp})
@@ -1263,6 +1270,11 @@ elseif(USE_CUDA)
   target_link_libraries(torch PUBLIC torch_cuda_library)
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
+endif()
+
+if(ADD_DEBUG_INFO)
+  print_target_properties(torch)
+  print_target_properties(torch_cpu)
 endif()
 
 # Install PDB files for MSVC builds
