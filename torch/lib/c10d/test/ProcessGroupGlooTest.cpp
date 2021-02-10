@@ -364,7 +364,9 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   for (const auto & vec : inputSplits) {
     // Due to concatenation of tensors, shape will actually be the sum
     int64_t sum = 0;
-    for (const auto & s : vec) sum += s;
+    for (const auto & s : vec) {
+      sum += s;
+    }
     allShapes.push_back({sum});
   }
   enableProfilerLegacy(ProfilerConfig(
