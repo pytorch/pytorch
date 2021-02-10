@@ -4,6 +4,7 @@ import inspect
 import sys
 import textwrap
 import torch
+import warnings
 
 class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     """
@@ -20,11 +21,15 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     An object of this class can walk a given ``nn.Module``'s AST and
     determine if it meets our requirements or not.
 
-    Known limitation: We can only check the AST nodes for certain
-    constructs; we can't ``eval`` arbitrary expressions. This means
-    that function calls, class instantiations, and complex expressions
-    that resolve to one of the "empty" values specified above will NOT
-    be flagged as problematic.
+    Known limitations
+    1. We can only check the AST nodes for certain constructs; we can't
+    ``eval`` arbitrary expressions. This means that function calls,
+    class instantiations, and complex expressions that resolve to one of
+    the "empty" values specified above will NOT be flagged as
+    problematic.
+    2. We match on string literals, so if the user decides to use a
+    non-standard import (e.g. `from typing import List as foo`), we
+    won't catch it.
 
     Example:
 
@@ -54,7 +59,6 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     """
 
     def check(self, nn_module: torch.nn.Module) -> None:
-
         # Check if we have a Python version <3.8
         self.using_deprecated_ast: bool = sys.version_info < (3, 8)
 
@@ -63,16 +67,73 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         # This AST only contains the `__init__` method of the nn.Module
         init_ast = ast.parse(source_lines)
 
+        # Get items annotated in the class body
+        self.class_level_annotations = list(nn_module.__annotations__.keys())
+
+        # Flag for later
+        self.visiting_class_level_ann = False
+
         self.visit(init_ast)
+
+    def _is_empty_container(self, node: ast.AST, ann_type: str) -> bool:
+        if ann_type == "List":
+            # Assigning `[]` to a `List` type gives you a Node where
+            # value=List(elts=[], ctx=Load())
+            if not isinstance(node, ast.List):
+                return False
+            if node.elts:
+                return False
+        elif ann_type == "Dict":
+            # Assigning `{}` to a `Dict` type gives you a Node where
+            # value=Dict(keys=[], values=[])
+            if not isinstance(node, ast.Dict):
+                return False
+            if node.keys:
+                return False
+        elif ann_type == "Optional":
+            # Assigning `None` to an `Optional` type gives you a
+            # Node where value=Constant(value=None, kind=None)
+            # or, in Python <3.8, value=NameConstant(value=None)
+            if (not self.using_deprecated_ast
+                    and not isinstance(node, ast.Constant)):
+                return False
+            if (self.using_deprecated_ast
+                    and not isinstance(node, ast.NameConstant)):
+                return False
+            if node.value:
+                return False
+
+        return True
+
+    def visit_Assign(self, node):
+        """
+        If we're visiting a Call Node (the right-hand side of an
+        assignment statement), we won't be able to check the variable
+        that we're assigning to (the left-hand side of an assignment).
+        Because of this, we need to store this state in visitAssign.
+        (Luckily, we only have to do this if we're assigning to a Call
+        Node, i.e. ``torch.jit.annotate``. If we're using normal Python
+        annotations, we'll be visiting an AnnAssign Node, which has its
+        target built in.)
+        """
+        if (isinstance(node.value, ast.Call)
+                and node.targets[0].attr in self.class_level_annotations):
+            self.visiting_class_level_ann = True
+        self.generic_visit(node)
+        self.visiting_class_level_ann = False
 
     def visit_AnnAssign(self, node):
         """
         Visit an AnnAssign node in an ``nn.Module``'s ``__init__``
         method and see if it conforms to our attribute annotation rules.
         """
-        # If we have a class-level attribute (instance-level attributes
-        # are instances of ast.Attribute)
-        if isinstance(node.target, ast.Name):
+        # If we have a local variable
+        if node.target.value.id != "self":
+            return
+
+        # If we have an attribute that's already been annotated at the
+        # class level
+        if node.target.attr in self.class_level_annotations:
             return
 
         # TODO @ansley: add `Union` once landed
@@ -100,36 +161,12 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             # not evaluating one of our "containers"
             return
 
-        # switch-case to check if the assigned variable is not empty
+        # Check if the assigned variable is empty
         ann_type = node.annotation.value.id
-        if ann_type == "List":
-            # Assigning `[]` to a `List` type gives you an AnnAssign
-            # Node where value=List(elts=[], ctx=Load())
-            if not isinstance(node.value, ast.List):
-                return
-            if node.value.elts:
-                return
-        elif ann_type == "Dict":
-            # Assigning `{}` to a `Dict` type gives you an AnnAssign
-            # Node where value=Dict(keys=[], values=[])
-            if not isinstance(node.value, ast.Dict):
-                return
-            if node.value.keys:
-                return
-        elif ann_type == "Optional":
-            # Assigning `None` to an `Optional` type gives you an
-            # AnnAssign Node where value=Constant(value=None, kind=None)
-            # or, in Python <3.8, value=NameConstant(value=None)
-            if (not self.using_deprecated_ast
-                    and not isinstance(node.value, ast.Constant)):
-                return
-            if (self.using_deprecated_ast
-                    and not isinstance(node.value, ast.NameConstant)):
-                return
-            if node.value.value:
-                return
+        if not self._is_empty_container(node.value, ann_type):
+            return
 
-        raise RuntimeError("The TorchScript type system doesn't support"
+        warnings.warn("The TorchScript type system doesn't support"
                            " instance-level annotations on empty"
                            " non-base types in `__init__`. Instead, "
                            " either 1) use a type annotation in the "
@@ -142,26 +179,27 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         method and determine if it's ``torch.jit.annotate``. If so,
         see if it conforms to our attribute annotation rules.
         """
+        # If we have an attribute that's already been annotated at the
+        # class level
+        if self.visiting_class_level_ann:
+            return
+
         # If this isn't a call to `torch.jit.annotate`
         try:
             if (node.func.value.value.id != "torch"
                     or node.func.value.attr != "jit"
                     or node.func.attr != "annotate"):
-                try:
-                    self.generic_visit(node)
-                except RuntimeError:
-                    raise
-                return
+                self.generic_visit(node)
+            elif (node.func.value.value.id != "jit"
+                    or node.func.value.attr != "annotate"):
+                self.generic_visit(node)
         except AttributeError:
             # Looks like we didn't even have the right node structure
             # to check for `torch.jit.annotate` in the first place
-            try:
-                self.generic_visit(node)
-            except RuntimeError:
-                raise
-            return
+            self.generic_visit(node)
 
-        # Invariant: we have a `torch.jit.annotate` call
+        # Invariant: we have a `torch.jit.annotate` or a
+        # `torch.annotate` call
 
         # A Call Node for `torch.jit.annotate` should have an `args`
         # list of length 2 where args[0] represents the annotation and
@@ -181,32 +219,11 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         if ann_type not in containers:
             return
 
-        # switch-case to check if the assigned variable is not empty
-        if ann_type == "List":
-            # An empty list is List(elts=[], ctx=Load())
-            if not isinstance(node.args[1], ast.List):
-                return
-            if node.args[1].elts:
-                return
-        elif ann_type == "Dict":
-            # An empty dict is Dict(keys=[], values=[])
-            if not isinstance(node.args[1], ast.Dict):
-                return
-            if node.args[1].keys:
-                return
-        elif ann_type == "Optional":
-            # `None` is Constant(value=None, kind=None), or, in Python
-            # <3.8, value=NameConstant(value=None)
-            if (not self.using_deprecated_ast
-                    and not isinstance(node.args[1], ast.Constant)):
-                return
-            if (self.using_deprecated_ast
-                    and not isinstance(node.args[1], ast.NameConstant)):
-                return
-            if node.args[1].value:
-                return
+        # Check if the assigned variable is empty
+        if not self._is_empty_container(node.args[1], ann_type):
+            return
 
-        raise RuntimeError("The TorchScript type system doesn't support"
+        warnings.warn("The TorchScript type system doesn't support"
                            " instance-level annotations on empty"
                            " non-base types in `__init__`. Instead, "
                            " either 1) use a type annotation in the "
