@@ -1199,6 +1199,21 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def sample_inputs_clamp(op_info, device, dtype, requires_grad):
+    tensors = (
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad),        
+    )
+    if dtype is torch.uint8:
+        min_max_vals = ((2, 5), (3, 7))
+    else:
+        min_max_vals = ((0, 1), (-1, 1))
+    output = [SampleInput(tensor, args=vals) for tensor, vals in product(tensors, min_max_vals)]    
+    output += [SampleInput(tensors[0], args=(0.5, None)), SampleInput(tensors[0], args=(None, 0.5))]
+    empty_tensor = make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    output += [SampleInput(empty_tensor, args=(0.0, 1.0)), ]
+    return output
+
 def sample_inputs_diag(op_info, device, dtype, requires_grad):
     vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
 
@@ -1355,6 +1370,7 @@ op_db: List[OpInfo] = [
                    )),
     # NOTE: the derivative for inplace acosh is not implemented
     UnaryUfuncInfo('acosh',
+                   aliases=('arccosh', ),
                    ref=np.arccosh,
                    domain=(1, float('inf')),
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -1424,6 +1440,7 @@ op_db: List[OpInfo] = [
                    )),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
+                   aliases=('arcsinh', ),
                    ref=np.arcsinh,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
@@ -1442,6 +1459,7 @@ op_db: List[OpInfo] = [
                                 active_if=IS_WINDOWS),
                    )),
     UnaryUfuncInfo('atan',
+                   aliases=('arctan', ),
                    ref=np.arctan,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1458,6 +1476,7 @@ op_db: List[OpInfo] = [
                                 active_if=IS_WINDOWS),
                    )),
     UnaryUfuncInfo('atanh',
+                   aliases=('arctanh', ),
                    ref=np.arctanh,
                    domain=(-1, 1),
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -1501,6 +1520,19 @@ op_db: List[OpInfo] = [
                          SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                          SkipInfo('TestCommon', 'test_variant_consistency_eager',
                                   dtypes=[torch.complex64, torch.complex128]),)),
+    UnaryUfuncInfo('clamp',
+                   aliases=('clip', ),
+                   ref=np.clip,
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+                   assert_autodiffed=True,
+                   skips=(
+                       # Skip all unary ufuncs tests as we call op(tensor) and min/max args are not passed
+                       # Reference: https://github.com/pytorch/pytorch/issues/51242
+                       SkipInfo('TestUnaryUfuncs'),
+                   ),
+                   sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1813,6 +1845,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=True),
     UnaryUfuncInfo('neg',
+                   aliases=('negative', ),
                    ref=np.negative,
                    skip_bfloat16_grad=True,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -1944,6 +1977,13 @@ op_db: List[OpInfo] = [
            # CUDA gradchecks are slow and triangular solve backward is a composite operation
            # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
            skips=(SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    UnaryUfuncInfo('trunc',
+                   aliases=('fix', ),
+                   ref=np.trunc,
+                   dtypes=floating_types_and(torch.bfloat16),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.float16),
+                   assert_autodiffed=True),
     UnaryUfuncInfo('exp2',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp2),
                    dtypes=all_types_and(torch.bool, torch.half),
@@ -2643,13 +2683,6 @@ def method_tests():
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
         ('complex', (S, S, S), ((S, S, S),), ''),
-        ('clamp', (S, S, S), (0, 1), '', (True,)),
-        ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
-        ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
-        ('clamp', (), (0, 1), 'scalar', (True,)),
-        ('clamp', (), (None, 0.5), 'min_scalar', (True,)),
-        ('clamp', (), (0.5, None), 'max_scalar', (True,)),
-        ('clamp', (S, S), (), 'max_scalar_kwarg', (True,), (), (), ident, {'max': 1}),
         ('atan2', (S, S, S), ((S, S, S),)),
         ('atan2', (), ((),), 'scalar'),
         ('atan2', (S, S, S), ((S,),), 'broadcast_rhs'),
@@ -2659,8 +2692,6 @@ def method_tests():
         ('sign', (), NO_ARGS, 'scalar'),
         ('sgn', (S, S, S), NO_ARGS),
         ('sgn', (), NO_ARGS, 'scalar'),
-        ('trunc', (S, S, S), NO_ARGS, '', (True,)),
-        ('trunc', (), NO_ARGS, 'scalar', (True,)),
         ('rad2deg', (S, S, S), NO_ARGS),
         ('deg2rad', (S, S, S), NO_ARGS),
         # Removing the 'rsqrt' entries leads to failure in
