@@ -444,6 +444,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'has_names': ['def has_names(self) -> _bool: ...'],
         'is_contiguous': ['def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ...'],
         '_is_view': ['def _is_view(self) -> _bool: ...'],
+        'is_complex': ['def is_complex(self) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
