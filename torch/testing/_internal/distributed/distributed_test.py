@@ -2051,7 +2051,6 @@ class DistributedTest:
         def _test_all_gather_helper(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
         ):
-            print("_test_all_gather")
             for dest in group:
                 tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]

@@ -418,7 +418,7 @@ void testBarrier(const std::string& path) {
 
   auto event_lists = disableProfilerLegacy();
   const char * GLOO_STR = "gloo:barrier";
-  std::vector<std::vector<long>> allShapes;
+  std::vector<std::vector<int64_t>> allShapes;
   // Barrier does not use tensors, so skip shape checking.
       checkProfiledEvents(
           std::move(event_lists), GLOO_STR, size, allShapes, /* verify_shapes */ false);
