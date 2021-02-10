@@ -1,6 +1,5 @@
 import importlib
 import sys
-from contextlib import contextmanager
 from pickle import _getattribute, _Pickler  # type: ignore
 from types import ModuleType
 from typing import Any, List, Optional, Tuple
