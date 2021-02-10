@@ -58,7 +58,9 @@ class _Globals:
         # qualified name -> keys in self.globals
         self._names: Dict[str, str] = {}
         self._dedupe_index = 0
-        self._import_strs: Set[str] = set()
+
+        # Always import torch
+        self._import_strs: Set[str] = {'import torch'}
 
         # Preload names into globals. These are objects whose `repr` returns
         # something that actually needs to be imported to execute correctly.
