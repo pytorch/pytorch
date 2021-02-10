@@ -931,6 +931,7 @@ def trace_module(
             # this is needed since Module.__call__ sets up some extra tracing
             func = mod if method_name == "forward" else getattr(mod, method_name)
             example_inputs = make_tuple(example_inputs)
+            print('--------_create_method_from_trace for ' + method_name)
             module._c._create_method_from_trace(
                 method_name,
                 func,
@@ -967,6 +968,8 @@ def trace_module(
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
+
+    print('--------return module')
 
     return module
 
