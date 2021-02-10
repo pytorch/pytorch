@@ -118,7 +118,7 @@ void toBackendSelectiveImpl(
   }
 }
 
-Module codegen_lambda(
+Module codegen_func(
     const std::string& backend_name,
     const Module& orig_module,
     const py::dict& method_compile_spec) {
@@ -129,7 +129,7 @@ Module codegen_lambda(
       orig_module,
       toIValue(method_compile_spec, any_dict_ty).toGenericDict(),
       any_dict_ty);
-};
+}
 
 void initJitBackendBindings(PyObject* module) {
   // Bind a function for lowering to each JIT backend. The name of the backend
@@ -148,7 +148,7 @@ void initJitBackendBindings(PyObject* module) {
           py::handle orig_module,
           const py::dict& method_compile_spec) {
         return py::module::import("torch.jit._recursive")
-            .attr("wrap_cpp_module")(codegen_lambda(
+            .attr("wrap_cpp_module")(codegen_func(
                 backend_name,
                 py::cast<Module>(orig_module.attr("_c")),
                 method_compile_spec));
