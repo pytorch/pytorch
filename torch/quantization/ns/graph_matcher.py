@@ -156,7 +156,7 @@ def _node_a_related_to_b(
     gm_b: GraphModule,
     type_a_related_to_b: Set[Tuple[Callable, Callable]],
 ) -> bool:
-    if node_a.op != node_a.op:
+    if node_a.op != node_b.op:
         # for now, comparing call_module to call_function is not supported
         # this can be added later if needed
         return False
