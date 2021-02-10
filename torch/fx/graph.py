@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import torch
 import keyword
 import re
+import io
 import builtins
 import math
 
@@ -38,8 +39,21 @@ def _snake_case(s: str) -> str:
     return ''.join(chars)
 
 
-def _is_custom_torch(qualname: str) -> bool:
-    return qualname.startswith('torch.ops') or qualname.startswith('torch.classes')
+def _is_from_torch(obj: Any) -> bool:
+    module_name = getattr(obj, '__module__', None)
+    if module_name is not None:
+        base_module = module_name.partition('.')[0]
+        if base_module == 'torch':
+            return True
+
+    name = getattr(obj, '__name__', None)
+    # exclude torch because torch.torch.torch.torch works. idk mang
+    if name is not None and name != 'torch':
+        for guess in [torch, torch.nn.functional]:
+            if getattr(guess, name, None) is obj:
+                return True
+
+    return False
 
 
 class _Globals:
@@ -54,45 +68,52 @@ class _Globals:
     def __init__(self):
         # The global name -> external object mapping.
         self.globals: Dict[str, Any] = {}
-
-        # qualified name -> keys in self.globals
-        self._names: Dict[str, str] = {}
+        # Reverse mapping of globals
+        self._reverse_globals: Dict[Any, str] = {}
         self._dedupe_index = 0
-
-        # Always import torch
-        self._import_strs: Set[str] = {'import torch'}
 
         # Preload names into globals. These are objects whose `repr` returns
         # something that actually needs to be imported to execute correctly.
         #
-        # If you add to this, you probably need to add an import string in
-        # '_format_import_str` as well.
+        # If you add to this, you need to add an import string in
+        # '_format_import_statement` as well.
         self.add_global(math.nan, 'nan')
         self.add_global(math.inf, 'inf')
         self.add_global(type(None), 'NoneType')
+        self.add_global(torch, 'torch')
 
-    def add_global(self, obj: Any, qualname: str) -> str:
+    def add_global(self, obj: Any, name_hint: str) -> str:
         """Add an external obj to be tracked.
 
-        Returns the global name that should be used to reference 'obj' in
-        Python source code.
+        Arguments:
+            obj: The external obj.
+            name_hint: A suggestion that will help us assign a descriptive global name.
 
-        Example: 'foo.bar.baz' becomes 'foo_bar_baz'
+        Returns:
+            The global name that should be used to reference 'obj' in Python
+            source code.
+                Example: 'foo.bar.baz' becomes 'foo_bar_baz'
         """
-        if _is_custom_torch(qualname):
-            # HACK: workaround for how torch custom ops are registered. We can't
-            # import them like normal modules so they must retain their fully qualified name.
-            self._names[qualname] = qualname
-            self.globals['torch'] = torch
+        if _is_from_torch(obj):
+            # HACK: workaround for how torch custom ops are registered. We
+            # can't import them like normal modules so they must retain their
+            # fully qualified name.
+            qualname = _get_qualified_name(obj)
+            self._reverse_globals[obj] = qualname
             return qualname
 
         # Check if we already added this global.
-        if qualname in self._names:
-            global_name = self._names[qualname]
+        if obj in self._reverse_globals:
+            global_name = self._reverse_globals[obj]
             assert self.globals[global_name] is obj
             return global_name
 
-        global_name = qualname.replace('.', '_')
+        global_name_buf = io.StringIO()
+        for c in name_hint:
+            c = c if c.isalnum() else '_'
+            global_name_buf.write(c)
+
+        global_name = global_name_buf.getvalue()
 
         # Resolve any collisions, e.g. between 'foo._bar' and 'foo_.bar'
         base_name = global_name
@@ -101,51 +122,10 @@ class _Globals:
             self._dedupe_index += 1
 
         # Populate our name tables
-        self._names[qualname] = global_name
+        self._reverse_globals[obj] = global_name
         self.globals[global_name] = obj
 
-        # Save the import string
-        import_str = self._format_import_str(qualname, global_name)
-        if import_str is not None:
-            self._import_strs.add(import_str)
-
         return global_name
-
-    def format_import_block(self):
-        """Return Python source code that can be executed to import external
-        objects and assign them to the correct global names.
-
-        This is used for serializing the source code, since we can't
-        serialize the globals dict itself.
-        """
-        return '\n'.join(self._import_strs)
-
-    @staticmethod
-    def _format_import_str(qualname: str, global_name: str) -> Optional[str]:
-        """Return a snippet of source code that imports `qualname` and assigns
-        the resulting object to `global_name`."""
-        module_name, _sep, type_name = qualname.rpartition('.')
-        if len(module_name) == 0:
-            # This was a single-atom qualified name, like 'getattr', or 'len'
-            # These generally are builtins so don't need to be imported.
-            #
-            # But there are some exceptions, for objects whose `repr`
-            # returns something that actually needs to be imported to
-            # execute correctly.
-            if qualname == 'NoneType':
-                return f'{global_name} = type(None)'
-            if qualname == 'inf':
-                return f'from math import inf as {global_name}'
-            if qualname == 'nan':
-                return f'from math import nan as {global_name}'
-            return None
-
-        if _is_custom_torch(qualname):
-            # HACK: workaround for how torch custom ops are registered. We can't
-            # import them like normal modules so they must retain their fully qualified name.
-            return 'import torch'
-        else:
-            return f'from {module_name} import {type_name} as {global_name}'
 
 
 @dataclass
@@ -155,8 +135,6 @@ class PythonCode:
     fn_src: str
     # Values in global scope during exection of `src_def`.
     globals: Dict[str, Any]
-    # Python source code for import statements that will recreate the `globals` dict.
-    import_block: str
 
 
 def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
@@ -689,7 +667,7 @@ class Graph:
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
 
-        def type_repr(o : Any):
+        def get_global_name(o : Any):
             typename = _type_repr(o)
 
             # Common case: this is a regular module name like 'foo.bar.baz'
@@ -701,9 +679,8 @@ class Graph:
             origin_typename = self._globals.add_global(origin_type, _type_repr(origin_type))
 
             # Assign global names for each of the inner type variables.
-            args = [type_repr(arg) for arg in o.__args__]
+            args = [get_global_name(arg) for arg in o.__args__]
             return f'{origin_typename}[{",".join(args)}]'
-
 
         # Run through reverse nodes and record the first instance of a use
         # of a given node. This represents the *last* use of the node in the
@@ -742,7 +719,7 @@ class Graph:
         def emit_node(node : Node):
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
+                maybe_type_annotation = '' if node.type is None else f' : {get_global_name(node.type)}'
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
@@ -783,7 +760,7 @@ class Graph:
                 return
             elif node.op == 'output':
                 if node.type is not None:
-                    maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
+                    maybe_return_annotation[0] = f" -> {get_global_name(node.type)}"
                 body.append(f'return {repr(node.args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
@@ -810,8 +787,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}"""
 
         return PythonCode(fn_code,
-                          self._globals.globals.copy(),
-                          self._globals.format_import_block())
+                          self._globals.globals.copy())
 
     def __str__(self) -> str:
         """

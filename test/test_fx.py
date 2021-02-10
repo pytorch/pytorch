@@ -15,7 +15,7 @@ from pathlib import Path
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
-from torch.fx.node import Target
+from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
@@ -188,7 +188,7 @@ class TestFX(JitTestCase):
         # Custom delegate to disallow in-place tensor operations
         class NoMutableCallTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
                             type_expr : Optional[Any] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == '_':
@@ -540,7 +540,7 @@ class TestFX(JitTestCase):
     def test_node_tagging(self):
         class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
                             type_expr : Optional[Any] = None) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = 'foo'
@@ -845,13 +845,28 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
+    def test_pickle_torch_custom_ops(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.sigmoid(a)
+                c = torch.ops.aten.cat([a, b])
+                return torch.ops.aten.cat((c, c))
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        gm.graph.lint(gm)
+        pickled = pickle.dumps(gm)
+        loaded = pickle.loads(pickled)
+        self.assertEqual(loaded(input), gm(input))
+
     def test_pretty_print(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
         traced.graph.lint(traced)
         printed = str(traced)
         assert 'SimpleTest()' in printed
-        assert 'torch_relu' in printed
+        assert 'torch.relu' in printed
 
     def test_pretty_print_graph(self):
         class KwargPrintTest(torch.nn.Module):
@@ -1105,6 +1120,13 @@ class TestFX(JitTestCase):
         interp = Interpreter(gm)
         result = interp.run(torch.ones(3, 4), torch.ones(3, 4), torch.rand(3, 4))
         self.assertEqual(result, torch.ones(3, 4) * 2.0)
+
+    @skipIfNoTorchVision
+    def test_interpreter_noop_resnet18(self):
+        rn18 = resnet18()
+        transformed = torch.fx.Transformer(symbolic_trace(rn18)).transform()
+        inp = torch.randn(5, 3, 224, 224)
+        self.assertEqual(transformed(inp), rn18(inp))
 
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):
@@ -1425,6 +1447,45 @@ class TestFX(JitTestCase):
 
         x, y = torch.randn(3, 4), torch.randn(3, 4)
         self.checkGraphModule(foo, (x, y))
+
+    def test_trace_dict_int_keys(self):
+        class ModWithDictArg(torch.nn.Module):
+            def forward(self, d : Dict[int, torch.Tensor]):
+                return d[42]
+
+        class CallsModWithDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = ModWithDictArg()
+
+            def forward(self, x):
+                return self.m({42: x})
+
+        class MyTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                return isinstance(m, ModWithDictArg)
+
+        traced_graph = MyTracer().trace(CallsModWithDict())
+
+    def test_trace_dict_proxy_keys(self):
+        class ModWithDictArg(torch.nn.Module):
+            def forward(self, d : Dict[torch.Tensor, torch.Tensor]):
+                return d[42]
+
+        class CallsModWithDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = ModWithDictArg()
+
+            def forward(self, x):
+                return self.m({x: x})
+
+        class MyTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                return isinstance(m, ModWithDictArg)
+
+        with self.assertRaisesRegex(RuntimeError, 'cannot contain a Node'):
+            traced_graph = MyTracer().trace(CallsModWithDict())
 
     def test_direct_param_use(self):
         class TransposeTest(torch.nn.Module):

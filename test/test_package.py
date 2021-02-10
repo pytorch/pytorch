@@ -3,6 +3,7 @@ import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
+from torch.package.module_environment import ModuleEnv, DefaultImporter
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -191,7 +192,7 @@ import module_a
 
         f2 = self.temp()
         pe = PackageExporter(f2, verbose=False)
-        pe.importers.insert(0, importer1.import_module)
+        pe.module_env = ModuleEnv([importer1, DefaultImporter])
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
             pe.require_module(loaded1.__module__)
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
@@ -220,7 +221,7 @@ import module_a
         def make_exporter():
             pe = PackageExporter(f2, verbose=False)
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
-            pe.importers.insert(0, importer1.import_module)
+            pe.module_env = ModuleEnv([importer1, DefaultImporter])
             return pe
 
         # This should fail. The 'PackageAObject' type defined from 'importer1'
@@ -357,8 +358,7 @@ import module_a
             # came from imported packages so that it can resolve
             # class names like torchvision.models.resnet.ResNet
             # to their source code.
-
-            e.importers.insert(0, i.import_module)
+            e.module_env = ModuleEnv([i, DefaultImporter])
 
             # e.importers is a list of module importing functions
             # that by default contains importlib.import_module.
@@ -585,6 +585,63 @@ class ManglingTest(TestCase):
         mangled = a.mangle("foo.bar")
         mangle_prefix = get_mangle_prefix(mangled)
         self.assertEqual(mangle_prefix + "." + "foo.bar", mangled)
+
+
+class TestModuleEnv(TestCase):
+    def test_default_importer(self):
+        import package_a
+        import package_a.subpackage
+        module_env = ModuleEnv()
+        self.assertIs(module_env.import_module('package_a'), package_a)
+        self.assertIs(module_env.import_module('package_a.subpackage'), package_a.subpackage)
+
+    def test_default_importer_roundtrip(self):
+        import package_a
+        import package_a.subpackage
+        module_env = ModuleEnv()
+        type_ = package_a.subpackage.PackageASubpackageObject
+        module_name, type_name = module_env.get_name(type_)
+
+        module = module_env.import_module(module_name)
+        self.assertIs(getattr(module, type_name), type_)
+
+    def test_importer_env(self):
+        import package_a
+        import module_a  # noqa: F401
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_module(package_a.__name__)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+
+        # Construct an importer-only environment.
+        module_env = ModuleEnv([importer])
+
+        # The module returned by this environment should be the same one that's
+        # in the importer.
+        self.assertIs(module_env.import_module('package_a'), importer.import_module('package_a'))
+        # It should not be the one available in the outer Python environment.
+        self.assertIsNot(module_env.import_module('package_a'), package_a)
+
+        # We didn't package this module, so it should not be available.
+        with self.assertRaises(ModuleNotFoundError):
+            module_env.import_module('module_a')
+
+    def test_importer_ordering(self):
+        import package_a
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_module(package_a.__name__)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+
+        module_env_default_first = ModuleEnv([DefaultImporter, importer])
+        self.assertIs(module_env_default_first.import_module('package_a'), package_a)
+
+        module_env_package_first = ModuleEnv([importer, DefaultImporter])
+        self.assertIs(module_env_package_first.import_module('package_a'), importer.import_module('package_a'))
 
 
 if __name__ == '__main__':
