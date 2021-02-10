@@ -350,7 +350,6 @@ filegroup(
         "aten/src/ATen/cudnn/Handle.cpp",
         "aten/src/ATen/cudnn/Types.cpp",
         "aten/src/ATen/native/cuda/CUDAUnaryOps.cpp",
-        "aten/src/ATen/native/cuda/LegacyDefinitions.cpp",
         "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
         "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
         "aten/src/ATen/native/cudnn/BatchNorm.cpp",
@@ -1869,6 +1868,19 @@ cc_library(
 )
 
 # torch
+py_binary(
+    name = "gen_version_header",
+    srcs = ["tools/setup_helpers/gen_version_header.py"],
+)
+
+genrule(
+    name = "version_h",
+    srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
+    outs = ["torch/csrc/api/include/torch/version.h"],
+    cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
+    tools = [':gen_version_header']
+)
+
 torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 cc_library(
     name = "torch_headers",
@@ -1889,7 +1901,7 @@ cc_library(
             "torch/csrc/autograd/generated/variable_factories.h",
             "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
-    ) + [":cpp_generated_code"],
+    ) + [":cpp_generated_code", ":version_h"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",

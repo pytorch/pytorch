@@ -57,6 +57,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StorageType::Kind:
       case NumberType::Kind:
       case FloatType::Kind:
+      case ComplexType::Kind:
       case IntType::Kind:
       case NoneType::Kind:
       case GeneratorType::Kind:
@@ -80,9 +81,6 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
-      // TODO(@anjali411): Implement serialization/deserialization for complex
-      // numbers
-      case ComplexDoubleType::Kind:
       case EnumType::Kind:
         // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
         AT_ASSERT(false);
@@ -115,7 +113,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         if (!w.value.isList()) {
           break;
         }
-        auto elem_type = w.static_type->cast<ListType>()->getElementType();
+        auto elem_type = w.static_type->castRaw<ListType>()->getElementType();
         auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
         for (const IValue item : lst) {
@@ -543,6 +541,15 @@ void Unpickler::readGlobal(
     // Unpickle a tensor
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
+  } else if (module_name == "builtins" && class_name == "complex") {
+    globals_.emplace_back([this] {
+      auto elems = pop(stack_).toTuple()->elements();
+      AT_ASSERT(elems.size() == 2);
+      auto complex =
+          c10::complex<double>(elems.at(0).toDouble(), elems.at(1).toDouble());
+      stack_.emplace_back(complex);
+    });
+
   } else if (module_name == "collections" && class_name == "OrderedDict") {
     // collections.OrderedDict is used in tensor serialization for a tensor's
     // backward hooks (but they are not actually saved with this Pickler)

@@ -153,7 +153,7 @@ class class_ {
     return *this;
   }
 
-  /// Method regisration API for static methods.
+  /// Method registration API for static methods.
   template <typename Func>
   class_& def_static(std::string name, Func func, std::string doc_string = "") {
     auto qualMethodName = qualClassName + "." + name;

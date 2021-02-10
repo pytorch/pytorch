@@ -42,11 +42,11 @@ void initPythonCustomClassBindings(PyObject* module) {
 
   py::class_<ScriptClassFunctionPtr>(
       m, "ScriptClassFunction", py::dynamic_attr())
-      .def("__call__", [](py::args args, py::kwargs kwargs) {
+      .def("__call__", [](py::args args, const py::kwargs& kwargs) {
         auto strongPtr = py::cast<ScriptClassFunctionPtr>(args[0]);
         Function& callee = *strongPtr.function_;
         py::object result = invokeScriptFunctionFromPython(
-            callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+            callee, tuple_slice(std::move(args), 1), kwargs);
         return result;
       });
 

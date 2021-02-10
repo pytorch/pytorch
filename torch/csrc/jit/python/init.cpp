@@ -210,13 +210,17 @@ void initJITBindings(PyObject* module) {
           PrepareInplaceOpsForONNX)
       .def(
           "_jit_pass_onnx_node_shape_type_inference",
-          [](Node* n, int opset_version) {
-            ONNXShapeTypeInference(n, opset_version);
+          [](Node* n,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(n, params_dict, opset_version);
           })
       .def(
           "_jit_pass_onnx_graph_shape_type_inference",
-          [](std::shared_ptr<Graph>& graph, int opset_version) {
-            ONNXShapeTypeInference(graph, opset_version);
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(graph, params_dict, opset_version);
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_fuse", FuseGraph)
@@ -563,12 +567,8 @@ void initJITBindings(PyObject* module) {
           []() { return getInlineEverythingMode(); })
       .def(
           "_jit_try_infer_type",
-          [](py::object obj) -> TypePtr {
-            auto match = tryToInferType(std::move(obj));
-            if (match.success()) {
-              return match.type();
-            }
-            return nullptr;
+          [](py::object obj) -> InferredType {
+            return tryToInferType(std::move(obj));
           })
       .def(
           "_jit_get_trigger_value",
@@ -868,6 +868,7 @@ void initJITBindings(PyObject* module) {
              const char* data,
              size_t size) { return self.writeRecord(name, data, size); })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
@@ -1183,6 +1184,21 @@ void initJITBindings(PyObject* module) {
           "set_result",
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)
+      .def(
+          "_set_unwrap_func",
+          // Intentionally not releasing GIL as this just does an assign
+          [](PythonFutureWrapper& self, py::function unwrapFunc) {
+            auto functionGuard =
+                std::make_shared<torch::jit::PythonFunctionGuard>(
+                    std::move(unwrapFunc));
+
+            std::function<void(py::object)> pf =
+                [functionGuard(std::move(functionGuard))](
+                    const py::object& inp) {
+                  return functionGuard->func_(inp);
+                };
+            self.unwrap_func = std::move(pf);
+          })
       .def(
           py::pickle(
               /* __getstate__ */

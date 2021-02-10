@@ -1,5 +1,6 @@
 import inspect
 import torch
+import types
 import collections
 import textwrap
 import functools
@@ -10,7 +11,6 @@ import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args, get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
 from torch.nn import Module
-from torch._six import get_function_from_type, bind_method
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -118,13 +118,18 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         # this test as isinstance(class_annotations[name], Callable) but
         # isinstance on typing things doesn't seem to work: isinstance(list, Callable)
         # is also true!
+        inferred = False
         if name in class_annotations and class_annotations[name] != torch.nn.Module.__annotations__["forward"]:
-            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
+            ann_to_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
+            attr_type = torch._C.InferredType(ann_to_type)
         elif isinstance(item, torch.jit.Attribute):
-            attr_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
+            ann_to_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
+            attr_type = torch._C.InferredType(ann_to_type)
         else:
             attr_type = torch._C._jit_try_infer_type(item)
-        return attr_type
+            inferred = True
+
+        return attr_type, inferred
 
     added_names = set()
 
@@ -133,13 +138,13 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             continue
 
         assert item is None or isinstance(item, torch.Tensor)
-        attr_type = infer_type(name, item)
+        attr_type, _ = infer_type(name, item)
         # We currently have the invariant in various places in our code
         # that parameters must be Tensors. However, the nn.Module API also
         # allows NoneType parameters. These parameters are not returned as
         # part of `parameters()` and its variants, but are available
         # through direct attribute access.
-        concrete_type_builder.add_attribute(name, attr_type, True, False)
+        concrete_type_builder.add_attribute(name, attr_type.type(), True, False)
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
@@ -147,24 +152,24 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             continue
 
         assert item is None or isinstance(item, torch.Tensor)
-        attr_type = infer_type(name, item)
-        concrete_type_builder.add_attribute(name, attr_type, False, True)
+        attr_type, _ = infer_type(name, item)
+        concrete_type_builder.add_attribute(name, attr_type.type(), False, True)
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
         if name in user_annotated_ignored_attributes:
             continue
 
-        attr_type = infer_type(name, item)
+        attr_type, _ = infer_type(name, item)
         if item is None:
             # Modules can be None. We don't have direct support for optional
             # Modules, so the register it as an NoneType attribute instead.
-            concrete_type_builder.add_attribute(name, attr_type, False, False)
+            concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
             continue
-        if attr_type is not None:
-            assert attr_type.is_interface_type()
+        if attr_type.success():
+            assert attr_type.type().is_interface_type()
             # if the type can be inferred, it should be a module interface type
-            sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
+            sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type.type())
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
             sub_concrete_type = get_module_concrete_type(item, share_types)
@@ -233,7 +238,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 scripted_fn = torch.jit.script(value)
                 concrete_type_builder.add_function_attribute(
                     name,
-                    torch._C._jit_try_infer_type(scripted_fn),
+                    torch._C._jit_try_infer_type(scripted_fn).type(),
                     value)
             except Exception as e:
                 # If we fail to script the function, it isn't a hard error.
@@ -258,20 +263,22 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if isinstance(value, torch.jit.ScriptFunction):
             concrete_type_builder.add_function_attribute(
                 name,
-                torch._C._jit_try_infer_type(value),
+                torch._C._jit_try_infer_type(value).type(),
                 value)
             continue
 
         # If we got here, this is a regular "data" attribute, Add it to the concrete type
-        attr_type = infer_type(name, value)
-        if attr_type is not None:
-            concrete_type_builder.add_attribute(name, attr_type, False, False)
+        attr_type, inferred = infer_type(name, value)
+        if attr_type.success():
+            concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
         else:
             # TODO: could add more detail here. For example, what the user should do
             # when the pytype is `list` or `NoneType`
-            hint = ("(This attribute exists on the Python module, "
-                    "but we failed to convert Python type: '{}' "
-                    "to a TorchScript type.)").format(torch.typename(type(value)))
+            inferred_msg = "Its type was inferred; try adding a type annotation for the attribute." if inferred else ""
+            additional_info = f"{attr_type.reason()}. {inferred_msg}"
+            hint = "(This attribute exists on the Python module, " \
+                f"but we failed to convert Python type: '{torch.typename(type(value))}' " \
+                f"to a TorchScript type. {additional_info})"
             concrete_type_builder.add_failed_attribute(name, hint)
 
     # add hooks to concrete type
@@ -449,7 +456,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
 
-    # Copy the forward hooks and pre-hooks to the new ScriptModule 
+    # Copy the forward hooks and pre-hooks to the new ScriptModule
     # to allow the hooks to be run from eager as ScriptFunctions
     for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
         script_module._forward_pre_hooks[idx] = fn
@@ -521,7 +528,7 @@ def script_model_defines_attr(script_model, attr):
     script_attr = getattr(script_model, attr, None)
     if script_attr is None:
         return False
-    default_attr = get_function_from_type(torch.jit.RecursiveScriptModule, attr)
+    default_attr = getattr(torch.jit.RecursiveScriptModule, attr, None)
     if default_attr is None:
         return False
     return script_attr != default_attr
@@ -590,8 +597,12 @@ def check_module_initialized(mod):
     # This is to avoid importing torch.distributed.nn
     if not hasattr(mod, 'remote_parameters'):
         for name, param in mod._parameters.items():
-            if isinstance(param, torch.nn.parameter.UninitializedParameter):
+            if torch.nn.parameter.is_lazy(param):
                 raise RuntimeError("'{}' has uninitialized parameters {}. Did you forget to run a forward pass?"
+                                   .format(torch.typename(type(mod)), name))
+        for name, buf in mod._buffers.items():
+            if torch.nn.parameter.is_lazy(buf):
+                raise RuntimeError("'{}' has uninitialized buffers {}. Did you forget to run a forward pass?"
                                    .format(torch.typename(type(mod)), name))
 
 def infer_methods_to_compile(nn_module):
@@ -604,7 +615,7 @@ def infer_methods_to_compile(nn_module):
     methods: List[str] = []
     if hasattr(nn_module, 'forward') and not _jit_internal.is_ignored_fn(nn_module.forward):
         forward_func = getattr(nn_module.forward, "__func__", None)
-        module_forward = get_function_from_type(torch.nn.Module, "forward")
+        module_forward = getattr(torch.nn.Module, "forward", None)
         if forward_func != module_forward:
             methods = ['forward']
 
@@ -798,7 +809,7 @@ def lazy_bind(concrete_type, unbound_method):
                 setattr(script_module, name, value)
 
         script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
-        method = bind_method(unbound_method, script_module, torch.jit.RecursiveScriptModule)
+        method = types.MethodType(unbound_method, script_module)
         return method(*args)
 
     # make the lazy binding method "look like" the original method

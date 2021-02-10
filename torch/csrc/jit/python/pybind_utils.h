@@ -54,12 +54,33 @@
 namespace torch {
 namespace jit {
 
+void clear_registered_instances(void* ptr);
+
 IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
 
 py::object toPyObject(IValue ivalue);
+
+// Wrap Python function to guard deref
+// NB: Need VISIBILITY_HIDDEN for silencing compiler error,
+// 'torch::jit::PythonFunctionGuard' declared with greater visibility than the
+// type of its field 'torch::jit::PythonFunctionGuard::func_'
+struct VISIBILITY_HIDDEN PythonFunctionGuard {
+  explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
+
+  ~PythonFunctionGuard() {
+    pybind11::gil_scoped_acquire ag;
+    func_.dec_ref();
+    // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+    // decref on the PyObject again.
+    // See Note [Destructing py::object] in python_ivalue.h
+    func_.ptr() = nullptr;
+  }
+
+  py::function func_;
+};
 
 // The PythonFutureWrapper for ivalue::Future
 //
@@ -91,6 +112,9 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     // without grabbing the GIL.
     py::gil_scoped_acquire acquire;
     py::object py_obj = toPyObject(fut->value());
+    // unwrap_func is a general compositional function that takes in a
+    // py::object and executes some python function. It is currently mostly used
+    // to throw python exceptions.
     if (unwrap_func) {
       (*unwrap_func)(py_obj);
     }
@@ -195,22 +219,6 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   c10::optional<UnwrapFunc> unwrap_func;
 
  private:
-  // Wrap Python function to guard deref
-  struct PythonFunctionGuard {
-    explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
-
-    ~PythonFunctionGuard() {
-      pybind11::gil_scoped_acquire ag;
-      func_.dec_ref();
-      // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-      // decref on the PyObject again.
-      // See Note [Destructing py::object] in python_ivalue.h
-      func_.ptr() = nullptr;
-    }
-
-    py::function func_;
-  };
-
   std::shared_ptr<PythonFutureWrapper> getPtr() {
     return shared_from_this();
   }
@@ -293,6 +301,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
     return InferredType(FloatType::get());
+  } else if (PyComplex_CheckExact(input.ptr())) {
+    return InferredType(ComplexType::get());
   } else if (py::isinstance<py::str>(input)) {
     return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
@@ -344,6 +354,16 @@ inline InferredType tryToInferType(py::handle input) {
     auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
     return InferredType(rref_ivalue.type());
 #endif
+  }
+
+  if (as_module(py::cast<py::object>(input))) {
+    return InferredType("Cannot infer type of ScriptModule");
+  }
+
+  auto module_type = py::module::import("torch.nn").attr("Module");
+  py::bool_ is_module = py::isinstance(input, module_type);
+  if (py::cast<bool>(is_module)) {
+    return InferredType("Cannot infer concrete type of torch.nn.Module");
   }
 
   // Try container types
