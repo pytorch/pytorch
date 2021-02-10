@@ -7017,6 +7017,26 @@ a")
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
 
+    def test_compare_two_bool_inputs(self):
+        def compare_eq(a: bool, b: bool):
+            return a == b
+
+        def compare_ne(a: bool, b: bool):
+            return a != b
+
+        scripted_fn_eq = torch.jit.script(compare_eq)
+        scripted_fn_ne = torch.jit.script(compare_ne)
+        self.assertEqual(scripted_fn_eq(True, False), compare_eq(True, False))
+        self.assertEqual(scripted_fn_eq(False, True), compare_eq(False, True))
+        self.assertEqual(scripted_fn_eq(True, True), compare_eq(True, True))
+        self.assertEqual(scripted_fn_eq(False, False), compare_eq(False, False))
+
+        self.assertEqual(scripted_fn_ne(True, False), compare_ne(True, False))
+        self.assertEqual(scripted_fn_ne(False, True), compare_ne(False, True))
+        self.assertEqual(scripted_fn_ne(True, True), compare_ne(True, True))
+        self.assertEqual(scripted_fn_ne(False, False), compare_ne(False, False))
+
+
     def _test_tensor_number_math(self, device='cpu'):
         template = dedent('''
         def func(t):
