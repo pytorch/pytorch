@@ -9,6 +9,8 @@ PYTORCH_DOCKER_TAG=$(git describe --tags --always)-devel
 make -f docker.Makefile \
      DOCKER_REGISTRY=ghcr.io \
      DOCKER_ORG=pytorch \
+     CUDA_VERSION=11.2.0 \
+     CUDA_CHANNEL=conda-forge \
      DOCKER_IMAGE=pytorch-nightly \
      DOCKER_TAG=${PYTORCH_DOCKER_TAG} \
      INSTALL_CHANNEL=pytorch-nightly BUILD_TYPE=official devel-image
