@@ -1,11 +1,11 @@
-import json
 from typing import Dict, List, NamedTuple, Any
 
 import torch
-from torch.fx.experimental.shape_prop import ShapeProp
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
-from torch.fx.graph import Graph, get_qualified_name
+from torch.fx.node import _get_qualified_name
 from torch.fx.graph_module import GraphModule
+from torch.fx.graph import Graph
 from torch.fx.node import Node, Target, map_arg
 
 
@@ -224,7 +224,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 )
 
         if node.op == "call_function":
-            node_rep["target"] = get_qualified_name(node.target)
+            node_rep["target"] = _get_qualified_name(node.target)
         else:
             node_rep["target"] = str(node.target)
 
@@ -248,11 +248,3 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         serialized_dict["nodes"] += [node_rep]
 
     return serialized_dict
-
-
-class AcceleratedGraphModule:
-    def __init__(self, fx_module: GraphModule):
-        """Creates the needed data structures to pass to the glow runtime"""
-        self.weights: Dict[str, Any] = {}
-        self.serialized_graph = serialize_module(fx_module, self.weights)
-        self.serialized_graph_json = json.dumps(self.serialized_graph, indent=4)

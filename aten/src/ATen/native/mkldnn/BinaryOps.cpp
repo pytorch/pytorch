@@ -69,13 +69,6 @@ Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor empty_strided_from_mkldnn(const Tensor& mkldnn_tensor) {
-  auto options = TensorOptions()
-                     .dtype(mkldnn_tensor.dtype())
-                     .device(mkldnn_tensor.device());
-  return at::empty(mkldnn_tensor.sizes(), options);
-}
-
 Tensor& mkldnn_add_out(
     const Tensor& self,
     const Tensor& other,
@@ -93,7 +86,7 @@ Tensor& mkldnn_add_out(
 }
 
 Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  if (self.numel() == 0 | other.numel() == 0) {
+  if (self.numel() == 0 || other.numel() == 0) {
     return emptyBinaryOp(self, other);
   }
 
@@ -136,7 +129,7 @@ Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) 
 }
 
 Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
-  if (self.numel() == 0 | other.numel() == 0) {
+  if (self.numel() == 0 || other.numel() == 0) {
     return emptyBinaryOp(self, other);
   }
   Tensor result = empty_mkldnn(self.sizes(), optTypeMetaToScalarType(self.options().dtype_opt()),

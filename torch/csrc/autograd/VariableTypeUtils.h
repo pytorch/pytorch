@@ -145,6 +145,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
       if (base.is_view()) {
         auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
         const auto& base_bw_info = diff_view_meta->get_backward_view();
+        creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
         return make_variable_differentiable_view(tensor, base_bw_info.chain(base, tensor, view_func),
                                                  c10::nullopt, creation_meta, allow_tensor_metadata_change);
       } else {
@@ -188,6 +189,10 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   }
 
   if (is_fw_differentiable || is_bw_differentiable) {
+    if (base.is_view()) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+      creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
+    }
     return make_variable_differentiable_view(tensor, std::move(new_bw_info), std::move(new_fw_info),
                                              creation_meta, allow_tensor_metadata_change);
   } else {
@@ -232,6 +237,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
     } else {
       new_fw_info = ViewInfo(base, /* view_func */ nullptr);
     }
+  }
+
+  if ((is_fw_differentiable || is_bw_differentiable) && base.is_view()) {
+    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+    creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
   }
 
   for(Tensor &tensor : tensors) {
@@ -299,4 +309,11 @@ inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   return args_sizes;
 }
 
+inline std::vector<ScalarType> to_args_scalartypes(TensorList tensors) {
+  std::vector<ScalarType> args_scalartypes(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    args_scalartypes[i] = tensors[i].scalar_type();
+  }
+  return args_scalartypes;
+}
 }} // namespace torch::autograd

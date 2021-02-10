@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from torch._six import StringIO
+from io import StringIO
 from collections import defaultdict
 
 import inspect
@@ -686,3 +686,8 @@ def warmup_backward(f, *args):
             f.backward(retain_graph=True)
 
     return results
+
+# TODO: Remove me once https://bugs.python.org/issue42666 is resolved
+def make_global(*args):
+    for arg in args:
+        setattr(sys.modules[arg.__module__], arg.__name__, arg)

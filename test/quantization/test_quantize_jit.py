@@ -2021,7 +2021,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                        .run(model.graph)
 
     @skipIfNoFBGEMM
-    def test_qbatch_norm_relu(self):
+    def test_qbatch_norm_relu_BNRelu(self):
         bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
 
         class BNRelu(torch.nn.Module):
@@ -2033,6 +2033,20 @@ class TestQuantizeJitOps(QuantizationTestCase):
             def forward(self, x):
                 return self.relu(self.bn(x))
 
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            for instance in [BNRelu(dim, True), BNRelu(dim, False)]:
+                model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
+                                              "quantized::batch_norm_relu", tracing)
+                FileCheck().check_not("aten::batch_norm") \
+                           .check_not("aten::relu") \
+                           .check_not("aten::relu_") \
+                           .run(model.graph)
+
+    @skipIfNoFBGEMM
+    def test_qbatch_norm_relu_BNFuncRelu(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
         class BNFuncRelu(torch.nn.Module):
             def __init__(self, dim):
                 super(BNFuncRelu, self).__init__()
@@ -2040,6 +2054,20 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
             def forward(self, x):
                 return F.relu(self.bn(x), False)
+
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            instance = BNFuncRelu(dim)
+            model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
+                                          "quantized::batch_norm_relu", tracing)
+            FileCheck().check_not("aten::batch_norm") \
+                       .check_not("aten::relu") \
+                       .check_not("aten::relu_") \
+                       .run(model.graph)
+
+    @skipIfNoFBGEMM
+    def test_qbatch_norm_relu_BNFuncInplaceRelu(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
 
         class BNFuncInplaceRelu(torch.nn.Module):
             def __init__(self, dim):
@@ -2051,14 +2079,13 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         options = itertools.product([True, False], [2, 3])
         for tracing, dim in options:
-            for instance in [BNRelu(dim, True), BNRelu(dim, False),
-                             BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
-                model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
-                                              "quantized::batch_norm_relu", tracing)
-                FileCheck().check_not("aten::batch_norm") \
-                           .check_not("aten::relu") \
-                           .check_not("aten::relu_") \
-                           .run(model.graph)
+            instance = BNFuncInplaceRelu(dim)
+            model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
+                                          "quantized::batch_norm_relu", tracing)
+            FileCheck().check_not("aten::batch_norm") \
+                       .check_not("aten::relu") \
+                       .check_not("aten::relu_") \
+                       .run(model.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_mul(self):
