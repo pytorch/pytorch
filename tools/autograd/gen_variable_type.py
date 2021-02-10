@@ -36,7 +36,9 @@ from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
 import tools.codegen.api.cpp as cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
+from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import Callable, List, Optional, Sequence, Tuple, Union
@@ -89,6 +91,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'reflection_pad1d_backward', 'reflection_pad2d_backward',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
+    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -984,6 +987,17 @@ def match_differentiability_info(
     result: List[NativeFunctionWithDifferentiabilityInfo] = []
     for f in native_functions:
         info, is_exact_match = find_info(f)
+
+        # Currently, the '.strides()' to 'strides_or_error' replacement does not support
+        # 'self' derivatives of an inplace function, so we must check for this case.
+        if f.func.kind() == SchemaKind.inplace and (info is not None):
+            for derivative in info.derivatives:
+                if 'self' in derivative.var_names:
+                    for saved_input in derivative.saved_inputs:
+                        assert 'strides_or_error' not in saved_input.expr, (
+                            "Calling '.strides()' in the 'self' derivative formula of an "
+                            f"in-place function is not supported: {f.func}")
+
         result.append(NativeFunctionWithDifferentiabilityInfo(
             func=f,
             info=info,

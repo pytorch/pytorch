@@ -2505,9 +2505,7 @@ at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
 }
 
 uint32_t checkTag(int32_t tag) {
-  if (tag < 0) {
-    throw std::runtime_error("Tag must be >= 0");
-  }
+  TORCH_CHECK(tag >= 0, "Tag must be nonnegative");
   return (uint32_t)tag;
 }
 

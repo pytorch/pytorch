@@ -396,17 +396,17 @@ struct Environment {
       }
     }
     if (as_simple_value) {
-      if (!annotated_type) {
-        annotated_type = as_simple_value->type();
-      }
-      if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
+      if (annotated_type &&
+          !as_simple_value->type()->isSubtypeOf(annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
             << annotated_type->repr_str()
             << " but is being assigned to a value of type "
             << as_simple_value->type()->repr_str();
       }
-      insertStore(name, loc, as_simple_value, annotated_type);
+      auto value_store_type =
+          annotated_type ? annotated_type : as_simple_value->type();
+      insertStore(name, loc, as_simple_value, value_store_type);
     } else {
       value_table[name] = std::move(value);
     }
@@ -1258,6 +1258,15 @@ struct to_ir {
       const TernaryIf& expr,
       const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
+    // If the cond expr is a static value, then we metacompile the `if`
+    // statemement and only emit true or false branch
+    if (cond_value.staticIf()) {
+      if (*cond_value.staticIf()) {
+        return emitExpr(expr.true_expr(), type_hint);
+      } else {
+        return emitExpr(expr.false_expr(), type_hint);
+      }
+    }
     auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
     auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);

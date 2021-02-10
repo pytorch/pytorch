@@ -1,21 +1,25 @@
-#include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/cpu/CatKernel.h>
+#include <ATen/native/cpu/StackKernel.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <ATen/SparseTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -24,12 +28,13 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(cat_serial_stub);
+DEFINE_DISPATCH(stack_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
   std::vector<int64_t> shape;
   auto accessor = shape_tensor.accessor<int64_t, 1>();
-  for (int64_t i = 0; i < shape_tensor.numel(); ++i) {
+  for (const auto i : c10::irange(shape_tensor.numel())) {
     shape.push_back(accessor[i]);
   }
   return self.reshape(IntArrayRef(shape));
@@ -119,7 +124,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   bool allContiguous = true;
 
   // Inputs cannot alias the output tensor
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     auto lap = at::get_overlap_status(result, tensors[i]);
     TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
         lap != at::MemOverlapStatus::FULL, 0,
@@ -159,7 +164,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
   auto first_tensor_mem_format = tensors[0].suggest_memory_format();
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     auto const &tensor = tensors[i];
     if (should_skip(tensor)) {
       // don't use fast path for empty tensor
@@ -264,7 +269,7 @@ Tensor _cat_cpu(TensorList tensors, int64_t dim) {
 }
 
 static void check_cat_no_zero_dim(TensorList tensors) {
-  for(size_t i = 0; i < tensors.size(); ++i) {
+  for(const auto i : c10::irange(tensors.size())) {
     auto& t = tensors[i];
     TORCH_CHECK(t.dim() > 0,
              "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
@@ -297,7 +302,7 @@ static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_excep
   if (s1.size() != s2.size()) {
     return false;
   }
-  for (size_t i = 0; i < s1.size(); ++i) {
+  for (const auto i : c10::irange(s1.size())) {
     if (i != dim_except && s1[i] != s2[i]) {
       return false;
     }
@@ -331,7 +336,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
   int64_t dense_dim = tensors[0].dense_dim();
   IntArrayRef sizes = tensors[0].sizes();
   if (wrapped < sparse_dim) {
-    for (size_t i = 0; i < tensors.size(); ++i) {
+    for (const auto i : c10::irange(tensors.size())) {
       auto const &t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       indices.push_back(t._indices());
@@ -350,7 +355,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     // and idxs[1][6:9] by 14.
     int64_t col = 0;
     int64_t cumulative_offset = 0;
-    for (size_t i = 0; i < tensors.size(); ++i) {
+    for (const auto i : c10::irange(tensors.size())) {
       auto const &t = tensors[i];
       int64_t this_piece_size = t._nnz();
       // cumulative_offset is zero for the first piece, so
@@ -392,7 +397,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
-    for (size_t i = 0; i < tensors.size(); ++i) {
+    for (const auto i : c10::irange(tensors.size())) {
       auto const &t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       // dimension 0 of values corresponds to the number of values,
@@ -439,8 +444,7 @@ Tensor block_diag(TensorList tensors) {
   }
 
   const Device& device = tensors[0].device();
-
-  for (size_t tensor_idx = 1; tensor_idx < tensors.size(); tensor_idx++) {
+  for (const auto tensor_idx : c10::irange(tensors.size())) {
     const Tensor& tensor = tensors[tensor_idx];
 
     TORCH_CHECK(
@@ -459,7 +463,7 @@ Tensor block_diag(TensorList tensors) {
   // Sum the dimensions of the tensors, check tensor sizes,
   // and expand all 0-D and 1-D tensors so that everything
   // is 2-D
-  for (size_t tensor_idx = 0; tensor_idx < tensors.size(); tensor_idx++) {
+  for (const auto tensor_idx : c10::irange(tensors.size())) {
     const Tensor& tensor = tensors[tensor_idx];
     int64_t ndims = tensor.dim();
     TORCH_CHECK(
@@ -495,9 +499,7 @@ Tensor block_diag(TensorList tensors) {
   int64_t cur_dim1 = 0;
 
   // Copy each tensor into the appropriate location in the result matrix
-  for (auto iter = tensors_2D.begin(); iter != tensors_2D.end(); iter++) {
-    const Tensor& tensor = *iter;
-
+  for (const auto& tensor : tensors_2D) {
     int64_t dim0 = tensor.size(0);
     int64_t dim1 = tensor.size(1);
     result.slice(0, cur_dim0, cur_dim0+dim0).slice(1, cur_dim1, cur_dim1+dim1).copy_(tensor);
@@ -538,7 +540,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   int64_t min_split_size = self.size(dim_) / sections;
   int64_t num_splits_one_extra = self.size(dim_) % sections;
   int64_t start_idx = 0;
-  for (int64_t split_idx = 0; split_idx < sections; split_idx++) {
+  for (const auto split_idx : c10::irange(sections)) {
     int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
     splits[split_idx] = at::slice(self, dim_, start_idx, start_idx + split_size);
     start_idx += split_size;
@@ -552,7 +554,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_
   int64_t num_indices = indices.size();
   std::vector<Tensor> splits(num_indices + 1);
   int64_t start_idx = 0;
-  for (int64_t split_idx = 0; split_idx < num_indices; split_idx++) {
+  for (const auto split_idx : c10::irange(num_indices)) {
     int64_t end_idx = indices[split_idx];
     splits[split_idx] = at::slice(self, dim_, start_idx, end_idx);
     start_idx = end_idx;
@@ -852,7 +854,7 @@ Tensor& narrow_copy_dense_cpu_out(
   char* src_offset_bytes = src_bytes + itemsize * src_offset;
   char* dst_offset_bytes = dst_bytes;
 
-  for (int64_t i = 0; i < num_blocks; ++i) {
+  for (const auto i : c10::irange(num_blocks)) {
     char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
     char* local_dst_offset_bytes = dst_offset_bytes + i * dst_block_size_bytes;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -904,7 +906,7 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
   std::vector<int64_t> newSizes(nDims);
   std::vector<int64_t> newStrides(nDims);
   std::vector<bool> seen(nDims);
-  for (int64_t i = 0; i < nDims; i++) {
+  for (const auto i : c10::irange(nDims)) {
     auto dim = maybe_wrap_dim(dims[i], nDims);
     TORCH_CHECK(!seen[dim],
              "repeated dim in permute");
@@ -927,7 +929,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   padded_size.insert(padded_size.end(), self.sizes().begin(), self.sizes().end());
   std::vector<int64_t> target_size(repeats.size());
   bool zero_tensor = false;
-  for(size_t idx = 0; idx < repeats.size(); ++idx) {
+  for(const auto idx : c10::irange(repeats.size())) {
     if (repeats[idx] == 0) {
       zero_tensor = true;
     }
@@ -949,7 +951,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   }
 
   Tensor urtensor = at::alias(result);
-  for (int64_t i = 0; i < xtensor.dim(); ++i) {
+  for (const auto i : c10::irange(xtensor.dim())) {
     // can't unfold with step 0, so make sure step is at least 1
     // (it doesn't matter what it is in that case, because the size is 0).
     urtensor = urtensor.unfold(i, xtensor.size(i), std::max<int64_t>(xtensor.size(i), 1));
@@ -968,7 +970,7 @@ Tensor tile(const Tensor& self, IntArrayRef reps){
   const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
   if (size_diff > 0){
     std::vector<int64_t> new_reps(size_diff, 1);
-    for(auto i = decltype(reps.size()){0}; i < reps.size(); ++i){
+    for (const auto i : c10::irange(reps.size())) {
       new_reps.emplace_back(reps[i]);
     }
     return self.repeat(IntArrayRef(new_reps));
@@ -1151,7 +1153,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
     int64_t new_nnz = 0;
-    for (int64_t i=0; i < new_sizes[dim]; i++) {
+    for (const auto i : c10::irange(new_sizes[dim])) {
       auto idx = index[i].item<int64_t>();
       if (idx < -size || idx >= size) {
         TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
@@ -1160,7 +1162,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
       if (idx < 0) {
         idx += size;
       }
-      for (int64_t j=0; j < nnz; j++) {
+      for (const auto j : c10::irange(nnz)) {
         auto jdx = dim_indices[j].item<int64_t>();
         if (idx == jdx) {
           new_nnz++;
@@ -1181,7 +1183,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     auto vsize = values.sizes().vec();
     vsize[dim + 1 - sparse_dim] = index.size(0);
     auto new_values = at::empty(vsize, values.options());
-    for (int64_t k=0; k < nnz; k++) {
+    for (const auto k : c10::irange(nnz)) {
       new_values[k] = values[k].index_select(dim - sparse_dim, index);
     }
     return _sparse_coo_tensor_with_dims_and_tensors(
@@ -1263,7 +1265,7 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   std::vector<Tensor> splits(num_splits);
   int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
 
-  for (int64_t i = 0; i < num_splits; ++i) {
+  for (const auto i : c10::irange(num_splits)) {
     auto length = i < num_splits - 1 ? split_size : last_split_size;
     splits[i] = self.narrow(dim, i * split_size, length);
   }
@@ -1284,9 +1286,8 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
   int64_t num_splits = split_sizes.size();
   std::vector<Tensor> splits(num_splits);
   int64_t start_idx = 0;
-  int64_t i;
 
-  for (i = 0; i < num_splits; ++i) {
+  for (const auto i : c10::irange(num_splits)) {
     auto length = split_sizes[i];
     TORCH_CHECK(length >= 0,
              "split_with_sizes expects split_sizes have only non-negative ",
@@ -1322,6 +1323,101 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   return inputs;
 }
 
+// Checks to see whether native stack can be invoked under these conditions:
+// - result and input tensors are contiguous
+// - only one thread is used
+// - no type promotion has to occur
+// - tensors dtype is Double or Float
+bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int64_t dim) {
+  TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
+
+  const Tensor& firstTensor = tensors[0];
+  // stack dimension should be in range [0,firstTensor.dim())
+  // dim == firstTensor.dim() is a valid input, but it is handled by default code path
+  // that uses unsqueeze
+  if (dim >= firstTensor.dim()) return false;
+  // Native stack doesn't apply any tensor is skipped.
+  if (should_skip(firstTensor)) return false;
+  // there should be no type promotion
+  if (result.dtype() != firstTensor.dtype()) return false;
+
+  // Inputs cannot alias the output tensor
+  for (size_t i = 0; i < tensors.size(); i++) {
+    auto lap = at::get_overlap_status(result, tensors[i]);
+    TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
+        lap != at::MemOverlapStatus::FULL, 0,
+        "unsupported operation: the input tensors cannot refer to any of the "
+        "output memory locations. Found overlap in input tensor ", i);
+  }
+
+  auto first_tensor_mem_format = firstTensor.suggest_memory_format();
+  ScalarType dtype = firstTensor.scalar_type();
+
+  if (!result.is_contiguous(first_tensor_mem_format)) {
+    return false;
+  }
+
+  // fast path only works for Double and Float
+  if (dtype != ScalarType::Double && dtype != ScalarType::Float) {
+    return false;
+  }
+
+  // check remainder of inputs
+  auto const &first_tensor_shape = firstTensor.sizes();
+  for (size_t i = 1; i < tensors.size(); i++) {
+    auto const &tensor = tensors[i];
+    TORCH_CHECK(tensors[i].sizes() == firstTensor.sizes(),
+      "stack expects each tensor to be equal size, but got ", first_tensor_shape,
+      " at entry 0 and ", tensor.sizes(), " at entry ", i);
+
+    // every tensor must be contiguous
+    // tensor sizes and strides must be the same
+    // there should be no type promotion
+    if (!tensor.is_contiguous(first_tensor_mem_format) ||
+      tensor.strides() != firstTensor.strides() ||
+      tensor.dtype() != dtype) {
+      return false;
+    }
+  }
+
+  // fast native stack should only be used when it is not worth using multiple threads
+  // or there is only one thread. Note that we aren't checking result.numel() here because
+  // it may not have been resized and we want to defer that cost till later.
+  int64_t numel_in_stack = firstTensor.numel() * tensors.size();
+  return numel_in_stack < at::internal::GRAIN_SIZE && at::get_num_threads() == 1;
+}
+
+bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) {
+  if (can_use_native_serial_stack(result, tensors, dim)) {
+    // compute the size of the result
+    auto result_sizes = tensors[0].sizes().vec();
+    result_sizes.insert(result_sizes.begin() + dim, tensors.size());
+
+    // skip resizing if size of result is same as expected
+    if (result.sizes() != result_sizes) {
+      result.resize_(result_sizes);
+    }
+    stack_serial_stub(kCPU, result, tensors, dim);
+    return true;
+  }
+  return false;
+}
+
+Tensor _stack(TensorList tensors, int64_t dim) {
+  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  ScalarType high_type = result_type(tensors);
+  Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
+  return at::native::_stack_out(get_stack_inputs(tensors, dim), dim, result);
+}
+
+Tensor _stack_cpu(TensorList tensors, int64_t dim) {
+  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  ScalarType high_type = result_type(tensors);
+  Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
+  return at::native::_stack_out_cpu(tensors, dim, result);
+}
+
+// TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
@@ -1329,6 +1425,21 @@ Tensor stack(TensorList tensors, int64_t dim) {
   return at::cat(get_stack_inputs(tensors, dim), dim);
 }
 
+// CPU specific implementation
+Tensor& _stack_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
+  if (maybe_native_stack(result, tensors, dim)) {
+    return result;
+  } else {
+    return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+  }
+}
+
+// default backend
+Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
+  return at::cat_out(result, tensors, dim);
+}
+
+// TODO(msubkhankulov): refactor to use _stack_out
 Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
@@ -1552,7 +1663,7 @@ inferSqueezeGeometry(const Tensor &tensor) {
   std::vector<int64_t> sizes;
   std::vector<int64_t> strides;
 
-  for(int64_t d = 0; d < tensor.dim(); d++) {
+  for(const auto d : c10::irange(tensor.dim())) {
     if(tensor.sizes()[d] != 1) {
       sizes.push_back(tensor.sizes()[d]);
       strides.push_back(tensor.strides()[d]);
@@ -1567,7 +1678,7 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   std::vector<int64_t> sizes;
   std::vector<int64_t> strides;
 
-  for(int64_t d = 0; d < tensor.dim(); d++) {
+  for(const auto d : c10::irange(tensor.dim())) {
     if(d != dim || tensor.sizes()[dim] != 1) {
       sizes.push_back(tensor.sizes()[d]);
       strides.push_back(tensor.strides()[d]);
@@ -1606,7 +1717,7 @@ Tensor squeeze_qtensor(const Tensor& self) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    for (int64_t d = 0; d < self.dim(); ++d) {
+    for (const auto d : c10::irange(self.dim())) {
       if (self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
         if (d < axis) {
@@ -1770,12 +1881,10 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   start_dim = maybe_wrap_dim(start_dim, self.dim());
   end_dim = maybe_wrap_dim(end_dim, self.dim());
   TORCH_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
-  std::vector<int64_t> shape;
 
   if (self.dim() == 0) {
     return self.reshape({1});
   }
-
   if (start_dim == end_dim) {
     return self;
   }
@@ -1785,13 +1894,14 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
   // can take on any value and satisfy the constraints.
   auto slice_numel = prod_intlist(self.sizes().slice(start_dim, end_dim - start_dim + 1));
+  std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
-  for (int64_t i = 0; i < start_dim; i++) {
-    shape.push_back(self.size(i));
+  for (const auto i : c10::irange(start_dim)) {
+    shape.push_back(self.sizes()[i]);
   }
   shape.push_back(slice_numel);
-  for (int64_t i = end_dim + 1; i < self.dim(); i++) {
-    shape.push_back(self.size(i));
+  for (const auto i : c10::irange(end_dim + 1, self.dim())) {
+    shape.push_back(self.sizes()[i]);
   }
 
   return native::reshape(self, shape);
@@ -1819,7 +1929,7 @@ Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname o
 
 Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   auto positions = dimnames_to_positions(self, dims);
-  for (size_t i = 0; i < positions.size() - 1; i++) {
+  for (const auto i : c10::irange(positions.size() - 1)) {
     if (positions[i] + 1 == positions[i + 1]) continue;
     TORCH_CHECK(positions[i] + 1 == positions[i + 1],
         "flatten(tensor, dims, out_dim): dims ", dims, " must be consecutive ",
@@ -1886,7 +1996,7 @@ std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
   int64_t size = self.size(dim);
   std::vector<Tensor> tensors(size);
-  for (int i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     tensors[i] = self.select(dim, i);
   }
   return tensors;
@@ -1900,7 +2010,7 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
   int64_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
   std::vector<int64_t> shape(size);
-  for(int64_t i = 0; i < size; i++) {
+  for(const auto i: c10::irange(size)){
     switch (tensors[i].dim()) {
     case 0:
       shape[i] = 1;
@@ -1912,12 +2022,12 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
       AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
     }
   }
-  for(int64_t i = 0; i < size - 1; i++){
+  for(const auto i: c10::irange(size - 1)){
       TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
       TORCH_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
   }
   std::vector<Tensor> grids;
-  for(int64_t i = 0; i < size; i++) {
+  for(const auto i: c10::irange(size)){
     std::vector<int64_t> view_shape(size, 1);
     view_shape[i] = -1;
     grids.push_back(tensors[i].view(view_shape).expand(shape));
@@ -1965,7 +2075,7 @@ Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step)
 
   new_size[self.dim()] = size;
   new_stride[self.dim()] = self.dim() == 0 ? 1 : self.stride(dimension);
-  for(int64_t d = 0; d < self.dim(); d++) {
+  for(const auto d : c10::irange(self.dim())) {
     auto self_size = self.size(d);
     auto self_stride = self.stride(d);
     if(d == dimension) {
@@ -1984,7 +2094,6 @@ template <typename scalar_t>
 void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
   TORCH_CHECK(self.dim() == 1 || self.dim() == 2, "matrix or a vector expected");
 
-  int64_t i;
   auto self_data = self.data_ptr<scalar_t>();
   if (self.dim() == 1) {
     auto self_size = self.size(0);
@@ -1998,7 +2107,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto r_stride_1 = result.stride(1);
     r_data += (dimension >= 0 ? dimension*r_stride_1 : -dimension*r_stride_0);
 
-    for (i = 0; i < self_size; i++) {
+    for (const auto i : c10::irange(self_size)) {
       r_data[i * (r_stride_0 + r_stride_1)] = self_data[i * self_stride];
     }
   } else {
@@ -2017,7 +2126,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto r_data = result.data_ptr<scalar_t>();
     auto r_stride_0 = result.stride(0);
     self_data += (dimension >= 0 ? dimension * self_stride_1 : -dimension * self_stride_0);
-    for (i = 0; i < sz; i++) {
+    for (const auto i : c10::irange(sz)) {
       r_data[i * r_stride_0] = self_data[i * (self_stride_0 + self_stride_1)];
     }
   }
@@ -2067,7 +2176,7 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   DimVector normalized_dst(dst.size());
 
   auto wrap_dims = [&self_dim](const IntArrayRef& vec, DimVector& normalized_vec) {
-    for (size_t i = 0; i < vec.size(); i++) {
+    for (const auto i : c10::irange(vec.size())) {
       normalized_vec[i] = maybe_wrap_dim(vec[i], self_dim);
     }
   };
@@ -2112,7 +2221,7 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   //     order = NA, NA, 0, NA, 1
   //     source_dims = -1, -1, 2, 3, 4
   //     destination_dims = 0, 1, -1, 3, -1
-  for (size_t i = 0; i < src.size(); ++i) {
+  for (const auto i : c10::irange(src.size())) {
       order[normalized_dst[i]] = normalized_src[i];
       source_dims[normalized_src[i]] = -1;
       destination_dims[normalized_dst[i]] = -1;
@@ -2136,7 +2245,7 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   // after considering the user inputs.
   // Variable State:
   //     order = 2, 3, 0, 4, 1
-  for (int64_t i = 0; i < rest_dim; ++i) {
+  for (const auto i : c10::irange(rest_dim)) {
       order[destination_dims[i]] = source_dims[i];
   }
 
