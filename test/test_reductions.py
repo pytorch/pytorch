@@ -8,7 +8,7 @@ import random
 from functools import partial
 from itertools import product, combinations, permutations
 
-from torch._six import inf, nan, istuple
+from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS)
@@ -533,7 +533,7 @@ class TestReductions(TestCase):
         self.compare_with_numpy(torchfn, reffn, x)
 
         def get_values(x):
-            if istuple(x):
+            if isinstance(x, tuple):
                 return x[0]
             return x
 
@@ -546,7 +546,7 @@ class TestReductions(TestCase):
             for xinp, d in product(inputs, dims):
                 self.compare_with_numpy(lambda x: get_values(torchfn(x, d, False)), lambda x: reffn(x, d, keepdims=False), xinp)
                 result = torchfn(xinp, d, False)
-                if istuple(result):
+                if isinstance(result, tuple):
                     v, i = result
                     if d == 1:
                         self.assertEqual(xinp[torch.arange(size), i], v, atol=0, rtol=0)
@@ -561,7 +561,7 @@ class TestReductions(TestCase):
                     result = torchfn(x, 0)
                     v = get_values(result)
                     self.assertEqual(v, nan)
-                    if istuple(result):
+                    if isinstance(result, tuple):
                         i = result[1]
                         self.assertEqual(i, index)
                 self.assertEqual(torchfn(x), nan)
@@ -1514,7 +1514,7 @@ class TestReductions(TestCase):
 
             def fn(x, dim, keepdim=False, out=None):
                 ans = fn_attr(x, dim, keepdim=keepdim, out=out)
-                return ans if not istuple(ans) else ans[0]
+                return ans if not isinstance(ans, tuple) else ans[0]
 
             def fn_tuple(x, dim, keepdim=False, out=None):
                 return fn_attr(x, dim, keepdim=keepdim, out=out)

@@ -92,7 +92,8 @@ void inBatchBroadcast(
         blob,
         ": ",
         shape.shape.dims(0),
-        " cannot be divided by batch_size ");
+        " cannot be divided by batch_size ",
+        batch_size);
     shape.shape.set_dims(0, shape.shape.dims(0) / batch_size);
     shape.setDimType(0, TensorBoundShape_DimType_CONSTANT);
   };
