@@ -10,7 +10,8 @@ public final class PyTorchAndroid {
     if (!NativeLoader.isInitialized()) {
       NativeLoader.init(new SystemDelegate());
     }
-    NativeLoader.loadLibrary("pytorch_jni");
+    // NativeLoader.loadLibrary("pytorch_jni");
+    NativeLoader.loadLibrary("pytorch_jni_lite");
     PyTorchCodegenLoader.loadNativeLibs();
   }
 
