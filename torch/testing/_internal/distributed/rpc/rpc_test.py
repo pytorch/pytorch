@@ -4613,6 +4613,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         self.assertFalse(rpc.api._is_current_rpc_agent_set())
 
+        rpc.shutdown()
+
     @skip_if_lt_x_gpu(2)
     def test_device_maps_wrong_worker_name(self):
         options = self.rpc_backend_options
