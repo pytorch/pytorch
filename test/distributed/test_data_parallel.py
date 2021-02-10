@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
+from torch._utils import _RemoteTraceback, LocalException
 from torch.testing._internal.common_utils import skipIfRocm
 import torch.nn.functional as F
 
@@ -140,11 +141,12 @@ class TestDataParallel(TestCase):
         l1 = TestModule().to("cuda", torch.float)
         # and check that parallel_apply passes on the exception
         # (we can use a single device twice for this test)
-        with self.assertRaisesRegex(KeyError,
-                                    'Caught KeyError in replica \\d '
-                                    'on device 0.\nOriginal Traceback'
-                                    '[\\s\\S]+wonderful'):
+        with self.assertRaises(LocalException,
+                               msg='Re-raise the exception in '
+                                   'replica \\d on device \\d') as cm:
             dp.parallel_apply(modules=(l1, l1), inputs=(None, None))
+            self.assertIsInstance(cm.exception.__cause__, _RemoteTraceback)
+            self.assertRegex(str(cm.exception.__cause__), r"KeyError: 'wonderful'$")
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
@@ -330,7 +332,13 @@ class TestDataParallel(TestCase):
         i = torch.randn(20, 10, dtype=torch.float, device="cuda")
         with torch.no_grad():
             dp.data_parallel(l, i, (0, 1))
-        self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
+        with self.assertRaises(LocalException,
+                               msg="Re-raise the exception in replica "
+                                   "\\d on device \\d") as cm:
+            dp.data_parallel(l, i, (0, 1))
+            self.assertIsInstance(cm.exception.__cause__, _RemoteTraceback)
+            self.assertRegex(str(cm.exception.__cause__),
+                             r"AssertionError: True is not false$")
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel(self):

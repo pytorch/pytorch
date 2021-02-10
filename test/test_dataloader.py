@@ -835,7 +835,7 @@ class TestDataLoader(TestCase):
         while True:
             try:
                 next(it)
-            except LocalException:
+            except NotImplementedError:
                 errors += 1
             except StopIteration:
                 self.assertEqual(errors,
@@ -844,22 +844,28 @@ class TestDataLoader(TestCase):
 
     def test_error_in_init(self):
         loader = self._get_data_loader(ErrorIterableDataset(), num_workers=0)
+        # Single-process raise original Exception
         with self.assertRaisesRegex(RuntimeError, 'Error in __iter__'):
             list(iter(loader))
 
         loader = self._get_data_loader(ErrorIterableDataset(), num_workers=2)
-        with self.assertRaises(LocalException) as cm:
+        # Multiprocessing re-raise by LocalException with traceback of original Exception
+        with self.assertRaises(LocalException,
+                               msg="Re-raise the exception in DataLoader "
+                                   "worker process \\d") as cm:
             list(iter(loader))
-        e = cm.exception.__cause__
-        self.assertIsInstance(e, _RemoteTraceback)
-        self.assertRegex(str(e), r"RuntimeError: Error in __iter__$")
+            self.assertIsInstance(cm.exception.__cause__, _RemoteTraceback)
+            self.assertRegex(str(cm.exception.__cause__),
+                             r"RuntimeError: Error in __iter__$")
 
         loader = self._get_data_loader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
-        with self.assertRaises(LocalException) as cm:
+        with self.assertRaises(LocalException,
+                               msg="Re-raise the exception in DataLoader "
+                                   "worker process \\d") as cm:
             list(iter(loader))
-        e = cm.exception.__cause__
-        self.assertIsInstance(e, _RemoteTraceback)
-        self.assertRegex(str(e.tb), r"RuntimeError: Error in worker_init_fn$")
+            self.assertIsInstance(cm.exception.__cause__, _RemoteTraceback)
+            self.assertRegex(str(cm.exception.__cause__),
+                             r"RuntimeError: Error in worker_init_fn$")
 
     def test_typing(self):
         from typing import List
@@ -995,6 +1001,7 @@ except RuntimeError as e:
                 self.assertFalse(p.is_alive())
                 self.assertNotEqual(p.exitcode, 0)
                 self.assertIsInstance(p.exception, LocalException)
+                self.assertEqual(str(p.exception), 'Re-raise the exception in background')
                 self.assertIsInstance(p.exception.__cause__, _RemoteTraceback)
                 self.assertRegex(str(p.exception.__cause__), r'DataLoader timed out after \d+ seconds')
             finally:
@@ -1014,6 +1021,7 @@ except RuntimeError as e:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
             self.assertIsInstance(p.exception, LocalException)
+            self.assertEqual(str(p.exception), 'Re-raise the exception in background')
             self.assertIsInstance(p.exception.__cause__, _RemoteTraceback)
             self.assertRegex(str(p.exception.__cause__), r'RuntimeError: My Error$')
         finally:
