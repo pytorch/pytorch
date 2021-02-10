@@ -193,9 +193,7 @@ class TestCommon(JitCommonTestCase):
     #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        test_backward = op.test_complex_grad or not dtype.is_complex
-        if not op.is_differentiable:
-            test_backward = False
+        test_backward = op.is_differentiable and (op.test_complex_grad or not dtype.is_complex)
 
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
@@ -264,10 +262,9 @@ class TestCommon(JitCommonTestCase):
     @ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
         test_backward = (
-            (dtype.is_complex and op.test_complex_grad) or
-            (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
-        if not op.is_differentiable:
-            test_backward = False
+            (op.is_differentiable) and
+            ((dtype.is_complex and op.test_complex_grad) or
+             (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16))))
 
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
