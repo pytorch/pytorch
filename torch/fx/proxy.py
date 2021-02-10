@@ -64,13 +64,12 @@ class TracerBase:
                 # Check for invalid dict keys. We do not want a Proxy to appear
                 # anywhere within the key. Since keys can be collection types,
                 # we iterate through the key with map_aggregate
-                is_invalid = [False] # 1-element array so it's mutable from the lambda
-                def check_invalid(arg):
-                    is_invalid[0] |= isinstance(arg, Proxy)
-                map_aggregate(k, check_invalid)
-                if is_invalid[0]:
-                    raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
-                                       "Proxy. Got key: {k}")
+                k = self.create_arg(k)
+                def no_node(arg):
+                    if isinstance(arg, Node):
+                        raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
+                                                            "Node. Got key: {k}")
+                map_aggregate(k, no_node)
 
                 r[k] = self.create_arg(v)
             return r

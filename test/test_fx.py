@@ -1438,7 +1438,7 @@ class TestFX(JitTestCase):
             def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
                 return isinstance(m, ModWithDictArg)
 
-        with self.assertRaisesRegex(RuntimeError, 'cannot contain a Proxy'):
+        with self.assertRaisesRegex(RuntimeError, 'cannot contain a Node'):
             traced_graph = MyTracer().trace(CallsModWithDict())
 
     def test_direct_param_use(self):
