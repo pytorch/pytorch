@@ -1,7 +1,8 @@
 import torch
 import torch.fx
 import inspect
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+from torch.fx.node import Argument, Target
 
 from torch.fx import Transformer
 
@@ -13,13 +14,13 @@ class NormalizeArgs(Transformer):
     Also populates default values. Does not support positional-only
     parameters or varargs parameters (*args, **kwargs).
     """
-    def __init__(self, module, normalize_functionals : bool = True,
+    def __init__(self, module : torch.nn.Module, normalize_functionals : bool = True,
                  normalize_modules : bool = True):
         super().__init__(module)
         self.normalize_functionals = normalize_functionals
         self.normalize_modules = normalize_modules
 
-    def call_function(self, target, args, kwargs):
+    def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         if self.normalize_functionals and target.__module__ == 'torch.nn.functional':
             new_kwargs = self._args_kwargs_to_normalized_kwargs(target, args, kwargs)
 
@@ -30,7 +31,7 @@ class NormalizeArgs(Transformer):
 
         return super().call_function(target, args, kwargs)
 
-    def call_module(self, target, args, kwargs):
+    def call_module(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
         if self.normalize_modules and hasattr(submod.__class__, '__name__'):
@@ -41,7 +42,9 @@ class NormalizeArgs(Transformer):
                     return super().call_module(target, (), new_kwargs)
         return super().call_module(target, args, kwargs)
 
-    def _args_kwargs_to_normalized_kwargs(self, target, args, kwargs) -> Optional[Dict[str, Any]]:
+    def _args_kwargs_to_normalized_kwargs(self, target : Target, args : Tuple[Argument, ...],
+                                          kwargs : Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        assert not isinstance(target, str)
         sig = inspect.signature(target)
         # Don't currently support positional-only
         # or varargs (*args, **kwargs) signatures
