@@ -1433,10 +1433,12 @@ def chain_matmul(*matrices):
     needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.
     If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
+    .. note:: :func:`torch.chain_matmul` is deprecated. Please use :func:`torch.linalg.multi_dot` instead. Note
+              that :func:`torch.linalg.multi_dot` requires at least 2 input tensors and allows the first and last
+              tensors to be 1D or 2D. It also accepts the :attr:`out` parameter.
 
     Args:
         matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
-
 
     Returns:
         Tensor: if the :math:`i^{th}` tensor was of dimensions :math:`p_{i} \times p_{i + 1}`, then the product
