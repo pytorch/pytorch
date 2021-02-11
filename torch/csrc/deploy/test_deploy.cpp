@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <torch/csrc/deploy/deploy.h>
+#include <torch/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 #include <future>
@@ -73,7 +73,6 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  // Futures on model forward
   for (size_t i = 0; i < ninterp; i++) {
     outputs.push_back(model({input}).toTensor());
   }
@@ -99,8 +98,6 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
 
   std::vector<at::Tensor> outputs;
 
-  // Futures on model forward
-  // Futures on model forward
   std::vector<std::future<at::Tensor>> futures;
   for (size_t i = 0; i < nthreads; i++) {
     futures.push_back(std::async(std::launch::async, [&model]() {

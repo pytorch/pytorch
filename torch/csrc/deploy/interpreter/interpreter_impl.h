@@ -17,6 +17,12 @@ struct PickledObject {
   std::shared_ptr<caffe2::serialize::PyTorchStreamReader> container_file_;
 };
 
+// this is a wrapper class that refers to a PyObject* instance in a particular
+// interpreter. We can't use normal PyObject or pybind11 objects here
+// because these objects get used in a user application which will not directly
+// link against libpython. Instead all interaction with the Python state in each
+// interpreter is done via this wrapper class, and methods on
+// InterpreterSession.
 struct PythonObject {
   friend struct InterpreterSessionImpl;
   PythonObject() : interaction_(nullptr), id_(0) {}

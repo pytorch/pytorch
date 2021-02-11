@@ -13,11 +13,13 @@ struct MovableObject;
 struct InterpreterManager;
 
 struct TORCH_API InterpreterSession {
-  InterpreterSession(InterpreterSessionImpl* impl, InterpreterManager* manager)
+  InterpreterSession(
+      InterpreterSessionImpl* impl,
+      InterpreterManager* manager) noexcept
       : impl_(impl), manager_(manager) {}
 
   PythonObject self; // when retreived from a PythonMovable this will be set.
-  InterpreterSession(InterpreterSession&&) = default;
+  InterpreterSession(InterpreterSession&&) noexcept = default;
   ~InterpreterSession();
   PythonObject global(const char* module, const char* name) {
     return impl_->global(module, name);
@@ -27,6 +29,7 @@ struct TORCH_API InterpreterSession {
   }
 
   MovableObject create_movable(PythonObject obj);
+  PythonObject from_movable(const MovableObject& obj);
 
  private:
   friend struct MovableObject;
@@ -52,7 +55,7 @@ class TORCH_API Interpreter {
     return InterpreterSession(pImpl_->acquire_session(), manager_);
   }
   ~Interpreter();
-  Interpreter(Interpreter&& rhs)
+  Interpreter(Interpreter&& rhs) noexcept
       : library_name_(std::move(rhs.library_name_)),
         handle_(rhs.handle_),
         pImpl_(std::move(rhs.pImpl_)),
@@ -77,43 +80,8 @@ struct TORCH_API LoadBalancer {
     TORCH_INTERNAL_ASSERT(n <= allocated_);
     n_ = n;
   }
-  int acquire() {
-    thread_local int last = 0;
-    size_t minusers = SIZE_MAX;
-    int min_idx = 0;
-    for (size_t i = 0; i < n_; ++i, ++last) {
-      if (last >= n_) {
-        last = 0;
-      }
-      uint64_t prev = 0;
-      bool acquired = __atomic_compare_exchange_n(
-          &uses_[8 * last],
-          &prev,
-          1ULL,
-          false,
-          __ATOMIC_SEQ_CST,
-          __ATOMIC_SEQ_CST);
-      if (acquired) {
-        // fast path, we found an interpreter with no users
-        return last;
-      }
-      // slow path, we don't want to use this interpreter because it is being
-      // used by someone else.
-
-      if (prev < minusers) {
-        minusers = prev;
-        min_idx = last;
-      }
-    }
-    // we failed to find a completely free interpreter. heuristically use the
-    // one with the least number of user (note that this may have changed since
-    // then, so this is only a heuristic).
-    __atomic_fetch_add(&uses_[8 * min_idx], 1ULL, __ATOMIC_SEQ_CST);
-    return min_idx;
-  }
-  void free(int where) {
-    __atomic_fetch_sub(&uses_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
-  }
+  int acquire();
+  void free(int where);
 
  private:
   std::unique_ptr<uint64_t[]>
@@ -225,11 +193,5 @@ struct TORCH_API Package {
   InterpreterManager* manager_;
   std::shared_ptr<caffe2::serialize::PyTorchStreamReader> container_file_;
 };
-
-inline InterpreterSession::~InterpreterSession() {
-  if (manager_ && notify_idx_ >= 0) {
-    manager_->resources_.free(notify_idx_);
-  }
-}
 
 } // namespace torch

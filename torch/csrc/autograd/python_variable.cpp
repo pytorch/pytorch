@@ -65,14 +65,15 @@ void set_pyobj(const Variable& self, PyObject* pyobj) {
   void* key = self.unsafeGetTensorImpl();
   if (!pyobj) {
     impl_to_pyobj.erase(key);
+    return;
   }
   impl_to_pyobj[key] = pyobj;
 }
 
 PyObject* pyobj(const Variable& self) {
   TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
-  return impl_to_pyobj[self.unsafeGetTensorImpl()]; // if it doesn't exist yet
-                                                    // this returns null
+  auto it = impl_to_pyobj.find(self.unsafeGetTensorImpl());
+  return it == impl_to_pyobj.end() ? nullptr : it->second;
 }
 #else
 using torch::autograd::impl::pyobj;

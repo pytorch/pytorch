@@ -112,7 +112,8 @@ extern "C" struct _frozen _PyImport_FrozenModules[];
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 
 // We need to register a custom finder because we are registering `torch._C` as
-// a built-in module, and it will otherwise get skipped by the default importer.
+// a built-in module, and it will get skipped if target != None. This Finder
+// just ensures target == None.
 const char* startup = R"RAW(
 import sys
 
@@ -228,6 +229,11 @@ using at::IValue;
 using torch::PickledObject;
 using torch::PythonObject;
 
+// Ensure GIL is held while this object is live,
+// note: we are not use py::gil_scoped_acquire here because
+// InitLockAcquire used below has to temporarily release the GIL
+// within this scope to ensure locking order.  Having the source
+// for these objects together makes it easier to see what is happening.
 struct ScopedAcquire {
   ScopedAcquire() {
     PyGILState_Ensure();
