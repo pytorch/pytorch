@@ -120,6 +120,42 @@ class TORCH_API Reducer {
   ReduceInteraction interaction_;
 };
 
+class ReduceXOp : public ExprNode<ReduceXOp> {
+ public:
+  ReduceXOp(
+      const Expr* body,
+      const std::vector<const Var*>& rvars,
+      const std::vector<const Expr*>& rdims,
+      const Reducer& reducer)
+      : ExprNodeBase(body->dtype()),
+        body_(body),
+        rvars_(rvars),
+        rdims_(rdims),
+        reducer_(reducer) {}
+
+  const Expr* body() const {
+    return body_;
+  }
+
+  const std::vector<const Var*>& rvars() const {
+    return rvars_;
+  }
+
+  const std::vector<const Expr*>& rdims() const {
+    return rdims_;
+  }
+
+  const Reducer& reducer() const {
+    return reducer_;
+  }
+
+ private:
+  const Expr* body_;
+  std::vector<const Var*> rvars_;
+  std::vector<const Expr*> rdims_;
+  Reducer reducer_;
+};
+
 // An expression representing a Reduction operation (e.g. Sum, Max) broken into
 // it's component parts: initialization, accumulation var, acquisition of value
 // to be reduced and interaction.
