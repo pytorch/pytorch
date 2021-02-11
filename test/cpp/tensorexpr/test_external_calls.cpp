@@ -285,7 +285,6 @@ TEST(ExternalCall, SeveralCallsUsedInEachOther) {
   LoopNest l({Input, Weight, ConvResult, MatmulResult, Result});
   l.prepareForCodegen();
   l.simplify();
-  std::cerr << *l.root_stmt() << "\n";
 
   auto options = at::TensorOptions()
                      .dtype(at::kFloat)
