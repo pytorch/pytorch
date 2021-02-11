@@ -1,4 +1,5 @@
 import copy
+import math
 
 import torch
 import torch.nn as nn
@@ -472,8 +473,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(1, 1))
+                self.w = nn.Parameter(torch.Tensor(1, 4))
                 self.b = nn.Parameter(torch.Tensor(1))
+                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
                 return F.linear(x, self.w, self.b)
@@ -595,8 +597,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(1, 1))
-                self.b = nn.Parameter(torch.Tensor(1))
+                self.w = nn.Parameter(torch.Tensor(4, 1))
+                self.b = nn.Parameter(torch.Tensor(4))
+                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
                 return F.linear(x, self.w, self.b)
@@ -656,10 +659,12 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(1, 1))
-                self.b1 = nn.Parameter(torch.Tensor(1))
-                self.w2 = nn.Parameter(torch.Tensor(1, 1))
-                self.b2 = nn.Parameter(torch.Tensor(1))
+                self.w1 = nn.Parameter(torch.Tensor(4, 1))
+                self.b1 = nn.Parameter(torch.Tensor(4))
+                self.w2 = nn.Parameter(torch.Tensor(4, 4))
+                self.b2 = nn.Parameter(torch.Tensor(4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
 
             def forward(self, x):
                 x = F.linear(x, self.w1, self.b1)
@@ -669,6 +674,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
         mp(torch.randn(2, 1))
+        print(mp)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
@@ -732,10 +738,12 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(1, 1))
-                self.b1 = nn.Parameter(torch.Tensor(1))
-                self.w2 = nn.Parameter(torch.Tensor(1, 1))
-                self.b2 = nn.Parameter(torch.Tensor(1))
+                self.w1 = nn.Parameter(torch.Tensor(4, 1))
+                self.b1 = nn.Parameter(torch.Tensor(4))
+                self.w2 = nn.Parameter(torch.Tensor(4, 4))
+                self.b2 = nn.Parameter(torch.Tensor(4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
 
             def forward(self, x):
                 x = F.linear(x, self.w1, self.b1)
