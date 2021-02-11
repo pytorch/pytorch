@@ -173,8 +173,7 @@ def _svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
     return U, S, V
 
 
-def pca_lowrank(A: Tensor, q: Optional[int] = None, center: bool = True,
-                niter: int = 2) -> Tuple[Tensor, Tensor, Tensor]:
+def pca_lowrank(A: Tensor, q: Optional[int] = None, center: bool = True, niter: int = 2) -> Tuple[Tensor, Tensor, Tensor]:
     r"""Performs linear Principal Component Analysis (PCA) on a low-rank
     matrix, batches of such matrices, or sparse matrix.
 

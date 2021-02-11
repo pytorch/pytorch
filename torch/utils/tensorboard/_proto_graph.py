@@ -29,7 +29,7 @@ def node_proto(name,
                op='UnSpecified',
                input=None,
                dtype=None,
-               shape=None,  # type: tuple
+               shape=None,
                outputsize=None,
                attributes=''
                ):

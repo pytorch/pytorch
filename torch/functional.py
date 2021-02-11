@@ -175,16 +175,15 @@ def _indices_product(indices: _Indices) -> List[List[int]]:
     return result
 
 
-def _index_tensor_with_indices_list(tensor, indices):
-    # type: (Tensor, List[int]) -> Tensor
+def _index_tensor_with_indices_list(tensor: Tensor, indices: List[int]) -> Tensor:
     out = tensor
     for index in indices:
         out = out[index]
     return out
 
 
-def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    # type: (Tensor, Tensor, bool, bool) ->  (Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]])
+def lu_unpack(LU_data: Tensor, LU_pivots: Tensor, unpack_data: bool = True,
+              unpack_pivots: bool = True) -> (Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]):
     r"""Unpacks the data and pivots from a LU factorization of a tensor.
 
     Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
@@ -812,8 +811,8 @@ def _unique_consecutive_impl(input: Tensor, return_inverse: bool = False,
     return output, inverse_indices, counts
 
 
-def _return_counts(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+def _return_counts(input: Tensor, sorted: bool = True, return_inverse: bool = False,
+                   return_counts: bool = False, dim: Optional[int] = None) -> Tuple[Tensor, Tensor]:
 
     if has_torch_function_unary(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -822,8 +821,8 @@ def _return_counts(input, sorted=True, return_inverse=False, return_counts=False
     return output, counts
 
 
-def _return_output(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
+def _return_output(input: Tensor, sorted: bool = True, return_inverse: bool = False,
+                   return_counts: bool = False, dim: Optional[int] = None) -> Tensor:
 
     if has_torch_function_unary(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -832,8 +831,8 @@ def _return_output(input, sorted=True, return_inverse=False, return_counts=False
     return output
 
 
-def _return_inverse(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+def _return_inverse(input: Tensor, sorted: bool = True, return_inverse: bool = False,
+                    return_counts: bool = False, dim: Optional[int] = None) -> Tuple[Tensor, Tensor]:
 
     if has_torch_function_unary(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -874,8 +873,8 @@ unique = boolean_dispatch(
 unique.__doc__ = _unique_impl.__doc__
 
 
-def _consecutive_return_counts(input, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+def _consecutive_return_counts(input: Tensor, return_inverse: bool = False,
+                               return_counts: bool = False, dim: Optional[int] = None) -> Tuple[Tensor, Tensor]:
 
     if has_torch_function_unary(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -884,8 +883,8 @@ def _consecutive_return_counts(input, return_inverse=False, return_counts=False,
     return output, counts
 
 
-def _consecutive_return_output(input, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, Optional[int]) -> Tensor
+def _consecutive_return_output(input: Tensor, return_inverse: bool = False,
+                               return_counts: bool = False, dim: Optional[int] = None) -> Tensor:
 
     if has_torch_function_unary(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -894,8 +893,8 @@ def _consecutive_return_output(input, return_inverse=False, return_counts=False,
     return output
 
 
-def _consecutive_return_inverse(input, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+def _consecutive_return_inverse(input: Tensor, return_inverse: bool = False,
+                                return_counts: bool = False, dim: Optional[int] = None) -> Tuple[Tensor, Tensor]:
 
     if has_torch_function_unary(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -1070,8 +1069,7 @@ def block_diag(*tensors):
     return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore
 
 
-def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
-    # type: (Tensor, Tensor, float, str) -> (Tensor)
+def cdist(x1: Tensor, x2: Tensor, p: float = 2., compute_mode: str = 'use_mm_for_euclid_dist_if_necessary') -> (Tensor):
     r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
@@ -1460,8 +1458,7 @@ def chain_matmul(*matrices):
     return _VF.chain_matmul(matrices)  # type: ignore
 
 
-def _lu_impl(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Any) -> Tuple[Tensor, Tensor, Tensor]
+def _lu_impl(A: Tensor, pivot: bool = True, get_infos: bool = False, out: Any = None) -> Tuple[Tensor, Tensor, Tensor]:
     r"""Computes the LU factorization of a matrix or batches of matrices
     :attr:`A`. Returns a tuple containing the LU factorization and
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
@@ -1572,8 +1569,8 @@ def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:
     if not isinstance(out, (tuple, list)):
         raise TypeError(f"argument 'out' must be tuple of Tensors, not {type(out).__name__}")
 
-def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]
+def _lu_with_infos(A: Tensor, pivot: bool = True, get_infos: bool = False,
+                   out: Optional[Tuple[Tensor, Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor, Tensor]:
     if has_torch_function_unary(A):
         return handle_torch_function(
             lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
@@ -1586,8 +1583,8 @@ def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
     else:
         return result  # A_LU, pivots, infos
 
-def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
+def _lu_no_infos(A: Tensor, pivot: bool = True, get_infos: bool = False,
+                 out: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
     # need to check for torch_function here so that we exit if
     if has_torch_function_unary(A):
         return handle_torch_function(

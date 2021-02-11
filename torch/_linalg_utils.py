@@ -71,7 +71,7 @@ def bform(X: Tensor, A: Optional[Tensor], Y: Tensor) -> Tensor:
     return matmul(transpose(X), matmul(A, Y))
 
 
-def qform(A: Optional[Tensor], S: Tensor):
+def qform(A: Optional[Tensor], S: Tensor) -> Tensor:
     """Return quadratic form :math:`S^T A S`.
     """
     return bform(S, A, S)
