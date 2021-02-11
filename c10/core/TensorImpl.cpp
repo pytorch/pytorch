@@ -80,7 +80,6 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
     // UndefinedTensorImpl is a singleton, so we skip logging it
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
-
   // After we removed Autograd keys from globally enabled set, every Tensor must be created with
   // a backend DispatchKey and an AutogradBackend key.
   // We automatically add the corresponding autograd key to key_set_ so that backends can stay
