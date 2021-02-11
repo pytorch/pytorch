@@ -630,7 +630,7 @@ class record_function(ContextDecorator):
         times.
 
         Args:
-            fut: (torch._C.Future): future for which to schedule
+            fut: (torch._C._jit.Future): future for which to schedule
             callback for.
 
         Returns:

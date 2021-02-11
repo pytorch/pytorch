@@ -1058,7 +1058,7 @@ class DistributedDataParallel(Module):
             Gradbucket tensors should consist of only a single tensor.
 
         .. warning ::
-            ``get_future`` API supports only NCCL backend and will return a ``torch._C.Future``
+            ``get_future`` API supports only NCCL backend and will return a ``torch._C._jit.Future``
             which is an internal type and should be used with caution. It can still be used by
             ``register_comm_hook`` API, but it is subject to some subtle differences compared
             to ``torch.futures.Future``.
@@ -1240,10 +1240,10 @@ class DistributedDataParallel(Module):
 
         if sig.return_annotation != inspect._empty and (
             sig.return_annotation != torch.futures.Future
-            and sig.return_annotation != torch._C.Future
+            and sig.return_annotation != torch._C._jit.Future
         ):
             raise ValueError(
-                "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
+                "Communication hook: return annotation should be torch.futures.Future or torch._C._jit.Future."
             )
 
     @staticmethod

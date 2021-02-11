@@ -2620,19 +2620,19 @@ class RpcTest(RpcAgentTestFixture):
             rref = rpc.remote(worker_name(1), torch.add, args=(1, 1))
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch._C.Future)
+            self.assertIsInstance(fut, torch._C._jit.Future)
 
             # UDF
             rref = rpc.remote(worker_name(1), foo_add, args=())
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch._C.Future)
+            self.assertIsInstance(fut, torch._C._jit.Future)
 
             # Script
             rref = rpc.remote(worker_name(1), my_script_func, args=(torch.tensor(1), ))
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch._C.Future)
+            self.assertIsInstance(fut, torch._C._jit.Future)
 
 
     @dist_init
@@ -2968,7 +2968,7 @@ class RpcTest(RpcAgentTestFixture):
             dst = worker_name((self.rank + 1) % self.world_size)
             fut = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
             self.assertTrue(len(_thread_local_var.future_list) == 1)
-            self.assertTrue(isinstance(_thread_local_var.future_list[0], torch._C.Future))
+            self.assertTrue(isinstance(_thread_local_var.future_list[0], torch._C._jit.Future))
         self.assertTrue(fut.done())
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
         self.assertFalse(hasattr(_thread_local_var, "future_list"))

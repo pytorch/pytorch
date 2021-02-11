@@ -426,7 +426,7 @@ Example::
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value`` 
+performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value``
 will only be placed if ``old_value`` for the ``key`` already exists in the store.
 
 .. warning::
@@ -1180,7 +1180,7 @@ Arguments:
           },
           R"(
             Returns:
-                A ``torch._C.Future`` object which is associated with the completion of
+                A ``torch._C._jit.Future`` object which is associated with the completion of
                 the ``ProcessGroup::Work``. As an example, a future object can be retrieved
                 by ``fut = process_group.allreduce(tensors).get_future()``.
 
@@ -1189,7 +1189,7 @@ Arguments:
                 ``get_future` API to retrieve a Future associated with the completion of
                 ``allreduce`` work.
 
-                >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
+                >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C._jit.Future
                 >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
@@ -1198,7 +1198,7 @@ Arguments:
 
             .. warning ::
                 ``get_future`` API supports only NCCL backend.
-                The ``torch._C.Future`` object returned by this API can be used in
+                The ``torch._C._jit.Future`` object returned by this API can be used in
                 ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
                 features on top of ``torch.futures.Future``.
 

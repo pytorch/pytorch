@@ -10,15 +10,15 @@ if not PY37:
     # Workaround for https://github.com/python/typing/issues/449 in Python 3.6
     from typing import GenericMeta
 
-    class _PyFutureMeta(type(torch._C.Future), GenericMeta):   # type: ignore[misc]
+    class _PyFutureMeta(type(torch._C._jit.Future), GenericMeta):   # type: ignore[misc]
         pass
 else:
-    class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
+    class _PyFutureMeta(type(torch._C._jit.Future), type(Generic)):  # type: ignore[misc, no-redef]
         pass
 
-class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
+class Future(torch._C._jit.Future, Generic[T], metaclass=_PyFutureMeta):
     r"""
-    Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
+    Wrapper around a ``torch._C._jit.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
     also exposes a set of APIs to add callback functions and set results.
     """
@@ -211,7 +211,7 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
         >>> # fut0 result = 0
         >>> # fut1 result = 1
     """
-    return cast(Future[List[Future]], torch._C._collect_all(cast(List[torch._C.Future], futures)))
+    return cast(Future[List[Future]], torch._C._collect_all(cast(List[torch._C._jit.Future], futures)))
 
 
 def wait_all(futures: List[Future]) -> List:
@@ -227,4 +227,4 @@ def wait_all(futures: List[Future]) -> List:
         method will throw an error if ``wait`` on any
         :class:`~torch.futures.Future` throws.
     """
-    return [fut.wait() for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()]
+    return [fut.wait() for fut in torch._C._collect_all(cast(List[torch._C._jit.Future], futures)).wait()]

@@ -487,7 +487,7 @@ PyObject *THPModule_warnAlways(PyObject *_unused, PyObject *noargs)
 {
   if (c10::Warning::get_warnAlways()) {
     Py_RETURN_TRUE;
-  } 
+  }
   Py_RETURN_FALSE;
 }
 
