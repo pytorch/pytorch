@@ -1472,7 +1472,7 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
                    ),
-                   assert_autodiffed=True),
+                   supports_autograd=False),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.half),
