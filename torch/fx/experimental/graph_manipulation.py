@@ -3,8 +3,9 @@ from typing import Dict, List, NamedTuple, Any
 import torch
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
-from torch.fx.graph import Graph, get_qualified_name
+from torch.fx.node import _get_qualified_name
 from torch.fx.graph_module import GraphModule
+from torch.fx.graph import Graph
 from torch.fx.node import Node, Target, map_arg
 
 
@@ -223,7 +224,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 )
 
         if node.op == "call_function":
-            node_rep["target"] = get_qualified_name(node.target)
+            node_rep["target"] = _get_qualified_name(node.target)
         else:
             node_rep["target"] = str(node.target)
 
