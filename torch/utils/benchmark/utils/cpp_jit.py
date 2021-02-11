@@ -63,7 +63,7 @@ CXX_FLAGS: Optional[List[str]]
 if hasattr(torch.__config__, "_cxx_flags"):
     try:
         CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
-        if "-g" not in CXX_FLAGS:
+        if CXX_FLAGS is not None and "-g" not in CXX_FLAGS:
             CXX_FLAGS.append("-g")
 
     except RuntimeError:
