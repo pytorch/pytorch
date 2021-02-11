@@ -1,15 +1,16 @@
 #ifndef CAFFE2_CORE_QTENSOR_H_
 #define CAFFE2_CORE_QTENSOR_H_
 
+#include "caffe2/core/common.h"
+#include "caffe2/core/context.h"
+#include "caffe2/core/tensor.h"
+#include <c10/util/accumulate.h>
+#include <c10/util/typeid.h>
+
 #include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <vector>
-
-#include "caffe2/core/common.h"
-#include "caffe2/core/context.h"
-#include "caffe2/core/tensor.h"
-#include <c10/util/typeid.h>
 
 namespace caffe2 {
 
@@ -57,8 +58,7 @@ class C10_EXPORT QTensor {
 
   void Resize(at::ArrayRef<int> dim_source) {
     if (dims_ != dim_source) {
-      size_t source_size = std::accumulate(
-          dim_source.begin(), dim_source.end(), 1, std::multiplies<int>());
+      const auto source_size = c10::multiply_integers(dim_source);
       if ((source_size * (precision_ + signed_)) > capacity_) {
         data_ptr_.clear();
         capacity_ = 0;
