@@ -374,6 +374,33 @@ void IRPrinter::visit(const ReduceOp* v) {
   os() << "})";
 }
 
+void IRPrinter::visit(const ReduceXOp* v) {
+  os() << "ReduceXOp(";
+  os() << *v->body() << ", ";
+
+  bool first = true;
+  os() << "rvars={";
+  for (auto* d : v->rvars()) {
+    if (!first) {
+      os() << ", ";
+    }
+    os() << d->name_hint();
+    first = false;
+  }
+  os() << "}, ";
+
+  first = true;
+  os() << "rdims={";
+  for (auto* d : v->rdims()) {
+    if (!first) {
+      os() << ", ";
+    }
+    os() << *d;
+    first = false;
+  }
+  os() << "})";
+}
+
 // === Stmt visitors below ===
 // Some invariants to keep in mind when changing printer visitors for statement:
 //  1) every statement first outputs the indendation with emitIndent
