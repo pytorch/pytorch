@@ -1491,6 +1491,9 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
+                       # Reference: https://github.com/pytorch/pytorch/pull/51944#issuecomment-777204310
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cdouble], active_if=TEST_WITH_ROCM),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
@@ -1530,6 +1533,9 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/48010
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       # Reference: https://github.com/pytorch/pytorch/pull/51944#issuecomment-777204310
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cdouble], active_if=TEST_WITH_ROCM),
                    ),
                    assert_autodiffed=True,
                    safe_casts_outputs=True),
@@ -1829,6 +1835,9 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/48641
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.int8]),
+                       # Reference: https://github.com/pytorch/pytorch/pull/51944#issuecomment-777204310
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cdouble], active_if=TEST_WITH_ROCM),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
