@@ -5,7 +5,7 @@
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
-#include <ATen/core/op_registration/op_whitelist.h>
+#include <ATen/core/op_registration/op_allowlist.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
