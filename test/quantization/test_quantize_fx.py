@@ -69,6 +69,8 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
+from torch.testing._internal.common_utils import TemporaryFileName
+
 from torch.testing._internal.common_distributed import skip_if_not_multigpu
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
@@ -1643,18 +1645,44 @@ class TestQuantizeFx(QuantizationTestCase):
         m = M2().eval()
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
+        res = m(data)
         weight, bias = m._packed_weight_0.unpack()
         # check that random model weight/bias does not match ref weight/bias
         self.assertNotEqual(weight, ref_weight)
         self.assertNotEqual(bias, ref_bias)
+        self.assertNotEqual(res, ref_res)
         m.load_state_dict(state_dict)
-        res = m(data)
-        weight, bias = m._packed_weight_0.unpack()
-        # check that weight/bias matches after load the state_dict
-        self.assertEqual(weight, ref_weight)
-        self.assertEqual(bias, ref_bias)
-        self.assertEqual(res, ref_res)
 
+        def checkModel(m, data, ref_weight, ref_bias, ref_res):
+            res = m(data)
+            weight, bias = m._packed_weight_0.unpack()
+            # check that weight/bias matches after load the state_dict
+            self.assertEqual(weight, ref_weight)
+            self.assertEqual(bias, ref_bias)
+            self.assertEqual(res, ref_res)
+
+        checkModel(m, data, ref_weight, ref_bias, ref_res)
+
+        # check quantized linear works
+        # m = M1().eval()
+        # m = prepare_fx(m, qconfig_dict)
+        # m = convert_fx(m)
+        # with TemporaryFileName() as fname:
+        #     torch.save(m.state_dict(), fname)
+        #     m.load_state_dict(torch.load(fname))
+
+        # checkModel(m, data, ref_weight, ref_bias, ref_res)
+
+        # Test save to disk and load back
+        m = M2().eval()
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        with TemporaryFileName() as fname:
+            print(state_dict)
+            torch.save(m.state_dict(), fname)
+            m.load_state_dict(torch.load(fname))
+
+        checkModel(m, data, ref_weight, ref_bias, ref_res)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
