@@ -1,11 +1,13 @@
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/DilatedConvolutionUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <tuple>
-#include <ATen/ATen.h>
 #include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/cuda/vol2col.cuh>
+#include <ATen/native/DilatedConvolutionUtils.h>
+#include <c10/util/accumulate.h>
+
+#include <tuple>
 
 namespace at {
 namespace native {
@@ -188,8 +190,8 @@ void slow_conv_dilated_all_cuda_template(
   int64_t nInputPlane = weight.size(1);
   int64_t nOutputPlane = weight.size(0);
   // Temporary buffers:
-  const int64_t m = prod_intlist(kernel_size);
-  const int64_t output_vsize = prod_intlist(output_size);
+  const int64_t m = c10::multiply_integers(kernel_size);
+  const int64_t output_vsize = c10::multiply_integers(output_size);
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
     columns.resize_({nInputPlane * m, output_vsize});
