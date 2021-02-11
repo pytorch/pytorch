@@ -1692,7 +1692,6 @@ torch_op_tests = [
     _TorchMathTestMeta('rad2deg'),
     _TorchMathTestMeta('deg2rad'),
     _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
-    _TorchMathTestMeta('trunc'),
     _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                        refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                        ref_backend='scipy'),
@@ -1701,9 +1700,7 @@ torch_op_tests = [
                        ref_backend='scipy', rtol=0.0008, atol=1e-5),
     _TorchMathTestMeta('polygamma', args=[2], substr='_2', reffn='polygamma',
                        refargs=lambda x: (2, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
-                       ref_backend='scipy', rtol=0.0008, atol=1e-5),
-    _TorchMathTestMeta('abs', input_fn=_medium_2d, dtypes=_types_no_half, rtol=0., atol=0.)]
-
+                       ref_backend='scipy', rtol=0.0008, atol=1e-5)]
 
 def generate_torch_test_functions(cls, testmeta, inplace):
     opstr = testmeta.opstr if not inplace else testmeta.opstr + "_"
