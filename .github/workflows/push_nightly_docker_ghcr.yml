@@ -13,8 +13,10 @@ jobs:
     env:
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v2
         with:
           ref: master
-      - run: |
+      - name: Build and upload nightly docker
+        run: |
           bash .github/scripts/build_publish_nightly_docker.sh
