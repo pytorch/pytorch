@@ -1133,7 +1133,8 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
   //       seen.add(child_fn)
   //       if compute_is_needed(child_fn):
   //         is_needed[fn] = true                         # (2)
-  //                                                      # (3)
+  //                                                      # (3) exit for-loop
+  //   return is_needed[fn]
   // compute_is_needed(graph_root)
   //
   int output_idx = 0;
@@ -1201,7 +1202,7 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
       // (3) no next child exists for `fn` means its `needed` has already been
       // finalized. pop stack and update parent
       stack.pop_back();
-      if (!stack.empty() && nodeShouldExecute(fn)) {
+      if (nodeShouldExecute(fn) && !stack.empty()) {
         exec_info_[stack.back().fn_].needed_ = true;
       }
     }
