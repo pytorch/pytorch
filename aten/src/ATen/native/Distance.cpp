@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Distance.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 
 namespace at { namespace native {
 
@@ -74,7 +75,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
   tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
 
-  const int64_t expand_batch_product = prod_intlist(expand_batch_portion);
+  const int64_t expand_batch_product = c10::multiply_integers(expand_batch_portion);
   std::vector<int64_t> tensor1_view{expand_batch_product, r1, c1};
   std::vector<int64_t> tensor2_view{expand_batch_product, r2, c2};
 
@@ -147,7 +148,7 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, c
   auto device2 = x2.device().type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
   IntArrayRef batch_tensor1(x1.sizes().data(), std::max<int64_t>(x1.dim() - 2, 0));
-  const int64_t batch_product = prod_intlist(batch_tensor1);
+  const int64_t batch_product = c10::multiply_integers(batch_tensor1);
   Tensor grad_x1 =
       at::empty_like(x1, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT)
           .view({batch_product, n, m});
