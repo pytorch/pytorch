@@ -36,7 +36,7 @@ TORCH_META_FUNC(upsample_trilinear3d_backward) (
   c10::optional<double> scales_h,
   c10::optional<double> scales_w
 ) {
-  auto full_output_size = native::upsample_2d_common_check(input_size, output_size);
+  auto full_output_size = native::upsample_3d_common_check(input_size, output_size);
 
   TORCH_CHECK(
       grad_output.dim() == 5,
