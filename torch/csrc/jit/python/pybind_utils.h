@@ -735,8 +735,6 @@ inline py::object toPyObject(IValue ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
-    return py::module::import("torch.jit._recursive")
-        .attr("wrap_cpp_class")(py::cast(Object(obj)));
 
   } else if (ivalue.isPyObject()) {
     // return borrowed reference to ensure it correctly incref the underlying

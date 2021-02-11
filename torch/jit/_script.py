@@ -319,7 +319,7 @@ if _enabled:
             return self_method(*args, **kwargs)
 
         def __getstate__(self):
-            raise pickle.PickleError("ScriptClasses cannot be pickled")
+            return self.forward_magic_method("__getstate__")
 
         def __iter__(self):
             return self.forward_magic_method("__iter__")
