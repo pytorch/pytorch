@@ -672,8 +672,8 @@ void PrepareCopyForONNX(Node* node) {
   }
 }
 
-void PrepareInplaceOps(Node* node, MutationRemover& mr) {
-  if (!mr.inplaceOpVariant(node))
+void PrepareInplaceOpsInBlocksForONNX(Node* node) {
+  if (!node->kind().is_aten())
     return;
 
   auto name = node->schema().name();
@@ -688,22 +688,24 @@ void PrepareInplaceOps(Node* node, MutationRemover& mr) {
     return;
 
   auto graph = node->owningGraph();
-  WithInsertPoint guard(node);
-
-  auto new_add = graph->insert(
-      Symbol::fromQualString(new_schema),
-      {node->inputs().at(0), node->inputs().at(1), node->inputs().at(2)});
-
-  auto new_select = graph->insert(
-      aten::select,
-      {input_node->inputs().at(0),
-       input_node->inputs().at(1),
-       input_node->inputs().at(2)});
+  auto new_node = graph->create(Symbol::fromQualString(new_schema), 1);
+  for (Value* input : node->inputs()) {
+    new_node->addInput(input);
+  }
+  new_node->output()->setType(node->output()->type());
+  new_node->insertBefore(node);
+  new_node->setSourceRange(node->sourceRange());
 
   auto false_val_ = graph->insertConstant(false);
-  auto new_copy = graph->insert(aten::copy_, {new_select, new_add, false_val_});
 
-  PrepareCopyForONNX(new_copy->node());
+  auto new_copy = graph->create(aten::copy_, 1);
+  new_copy->addInput(input_node->output());
+  new_copy->addInput(new_node->output());
+  new_copy->addInput(false_val_);
+  new_copy->insertBefore(node);
+  new_copy->setSourceRange(node->sourceRange());
+
+  PrepareCopyForONNX(new_copy);
 }
 
 // aten::pop is inplace. The tensor list input is updated.
@@ -773,39 +775,6 @@ static void PrepareListAppendAndInsertForONNX(Node* n) {
         n,
         n->owningBlock(),
         n->owningBlock()->owningNode());
-  }
-}
-
-static void PrepareInplaceOpsForONNX(Block* b) {
-  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
-    for (auto* child_block : it->blocks()) {
-      PrepareInplaceOpsForONNX(child_block);
-    }
-
-    switch (it->kind()) {
-      case aten::copy_: {
-        PrepareCopyForONNX(*it);
-        break;
-      }
-      case aten::index_put:
-      case aten::index_put_: {
-        PrepareIndexPutForONNX(*it);
-        break;
-      }
-      case aten::pop: {
-        PrepareListPopForONNX(*it);
-        break;
-      }
-      case aten::insert:
-      case aten::append: {
-        PrepareListAppendAndInsertForONNX(*it);
-        break;
-      }
-      case aten::Delete: {
-        PrepareListDeleteForONNX(*it);
-        break;
-      }
-    }
   }
 }
 
@@ -1048,10 +1017,13 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
           nextSetAttrValues);
     } else if (n->kind() == aten::copy_) {
       PrepareCopyForONNX(n);
-    } else if (mr.inplaceOpVariant(n)) {
-      PrepareInplaceOps(n, mr);
     } else if (n->kind() == aten::index_put || n->kind() == aten::index_put_) {
       PrepareIndexPutForONNX(n);
+    } else if (mr.inplaceOpVariant(
+                   n)) { // n->kind().is_aten() &&
+                         // n->schema().name().at(n->schema().name().size()
+                         // - 1) == '_') {
+      PrepareInplaceOpsInBlocksForONNX(n);
     } else if (n->kind() == aten::pop) {
       PrepareListPopForONNX(n);
     } else if (n->kind() == aten::insert || n->kind() == aten::append) {
@@ -1089,19 +1061,15 @@ void RegisterInplaceOpAsBlockOutputs(
 
 } // namespace
 
-void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
-  PrepareInplaceOpsForONNX(graph->block());
-}
-
 void RemoveInplaceOpsForONNX(
     const std::shared_ptr<Graph>& graph,
     Module* model = nullptr) {
   MutationRemover mr(graph);
   ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
+  RegisterInplaceOpAsBlockOutputs(model, graph, mr);
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
-  RegisterInplaceOpAsBlockOutputs(model, graph, mr);
 }
 
 } // namespace jit

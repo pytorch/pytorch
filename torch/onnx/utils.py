@@ -124,7 +124,7 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    params_dict=None, use_new_jit_passes=True, dynamic_axes=None, input_names=None, module=None):
+                    params_dict=None, dynamic_axes=None, input_names=None, module=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
 
@@ -132,13 +132,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
 
-    if use_new_jit_passes:
-        torch._C._jit_pass_lower_all_tuples(graph)
-        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
-    else:
-        torch._C._jit_pass_remove_inplace_ops(graph)
-        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
-        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
+    torch._C._jit_pass_lower_all_tuples(graph)
+    torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
 
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
@@ -461,7 +456,6 @@ def _model_to_graph(model, args, verbose=False,
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
                             fixed_batch_size=fixed_batch_size, params_dict=params_dict,
-                            use_new_jit_passes=use_new_jit_passes,
                             dynamic_axes=dynamic_axes, input_names=input_names,
                             module=module)
     from torch.onnx.symbolic_helper import _onnx_shape_inference

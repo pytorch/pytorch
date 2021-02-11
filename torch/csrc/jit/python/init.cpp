@@ -206,9 +206,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
-          "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
-          PrepareInplaceOpsForONNX)
-      .def(
           "_jit_pass_onnx_node_shape_type_inference",
           [](Node* n,
              std::map<std::string, IValue>& params_dict,

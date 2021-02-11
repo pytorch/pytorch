@@ -6832,7 +6832,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_index_put_add_(self):
+    def test_index_put_inplace_ops(self):
         @torch.jit.script
         def check_init(input_data, hidden_size):
             # type: (torch.Tensor, int) -> torch.Tensor
@@ -6843,7 +6843,8 @@ class TestONNXRuntime(unittest.TestCase):
             state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
             state = torch.zeros(state_size, device=input_data.device)
             if input_data.size(0) == 1:
-                state[1] += torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+                state[1] += torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
+                state[1] /= torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 3
             return state
 
         class Example(torch.nn.Module):
