@@ -2086,6 +2086,7 @@
 - func: is_complex(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  manual_cpp_binding: True
 
 - func: isreal(Tensor self) -> Tensor
   variants: function, method
