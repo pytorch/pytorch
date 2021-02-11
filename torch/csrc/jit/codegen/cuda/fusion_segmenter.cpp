@@ -156,10 +156,19 @@ void insertUniquePredicated(
 }
 
 void SegmentedGroup::finalize() {
-  // Move all the edgees to group input/output
+  // Move all the edges to group input/output
   // Inputs
   insertUniquePredicated(
       input_vals, producer_edges, [](Val* v) { return !v->isFusionInput(); });
+
+  for (auto expr : exprs_) {
+    for (auto i : expr->inputs()) {
+      if (i->isAnInt() && i->definition() == nullptr && !i->isConstScalar() &&
+          !i->isFusionInput()) {
+        input_vals.push_back(i);
+      }
+    }
+  }
 
   // Outputs
   insertUniquePredicated(

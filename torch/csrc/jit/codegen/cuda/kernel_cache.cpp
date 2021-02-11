@@ -511,6 +511,24 @@ std::vector<at::Tensor> FusionSegmentRuntime::runWithInput(
   // Bind input in the tensor_map
   for (size_t i = 0; i < inputs.size(); i++) {
     tensor_map.emplace(segmented_fusion_->inputs()[i], inputs[i]);
+
+    // Bind tensorview inputs values in case some segmented group
+    //  needs it down the road.
+    // TODO: we probably have done this already up to this point
+    //      should consider caching the expression evaluators, both
+    //      more convenient and safer than replication
+    if (inputs[i].isTensor()) {
+      auto aten_tensor = inputs[i].toTensor();
+      TORCH_INTERNAL_ASSERT(
+          segmented_fusion_->inputs()[i]->getValType() == ValType::TensorView);
+      auto input_tv = segmented_fusion_->inputs()[i]->as<TensorView>();
+      auto root_dom = TensorDomain::noReductions(input_tv->getRootDomain());
+      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+        const auto extent = root_dom[dim]->extent();
+        const auto value = aten_tensor.sizes()[dim];
+        tensor_map.emplace(extent, value);
+      }
+    }
   }
 
   // Keep track of groups that has run
