@@ -106,7 +106,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
   } else if (input_.layout() == c10::kMkldnn) {
-    return grad.to_mkldnn();
+    return grad.to_mkldnn(input_.scalar_type());
   } else {
     AT_ERROR("Unsupported input layout: ", input_.layout());
   }
@@ -114,7 +114,23 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() == c10::kStrided);
-  return grad.to_dense();
+  return grad.to_dense(input_.scalar_type());
+}
+
+Tensor view_dtype(const Tensor& self, ScalarType dtype) {
+  if (self.scalar_type() == dtype) {
+    return self;
+  }
+  auto type_meta = c10::scalarTypeToTypeMeta(dtype);
+  TORCH_CHECK(self.element_size() == type_meta.itemsize(),
+    "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
+  Storage storage = self.storage();
+  auto new_tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage), self.key_set(), type_meta);
+  auto* impl = new_tensor.unsafeGetTensorImpl();
+  impl->set_storage_offset(self.storage_offset());
+  impl->set_sizes_and_strides(self.sizes(), self.strides());
+  return new_tensor;
 }
 
 }} // namespace at::native

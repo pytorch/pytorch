@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+
 #include <ATen/core/Reduction.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
@@ -202,14 +203,14 @@ struct SchemaParser {
   IValue convertToList(
       TypeKind kind,
       const SourceRange& range,
-      std::vector<IValue> vs) {
+      const std::vector<IValue>& vs) {
     switch (kind) {
       case TypeKind::FloatType:
-        return fmap(vs, [](IValue v) { return v.toDouble(); });
+        return fmap(vs, [](const IValue& v) { return v.toDouble(); });
       case TypeKind::IntType:
-        return fmap(vs, [](IValue v) { return v.toInt(); });
+        return fmap(vs, [](const IValue& v) { return v.toInt(); });
       case TypeKind::BoolType:
-        return fmap(vs, [](IValue v) { return v.toBool(); });
+        return fmap(vs, [](const IValue& v) { return v.toBool(); });
       default:
         throw ErrorReport(range)
             << "lists are only supported for float or int types";
@@ -224,7 +225,7 @@ struct SchemaParser {
       } while (L.nextIf(','));
     }
     L.expect(']');
-    return convertToList(kind, tok.range, std::move(vs));
+    return convertToList(kind, tok.range, vs);
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
@@ -256,7 +257,7 @@ struct SchemaParser {
         break;
       }
       case TypeKind::ListType: {
-        auto elem_kind = arg_type->cast<ListType>()->getElementType();
+        auto elem_kind = arg_type->castRaw<ListType>()->getElementType();
         if (L.cur().kind == TK_IDENT) {
           return parseTensorDefault(range);
         } else if (arg_N && L.cur().kind != '[') {

@@ -38,6 +38,17 @@ Containers
     ParameterList
     ParameterDict
 
+Global Hooks For Module
+
+.. currentmodule:: torch.nn.modules.module
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    register_module_forward_pre_hook
+    register_module_forward_hook
+    register_module_backward_hook
+
 .. currentmodule:: torch
 
 Convolution Layers
@@ -54,6 +65,12 @@ Convolution Layers
     nn.ConvTranspose1d
     nn.ConvTranspose2d
     nn.ConvTranspose3d
+    nn.LazyConv1d
+    nn.LazyConv2d
+    nn.LazyConv3d
+    nn.LazyConvTranspose1d
+    nn.LazyConvTranspose2d
+    nn.LazyConvTranspose3d
     nn.Unfold
     nn.Fold
 
@@ -159,6 +176,9 @@ Normalization Layers
     nn.BatchNorm1d
     nn.BatchNorm2d
     nn.BatchNorm3d
+    nn.LazyBatchNorm1d
+    nn.LazyBatchNorm2d
+    nn.LazyBatchNorm3d
     nn.GroupNorm
     nn.SyncBatchNorm
     nn.InstanceNorm1d
@@ -259,6 +279,7 @@ Loss Functions
     nn.CTCLoss
     nn.NLLLoss
     nn.PoissonNLLLoss
+    nn.GaussianNLLLoss
     nn.KLDivLoss
     nn.BCELoss
     nn.BCEWithLogitsLoss
@@ -282,6 +303,7 @@ Vision Layers
     :template: classtemplate.rst
 
     nn.PixelShuffle
+    nn.PixelUnshuffle
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d

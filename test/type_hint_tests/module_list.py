@@ -8,4 +8,4 @@ class BarModule(torch.nn.Module):
     pass
 
 ml: torch.nn.ModuleList = torch.nn.ModuleList([FooModule(), BarModule()])
-ml[0].children() == []
+ml[0].children() == []  # noqa: B015

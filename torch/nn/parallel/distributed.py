@@ -5,15 +5,20 @@ import os
 import inspect
 import logging
 import warnings
+from typing import NamedTuple
 
 import torch
 
 from . import comm
 import torch.distributed as dist
 
+RPC_AVAILABLE = False
 if dist.is_available():
     from torch.distributed.distributed_c10d import _get_default_group
     from torch.distributed.distributed_c10d import ReduceOp
+if torch.distributed.rpc.is_available():
+    RPC_AVAILABLE = True
+    from torch.distributed.rpc import RRef
 from ..modules import Module
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
@@ -25,6 +30,12 @@ def _find_tensors(obj):
     r"""
     Recursively find all tensors contained in the specified object.
     """
+    if RPC_AVAILABLE and isinstance(obj, RRef):
+        # If the current node is the owner of the RRef, unwrap it and try to
+        # find Tensors.
+        # TODO: Expand to remote RRefs.
+        if obj.is_owner():
+            return _find_tensors(obj.local_value())
     if isinstance(obj, torch.Tensor):
         return [obj]
     if isinstance(obj, (list, tuple)):
@@ -90,6 +101,12 @@ def _dump_DDP_relevant_env_vars():
     print(formatted_output)
 
 
+
+class _DDPUnevenInputsConfig(NamedTuple):
+    ddp_join_enabled: bool
+    ddp_join_divide_by_initial_world_size: bool
+
+
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
@@ -151,10 +168,14 @@ class DistributedDataParallel(Module):
 
     .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
         gradient will be ``M`` times smaller when compared to the same model
-        trained on a single node with ``batch=M*N`` (because the gradients
+        trained on a single node with ``batch=M*N`` if the loss is summed (NOT
+        averaged as usual) across instances in a batch (because the gradients
         between different nodes are averaged). You should take this into
         consideration when you want to obtain a mathematically equivalent
-        training process compared to the local training counterpart.
+        training process compared to the local training counterpart. But in most
+        cases, you can just treat a DistributedDataParallel wrapped model, a
+        DataParallel wrapped model and an ordinary model on a single GPU as the
+        same (E.g. using the same learning rate for equivalent batch size).
 
     .. note::
         Parameters are never broadcast between processes. The module performs
@@ -387,7 +408,9 @@ class DistributedDataParallel(Module):
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
-        self.ddp_join_enabled = False
+        self.ddp_uneven_inputs_config = _DDPUnevenInputsConfig(
+            ddp_join_enabled=False, ddp_join_divide_by_initial_world_size=False
+        )
         self.gradient_as_bucket_view = gradient_as_bucket_view
         if hasattr(module, '_ddp_params_and_buffers_to_ignore'):
             self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
@@ -583,6 +606,15 @@ class DistributedDataParallel(Module):
             self.find_unused_parameters,
             self.gradient_as_bucket_view)
 
+        self.logger = dist.Logger(self.reducer)
+
+        # Set logging data that can be got during construction time.
+        self.logger.set_construction_data_and_log(
+            self.module.__class__.__name__,
+            [] if self.device_ids is None else self.device_ids,
+            -1 if self.output_device is None else self.output_device,
+            self.broadcast_buffers)
+
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
 
@@ -591,6 +623,7 @@ class DistributedDataParallel(Module):
         attrs = copy.copy(self.__dict__)
         del attrs['process_group']
         del attrs['reducer']
+        del attrs['logger']
         return attrs
 
     def __setstate__(self, state):
@@ -640,13 +673,13 @@ class DistributedDataParallel(Module):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
-        if self.ddp_join_enabled:
+        if self.ddp_uneven_inputs_config.ddp_join_enabled:
             ones = torch.ones(
                 1, device=self.device
             )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
-                work, self.ddp_join_divide_by_initial_world_size
+                work, self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size
             )
 
         # Calling _rebuild_buckets before forward compuation,
@@ -661,7 +694,7 @@ class DistributedDataParallel(Module):
         if self.require_forward_param_sync:
             self._sync_params()
 
-        if self.ddp_join_enabled:
+        if self.ddp_uneven_inputs_config.ddp_join_enabled:
             # Notify joined ranks whether they should sync in backwards pass or not.
             self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
@@ -905,8 +938,10 @@ class DistributedDataParallel(Module):
                     to spawn a single process that works on a single GPU."""
                 )
             has_error = False
-            self.ddp_join_enabled = enable
-            self.ddp_join_divide_by_initial_world_size = divide_by_initial_world_size
+            self.ddp_uneven_inputs_config = _DDPUnevenInputsConfig(
+                ddp_join_enabled=enable,
+                ddp_join_divide_by_initial_world_size=divide_by_initial_world_size,
+            )
             yield
         except Exception as e:
             # Set to skip any processing in the finally block.
@@ -973,9 +1008,9 @@ class DistributedDataParallel(Module):
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)
 
-    def _register_comm_hook(self, state: object, hook: callable):
+    def register_comm_hook(self, state: object, hook: callable):
         r"""
-        Register a communication hook which is an enhancement that provides a
+        Registers a communication hook which is an enhancement that provides a
         flexible hook to users where they can specify how DDP aggregates gradients
         across multiple workers.
 
@@ -984,14 +1019,15 @@ class DistributedDataParallel(Module):
         and gradient compression which involve different communication strategies for
         parameter syncs while running Distributed DataParallel training.
 
-        Arguments:
-            state (object): state is passed to the hook and can be used to maintain
-                            and update any state information that users would like to
-                            maintain as part of the training process. Examples: error
-                            feedback in gradient compression, peers to communicate with
-                            next in GossipGrad etc.
-            hook (callable): is defined as:
-                             hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+        Args:
+            state (object): Passed to the hook to maintain any state information during the training process.
+                            Examples include error feedback in gradient compression,
+                            peers to communicate with next in GossipGrad, etc.
+
+                            It is locally stored by each worker
+                            and shared by all the gradient tensors on the worker.
+            hook (callable): Averages gradient tensors across workers and defined as:
+                             ``hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
@@ -1024,21 +1060,21 @@ class DistributedDataParallel(Module):
         .. warning ::
             ``get_future`` API supports only NCCL backend and will return a ``torch._C.Future``
             which is an internal type and should be used with caution. It can still be used by
-            ``_register_comm_hook`` API, but it is subject to some subtle differences compared
+            ``register_comm_hook`` API, but it is subject to some subtle differences compared
             to ``torch.futures.Future``.
 
         .. warning ::
             DDP communication hook is experimental and subject to change.
 
         Example::
-            Below is an example of a noop hook that returns back the same tensors:
+            Below is an example of a noop hook that returns the same tensors.
 
             >>> def noop(state: object, bucket: dist._GradBucket): -> torch.futures.Future
             >>>     fut = torch.futures.Future()
             >>>     fut.set_result(bucket.get_tensors())
             >>>     return fut
 
-            >>> ddp._register_comm_hook(state = None, hook = noop)
+            >>> ddp.register_comm_hook(state = None, hook = noop)
 
         Example::
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
@@ -1054,11 +1090,44 @@ class DistributedDataParallel(Module):
             >>>         return decoded_tensors
             >>>     return fut.then(decode)
 
-            >>> ddp._register_comm_hook(state = None, hook = encode_and_decode)
-
+            >>> ddp.register_comm_hook(state = None, hook = encode_and_decode)
         """
         self._check_comm_hook(hook)
         dist._register_comm_hook(self.reducer, state, hook)
+
+    def _register_builtin_comm_hook(
+        self, comm_hook_type
+    ):
+        r"""
+        Registers a built-in communication hook that specifies how DDP
+        aggregates gradients across multiple workers.
+        The built-in hooks aim to provide efficient C++ implementations for certain hooks,
+        which might not be as efficient if implemented in Python using a Python communication hook.
+
+        Args:
+            comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
+            ALLREDUCE, FP16_COMPRESS, etc.
+
+        .. warning ::
+            DDP communication hook can only be registered once and should be registered
+            before calling backward.
+
+        .. warning ::
+            DDP communication hook does not support single-process multiple-device mode.
+            Gradbucket tensors should consist of only a single tensor.
+
+        .. warning ::
+            DDP communication hook is experimental and subject to change.
+
+        Example::
+            Below is an example of a FP16 compression where gradients are
+            compressed into 16-bit floating-point numbers before allreduce, and
+            then decompressed after allreduce.
+
+            >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
+
+        """
+        dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0
@@ -1125,7 +1194,7 @@ class DistributedDataParallel(Module):
                 # If we are running DDP with the join manager, we have to agree
                 # upon a rank to sync module buffers from, since rank 0 may
                 # already have been joined and have stale module buffers.
-                if self.ddp_join_enabled:
+                if self.ddp_uneven_inputs_config.ddp_join_enabled:
                     authoritative_rank = self._find_common_rank(dist.get_rank(), True)
                 else:
                     # The process with rank 0 is considered the authoritative copy.

@@ -81,13 +81,6 @@ case "$image" in
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
-  pytorch-linux-xenial-py3.6-gcc4.8)
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=4.8
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-py3.6-gcc5.4)
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=5
@@ -165,8 +158,8 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.1
+  pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.2.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=7
@@ -261,8 +254,8 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-cuda11.1-cudnn8-py3.6-gcc9)
-    CUDA_VERSION=11.1
+  pytorch-linux-bionic-cuda11.2-cudnn8-py3.6-gcc9)
+    CUDA_VERSION=11.2.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=9
@@ -271,8 +264,8 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-cuda11.1-cudnn8-py3.8-gcc9)
-    CUDA_VERSION=11.1
+  pytorch-linux-bionic-cuda11.2-cudnn8-py3.8-gcc9)
+    CUDA_VERSION=11.2.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
@@ -281,19 +274,26 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-rocm3.7-py3.6)
+  pytorch-linux-bionic-rocm3.9-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=3.7
+    ROCM_VERSION=3.9
     ;;
-  pytorch-linux-bionic-rocm3.8-py3.6)
+  pytorch-linux-bionic-rocm3.10-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=3.8
+    ROCM_VERSION=3.10
+    ;;
+  pytorch-linux-bionic-rocm4.0.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=4.0.1
     ;;
   *)
     # Catch-all for builds that are not hardcoded.

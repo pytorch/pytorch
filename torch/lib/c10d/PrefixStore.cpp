@@ -4,7 +4,7 @@ namespace c10d {
 
 PrefixStore::PrefixStore(
     const std::string& prefix,
-    std::shared_ptr<Store> store)
+    c10::intrusive_ptr<Store> store)
     : prefix_(prefix), store_(store) {}
 
 std::string PrefixStore::joinKey(const std::string& key) {
@@ -25,6 +25,13 @@ void PrefixStore::set(
     const std::string& key,
     const std::vector<uint8_t>& value) {
   store_->set(joinKey(key), value);
+}
+
+std::vector<uint8_t> PrefixStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& currentValue,
+    const std::vector<uint8_t>& newValue) {
+  return store_->compareSet(joinKey(key), currentValue, newValue);
 }
 
 std::vector<uint8_t> PrefixStore::get(const std::string& key) {

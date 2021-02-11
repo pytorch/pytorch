@@ -237,7 +237,7 @@ struct CompleteArgumentSpec {
     for (int32_t i = 0; i < num_inputs; i++) {
       if (!inputs[i].isTensor())
         continue;
-      auto tensor = inputs[i].toTensor();
+      auto& tensor = inputs[i].toTensor();
       all_dims += tensor.defined() ? tensor.ndimension() : 0;
     }
     // allocate enough room for all TensorPODs and dimensions

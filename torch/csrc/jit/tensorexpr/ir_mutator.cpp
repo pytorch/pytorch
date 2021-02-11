@@ -118,7 +118,8 @@ const Expr* IRMutator::mutate(const CompareSelect* v) {
              ExprHandle(rhs_new),
              ExprHandle(retval1_new),
              ExprHandle(retval2_new),
-             v->compare_select_op())
+             v->compare_select_op(),
+             v->bias())
       .node();
 }
 
@@ -137,6 +138,15 @@ const Expr* IRMutator::mutate(const Cast* v) {
     return v;
   }
   return new Cast(v->dtype(), src_value_new);
+}
+
+const Expr* IRMutator::mutate(const BitCast* v) {
+  const Expr* src_value = v->src_value();
+  const Expr* src_value_new = src_value->accept_mutator(this);
+  if (src_value_new == v->src_value()) {
+    return v;
+  }
+  return new BitCast(v->dtype(), src_value_new);
 }
 
 const Expr* IRMutator::mutate(const Var* v) {
@@ -270,7 +280,7 @@ const Expr* IRMutator::mutate(const MinTerm* v) {
 const Expr* IRMutator::mutate(const ReduceOp* v) {
   const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
   const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
-  auto body = v->body().node()->accept_mutator(this);
+  const Expr* body_new = v->body()->accept_mutator(this);
 
   std::vector<const Expr*> new_output_args;
   std::vector<const Var*> new_reduce_args;
@@ -282,11 +292,7 @@ const Expr* IRMutator::mutate(const ReduceOp* v) {
   }
 
   return new ReduceOp(
-      buf_new,
-      ExprHandle(body),
-      v->interaction(),
-      new_output_args,
-      new_reduce_args);
+      buf_new, body_new, new_output_args, new_reduce_args, v->reducer());
 }
 
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
@@ -398,6 +404,31 @@ Stmt* IRMutator::mutate(const AtomicAdd* v) {
 
 Stmt* IRMutator::mutate(const SyncThreads* v) {
   return new SyncThreads();
+}
+
+Stmt* IRMutator::mutate(const ExternalCall* v) {
+  bool changed = false;
+  const Buf* new_buf = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(new_buf);
+  changed |= new_buf != v->buf();
+
+  std::vector<const Buf*> new_buf_args;
+  for (const Buf* buf_arg : v->buf_args()) {
+    const Buf* new_buf_arg =
+        dynamic_cast<const Buf*>(buf_arg->accept_mutator(this));
+    TORCH_INTERNAL_ASSERT(new_buf_arg);
+    new_buf_args.push_back(new_buf_arg);
+    changed |= new_buf_arg != buf_arg;
+  }
+  std::vector<const Expr*> new_args;
+  for (const Expr* arg : v->args()) {
+    const Expr* new_arg = arg->accept_mutator(this);
+    new_args.push_back(new_arg);
+    changed |= new_arg != arg;
+  }
+  return changed
+      ? new ExternalCall(new_buf, v->func_name(), new_buf_args, new_args)
+      : (Stmt*)v;
 }
 
 Stmt* IRMutator::mutate(const Allocate* v) {

@@ -146,7 +146,7 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
 }
 
 TEST(TestQTensor, QuantizePerChannel4d) {
-  int C = 32, H = 10, W = 10;
+  int C = 64, H = 10, W = 10;
   auto scales = rand({C}).toType(kDouble);
   auto zero_points = randint(10, {C}).toType(kLong);
   int ch_axis = 1;
@@ -163,20 +163,20 @@ TEST(TestQTensor, QuantizePerChannel4d) {
       tensor, scales, zero_points, ch_axis, kQUInt8);
   auto* q_data = (uint8_t*)q.data_ptr<quint8>();
   for (int c = 0, i = 0; c < C; ++c) {
-    auto scale = scales[c].item<float>();
-    auto zero_point = zero_points[c].item<int>();
+    float inv_scale = 1.0f / static_cast<float>(scales[c].item<double>());
+    int64_t zero_point = zero_points[c].item<int64_t>();
     for (int e = 0; e < H * W; ++e, ++i) {
       // downsize qval to 255 if val is greater than max uint8_t value
-      int qval = std::min((int)round(e / scale) + zero_point, 255);
+      int qval = std::min<int>(zero_point + std::nearbyint(e * inv_scale), 255);
       ASSERT_EQ((int)q_data[i], qval);
     }
   }
 }
 
 TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
-  int C = 32, H = 10, W = 10;
-  auto scales = rand({C}).toType(kFloat);
-  auto zero_points = randint(10, {C}).toType(kInt);
+  int C = 64, H = 10, W = 10;
+  auto scales = rand({C}).toType(kDouble);
+  auto zero_points = randint(10, {C}).toType(kLong);
   int ch_axis = 1;
   // create 4d tensor where each H x W image is a range(0, H*W)
   Tensor tensor = at::empty(
@@ -196,10 +196,10 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
   auto* q_data = (uint8_t*)q.data_ptr<quint8>();
   for (int e = 0, i = 0; e < H * W; ++e) {
     for (int c = 0; c < C; ++c, ++i) {
-      auto scale = scales[c].item<float>();
-      auto zero_point = zero_points[c].item<int>();
+      float inv_scale = 1.0f / static_cast<float>(scales[c].item<double>());
+      int64_t zero_point = zero_points[c].item<int64_t>();
       // downsize qval to 255 if val is greater than max uint8_t value
-      int qval = std::min((int)round(e / scale) + zero_point, 255);
+      int qval = std::min<int>(zero_point + std::nearbyint(e * inv_scale), 255);
       ASSERT_EQ((int)q_data[i], qval);
     }
   }

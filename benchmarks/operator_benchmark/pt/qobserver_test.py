@@ -104,19 +104,22 @@ q_hist_observer_list = op_bench.op_list(
 
 class QObserverBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, C, M, N, dtype, qscheme, op_func, device):
-        self.f_input = torch.rand(C, M, N, device=device)
+        self.inputs = {
+            "f_input": torch.rand(C, M, N, device=device)
+        }
         self.op_func = op_func(dtype=dtype, qscheme=qscheme).to(device)
 
-    def forward(self):
-        self.op_func(self.f_input)
-        self.op_func.calculate_qparams()
-        return
+    def forward(self, f_input):
+        self.op_func(f_input)
+        return self.op_func.calculate_qparams()
+
 
 class QObserverBenchmarkCalculateQparams(op_bench.TorchBenchmarkBase):
     def init(self, C, M, N, dtype, qscheme, op_func, device):
         self.f_input = torch.rand(C, M, N, device=device)
         self.q_observer = op_func(dtype=dtype, qscheme=qscheme).to(device)
         self.q_observer(self.f_input)
+        self.inputs = {}
 
     def forward(self):
         return self.q_observer.calculate_qparams()

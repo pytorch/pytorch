@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
@@ -40,52 +41,49 @@ std::vector<size_t> toVector(const at::DimVector& small_vec) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"
 void debugPrint(const TensorTypePtr& type) {
-  printf("\nsizes:");
+  std::stringstream sizes_s;
   if (auto sizes = type->symbolic_sizes().sizes()) {
-    // for (const auto& shape_symbol : sizes.value()) {
-    int rank = static_cast<int>(sizes->size());
-    for (int i = 0; i < rank; i++) {
-      const auto& shape_symbol = sizes.value()[i];
+    for (const auto& shape_symbol : *sizes) {
       if (shape_symbol.is_static()) {
-        printf("%ld, ", shape_symbol.static_size());
+        sizes_s << shape_symbol.static_size() << ", ";
       } else {
-        printf("s(%ld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
+        sizes_s << "s(" << *reinterpret_cast<const int64_t*>(&shape_symbol)
+                << "), ";
       }
     }
   } else {
-    printf("no size available\n");
+    sizes_s << "no size available";
   }
+  std::cout << "sizes:" << sizes_s.str() << std::endl;
   if (const auto& stride_properties = type->stride_properties().sizes()) {
-    int rank = static_cast<int>(stride_properties->size());
-    printf("\nstride: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_.has_value()) {
-        printf("%ld, ", (*stride_properties)[i]->stride_.value());
+    std::stringstream stride_s;
+    std::stringstream index_s;
+    std::stringstream contig_s;
+
+    for (const auto& stride_property : *stride_properties) {
+      if (stride_property.has_value() && stride_property->stride_.has_value()) {
+        stride_s << *stride_property->stride_ << ", ";
       } else {
-        printf("?, ");
+        stride_s << "?, ";
+      }
+      if (stride_property.has_value() &&
+          stride_property->stride_index_.has_value()) {
+        index_s << *stride_property->stride_index_ << ", ";
+      } else {
+        index_s << "?, ";
+      }
+      if (stride_property.has_value() &&
+          stride_property->contiguous_.has_value()) {
+        contig_s << *stride_property->contiguous_ << ", ";
+      } else {
+        contig_s << "?, ";
       }
     }
-    printf("\nstride index: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_index_.has_value()) {
-        printf("%ld, ", (*stride_properties)[i]->stride_index_.value());
-      } else {
-        printf("?, ");
-      }
-    }
-    printf("\ncontiguous: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->contiguous_.has_value()) {
-        printf("%d, ", (*stride_properties)[i]->contiguous_.value());
-      } else {
-        printf("?, ");
-      }
-    }
+    std::cout << "stride: " << stride_s.str() << std::endl;
+    std::cout << "stride index: " << index_s.str() << std::endl;
+    std::cout << "contiguous: " << contig_s.str() << std::endl;
   } else {
-    printf("no stride properties available\n");
+    std::cout << "no stride properties available" << std::endl;
   }
 }
 #pragma clang diagnostic pop
@@ -212,7 +210,7 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
   std::stringstream encoded_inputs;
   for (const auto& input : inputs) {
     if (input.isTensor()) {
-      auto input_tensor = input.toTensor();
+      auto& input_tensor = input.toTensor();
 
       encoded_inputs << ";";
       auto sep = "";
@@ -553,7 +551,7 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
         // TODO: I think merge cannot handle broadcast - Go verify it later;
         // TODO: Since we are only handling permutation here, we should just
         //       merge the stride_index_;
-        acc_type = acc_type->merge(input_type);
+        acc_type = acc_type->merge(*input_type);
       } else {
         acc_type = input_type;
       }

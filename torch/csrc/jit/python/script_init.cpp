@@ -51,7 +51,7 @@ namespace jit {
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 
-using ResolutionCallback = std::function<py::function(std::string)>;
+using ResolutionCallback = std::function<py::object(std::string)>;
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
 using ClassMethodDefaults = std::unordered_map<std::string, FunctionDefaults>;
 
@@ -339,7 +339,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const c10::QualifiedName& name,
     const Decl& overload_decl,
     const Def& implementation_def,
-    ResolutionCallback rcb,
+    const ResolutionCallback& rcb,
     const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
   if (signature.is(py::none())) {
@@ -356,7 +356,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
       /*properties=*/{},
       /*propResolvers=*/{},
       {new_def},
-      {pythonResolver(std::move(rcb))},
+      {pythonResolver(rcb)},
       nullptr,
       true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
@@ -377,14 +377,14 @@ static StrongFunctionPtr script_compile_function(
     const c10::QualifiedName& name,
     const Def& def,
     const FunctionDefaults& defaults,
-    ResolutionCallback rcb) {
+    const ResolutionCallback& rcb) {
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
       QualifiedName(name.prefix()),
       /*properties=*/{},
       /*propResolvers=*/{},
       {def},
-      {pythonResolver(std::move(rcb))},
+      {pythonResolver(rcb)},
       nullptr,
       true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
@@ -639,6 +639,14 @@ py::list debugMakeNamedList(const T& list) {
   }
   return result;
 }
+template <typename T>
+py::set debugMakeSet(const T& list) {
+  py::set result;
+  for (const auto& elem : list) {
+    result.add(py::cast(elem));
+  }
+  return result;
+}
 
 static py::dict _jit_debug_module_iterators(Module& module) {
   py::dict result;
@@ -710,12 +718,27 @@ void extra_files_to_python(const ExtraFilesMap& m, const py::dict& pydict) {
   }
 }
 
+void pyCompilationUnitDefine(
+    CompilationUnit& cu,
+    const std::string& src,
+    const ResolutionCallback* rcb,
+    const uint32_t _frames_up) {
+  if (rcb && *rcb) {
+    cu.define(c10::nullopt, src, pythonResolver(*rcb), nullptr);
+  } else {
+    py::object py_default_rcb =
+        py::module::import("torch._jit_internal")
+            .attr("createResolutionCallbackFromFrame")(_frames_up);
+    auto default_rcb = py_default_rcb.cast<ResolutionCallback>();
+    cu.define(c10::nullopt, src, pythonResolver(default_rcb), nullptr);
+  }
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<CustomClassHolder, c10::intrusive_ptr<CustomClassHolder>>(
-      m, "Capsule");
+  py::class_<c10::Capsule>(m, "Capsule");
 
   auto object_class =
       py::class_<Object>(m, "ScriptObject")
@@ -783,6 +806,12 @@ void initJitScriptBindings(PyObject* module) {
                 });
               })
           .def("__copy__", &Object::copy)
+          .def(
+              "__hash__",
+              [](const Object& self) {
+                // Similar to Tensor's `__hash__`, which is `id()`.
+                return std::hash<c10::ivalue::Object*>{}(self._ivalue().get());
+              })
           .def(py::pickle(
               [](const Object& self)
                   -> std::tuple<py::object, std::string> { // __getstate__
@@ -1006,6 +1035,26 @@ void initJitScriptBindings(PyObject* module) {
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
           })
+      .def(
+          "_get_forward_hooks",
+          [](const Module& m) {
+            std::vector<StrongFunctionPtr> funcs;
+            for (auto& hook : m.type()->getForwardHooks()) {
+              funcs.emplace_back(
+                  StrongFunctionPtr(m.type()->compilation_unit(), hook));
+            }
+            return funcs;
+          })
+      .def(
+          "_get_forward_pre_hooks",
+          [](const Module& m) {
+            std::vector<StrongFunctionPtr> funcs;
+            for (auto& pre_hook : m.type()->getForwardPreHooks()) {
+              funcs.emplace_back(
+                  StrongFunctionPtr(m.type()->compilation_unit(), pre_hook));
+            }
+            return funcs;
+          })
       .def_property_readonly(
           "code",
           [](Module& self) {
@@ -1089,21 +1138,72 @@ void initJitScriptBindings(PyObject* module) {
 
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
       m, "CompilationUnit")
-      .def(py::init<>())
+      .def(
+          py::init([](const std::string& lang, const uint32_t _frames_up) {
+            auto cu = std::make_shared<CompilationUnit>();
+            if (lang.size() > 0) {
+              pyCompilationUnitDefine(*cu, lang, nullptr, _frames_up);
+            }
+            return cu;
+          }),
+          py::arg("lang") = "",
+          py::arg("_frames_up") = 0)
+
       .def(
           "find_function",
           [](std::shared_ptr<CompilationUnit> self, const std::string& name) {
-            auto& fn = self->get_function(QualifiedName(name));
-            return StrongFunctionPtr(std::move(self), &fn);
+            auto fn = self->find_function(QualifiedName(name));
+            if (fn) {
+              return c10::optional<StrongFunctionPtr>(
+                  StrongFunctionPtr(std::move(self), fn));
+            } else {
+              return c10::optional<StrongFunctionPtr>(c10::nullopt);
+            }
+          })
+      .def(
+          "__getattr__",
+          [](std::shared_ptr<CompilationUnit> self, const std::string& name) {
+            auto fn = self->find_function(QualifiedName(name));
+            if (fn) {
+              return StrongFunctionPtr(std::move(self), fn);
+            } else {
+              throw AttributeError(
+                  "'CompilationUnit' has no attribute '%s'", name.c_str());
+            }
+          })
+      .def(
+          "get_functions",
+          [](const std::shared_ptr<CompilationUnit>& self) {
+            auto raw_functions = self->get_functions();
+            std::vector<StrongFunctionPtr> functions;
+            functions.reserve(raw_functions.size());
+            for (auto fn : raw_functions) {
+              if (fn) {
+                functions.emplace_back(self, fn);
+              }
+            }
+            return functions;
           })
       .def("set_optimized", &CompilationUnit::set_optimized)
       .def(
           "define",
-          [](CompilationUnit& cu,
-             const std::string& src,
-             const ResolutionCallback& rcb) {
-            cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
-          })
+          pyCompilationUnitDefine,
+          py::arg("src"),
+          py::arg("rcb") = nullptr,
+          py::arg("_frames_up") = 0)
+      .def(
+          "create_function",
+          [](std::shared_ptr<CompilationUnit>& self,
+             const std::string& qualified_name,
+             std::shared_ptr<Graph> graph,
+             bool should_mangle) {
+            Function* fn = self->create_function(
+                qualified_name, std::move(graph), should_mangle);
+            return StrongFunctionPtr(std::move(self), fn);
+          },
+          py::arg("qualified_name"),
+          py::arg("graph"),
+          py::arg("should_mangle") = false)
       .def(
           "get_interface",
           [](const std::shared_ptr<CompilationUnit>& self,
@@ -1244,19 +1344,19 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_compile",
       [](const std::string& qualname,
          const Def& def,
-         ResolutionCallback rcb,
+         const ResolutionCallback& rcb,
          const FunctionDefaults& defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         const auto name = c10::QualifiedName(qualname);
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
-        return script_compile_function(name, def, defaults, std::move(rcb));
+        return script_compile_function(name, def, defaults, rcb);
       });
   m.def(
       "_jit_script_compile_overload",
       [](const std::string& qualname,
          const Decl& overload_decl,
          const Def& implementation_def,
-         ResolutionCallback rcb,
+         const ResolutionCallback& rcb,
          const FunctionDefaults& implementation_defaults,
          const py::object& signature) {
         const auto name = c10::QualifiedName(qualname);
@@ -1264,7 +1364,7 @@ void initJitScriptBindings(PyObject* module) {
             name,
             overload_decl,
             implementation_def,
-            std::move(rcb),
+            rcb,
             implementation_defaults,
             signature);
       });
@@ -1369,12 +1469,12 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_interface_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
-         ResolutionCallback rcb,
+         const ResolutionCallback& rcb,
          bool is_module) {
         get_python_cu()->define_interface(
             c10::QualifiedName(qualifiedName),
             classDef,
-            pythonResolver(std::move(rcb)),
+            pythonResolver(rcb),
             is_module);
       });
 
@@ -1452,6 +1552,9 @@ void initJitScriptBindings(PyObject* module) {
         }
         return _load_for_mobile(in, optional_device);
       });
+  m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
+    return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
+  });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
@@ -1476,7 +1579,7 @@ void initJitScriptBindings(PyObject* module) {
         // TODO this should go in the global Python CU
         auto cu = std::make_shared<CompilationUnit>();
         c10::QualifiedName name(qualname);
-        auto fn = cu->create_function(std::move(name), graph);
+        auto fn = cu->create_function(std::move(name), std::move(graph));
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
@@ -1573,6 +1676,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "add_builtin_function",
           &ConcreteModuleTypeBuilder::addBuiltinFunction)
+      .def("add_forward_hook", &ConcreteModuleTypeBuilder::addForwardHook)
+      .def(
+          "add_forward_pre_hook", &ConcreteModuleTypeBuilder::addForwardPreHook)
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
@@ -1676,6 +1782,41 @@ void initJitScriptBindings(PyObject* module) {
               ++defs_it;
               ++defaults_it;
             }
+          })
+      .def(
+          "_create_hooks",
+          [](std::shared_ptr<ConcreteModuleType> concreteType,
+             const std::vector<Def>& hookDefs,
+             const std::vector<ResolutionCallback>& hookRcbs,
+             const std::vector<Def>& preHookDefs,
+             const std::vector<ResolutionCallback>& preHookRcbs) {
+            TORCH_INTERNAL_ASSERT(hookDefs.size() == hookRcbs.size());
+            TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookRcbs.size());
+
+            std::vector<ResolverPtr> hookResolvers, preHookResolvers;
+
+            hookResolvers.reserve(hookRcbs.size());
+            for (auto& callback : hookRcbs) {
+              hookResolvers.push_back(pythonResolver(callback));
+            }
+
+            preHookResolvers.reserve(preHookRcbs.size());
+            for (auto& callback : preHookRcbs) {
+              preHookResolvers.push_back(pythonResolver(callback));
+            }
+
+            const auto& selfType =
+                concreteType->getJitType()->expect<ClassType>();
+            const auto& prefix = selfType->name().value();
+            const auto self = ModuleSelf(std::move(concreteType));
+            auto cu = selfType->compilation_unit();
+            cu->define_hooks(
+                prefix,
+                hookDefs,
+                hookResolvers,
+                preHookDefs,
+                preHookResolvers,
+                &self);
           });
 
   m.def(

@@ -33,6 +33,14 @@ struct Foo : torch::CustomClassHolder {
   }
 };
 
+struct LambdaInit : torch::CustomClassHolder {
+  int x, y;
+  LambdaInit(int x_, int y_) : x(x_), y(y_) {}
+  int64_t diff() {
+    return this->x - this->y;
+  }
+};
+
 struct NoInit : torch::CustomClassHolder {
   int64_t x;
 };
@@ -201,6 +209,16 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
       .def("combine", &Foo::combine);
+
+  m.class_<LambdaInit>("_LambdaInit")
+      .def(torch::init([](int64_t x, int64_t y, bool swap) {
+        if (swap) {
+          return c10::make_intrusive<LambdaInit>(y, x);
+        } else {
+          return c10::make_intrusive<LambdaInit>(x, y);
+        }
+      }))
+      .def("diff", &LambdaInit::diff);
 
   m.class_<NoInit>("_NoInit").def(
       "get_x", [](const c10::intrusive_ptr<NoInit>& self) { return self->x; });

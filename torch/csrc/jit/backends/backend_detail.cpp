@@ -1,5 +1,8 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
+
 #include <ATen/core/builtin_function.h>
+
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -46,6 +49,40 @@ c10::FunctionSchema getExecuteSchema() {
       /*overload_name=*/"",
       /*arguments=*/{self, handle, input},
       /*returns=*/{output});
+}
+
+namespace {
+std::unordered_map<std::string, BackendPreprocessFunction>&
+backendPreprocessFunctions() {
+  static std::unordered_map<std::string, BackendPreprocessFunction>
+      preprocess_functions;
+  return preprocess_functions;
+}
+} // namespace
+
+bool hasBackendPreprocessFunction(const std::string& name) {
+  return backendPreprocessFunctions().count(name);
+}
+
+void registerBackendPreprocessFunction(
+    const std::string& name,
+    const BackendPreprocessFunction& preprocess) {
+  TORCH_CHECK(
+      !detail::hasBackendPreprocessFunction(name),
+      "Preprocessing function for backend ",
+      name,
+      " is already registered. Ensure that registration is only called once.");
+  detail::backendPreprocessFunctions()[name] = preprocess;
+}
+
+BackendPreprocessFunction getBackendPreprocessFunction(
+    const std::string& name) {
+  TORCH_CHECK(
+      hasBackendPreprocessFunction(name),
+      "Preprocessing function for backend ",
+      name,
+      " is not registered.");
+  return backendPreprocessFunctions()[name];
 }
 } // namespace detail
 } // namespace jit
