@@ -3879,6 +3879,74 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):
                 rref.backward()
 
+    def _test_rref_proxy_timeout(self, rref_proxy_api):
+        dst_rank = (self.rank + 1) % self.world_size
+        dst = worker_name(dst_rank)
+        rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), ))
+        # Ensure RRef is created on remote node.
+        rref.to_here()
+        rref_api = getattr(rref, rref_proxy_api)
+        self.assertTrue(rref_api is not None, f"Failed to get RRef proxy api: {rref_proxy_api}")
+        expected_error = self.get_timeout_error_regex()
+        timeout = 2
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            result = rref_api(timeout=timeout).my_slow_method(torch.ones(2, 2))
+            if rref_api == rref.rpc_async:
+                result.wait()
+            elif rref_api == rref.remote:
+                result._get_future().wait()
+
+        # Case where rpc.remote() is stuck and exceeds timeout
+        # return
+        slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
+        timeout = 0.01
+        rref_api = getattr(slow_rref, rref_proxy_api)
+        expect_raise_inline = rref_api in [rref.rpc_sync, rref.remote]
+        with self.assertRaisesRegex(RuntimeError, expected_error) if expect_raise_inline else contextlib.suppress():
+            result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+
+        if not expect_raise_inline:
+            with self.assertRaisesRegex(RuntimeError, expected_error):
+                result.wait()
+        if rref_api in [rref.rpc_sync, rref.remote]:
+            with self.assertRaisesRegex(RuntimeError, expected_error):
+                result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+        else:
+            with self.assertRaisesRegex(RuntimeError, expected_error):
+                rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2)).wait()
+
+    @dist_init
+    def test_rref_proxy_timeout(self):
+        for rpc_api in ["rpc_async", "rpc_sync", "remote"]:
+            if rpc_api != "rpc_async": continue
+            self._test_rref_proxy_timeout(rpc_api)
+
+    @dist_init
+    def _test_rref_get_type_timeout(self, blocking):
+        # Test where we try to get the type of a RRef from an owner, but RRef
+        # creation is slower than timeout passed into _get_type.
+        dst_rank = (self.rank + 1) % self.world_size
+        dst = worker_name(dst_rank)
+        slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
+        timeout = 0.5
+        expected_err = self.get_timeout_error_regex()
+        # Blocking: blocks on inline call
+        if blocking:
+            with self.assertRaisesRegex(RuntimeError, expected_err):
+                slow_rref._get_type(timeout=timeout, blocking=blocking)
+        # Non-blocking: blocks on wait
+        else:
+            fut = slow_rref._get_type(timeout=timeout, blocking=blocking)
+            with self.assertRaisesRegex(RuntimeError, expected_err):
+                fut.wait()
+
+    def test_rref_get_type_timeout_blocking(self):
+        self._test_rref_get_type_timeout(blocking=True)
+
+    def test_rref_get_type_timeout_non_blocking(self):
+        self._test_rref_get_type_timeout(blocking=False)
+
+
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_mismatched_type_for_options(self):
@@ -5337,30 +5405,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
-    @dist_init
-    def _test_rref_get_type_timeout(self, blocking):
-        # Test where we try to get the type of a RRef from an owner, but RRef
-        # creation is slower than timeout passed into _get_type.
-        dst_rank = (self.rank + 1) % self.world_size
-        dst = worker_name(dst_rank)
-        slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
-        timeout = 0.5
-        expected_err = self.get_timeout_error_regex()
-        # Blocking: blocks on inline call
-        if blocking:
-            with self.assertRaisesRegex(RuntimeError, expected_err):
-                slow_rref._get_type(timeout=timeout, blocking=blocking)
-        # Non-blocking: blocks on wait
-        else:
-            fut = slow_rref._get_type(timeout=timeout, blocking=blocking)
-            with self.assertRaisesRegex(RuntimeError, expected_err):
-                fut.wait()
-
-    def test_rref_get_type_timeout_blocking(self):
-        self._test_rref_get_type_timeout(blocking=True)
-
-    def test_rref_get_type_timeout_non_blocking(self):
-        self._test_rref_get_type_timeout(blocking=False)
 
     @dist_init
     def test_op_with_invalid_args(self):
@@ -5369,45 +5413,3 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             RuntimeError, "Overloaded torch operator invoked from Python failed to many any schema"
         ):
             rpc.rpc_sync(dst, torch.add, args=())
-
-    def _test_rref_proxy_timeout(self, rref_proxy_api):
-        dst_rank = (self.rank + 1) % self.world_size
-        dst = worker_name(dst_rank)
-        rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), ))
-        # Ensure RRef is created on remote node.
-        rref.to_here()
-        rref_api = getattr(rref, rref_proxy_api)
-        self.assertTrue(rref_api is not None, f"Failed to get RRef proxy api: {rref_proxy_api}")
-        expected_error = self.get_timeout_error_regex()
-        timeout = 2
-        with self.assertRaisesRegex(RuntimeError, expected_error):
-            result = rref_api(timeout=timeout).my_slow_method(torch.ones(2, 2))
-            if rref_api == rref.rpc_async:
-                result.wait()
-            elif rref_api == rref.remote:
-                result._get_future().wait()
-
-        # return
-        # Case where rpc.remote() is stuck and exceeds timeout
-        slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
-        timeout = 0.01
-        rref_api = getattr(slow_rref, rref_proxy_api)
-        expect_raise_inline = rref_api in [rref.rpc_sync, rref.remote]
-        with self.assertRaisesRegex(RuntimeError, expected_error) if expect_raise_inline else contextlib.suppress():
-            result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
-
-        if not expect_raise_inline:
-            with self.assertRaisesRegex(RuntimeError, expected_error):
-                result.wait()
-        if rref_api in [rref.rpc_sync, rref.remote]:
-            with self.assertRaisesRegex(RuntimeError, expected_error):
-                result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
-        else:
-            with self.assertRaisesRegex(RuntimeError, expected_error):
-                rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2)).wait()
-
-    @dist_init
-    def test_rref_proxy_timeout(self):
-        for rpc_api in ["rpc_async", "rpc_sync", "remote"]:
-            if rpc_api != "rpc_async": continue
-            self._test_rref_proxy_timeout(rpc_api)
