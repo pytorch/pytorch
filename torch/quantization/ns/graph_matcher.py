@@ -11,7 +11,7 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from .utils import getattr_from_fqn
+from .utils import getattr_from_fqn, print_node
 
 from typing import Dict, Tuple, List, Optional, Set, Callable
 
@@ -42,6 +42,7 @@ def get_type_a_related_to_b() -> Set[Tuple[Callable, Callable]]:
         set([
             F.linear,
             toq.linear,
+            toq.linear_relu,
         ]),
         # add
         set([
@@ -87,12 +88,41 @@ def get_non_matchable_modules() -> Set[Callable]:
         torch.quantization.FakeQuantizeBase,
     ])
 
-class _NSGraphMatchableNodesIterator:
+def get_reversed_fusions() -> Set[Tuple[Callable, Callable]]:
+    """
+    TODO(before land): docblock
+    """
+    return set([
+        (F.relu, F.linear),
+    ])
+
+# TODO(future PR): we should see if we can reuse quantization's fusion
+# patterns here.
+def end_node_matches_reversed_fusion(
+    end_node: Node,
+    reversed_fusion: Tuple[Callable, Callable],
+) -> bool:
+    if end_node.op == 'call_function':
+        cur_node = end_node
+        for fusion_idx in range(len(reversed_fusion)):
+            cur_fusion_op = reversed_fusion[fusion_idx]
+            if cur_node.target != cur_fusion_op:
+                return False
+            if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
+                cur_node = cur_node.args[0]
+            else:
+                return False
+        return True
+    # TODO(future PR): handle call_module
+    return False
+
+
+class _NSGraphMatchableSubgraphsIterator:
     """
     Iterates through the graph of gm, starting with the output nodes
     and continuing backwards.
-    1. Returns matchable nodes, in order
-    2. Skips over non-matchable nodes
+    1. Returns matchable subgraphs, in order
+    2. Skips over non-matchable subgraphs
     """
     def __init__(
         self,
@@ -111,27 +141,52 @@ class _NSGraphMatchableNodesIterator:
     def __iter__(self):
         return self
 
-    def __next__(self) -> Node:
+    def __next__(self) -> Tuple[Node, Node]:
         """
-        Returns the next matchable node.
+        Returns the next matchable subgraph, defined by (start_node, end_node)
         """
         while len(self.stack) > 0:
-            cur_node = self.stack.pop()
-            if cur_node in self.seen_nodes:
+            cur_end_node = self.stack.pop()
+            if cur_end_node in self.seen_nodes:
                 continue
-            self.seen_nodes.add(cur_node)
+
+            # for subgraphs which are single nodes, start_node == end_node
+            # for subgraphs with more than one node, start node != end_node
+            cur_start_node = cur_end_node
+
+            # Check for potential fusions. For now, we are greedy
+            # and always skip all non-base nodes of a fusion.  For example,
+            # if we match linear-relu backwards, we will always skip the
+            # relu node and attempt to match the linear node.  This can
+            # be made configurable later if needed.
+            for _reverse_fusion_ops in get_reversed_fusions():
+                is_match = end_node_matches_reversed_fusion(
+                    cur_end_node, _reverse_fusion_ops)
+                if is_match:
+                    # navigate to the base node
+                    for fusion_idx in range(len(_reverse_fusion_ops) - 1):
+                        self.seen_nodes.add(cur_start_node)
+                        # for now, assume that there are no other nodes
+                        # which need to be added to the stack
+                        cur_start_node = cur_start_node.args[0]
+                    break
+
+            self.seen_nodes.add(cur_start_node)
             # add args of previous nodes to stack
             # TODO(future PR): handle kwargs as needed
-            for arg in cur_node.args:
+            for arg in cur_start_node.args:
                 if isinstance(arg, Node):
                     self.stack.append(arg)
                 # TODO(future PR): handle other arg types such as Tuple, etc
 
             # skip observers, etc
-            if not self._is_matchable(cur_node):
+            # note: this check is done on the start_node, i.e.
+            # if we are matching linear-relu in reverse, this would do the matchable
+            # check on the linear
+            if not self._is_matchable(cur_start_node):
                 continue
 
-            return cur_node
+            return cur_start_node, cur_end_node
 
         raise StopIteration
 
@@ -205,15 +260,19 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[Callable]:
         return type(mod)
     return None
 
-def get_matching_node_pairs(
+def get_matching_subgraph_pairs(
     gm_a: GraphModule,
     gm_b: GraphModule,
-) -> Dict[str, Tuple[Node, Node]]:
+) -> Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]]:
     """
-    Matches matchable nodes of graph_a to graph_b.
+    Matches matchable subgraphs of graph_a to graph_b.
 
     For a node, "matchable" is defined as a node which is not an observer,
     fake_quants, quant or dequant.
+
+    A subgraph can contain one or more nodes.  A subgraph is matchable if
+    at least one node inside of it is matchable.
+    TODO: finish the docblock about subgraphs.
 
     A pair of nodes is "related" if both nodes represent the same mathematical
     operation across different quantization flavors. For example,
@@ -224,11 +283,11 @@ def get_matching_node_pairs(
     if node_a and node_b are related.
 
     For graphs A and B, they will match iff:
-    1. the number of matchable nodes in A and B is equivalent
-    2. when iterating through the matchable nodes of A and B in the same order, each
-       corresponding pair of nodes is related.
+    1. the number of matchable subgraphs in A and B is equivalent
+    2. when iterating through the matchable subgraphs of A and B in the same order, each
+       corresponding pair of base nodes is related.
 
-    Practically, this enables us to find the corresponding nodes between
+    Practically, this enables us to find the corresponding subgraphs between
     graphs of related models.  For example, if we had two graphs such as:
 
     graph_a: x0 -> conv_0 (type: nn.Conv2d) -> obs_0 -> x1
@@ -249,48 +308,55 @@ def get_matching_node_pairs(
     """
     non_matchable_functions = get_non_matchable_functions()
     non_matchable_modules = get_non_matchable_modules()
-    graph_a_iterator = _NSGraphMatchableNodesIterator(
+    graph_a_iterator = _NSGraphMatchableSubgraphsIterator(
         gm_a, non_matchable_functions, non_matchable_modules)
-    graph_b_iterator = _NSGraphMatchableNodesIterator(
+    graph_b_iterator = _NSGraphMatchableSubgraphsIterator(
         gm_b, non_matchable_functions, non_matchable_modules)
     results = {}
     type_a_related_to_b = get_type_a_related_to_b()
 
     while True:
         # fetch the next nodes from a and b
-        cur_node_a, cur_node_b = None, None
+        cur_start_node_a, cur_start_node_b = None, None
+        cur_end_node_a, cur_end_node_b = None, None
         try:
-            cur_node_a = next(graph_a_iterator)
+            cur_start_node_a, cur_end_node_a = next(graph_a_iterator)
         except StopIteration:
             pass
         try:
-            cur_node_b = next(graph_b_iterator)
+            cur_start_node_b, cur_end_node_b = next(graph_b_iterator)
         except StopIteration:
             pass
 
         # look up types of a and b for useful error messages
         type_a, type_b = None, None
-        if cur_node_a is not None:
-            type_a = _get_node_target_type(cur_node_a, gm_a)
-        if cur_node_b is not None:
-            type_b = _get_node_target_type(cur_node_b, gm_b)
+        if cur_end_node_a is not None:
+            type_a = _get_node_target_type(cur_end_node_a, gm_a)
+        if cur_end_node_b is not None:
+            type_b = _get_node_target_type(cur_end_node_b, gm_b)
 
         # check for results and determine what to do next
-        if cur_node_a is not None and cur_node_b is not None:
+        if cur_end_node_a is not None and cur_end_node_b is not None:
             # both nodes were fetched, check for relatedness
-            if not _node_a_related_to_b(cur_node_a, cur_node_b,
+            # note: relatedness is checked on the start node, i.e.
+            # if a linear-relu pattern is checked, we would check for relatedness
+            # of the linear
+            if not _node_a_related_to_b(cur_start_node_a, cur_start_node_b,
                                         gm_a, gm_b, type_a_related_to_b):
-                msg = f"({cur_node_a}, {type_a}) and ({cur_node_b}, {type_b}) are not related"
+                msg = f"({cur_start_node_a}, {type_a}) and ({cur_start_node_b}, {type_b}) are not related"
                 raise GraphMatchingException(msg)
-            key_name = _get_name_for_node_pair(cur_node_a, cur_node_b)
-            results[key_name] = (cur_node_a, cur_node_b)
+            key_name = _get_name_for_node_pair(cur_start_node_a, cur_start_node_b)
+            results[key_name] = (
+                (cur_start_node_a, cur_end_node_a),
+                (cur_start_node_b, cur_end_node_b),
+            )
             continue
-        elif cur_node_a is None and cur_node_b is None:
+        elif cur_end_node_a is None and cur_end_node_b is None:
             # we reached the end of both graphs
             break
         else:
             # only one node was fetched, no match possible, throw error
-            msg = f"Matchable nodes count mismatch: ({cur_node_a}, {type_a}) and ({cur_node_b}, {type_b})"
+            msg = f"Matchable nodes count mismatch: ({cur_end_node_a}, {type_a}) and ({cur_end_node_b}, {type_b})"
             raise GraphMatchingException(msg)
 
     return results
