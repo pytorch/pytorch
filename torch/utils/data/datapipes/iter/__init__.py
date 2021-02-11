@@ -9,12 +9,12 @@ from torch.utils.data.datapipes.iter.groupbykey import GroupByKeyIterDataPipe as
 from torch.utils.data.datapipes.iter.callable import \
     (MapIterDataPipe as Map, CollateIterDataPipe as Collate)
 from torch.utils.data.datapipes.iter.combinatorics import \
-    (SamplerIterDataPipe as Sampler)
+    (SamplerIterDataPipe as Sampler, ShuffleIterDataPipe as Shuffle)
 from torch.utils.data.datapipes.iter.grouping import \
     (BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch)
 from torch.utils.data.datapipes.iter.selecting import \
     (FilterIterDataPipe as Filter)
 
 
-__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFormTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
-           'Batch', 'BucketBatch', 'Collate', 'Filter', 'Map', 'Sampler']
+__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
+           'Batch', 'BucketBatch', 'Collate', 'Filter', 'Map', 'Sampler', 'Shuffle']

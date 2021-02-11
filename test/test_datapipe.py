@@ -433,6 +433,29 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
 
+    def test_shuffle_datapipe(self):
+        exp = list(range(20))
+        input_ds = IDP(exp)
+
+        with self.assertRaises(AssertionError):
+            shuffle_dp = dp.iter.Shuffle(input_ds, buffer_size=0)
+
+        for bs in (5, 20, 25):
+            shuffle_dp = dp.iter.Shuffle(input_ds, buffer_size=bs)
+            self.assertEqual(len(shuffle_dp), len(input_ds))
+
+            random.seed(123)
+            res = [d for d in shuffle_dp]
+            self.assertEqual(sorted(res), exp)
+
+            # Test Deterministic
+            random.seed(123)
+            res2 = [d for d in shuffle_dp]
+            self.assertEqual(res, res2)
+
+        shuffle_dp_nl = dp.iter.Shuffle(IDP_NoLen(range(20)), buffer_size=5)
+        with self.assertRaises(NotImplementedError):
+            len(shuffle_dp_nl)
 
 if __name__ == '__main__':
     run_tests()

@@ -405,7 +405,6 @@ Example::
 .. autoclass:: TensorDataset
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
-.. autoclass:: BufferedShuffleDataset
 .. autoclass:: Subset
 .. autofunction:: torch.utils.data.get_worker_info
 .. autofunction:: torch.utils.data.random_split
