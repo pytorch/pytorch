@@ -14,11 +14,11 @@ import warnings
 from textwrap import dedent
 import torch
 import sys
+import builtins
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
-from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
@@ -229,6 +229,37 @@ def can_compile_class(cls):
     fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
     return all(has_code)
+
+
+def get_callable_argument_names(fn):
+    """
+    Gets names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
+    Returns an empty list when other types of arguments are present.
+
+    This is used by `torch.jit.trace` to assign meaningful argument names to
+    traced functions and modules.
+
+    Args:
+        fn: A callable.
+    Returns:
+        Argument names: List[str]
+    """
+    # inspect.signature may fail, give up in that case.
+    try:
+        callable_signature = inspect.signature(fn)
+    except Exception:
+        return []
+
+    argument_names = []
+    for name, param in callable_signature.parameters.items():
+        # All four other types of arguments do not map to individual values
+        # with a keyword as name.
+        if not param.kind == param.POSITIONAL_OR_KEYWORD:
+            return []
+
+        argument_names.append(name)
+
+    return argument_names
 
 
 def get_annotation_str(annotation):
