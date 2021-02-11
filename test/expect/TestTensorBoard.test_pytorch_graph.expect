@@ -1,5 +1,5 @@
 node {
-  name: "input/input"
+  name: "input/x"
   op: "IO Node"
   attr {
     key: "_output_shapes"
