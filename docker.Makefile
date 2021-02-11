@@ -17,7 +17,7 @@ BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-de
 INSTALL_CHANNEL           = pytorch
 
 PYTHON_VERSION            = 3.7
-PYTORCH_VERSION           = $(shell git describe --tags)
+PYTORCH_VERSION           = $(shell git describe --tags --always)
 # Can be either official / dev
 BUILD_TYPE                = dev
 BUILD_PROGRESS            = auto
