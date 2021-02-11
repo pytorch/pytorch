@@ -331,11 +331,13 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     assign_return_values = f'{tie_return_values(f)} = ' \
                            if f.func.kind() == SchemaKind.functional and f.func.returns else ''
 
-    api_name = cpp.name(f.func, faithful_name_for_out_overloads=True)
-    if f.manual_cpp_binding:
-        # The redispatching namespace doesn't include fastpath manual_cpp_binding ops.
-        # Instead, call the codegen'd __dispatch_ binding
-        api_name = '__dispatch_' + api_name
+    # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
+    # We could probably work harder to ensure that the fast variants are called instead, but the perf benefit would be minimal.
+    sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
+    if sig_group.faithful_signature is not None:
+        api_name = sig_group.faithful_signature.name()
+    else:
+        api_name = sig_group.signature.name()
 
     trace_body.append(TRACE_DISPATCH.substitute(
         assign_return_values=assign_return_values,

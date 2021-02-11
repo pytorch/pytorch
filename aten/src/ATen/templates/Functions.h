@@ -146,4 +146,8 @@ inline int64_t stride(const Tensor& tensor, int64_t dim) {
   return tensor.stride(dim);
 }
 
+inline bool is_complex(const Tensor& tensor) {
+  return tensor.is_complex();
+}
+
 } // namespace at
