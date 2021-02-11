@@ -15,6 +15,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/util/Optional.h>
@@ -1893,7 +1894,7 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   // of freedom we don't want; for example, consider shape [0, 1, 3, 0], with start_dim=1, end_dim=2.
   // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
   // can take on any value and satisfy the constraints.
-  auto slice_numel = prod_intlist(self.sizes().slice(start_dim, end_dim - start_dim + 1));
+  auto slice_numel = c10::multiply_integers(self.sizes().slice(start_dim, end_dim - start_dim + 1));
   std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (const auto i : c10::irange(start_dim)) {
