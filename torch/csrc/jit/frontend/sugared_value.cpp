@@ -190,7 +190,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   // If field is a type, then call the aten::to op
   if (field == "type") {
     if (auto builtin = BuiltinFunction::tryCreate(
-          Symbol::aten("to"), NamedValue(loc, "self", value_))) {
+            Symbol::aten("to"), NamedValue(loc, "self", value_))) {
       return builtin;
     }
   }
