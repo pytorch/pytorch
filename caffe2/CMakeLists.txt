@@ -12,9 +12,9 @@ if(MSVC)
 endif()
 
 # Debug messages - if you want to get a list of source files and examine
-# target information enable the following by -DADD_CMAKE_DEBUG_INFO=ON.
-option(ADD_CMAKE_DEBUG_INFO "Option to print target source file and properties" OFF)
-if(ADD_CMAKE_DEBUG_INFO)
+# target information enable the following by -DPRINT_CMAKE_DEBUG_INFO=ON.
+set(PRINT_CMAKE_DEBUG_INFO FALSE CACHE BOOL "print cmake debug information")
+if(PRINT_CMAKE_DEBUG_INFO)
   include(../cmake/DebugHelper.cmake)
 endif()
 
@@ -195,7 +195,7 @@ endif()
 
 # Debug messages - if you want to get a list of source files, enable the
 # following.
-if(ADD_CMAKE_DEBUG_INFO)
+if(PRINT_CMAKE_DEBUG_INFO)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
     message(STATUS "  " ${tmp})
@@ -1272,7 +1272,7 @@ elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
 endif()
 
-if(ADD_CMAKE_DEBUG_INFO)
+if(PRINT_CMAKE_DEBUG_INFO)
   print_target_properties(torch)
   print_target_properties(torch_cpu)
 endif()
