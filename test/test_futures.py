@@ -101,6 +101,9 @@ class TestFuture(TestCase):
 
         self.assertEqual(f.wait(), torch.ones(2, 2))
 
+    def test_set_result_error(self):
+        pass
+
     def test_wait_multi_thread(self) -> None:
 
         def slow_set_future(fut, value):
