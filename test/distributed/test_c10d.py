@@ -1,4 +1,5 @@
 import copy
+import logging
 import math
 import operator
 import os
@@ -527,6 +528,18 @@ class RendezvousEnvTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_connect_failures
+    def test_logging_init(self):
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = str(common.find_free_port())
+        os.environ["RANK"] = "0"
+
+        self.assertFalse(logging.root.hasHandlers())
+        c10d.init_process_group(backend="gloo", init_method="env://")
+        self.assertFalse(logging.root.hasHandlers())
+        c10d.destroy_process_group()
 
 
 class RendezvousFileTest(TestCase):
