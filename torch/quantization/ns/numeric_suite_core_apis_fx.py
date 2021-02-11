@@ -129,19 +129,23 @@ def prepare_model_outputs(
 
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
 
-    nodes_to_instrument_a = []
-    nodes_to_instrument_b = []
+    node_to_instrument_to_other_node_name_a = {}
+    node_to_instrument_to_other_node_name_b = {}
     for match_name, match in matched_subgraph_pairs.items():
         (node_start_a, node_end_a), (node_start_b, node_end_b) = match
         # TODO(future PR): do not observe pairs of nodes we do not care
         #   about (both fp32, denylist, etc)
         # Note: for matching activations we always use the end nodes,
         # such as observing the output of relu in linear-relu
-        nodes_to_instrument_a.append(node_end_a)
-        nodes_to_instrument_b.append(node_end_b)
+        # Note: other_node_name is set to None in model B's loggers,
+        # and set to the corresponding model B's node in model A's loggers.
+        node_to_instrument_to_other_node_name_a[node_end_a] = node_end_b.name
+        node_to_instrument_to_other_node_name_b[node_end_b] = None
 
-    gm_a = remove_observers_add_loggers(gm_a, nodes_to_instrument_a, logger_cls, name_a)
-    gm_b = remove_observers_add_loggers(gm_b, nodes_to_instrument_b, logger_cls, name_b)
+    gm_a = remove_observers_add_loggers(
+        gm_a, node_to_instrument_to_other_node_name_a, logger_cls, name_a)
+    gm_b = remove_observers_add_loggers(
+        gm_b, node_to_instrument_to_other_node_name_b, logger_cls, name_b)
     return (gm_a, gm_b)
 
 # Note: this is not a user facing API
@@ -190,7 +194,12 @@ def get_matching_activations(
                 )
             )
             if is_logger:
-                results[mod.node_name + '.stats'][mod.model_name] = mod.stats
+                # If logger_obj.other_node_name is populated, then this logger
+                # is from model A, and other_node_name is the name from model B.
+                if mod.other_node_name is None:
+                    results[mod.node_name + '.stats'][mod.model_name] = mod.stats
+                else:
+                    results[mod.other_node_name + '.stats'][mod.model_name] = mod.stats
     return dict(results)
 
 # Note: this is not a user facing API

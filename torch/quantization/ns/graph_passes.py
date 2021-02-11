@@ -12,7 +12,7 @@ from .utils import (
     return_first_non_observer_node,
 )
 
-from typing import Dict, Tuple, Callable, List, Any, Optional
+from typing import Dict, Tuple, Callable, Any, Optional
 
 def _insert_logger_after_node(
     node: Node,
@@ -45,7 +45,7 @@ def _insert_logger_after_node(
 
 def remove_observers_add_loggers(
     gm: GraphModule,
-    nodes_to_instrument: List[Node],
+    node_to_instrument_to_other_node_name: Dict[Node, Optional[str]],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
@@ -71,12 +71,14 @@ def remove_observers_add_loggers(
             # remove activation post process node
             env[node.name] = env[node.args[0].name]
 
-        elif node in nodes_to_instrument:
+        elif node in node_to_instrument_to_other_node_name:
+            other_node_name = node_to_instrument_to_other_node_name[node]
             # ensure env is populated with base node
             env[node.name] = new_graph.node_copy(node, load_arg)
             # add the logger after the base node
             env[node.name] = _insert_logger_after_node(
-                env[node.name], gm, logger_cls, '_ns_logger_', model_name)
+                env[node.name], gm, logger_cls, '_ns_logger_', model_name,
+                other_node_name)
 
         else:
             env[node.name] = new_graph.node_copy(node, load_arg)
@@ -326,7 +328,7 @@ def create_a_shadows_b(
 
         elif node_b in node_b_to_matched_subgraph_a:
             node_start_a, node_end_a = node_b_to_matched_subgraph_a[node_b]
-            if True:
+            if False:
                 print('b')
                 print_node(node_b)
                 print('a')

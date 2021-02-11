@@ -11,7 +11,7 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from .utils import getattr_from_fqn, print_node
+from .utils import getattr_from_fqn
 
 from typing import Dict, Tuple, List, Optional, Set, Callable
 
@@ -90,7 +90,8 @@ def get_non_matchable_modules() -> Set[Callable]:
 
 def get_reversed_fusions() -> Set[Tuple[Callable, Callable]]:
     """
-    TODO(before land): docblock
+    Set of potential fusions, in reverse order.  The order is reversed
+    to match how fusion patterns are defined in quantization code.
     """
     return set([
         (F.relu, F.linear),
@@ -102,6 +103,10 @@ def end_node_matches_reversed_fusion(
     end_node: Node,
     reversed_fusion: Tuple[Callable, Callable],
 ) -> bool:
+    """
+    Returns true if a pattern ending with `end_node` matches
+    the fusion pattern.
+    """
     if end_node.op == 'call_function':
         cur_node = end_node
         for fusion_idx in range(len(reversed_fusion)):
@@ -121,7 +126,8 @@ class _NSGraphMatchableSubgraphsIterator:
     """
     Iterates through the graph of gm, starting with the output nodes
     and continuing backwards.
-    1. Returns matchable subgraphs, in order
+    1. Returns matchable subgraphs, in order. A subgraph is defined by
+       (start_node, end_node).
     2. Skips over non-matchable subgraphs
     """
     def __init__(
@@ -240,16 +246,18 @@ def _node_a_related_to_b(
         return key in type_a_related_to_b
     return False
 
-def _get_name_for_node_pair(
-    node_a: Node,
-    node_b: Node,
+def _get_name_for_subgraph_pair(
+    start_node_a: Node,
+    end_node_a: Node,
+    start_node_b: Node,
+    end_node_b: Node,
 ) -> str:
-    if node_b.op == 'call_module':
-        assert isinstance(node_b.target, str)
-        return node_b.target
+    if end_node_b.op == 'call_module':
+        assert isinstance(end_node_b.target, str)
+        return end_node_b.target
     # for now, use node name.
     # TODO(future PR): find a better solution
-    return node_b.name
+    return end_node_b.name
 
 def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[Callable]:
     if node.op == 'call_function':
@@ -271,8 +279,13 @@ def get_matching_subgraph_pairs(
     fake_quants, quant or dequant.
 
     A subgraph can contain one or more nodes.  A subgraph is matchable if
-    at least one node inside of it is matchable.
-    TODO: finish the docblock about subgraphs.
+    at least one node inside of it is matchable.  Currently, all nodes in
+    a subgraph must be matchable (because we assume no observers will be
+    inserted in the middle of a fusion).
+
+    A subgraph is defined by (start_node, end_node).  We assume that only
+    start_node and end_node are linked with the surrounding graph, all other
+    nodes in a subgraph are self-contained.
 
     A pair of nodes is "related" if both nodes represent the same mathematical
     operation across different quantization flavors. For example,
@@ -287,24 +300,40 @@ def get_matching_subgraph_pairs(
     2. when iterating through the matchable subgraphs of A and B in the same order, each
        corresponding pair of base nodes is related.
 
-    Practically, this enables us to find the corresponding subgraphs between
+    This enables us to find the corresponding subgraphs between
     graphs of related models.  For example, if we had two graphs such as:
 
     graph_a: x0 -> conv_0 (type: nn.Conv2d) -> obs_0 -> x1
              w  -/
              b  -/
 
-    graph_b: x0 -> quant_0 -> conv_0 (type: nnq.Conv2d) -> dequant_0 -> x1
+    graph_b: x0 -> quant_0 -> qconv_0 (type: nnq.Conv2d) -> dequant_0 -> x1
            packed_params_0 -/
 
     This function will return the following result:
     {
         'conv_0': (  # the name of the node in graph_b
-          conv_0,  # the Node object from graph A
-          conv_0,  # the Node object from graph B
+          (conv_0, conv_0),  # (start_node_a, end_node_a)
+          (qconv_0, qconv_0),  # (start_node_b, end_node_b)
         ),
     }
 
+    Or, if we have a fusion pattern,
+
+    graph_a: x0 -> linear_0 -> relu_0 -> obs_0 -> x1
+             w  -/
+             b  -/
+
+    graph_b: x0 -> quant_0 -> linear_relu_0 -> dequant_0 -> x1
+           packed_params_0 -/
+
+    This function will return the following result:
+    {
+        'linear_relu_0': (  # the name of the node in graph_b
+          (linear_0, relu_0),  # (start_node_a, end_node_a)
+          (linear_relu_0, linear_relu_0),  # (start_node_b, end_node_b)
+        ),
+    }
     """
     non_matchable_functions = get_non_matchable_functions()
     non_matchable_modules = get_non_matchable_modules()
@@ -345,7 +374,8 @@ def get_matching_subgraph_pairs(
                                         gm_a, gm_b, type_a_related_to_b):
                 msg = f"({cur_start_node_a}, {type_a}) and ({cur_start_node_b}, {type_b}) are not related"
                 raise GraphMatchingException(msg)
-            key_name = _get_name_for_node_pair(cur_start_node_a, cur_start_node_b)
+            key_name = _get_name_for_subgraph_pair(
+                cur_start_node_a, cur_end_node_a, cur_start_node_b, cur_end_node_b)
             results[key_name] = (
                 (cur_start_node_a, cur_end_node_a),
                 (cur_start_node_b, cur_end_node_b),

@@ -689,7 +689,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
                 x = F.linear(x, self.w1, self.b1)
                 x = F.linear(x, self.w2, self.b2)
                 # TODO(before land): fix this, need to update names of loggers
-                # x = F.relu(x)
+                x = F.relu(x)
                 return x
 
         m = M().eval()
