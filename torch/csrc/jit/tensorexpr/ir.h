@@ -23,6 +23,12 @@ enum CompareSelectOperation {
   kNE,
 };
 
+enum CompareSelectBias {
+  kUnbiased,
+  kLikely,
+  kUnlikely,
+};
+
 inline int getPrecedence(IRNodeType ty) {
   // Match C++ operator precedence rules, since some pretty-print expressions to
   // C++. SEE: https://en.cppreference.com/w/cpp/language/operator_precedence
@@ -563,11 +569,15 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   const Expr* ret_val2() const {
     return this->ret_val2_;
   }
+  CompareSelectBias bias() const {
+    return bias_;
+  }
 
   static ExprHandle make(
       const ExprHandle& lhs,
       const ExprHandle& rhs,
-      CompareSelectOperation cmp_op) {
+      CompareSelectOperation cmp_op,
+      CompareSelectBias bias = kUnbiased) {
     if (lhs.dtype() != rhs.dtype()) {
       throw malformed_input("bad dtype in CompareSelect");
     }
@@ -576,7 +586,8 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         rhs.node(),
         IntImm::make(1).node(),
         IntImm::make(0).node(),
-        cmp_op));
+        cmp_op,
+        bias));
   }
 
   static ExprHandle make(
@@ -584,12 +595,18 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& rhs,
       const ExprHandle& ret_val1,
       const ExprHandle& ret_val2,
-      CompareSelectOperation cmp_op) {
+      CompareSelectOperation cmp_op,
+      CompareSelectBias bias = kUnbiased) {
     if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
       throw malformed_input("bad dtype in CompareSelect");
     }
     return ExprHandle(new CompareSelect(
-        lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
+        lhs.node(),
+        rhs.node(),
+        ret_val1.node(),
+        ret_val2.node(),
+        cmp_op,
+        bias));
   }
 
   CompareSelect(
@@ -597,25 +614,32 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const Expr* rhs,
       const Expr* ret_val1,
       const Expr* ret_val2,
-      CompareSelectOperation cmp_op)
+      CompareSelectOperation cmp_op,
+      CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(ret_val1->dtype()),
         lhs_(lhs),
         rhs_(rhs),
         ret_val1_(ret_val1),
         ret_val2_(ret_val2),
-        compare_op_(cmp_op) {
+        compare_op_(cmp_op),
+        bias_(bias) {
     if (ret_val1->dtype() != ret_val2->dtype()) {
       throw malformed_input("bad dtype in CompareSelect");
     }
   }
 
-  CompareSelect(const Expr* lhs, const Expr* rhs, CompareSelectOperation cmp_op)
+  CompareSelect(
+      const Expr* lhs,
+      const Expr* rhs,
+      CompareSelectOperation cmp_op,
+      CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(kInt),
         lhs_(lhs),
         rhs_(rhs),
         ret_val1_(new IntImm(1)),
         ret_val2_(new IntImm(0)),
-        compare_op_(cmp_op) {}
+        compare_op_(cmp_op),
+        bias_(bias) {}
 
  private:
   const Expr* lhs_;
@@ -623,6 +647,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   const Expr* ret_val1_;
   const Expr* ret_val2_;
   CompareSelectOperation compare_op_;
+  CompareSelectBias bias_;
 };
 
 enum IntrinsicsOp {
