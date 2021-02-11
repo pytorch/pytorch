@@ -94,7 +94,7 @@ def _graph_for(self, *args, **kwargs):
             n.g_('Subgraph', fw_execution_plans[0].graph)
 
         return graph
-    except:
+    except Exception:
         # fallback approach, we just ran the graph and return the recorded optimized
         # graph
         self(*args, **kwargs)
