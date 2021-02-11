@@ -301,6 +301,7 @@ Tensor upsample_nearest3d_backward_cuda(
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
+  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::upsample_nearest3d_backward_out_cuda_template(
       grad_input, grad_output, osize, input_size, scale_d, scale_h, scale_w);
   return grad_input;
