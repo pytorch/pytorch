@@ -35,9 +35,6 @@ class Pipe;
 
 namespace transport {
 class Context;
-namespace uv {
-class Context;
-} // namespace uv
 } // namespace transport
 
 namespace channel {
@@ -191,7 +188,7 @@ class TensorPipeAgent : public RpcAgent {
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
-  void join() override;
+  void join(bool shutdown = false) override;
   void sync() override;
   void startImpl() override;
   void shutdownImpl() override;
@@ -221,8 +218,7 @@ class TensorPipeAgent : public RpcAgent {
   // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
-  static std::string guessUvAddress(
-      tensorpipe::transport::uv::Context& uvContext);
+  static const std::string& guessAddress();
 
   // For testing purposes.
   size_t timeoutMapSize();
@@ -452,6 +448,10 @@ class TensorPipeAgent : public RpcAgent {
   int32_t serverActiveCalls_{0};
   // Running total of RPC requests that will be completed asynchronously
   int32_t serverActiveAsyncCalls_{0};
+
+  // Whether a global graceful shutdown has begun, in which case we'll silence
+  // error messages due to remote workers closing their pipes.
+  std::atomic<bool> shuttingDown_{false};
 
   // Helpers to modify the counts while correctly dealing with the mutex and cv.
   void increaseCallCount(int32_t& count);

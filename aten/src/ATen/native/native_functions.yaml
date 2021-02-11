@@ -95,10 +95,10 @@
   dispatch:
     DefaultBackend: _fw_primal
 
-- func: make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
+- func: _make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
   variants: function
 
-- func: unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
+- func: _unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
   variants: function
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
@@ -227,7 +227,8 @@
 #     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 7) Add entries to test/test_op_aliases.py's "alias_infos"
+# 7) Add aliases argument to existing OpInfo/UnaryUfuncInfo or create new OpInfo/UnaryUfuncInfo entry 
+# in op_db list in torch/testing/_internal/common_methods_invocations.py
 #
 # See torch.absolute, an alias for torch.abs, as an example.
 
@@ -1392,6 +1393,20 @@
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
+- func: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU, CUDA: div
+
+- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA: div_
+
+- func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: div_out
+
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
   variants: function, method
@@ -1399,6 +1414,16 @@
     DefaultBackend: div
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    DefaultBackend: div_
+
+- func: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+  variants: function, method
+  dispatch:
+    DefaultBackend: div
+
+- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
   variants: method
   dispatch:
     DefaultBackend: div_
@@ -1417,6 +1442,20 @@
   variants: function, method
 
 - func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
+
+- func: divide.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+  variants: function, method
+
+- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+  variants: method
+
+- func: divide.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+
+- func: divide.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+  variants: function, method
+
+- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
   variants: method
 
   # true_divide, an alias for div
@@ -2047,6 +2086,7 @@
 - func: is_complex(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  manual_cpp_binding: True
 
 - func: isreal(Tensor self) -> Tensor
   variants: function, method
@@ -2134,7 +2174,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
-- func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+- func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
@@ -2696,10 +2736,10 @@
     SparseCPU: sparse_sparse_matmul_cpu
     SparseCUDA: sparse_sparse_matmul_cuda
 
-- func: _sparse_matrix_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
+- func: _sparse_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
   dispatch:
-    SparseCPU: sparse_matrix_mask_helper_cpu
-    SparseCUDA: sparse_matrix_mask_helper_cuda
+    SparseCPU: sparse_mask_helper_cpu
+    SparseCUDA: sparse_mask_helper_cuda
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -3545,6 +3585,16 @@
   dispatch:
     DefaultBackend: stack_out
 
+- func: _stack(Tensor[] tensors, int dim=0) -> Tensor
+  dispatch: # match the backends supported by _cat
+    CPU: _stack_cpu
+    DefaultBackend: _stack
+
+- func: _stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch: # match the backends supported by _cat_out
+    CPU: _stack_out_cpu
+    DefaultBackend: _stack_out
+
 - func: hstack(Tensor[] tensors) -> Tensor
 
 - func: hstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
@@ -4283,7 +4333,6 @@
     CUDA: addmm_out_cuda
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
-    MkldnnCPU: mkldnn_addmm_wraper_out
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -4292,7 +4341,6 @@
     CUDA: addmm_cuda
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
-    MkldnnCPU: mkldnn_addmm_wraper
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -4674,12 +4722,12 @@
 - func: fake_quantize_per_tensor_affine_cachemask_backward(Tensor grad, Tensor mask) -> Tensor
   variants: function
 
-- func: _fake_quantize_learnable_per_tensor_affine(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> Tensor
+- func: _fake_quantize_learnable_per_tensor_affine(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max, float grad_factor=1.0) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _fake_quantize_learnable_per_tensor_affine
 
-- func: _fake_quantize_learnable_per_tensor_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> (Tensor, Tensor, Tensor)
+- func: _fake_quantize_learnable_per_tensor_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max, float grad_factor=1.0) -> (Tensor, Tensor, Tensor)
   variants: function
 
 - func: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
@@ -4695,12 +4743,12 @@
 - func: fake_quantize_per_channel_affine_cachemask_backward(Tensor grad, Tensor mask) -> Tensor
   variants: function
 
-- func: _fake_quantize_learnable_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
+- func: _fake_quantize_learnable_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max, float grad_factor=1.0) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _fake_quantize_learnable_per_channel_affine
 
-- func: _fake_quantize_learnable_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> (Tensor, Tensor, Tensor)
+- func: _fake_quantize_learnable_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max, float grad_factor=1.0) -> (Tensor, Tensor, Tensor)
   variants: function
 
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
@@ -6703,49 +6751,49 @@
     CPU: foreach_tensor_div_list_kernel_slow_
     CUDA: foreach_tensor_div_list_kernel_cuda_
 
-- func: _foreach_add.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+- func: _foreach_add.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalarlist_kernel_slow
     CUDA: foreach_tensor_add_scalarlist_kernel_cuda
 
-- func: _foreach_add_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
+- func: _foreach_add_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalarlist_kernel_slow_
     CUDA: foreach_tensor_add_scalarlist_kernel_cuda_
 
-- func: _foreach_sub.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+- func: _foreach_sub.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalarlist_kernel_slow
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda
 
-- func: _foreach_sub_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
+- func: _foreach_sub_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalarlist_kernel_slow_
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda_
 
-- func: _foreach_div.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+- func: _foreach_div.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda
 
-- func: _foreach_div_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
+- func: _foreach_div_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow_
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
 
-- func: _foreach_mul.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+- func: _foreach_mul.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda
 
-- func: _foreach_mul_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
+- func: _foreach_mul_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow_
@@ -7105,13 +7153,13 @@
     CPU: foreach_tensor_addcmul_scalar_slow_
     CUDA: foreach_tensor_addcmul_scalar_cuda_
 
-- func: _foreach_addcdiv_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> ()
+- func: _foreach_addcdiv_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow_
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda_
 
-- func: _foreach_addcmul_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> ()
+- func: _foreach_addcmul_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow_
@@ -7129,13 +7177,13 @@
     CPU: foreach_tensor_addcmul_scalar_slow
     CUDA: foreach_tensor_addcmul_scalar_cuda
 
-- func: _foreach_addcdiv.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
+- func: _foreach_addcdiv.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda
 
-- func: _foreach_addcmul.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
+- func: _foreach_addcmul.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow
