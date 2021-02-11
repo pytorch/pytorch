@@ -306,8 +306,8 @@ Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   return handle_r_to_c(self_st, out);
 }
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, c10::string_view rounding_mode) {
-  if (rounding_mode != "true") {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, const c10::optional<c10::string_view>& rounding_mode) {
+  if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(self_st));
   }
 
@@ -316,11 +316,11 @@ Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, c
 }
 
 Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
-  return div_tensor_self_backward(grad, other, self_st, "true");
+  return div_tensor_self_backward(grad, other, self_st, c10::nullopt);
 }
 
-Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, c10::string_view rounding_mode) {
-  if (rounding_mode != "true") {
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, const c10::optional<c10::string_view>& rounding_mode) {
+  if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(other.scalar_type()));
   }
 
@@ -329,7 +329,7 @@ Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, c10::st
 }
 
 Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
-  return div_tensor_other_backward(grad, self, other, "true");
+  return div_tensor_other_backward(grad, self, other, c10::nullopt);
 }
 
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
