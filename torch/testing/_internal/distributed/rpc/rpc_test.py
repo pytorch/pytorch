@@ -675,7 +675,6 @@ class RpcTest(RpcAgentTestFixture):
     def _test_rref_proxy_class(self, dst):
         rref = rpc.remote(dst, MyClass, args=(7,))
         expected = MyClass(7)
-        # self.assertEqual(expected.get_value(), rref.rpc_async().get_value())
         self.assertEqual(expected.get_value(), rref.rpc_async().get_value().wait())
         self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
 
@@ -5387,7 +5386,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             elif rref_api == rref.remote:
                 result._get_future().wait()
 
-        # return
         # Case where rpc.remote() is stuck and exceeds timeout
         slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
         timeout = 0.01
@@ -5409,5 +5407,4 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     @dist_init
     def test_rref_proxy_timeout(self):
         for rpc_api in ["rpc_async", "rpc_sync", "remote"]:
-            if rpc_api != "rpc_async": continue
             self._test_rref_proxy_timeout(rpc_api)
