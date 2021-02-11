@@ -115,6 +115,8 @@ class TestGradients(TestCase):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     def _skip_helper(self, op, dtype):
+        if not op.supports_autograd:
+            self.skipTest("Skipped! autograd not supported")
         if not op.test_complex_grad and dtype.is_complex:
             self.skipTest("Skipped! complex grad tests marked to skip.")
 
@@ -191,7 +193,7 @@ class TestCommon(JitCommonTestCase):
     #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        test_backward = op.test_complex_grad or not dtype.is_complex
+        test_backward = op.supports_autograd and op.test_complex_grad or not dtype.is_complex
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
@@ -258,7 +260,7 @@ class TestCommon(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
-        test_backward = (
+        test_backward = op.supports_autograd and (
             (dtype.is_complex and op.test_complex_grad) or
             (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)

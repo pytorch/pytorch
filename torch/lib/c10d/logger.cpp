@@ -163,6 +163,13 @@ void Logger::set_runtime_stats_and_log() {
 
   if (reducer_->replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
+    // Cuda time stats are only collected for single process single
+    // device program.
+    if (reducer_->replicas_.size() > 1) {
+      return;
+    }
+    // Check events on the replicas_[0][0].device().
+    at::cuda::set_device(reducer_->replicas_[0][0].device().index());
     // It is possible users did not call backward or run codes in
     // no-sync mode, in this case, some cudaEvents like "backward_compute_end"
     // or "backward_comm_start" or "backward_comm_end" will not be recorded.
