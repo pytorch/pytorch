@@ -63,12 +63,12 @@ CXX_FLAGS: Optional[List[str]]
 if hasattr(torch.__config__, "_cxx_flags"):
     try:
         CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
+        if "-g" not in CXX_FLAGS:
+            CXX_FLAGS.append("-g")
+
     except RuntimeError:
         # We are in FBCode.
         CXX_FLAGS = None
-
-    if "-g" not in CXX_FLAGS:
-        CXX_FLAGS.append("-g")
 else:
     # FIXME: Remove when back testing is no longer required.
     CXX_FLAGS = ["-O2", "-fPIC", "-g"]
