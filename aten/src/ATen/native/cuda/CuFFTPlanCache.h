@@ -1,17 +1,19 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/Config.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/utils/ParamsHash.h>
+#include <c10/util/accumulate.h>
 
-#include <list>
-#include <unordered_map>
-#include <string>
-#include <stdexcept>
-#include <sstream>
-#include <limits>
 #include <cufft.h>
 #include <cufftXt.h>
+
+#include <limits>
+#include <list>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
 
 namespace at { namespace native { namespace detail {
 
@@ -167,7 +169,7 @@ inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bo
 
   const auto last_dim_size = onesided ?
       sizes[signal_ndim] / 2 + 1 : sizes[signal_ndim];
-  const auto signal_numel = at::prod_intlist(sizes.slice(1, sizes.size() - 2)) * last_dim_size;
+  const auto signal_numel = c10::multiply_integers(sizes.slice(1, sizes.size() - 2)) * last_dim_size;
 
   // Zero stides are not allowed, even if the batch size is one.
   // If that happens just set a dummy case
