@@ -132,10 +132,10 @@ WORKFLOW_DATA = [
     WindowsJob(None, _VC2019, CudaVersion(10, 1)),
     WindowsJob(1, _VC2019, CudaVersion(10, 1)),
     WindowsJob(2, _VC2019, CudaVersion(10, 1)),
-    # VS2019 CUDA-11.1
-    WindowsJob(None, _VC2019, CudaVersion(11, 1)),
-    WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
-    WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
+    # VS2019 CUDA-11.2
+    WindowsJob(None, _VC2019, CudaVersion(11, 2)),
+    WindowsJob(1, _VC2019, CudaVersion(11, 2), master_only_pred=TruePred),
+    WindowsJob(2, _VC2019, CudaVersion(11, 2), master_only_pred=TruePred),
     # VS2019 CPU-only
     WindowsJob(None, _VC2019, None),
     WindowsJob(1, _VC2019, None, master_only_pred=TruePred),

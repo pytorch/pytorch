@@ -271,10 +271,6 @@ class MultiProcessTestCase(TestCase):
     # but we still want to ensure we didn't run into any other errors.
     TEST_ERROR_EXIT_CODE = 10
 
-    # do not early terminate for distributed tests.
-    def _should_stop_test_suite(self):
-        return False
-
     @property
     def world_size(self):
         return 4
