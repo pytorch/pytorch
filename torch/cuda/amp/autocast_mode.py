@@ -134,7 +134,7 @@ class autocast(object):
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():
-            return self
+            return
         self.prev = torch.is_autocast_enabled()
         torch.set_autocast_enabled(self._enabled)
         torch.autocast_increment_nesting()
