@@ -1287,6 +1287,31 @@ class TestCase(expecttest.TestCase):
                         msg += '\n'
                     self.fail(msg)
 
+    @contextmanager
+    def assertWarnsOnceRegex(self, category, regex=''):
+        """Context manager for code that *must always* warn
+
+        This filters expected warnings from the test and fails if
+        the expected warning is not caught. It uses set_warn_always() to force
+        TORCH_WARN_ONCE to behave like TORCH_WARN
+        """
+        pattern = re.compile(regex)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            prev = torch.is_warn_always_enabled()
+            torch.set_warn_always(True)
+            try:
+                yield
+            finally:
+                torch.set_warn_always(prev)
+                if len(ws) == 0:
+                    self.fail('no warning caught')
+                if len(ws) > 1:
+                    self.fail('too many warnings caught: %s' % '\n    '.join([str(w) for w in ws]))
+                self.assertTrue(type(ws[0].message) is category)
+                self.assertTrue(re.match(pattern, str(ws[0].message)),
+                                f'{pattern}, {ws[0].message}')
+
     def assertExpected(self, s, subname=None):
         r"""
         Test that a string matches the recorded contents of a file
@@ -1948,3 +1973,12 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.double: 1e-5,
                       torch.half: 1e-2,
                       torch.bfloat16: 1e-1}
+
+
+def _wrap_maybe_warns(regex):
+    def decorator(fn):
+        def inner(self, *args, **kwargs):
+            with self.maybeWarnsRegex(UserWarning, regex):
+                fn(self, *args, **kwargs)
+        return inner
+    return decorator

@@ -205,6 +205,18 @@ public:
     );
   }
 
+  // Variant that takes in a boxed kernel function with a plumbed DispatchKeySet.
+  // See Note [Plumbing Keys Through The Dispatcher] for details.
+  template<c10::KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
+  static CppFunction makeFromBoxedFunction() {
+    // TODO: more user friendly API
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunction<func>(),
+      /* cpp_signature */ c10::nullopt, // not known for boxed functions
+      /* schema */ nullptr
+    );
+  }
+
   /// Create a function from an unboxed kernel function.
   /// This is typically used to register common operators.
   template<typename FuncPtr, std::enable_if_t<c10::guts::is_function_type<FuncPtr>::value, std::nullptr_t> = nullptr>
