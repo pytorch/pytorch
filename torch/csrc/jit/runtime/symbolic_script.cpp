@@ -392,6 +392,7 @@ const std::vector<std::string> functions = {
                 dims[-2] = dim - 1
                 out = mat.permute(dims)
             return out
+
         # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
         # instead of doing [b, m, p] and then reduce to [m, p]
         # whice potentially uses large intermediate of size b*m*p,

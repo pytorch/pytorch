@@ -2444,7 +2444,7 @@ def var(g, input, *args):
     return var
 
 
-# var_mean (and all variance-related functions) has multiple signatures, no need to manually figure
+# var_mean (and all variance-related functions) has multiple signatures, so need to manually figure
 # out the correct arguments:
 # aten::var_mean(Tensor self, bool unbiased)
 # aten::var_mean(Tensor self, int[1] dim, bool unbiased, bool keepdim=False)

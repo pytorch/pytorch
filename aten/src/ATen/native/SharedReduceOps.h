@@ -4,7 +4,6 @@
 
 #include <type_traits>
 #include <complex>
-#include <limits>
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/NumericUtils.h>
@@ -103,12 +102,9 @@ struct WelfordOps {
   }
   inline C10_DEVICE res_t project(acc_t acc) const {
     auto mean = acc.mean;
-    combine_t divisor = acc.nf - correction;
-    scalar_t ret = std::numeric_limits<scalar_t>::infinity();
-    if (divisor > 0) {
-      ret = take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor);
-    }
-    detail::pair<scalar_t, scalar_t> results{ret, (scalar_t)mean};
+    combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
+		auto var = acc.m2 / divisor;
+    detail::pair<scalar_t, scalar_t> results{take_sqrt ? device_sqrt(var) : var, (scalar_t)mean};
     return results;
   }
 
