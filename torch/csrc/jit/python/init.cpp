@@ -868,6 +868,7 @@ void initJITBindings(PyObject* module) {
              const char* data,
              size_t size) { return self.writeRecord(name, data, size); })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
@@ -1183,6 +1184,21 @@ void initJITBindings(PyObject* module) {
           "set_result",
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)
+      .def(
+          "_set_unwrap_func",
+          // Intentionally not releasing GIL as this just does an assign
+          [](PythonFutureWrapper& self, py::function unwrapFunc) {
+            auto functionGuard =
+                std::make_shared<torch::jit::PythonFunctionGuard>(
+                    std::move(unwrapFunc));
+
+            std::function<void(py::object)> pf =
+                [functionGuard(std::move(functionGuard))](
+                    const py::object& inp) {
+                  return functionGuard->func_(inp);
+                };
+            self.unwrap_func = std::move(pf);
+          })
       .def(
           py::pickle(
               /* __getstate__ */

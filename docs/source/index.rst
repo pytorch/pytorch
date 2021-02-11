@@ -71,6 +71,7 @@ Features described in this documentation are classified by release status:
    onnx
    optim
    complex_numbers
+   ddp_comm_hooks
    pipeline
    quantization
    rpc

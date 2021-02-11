@@ -227,23 +227,9 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   auto scale_vectorized = scale.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
   auto zero_point_vectorized = zero_point.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
 
-  auto iter_x = TensorIteratorConfig()
+  auto iter = TensorIteratorConfig()
     .add_output(dX)
-    .add_input(X)
-    .add_input(dY)
-    .add_input(scale_vectorized)
-    .add_input(zero_point_vectorized)
-    .build();
-
-  auto iter_scale = TensorIteratorConfig()
     .add_output(dScale_vec)
-    .add_input(X)
-    .add_input(dY)
-    .add_input(scale_vectorized)
-    .add_input(zero_point_vectorized)
-    .build();
-
-  auto iter_zero_point = TensorIteratorConfig()
     .add_output(dZeroPoint_vec)
     .add_input(X)
     .add_input(dY)
@@ -252,7 +238,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
     .build();
 
   fake_quant_grad_learnable_channel_stub(
-    X.device().type(), iter_x, iter_scale, iter_zero_point, quant_min, quant_max, grad_factor);
+    X.device().type(), iter, quant_min, quant_max, grad_factor);
 
   auto numElements = X.ndimension() - 1;
 

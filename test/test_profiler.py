@@ -385,6 +385,20 @@ class TestProfiler(TestCase):
         profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
         self.assertIn("FLOPS", profiler_output)
 
+        if not (kineto_available() and torch.cuda.is_available()):
+            return
+
+        with profile(activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA],
+                record_shapes=True,
+                with_flops=True,
+        ) as kineto_profiler:
+            model(inputs)
+        profiler_output = kineto_profiler.key_averages().table(
+            sort_by="self_cuda_time_total", row_limit=-1)
+        self.assertIn("FLOPS", profiler_output)
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_kineto_profiler_api(self):
