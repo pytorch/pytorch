@@ -3077,6 +3077,93 @@ t2.start()
             # Adds an empty dict for kwargs, which none of the Tensor methods use
             run("Tensor", *(meth_with_args + ({},)))
 
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_shared_mempool(self):
+        pass
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_different_mempools_concurrent_replay(self):
+        pass
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
+        kSmallSize = 1048576
+        kSmallBuffer = 2097152
+        kLargeBuffer = 20971520
+        kMinLargeAlloc = 10485760
+        kRoundLarge = 2097152
+
+        # this was annoying to write but stresses the expectations pretty rigorously
+        cases = ((512, 1, kSmallBuffer, "small_pool"),)
+                 # (kSmallSize // 2, 2, 2 * kSmallBuffer, "small_pool"),
+                 # (kSmallSize + 512, 1, kLargeBuffer, "large_pool"),
+                 # (kMinLargeAlloc - 512, 2, 2 * kLargeBuffer, "large_pool"),
+                 # ( kMinLargeAlloc + 512, 3,
+                 #  kRoundLarge * ((kMinLargeAlloc + 512 + kRoundLarge - 1) // kRoundLarge),
+                 #  "large_pool"))
+
+        stats_to_check = ("segment.", "allocated_bytes.", "active.", "active_bytes.")
+
+        for (size,
+             delta_cudaMallocs,
+             delta_cudaMalloc_bytes,
+             pool_string) in cases:
+            delta_active_blocks = 3
+            delta_active_bytes = 3 * size
+
+            a = torch.ones((size,), device="cuda")
+            precapture_stats = torch.cuda.memory_stats()
+
+            g = torch.cuda._Graph()
+            g.capture_begin()
+            b = a.clone()
+            # for _ in range(5):
+            #     # Needed bytes high water mark should be 3 * size of b
+            #     b = b.clone() + 1
+            g.capture_end()
+
+            postcapture_stats = torch.cuda.memory_stats()
+
+            expecteds = (delta_cudaMallocs,
+                         delta_cudaMalloc_bytes,
+                         delta_active_blocks,
+                         delta_active_bytes)
+            for stat, expected in zip(stats_to_check, expecteds):
+                stat = stat + pool_string + ".current"
+                current = postcapture_stats[stat] - precapture_stats[stat]
+                self.assertEqual(current, expected, "Pre to post capture delta of " +
+                                 stat + " = {}, expected = {}, size = {}".format(current, expected, size))
+
+            g.replay()
+            self.assertEqual(a.sum().item(), 6 * size)
+
+            del g
+            gc.collect()
+            torch.cuda.empty_cache()
+            postdel_stats = torch.cuda.memory_stats()
+
+            self.assertEqual(a.sum().item(), 6 * size)
+
+            # b should be the only live reference remaining from the graph's private pool
+            expecteds = (1, size, 1, size)
+            for stat, expected in zip(stats_to_check, expecteds):
+                stat = stat + pool_string + ".current"
+                current = postdel_stats[stat] - precapture_stats[stat]
+                self.assertEqual(current, expected,
+                                 stat + " = {}, expected = {}, size = {}".format(current, expected, size))
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_triple(self):
+        pass
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(

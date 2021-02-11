@@ -760,6 +760,7 @@ class DeviceCachingAllocator {
         auto it1 = graph_pools.find(it0->second);
         TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
         if (size <= kSmallSize) {
+          std::cout << "desoto" << std::endl;
           return it1->second.small_blocks;
         } else {
           return it1->second.large_blocks;
