@@ -1862,7 +1862,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_tensor_out=False,
            skips=(
-               # Skip right now as it fails due to a pybind error
+               # Reference: https://github.com/pytorch/pytorch/issues/51788#issuecomment-777625293
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=[torch.bfloat16]),)),
     OpInfo('max',
@@ -1893,7 +1893,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
-               # Skip right now as it fails due to a pybind error
+               # Reference: https://github.com/pytorch/pytorch/issues/51788#issuecomment-777625293
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=[torch.bfloat16]),)),
     OpInfo('min',
