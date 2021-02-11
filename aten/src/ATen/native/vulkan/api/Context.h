@@ -41,15 +41,6 @@ class Context final {
   Resource& resource();
 
   // GPU RPC
-
-  template<typename... Arguments>
-  void dispatch(
-      Command::Buffer& command_buffer,
-      const Shader::Layout::Signature& shader_layout_signature,
-      const Shader::Descriptor& shader_descriptor,
-      const Shader::WorkGroup& global_work_group,
-      Arguments&&... arguments);
-
   template<typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
@@ -143,43 +134,6 @@ inline void bind(
 }
 
 } // namespace detail
-
-template<typename... Arguments>
-inline void Context::dispatch(
-    Command::Buffer& command_buffer,
-    const Shader::Layout::Signature& shader_layout_signature,
-    const Shader::Descriptor& shader_descriptor,
-    const Shader::WorkGroup& global_work_group,
-    Arguments&&... arguments) {
-  // Forward declaration
-  Descriptor::Set dispatch_prologue(
-      Command::Buffer&,
-      const Shader::Layout::Signature&,
-      const Shader::Descriptor&);
-
-  // Factor out template parameter independent code to minimize code bloat.
-  Descriptor::Set descriptor_set = dispatch_prologue(
-      command_buffer,
-      shader_layout_signature,
-      shader_descriptor);
-
-  detail::bind(
-      descriptor_set,
-      std::index_sequence_for<Arguments...>{},
-      std::forward<Arguments>(arguments)...);
-
-  // Forward declaration
-  void dispatch_epilogue(
-      Command::Buffer&,
-      const Descriptor::Set&,
-      const Shader::WorkGroup&);
-
-  // Factor out template parameter independent code to minimize code bloat.
-  dispatch_epilogue(
-      command_buffer,
-      descriptor_set,
-      global_work_group);
-}
 
 template<typename... Arguments>
 inline void Context::dispatch(

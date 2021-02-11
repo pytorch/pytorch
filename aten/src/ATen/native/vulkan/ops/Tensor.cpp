@@ -794,6 +794,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
       },
       VK_KERNEL(nchw_to_image),
       extents,
+      view_.context_->gpu().adapter->local_work_group_size(),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
@@ -851,6 +852,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
       },
       VK_KERNEL(image_to_nchw),
       view_.extents(),
+      view_.context_->gpu().adapter->local_work_group_size(),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
