@@ -41,8 +41,8 @@ if(NOT __NCCL_INCLUDED)
 
     # Detect objcopy version
     execute_process(COMMAND "${CMAKE_OBJCOPY}" "--version" OUTPUT_VARIABLE OBJCOPY_VERSION_STR)
-    string(REGEX REPLACE "GNU objcopy version ([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
-    string(REGEX REPLACE "GNU objcopy version ([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
+    string(REGEX REPLACE "GNU objcopy[^0-9]*([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
+    string(REGEX REPLACE "GNU objcopy[^0-9]*([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
 
     if((${OBJCOPY_VERSION_MAJOR} GREATER 2) OR ((${OBJCOPY_VERSION_MAJOR} EQUAL 2) AND (${OBJCOPY_VERSION_MINOR} GREATER 27)))
       message(WARNING "Enabling NCCL library slimming")
