@@ -7,6 +7,8 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 #include <ATen/ATen.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
 
 #include <stdlib.h>
@@ -65,7 +67,7 @@ bool almostEqualVec(
 }
 
 typedef bool (^Func)(void);
-bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) { 
+bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) {
   std::stringstream ss;
   std::copy(sizes.begin(), sizes.end(), std::ostream_iterator<int>(ss, " "));
   __block std::string str1 = ss.str();
@@ -103,11 +105,7 @@ bool test_nchw_to_nc4_cpu() {
     __block std::vector<int64_t> size{N, C, H, W};
     bool b = TEST(size, __PRETTY_FUNCTION__, ^bool {
       auto t = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      int len = std::accumulate(
-          std::begin(size),
-          std::end(size),
-          (int64_t)1,
-          std::multiplies<int64_t>());
+      const auto len = c10::multiply_integers(std::begin(size), std::end(size));
       auto buf =
           std::vector<float>{t.data_ptr<float>(), t.data_ptr<float>() + len};
       auto c4 = NCHW_to_NC4((float*)t.data_ptr<float>(), t.sizes().vec());
