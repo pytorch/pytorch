@@ -77,8 +77,7 @@ TEST(VulkanAPITest, adaptive_avg_pool2d) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -100,8 +99,7 @@ TEST(VulkanAPITest, add) {
 
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << c_cpu << std::endl;
-    std::cout << "Got:\n" << c_vulkan.cpu() << std::endl;
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -123,8 +121,7 @@ TEST(VulkanAPITest, add_) {
 
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << a_cpu << std::endl;
-    std::cout << "Got:\n" << a_vulkan.cpu() << std::endl;
+    showRtol(b_cpu, b_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -145,8 +142,7 @@ TEST(VulkanAPITest, add_scalar) {
 
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << c_cpu << std::endl;
-    std::cout << "Got:\n" << c_vulkan.cpu() << std::endl;
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -167,8 +163,7 @@ TEST(VulkanAPITest, add_scalar_) {
 
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << a_cpu << std::endl;
-    std::cout << "Got:\n" << a_vulkan.cpu() << std::endl;
+    showRtol(a_cpu, a_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -254,8 +249,7 @@ TEST(VulkanAPITest, avg_pool2d) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -277,8 +271,7 @@ TEST(VulkanAPITest, clamp) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -300,8 +293,7 @@ TEST(VulkanAPITest, clamp_) {
 
   const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << cpu << std::endl;
-    std::cout << "Got:\n" << vulkan.cpu() << std::endl;
+    showRtol(cpu, vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -374,8 +366,7 @@ TEST(VulkanAPITest, conv2d) {
 
   const bool check = almostEqual(output_cpu, output_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << output_cpu << std::endl;
-    std::cout << "Got:\n" << output_vulkan.cpu() << std::endl;
+    showRtol(output_cpu, output_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -447,8 +438,7 @@ TEST(VulkanAPITest, conv2d_dw) {
 
   const bool check = almostEqual(output_cpu, output_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << output_cpu << std::endl;
-    std::cout << "Got:\n" << output_vulkan.cpu() << std::endl;
+    showRtol(output_cpu, output_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -520,8 +510,7 @@ TEST(VulkanAPITest, conv2d_pw) {
 
   const bool check = almostEqual(output_cpu, output_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << output_cpu << std::endl;
-    std::cout << "Got:\n" << output_vulkan.cpu() << std::endl;
+    showRtol(output_cpu, output_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -537,8 +526,7 @@ TEST(VulkanAPITest, copy) {
 
   const auto check = exactlyEqual(cpu, vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << cpu << std::endl;
-    std::cout << "Got:\n" << vulkan.cpu() << std::endl;
+    showRtol(cpu, vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -561,8 +549,7 @@ TEST(VulkanAPITest, mean) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -599,8 +586,7 @@ TEST(VulkanAPITest, mul_scalar) {
 
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << c_cpu << std::endl;
-    std::cout << "Got:\n" << c_vulkan.cpu() << std::endl;
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -621,8 +607,7 @@ TEST(VulkanAPITest, mul_scalar_) {
 
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << a_cpu << std::endl;
-    std::cout << "Got:\n" << a_vulkan.cpu() << std::endl;
+    showRtol(a_cpu, a_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -643,8 +628,7 @@ TEST(VulkanAPITest, reshape) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-  std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -665,8 +649,7 @@ TEST(VulkanAPITest, reshape_) {
 
   const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << cpu << std::endl;
-    std::cout << "Got:\n" << vulkan.cpu() << std::endl;
+    showRtol(cpu, vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -685,8 +668,7 @@ TEST(VulkanAPITest, upsample_nearest2d) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -930,7 +912,6 @@ class MobileNetV2 final : public OpsList {
   }
 };
 
-/*
 TEST(VulkanAPITest, mobilenetv2) {
   if (!at::is_vulkan_available()) {
     return;
@@ -943,13 +924,11 @@ TEST(VulkanAPITest, mobilenetv2) {
 
   const auto check = almostEqual(output.first, output.second.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << output.first << std::endl;
-    std::cout << "Got:\n" << output.second.cpu() << std::endl;
+    showRtol(output.first, output.second.cpu());
   }
 
   ASSERT_TRUE(check);
 }
-*/
 
 } // namespace
 

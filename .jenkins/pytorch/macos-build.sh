@@ -12,12 +12,18 @@ if [ -z "${IN_CI}" ]; then
   export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
-if which sccache > /dev/null; then
-  printf "#!/bin/sh\nexec sccache %s \$*" "$(which clang++)" > "${WORKSPACE_DIR}/clang++"
-  chmod a+x "${WORKSPACE_DIR}/clang++"
+# This helper function wraps calls to binaries with sccache, but only if they're not already wrapped with sccache.
+# For example, `clang` will be `sccache clang`, but `sccache clang` will not become `sccache sccache clang`.
+# The way this is done is by detecting the command of the parent pid of the current process and checking whether
+# that is sccache, and wrapping sccache around the process if its parent were not already sccache.
+function write_sccache_stub() {
+  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache %s \"\$@\"\nelse\n  exec %s \"\$@\"\nfi" "$(which $1)" "$(which $1)" > "${WORKSPACE_DIR}/$1"
+  chmod a+x "${WORKSPACE_DIR}/$1"
+}
 
-  printf "#!/bin/sh\nexec sccache %s \$*" "$(which clang)" > "${WORKSPACE_DIR}/clang"
-  chmod a+x "${WORKSPACE_DIR}/clang"
+if which sccache > /dev/null; then
+  write_sccache_stub clang++
+  write_sccache_stub clang
 
   export PATH="${WORKSPACE_DIR}:$PATH"
 fi

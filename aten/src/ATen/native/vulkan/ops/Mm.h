@@ -32,13 +32,11 @@ class LinearOpContext final : public torch::jit::CustomClassHolder {
   struct {
     vTensor v_weight;
     vTensor v_bias;
-    bool has_bias;
   } packed_;
 
   struct {
     Tensor weight;
     c10::optional<Tensor> bias;
-    bool has_bias;
   } unpacked_;
 };
 

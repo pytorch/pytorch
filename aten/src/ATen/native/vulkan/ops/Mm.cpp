@@ -232,12 +232,10 @@ LinearOpContext::LinearOpContext(
   : packed_{
       pack_weights(pool, weight),
       pack_biases(pool, weight, bias),
-      bias.has_value(),
     },
     unpacked_{
       weight,
       bias,
-      bias.has_value(),
     } {
 }
 
@@ -297,7 +295,7 @@ Tensor LinearOpContext::run(
     if (v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
-      if (packed_.has_bias) {
+      if (unpacked_.bias && unpacked_.bias->defined()) {
         const struct {
           uvec3 size;
           int32_t K;
