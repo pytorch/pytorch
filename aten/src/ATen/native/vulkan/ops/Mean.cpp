@@ -99,12 +99,6 @@ Tensor mean(
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 
-  /*
-  api::Command::Buffer& output_unpack_buffer = command_pool.stream();
-  vTensor v_output = unpack_image1x1(v_output_packed, output_sizes, context, output_unpack_buffer);
-  command_pool.submit(context->gpu().queue, output_unpack_buffer);
-  */
-
   return convert(v_output);
 }
 
