@@ -1672,13 +1672,13 @@ reciprocal(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
+.. math::
+    \text{out}_{i} = \frac{1}{\text{input}_{i}}
+
 .. note::
     Unlike NumPy's reciprocal, torch.reciprocal supports integral inputs. Integral
     inputs to reciprocal are automatically :ref:`promoted <type-promotion-doc>` to
     the default scalar type.
-
-.. math::
-    \text{out}_{i} = \frac{1}{\text{input}_{i}}
 """ + r"""
 Args:
     {input}
@@ -3158,9 +3158,12 @@ add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
 .. warning::
-    This function's name is a misnomer. It actually rounds the
-    quotient towards zero instead of taking its floor. This behavior
-    will be deprecated in a future PyTorch release.
+
+    :func:`torch.floor_divide` is deprecated and will be removed in a future PyTorch
+    release. Its name is a misnomer because it actually rounds the quotient
+    towards zero instead of taking its floor. To keep the current behavior use
+    :func:`torch.div` with ``rounding_mode='trunc'``. To actually perform floor
+    division, use :func:`torch.div` with ``rounding_mode='floor'``.
 
 Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
 quotient towards zero. Equivalently, it truncates the quotient(s):

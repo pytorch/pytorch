@@ -118,7 +118,8 @@ const Expr* IRMutator::mutate(const CompareSelect* v) {
              ExprHandle(rhs_new),
              ExprHandle(retval1_new),
              ExprHandle(retval2_new),
-             v->compare_select_op())
+             v->compare_select_op(),
+             v->bias())
       .node();
 }
 
