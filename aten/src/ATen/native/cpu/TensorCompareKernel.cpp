@@ -3,6 +3,8 @@
 #include <numeric>
 #include <iterator>
 #include <algorithm>
+#include <utility>
+#include <vector>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -213,106 +215,56 @@ static void isneginf_kernel_impl(TensorIterator& iter) {
   });
 }
 
-template <typename scalar_t>
-static void mode_kernel(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    const Tensor& indices_sorted,
-    int64_t dim) {
-  int64_t self_dim_size = ensure_nonempty_size(self, dim);
-  int64_t self_dim_stride = ensure_nonempty_stride(self, dim);
-
-  auto iter = TensorIteratorConfig()
-                  .check_all_same_dtype(false)
-                  .resize_outputs(false)
-                  .declare_static_shape(self.sizes(), dim)
-                  .add_output(values)
-                  .add_output(indices)
-                  .add_input(self)
-                  .add_input(indices_sorted)
-                  .build();
-
-  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-    auto* values_data_bytes = data[0];
-    auto* indices_data_bytes = data[1];
-    const auto* self_data_bytes = data[2];
-    const auto* sorted_indices_data_bytes = data[3];
-
-    for (int64_t k = 0; k < n; k++) {
-      scalar_t* result_data = (scalar_t*)values_data_bytes;
-      int64_t* indice_data = (int64_t*)indices_data_bytes;
-      const scalar_t* self_data = (scalar_t*)self_data_bytes;
-      const int64_t* sorted_indice_data = (int64_t*)sorted_indices_data_bytes;
-
-      scalar_t mode = 0;
-      int64_t modei = 0;
-      int64_t temp_freq = 0;
-      int64_t max_freq = 0;
-      for (int64_t i = 0; i < self_dim_size; i++) {
-        temp_freq++;
-        const int64_t i_offset = i * self_dim_stride;
-        const int64_t next_offset = (i + 1) * self_dim_stride;
-        if ((i == self_dim_size - 1) ||
-            (self_data[i_offset] != self_data[next_offset])) {
-          if (temp_freq > max_freq) {
-            mode = self_data[i_offset];
-            modei = sorted_indice_data[i_offset];
-            max_freq = temp_freq;
-          }
-          temp_freq = 0;
-        }
-      }
-
-      *result_data = mode;
-      *indice_data = modei;
-
-      values_data_bytes += strides[0];
-      indices_data_bytes += strides[1];
-      self_data_bytes += strides[2];
-      sorted_indices_data_bytes += strides[3];
-    }
-  };
-
-  iter.for_each(loop, /* grain_size */ 1);
-}
-
 static void mode_kernel_impl(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  // Sorting everything first, so that computing the mode is only a linear pass
-  // through each element in the tensor.
-  auto sorted_tuple = at::sort(self, dim, false);
-  auto& self_sorted = std::get<0>(sorted_tuple);
-  auto& indices_sorted = std::get<1>(sorted_tuple);
+  int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
-  auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
-  self_sizes[dim] = 1;
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, self.scalar_type(), "mode_cpu", [&] {
+    compare_base_kernel<scalar_t>(
+        values,
+        indices,
+        self,
+        dim,
+        keepdim,
+        [&](scalar_t* values_data,
+            int64_t* indices_data,
+            const scalar_t* self_data,
+            auto self_dim_stride) {
+          scalar_t mode = 0;
+          int64_t modei = 0;
+          int64_t temp_freq = 0;
+          int64_t max_freq = 0;
 
-  // values and result2 may be a empty tensor, if not,
-  // reshape them as self dims
-  if (!keepdim) {
-    if (values.ndimension() >= dim) {
-      values.unsqueeze_(dim);
-    }
-    if (indices.ndimension() >= dim) {
-      indices.unsqueeze_(dim);
-    }
-  }
-  values.resize_(self_sizes);
-  indices.resize_(self_sizes);
+          std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
+          std::vector<int64_t> idxs(self_dim_size);
+          std::iota(idxs.begin(), idxs.end(), 0);
+          std::transform(
+              idxs.begin(), idxs.end(), elements.begin(), [=](int64_t i) {
+                return std::make_pair(self_data[i * self_dim_stride], i);
+              });
+          std::sort(elements.begin(), elements.end());
 
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "mode_cpu", [&] {
-      mode_kernel<scalar_t>(values, indices, self_sorted, indices_sorted, dim);
+          for (int64_t i = 0; i < self_dim_size; i++) {
+            temp_freq++;
+            if ((i == self_dim_size - 1) ||
+                (elements[i].first != elements[i + 1].first)) {
+              if (temp_freq > max_freq) {
+                mode = elements[i].first;
+                modei = elements[i].second;
+                max_freq = temp_freq;
+              }
+              temp_freq = 0;
+            }
+          }
+
+          *values_data = mode;
+          *indices_data = modei;
+        });
   });
-
-  if (!keepdim) {
-    values.squeeze_(dim);
-    indices.squeeze_(dim);
-  }
 }
 
 } // anonymous namespace
