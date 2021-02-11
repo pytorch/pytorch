@@ -145,7 +145,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     nodes_of_a = [node_end_a]
     cur_node = node_end_a
     while cur_node != node_start_a:
-        cur_node = cur_node.args[0]
+        cur_node = cur_node.args[0]  # type: ignore
         nodes_of_a.insert(0, cur_node)
 
     # go through nodes of a in order, and insert them into the graph of c

@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 toq = torch.ops.quantized
 from torch.fx import GraphModule
+from torch.fx.graph import Node
 from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     get_type_a_related_to_b,
@@ -129,8 +130,8 @@ def prepare_model_outputs(
 
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
 
-    node_to_instrument_to_other_node_name_a = {}
-    node_to_instrument_to_other_node_name_b = {}
+    node_to_instrument_to_other_node_name_a: Dict[Node, Optional[str]] = {}
+    node_to_instrument_to_other_node_name_b: Dict[Node, Optional[str]] = {}
     for match_name, match in matched_subgraph_pairs.items():
         (node_start_a, node_end_a), (node_start_b, node_end_b) = match
         # TODO(future PR): do not observe pairs of nodes we do not care

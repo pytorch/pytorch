@@ -174,7 +174,7 @@ class _NSGraphMatchableSubgraphsIterator:
                         self.seen_nodes.add(cur_start_node)
                         # for now, assume that there are no other nodes
                         # which need to be added to the stack
-                        cur_start_node = cur_start_node.args[0]
+                        cur_start_node = cur_start_node.args[0]  # type: ignore
                     break
 
             self.seen_nodes.add(cur_start_node)
@@ -366,6 +366,8 @@ def get_matching_subgraph_pairs(
 
         # check for results and determine what to do next
         if cur_end_node_a is not None and cur_end_node_b is not None:
+            assert isinstance(cur_start_node_a, Node)
+            assert isinstance(cur_start_node_b, Node)
             # both nodes were fetched, check for relatedness
             # note: relatedness is checked on the start node, i.e.
             # if a linear-relu pattern is checked, we would check for relatedness
