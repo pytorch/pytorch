@@ -161,7 +161,7 @@ def inv(input: Tensor, *, out: Tensor = None, infos: Optional[Tuple[Tensor, Tens
         infos_lu, infos_getri = infos
         if out is None:
             out = torch.empty(0, dtype=input.dtype, device=input.device)
-        return torch._C._linalg.linalg_inv_out_info(out, infos_lu, infos_getri, input)
+        return _linalg.linalg_inv_out_info(out, infos_lu, infos_getri, input)
 
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
