@@ -36,7 +36,8 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   TORCH_CHECK(op1.dim() == 2, "addmm: 2-D matrices expected, got ", op1.dim(), "D tensor");
   TORCH_CHECK(op2.dim() == 2, "addmm: 2-D matrices expected, got ", op2.dim(), "D tensor");
 
-  TORCH_CHECK(out.is_contiguous(), "out argument must be contiguous, but got: ", out.suggest_memory_format());
+  TORCH_CHECK(out.is_contiguous(), "out argument must be contiguous, but got: ",
+              out.suggest_memory_format());
   
   // ixk * kxj = ixj
   int64_t dim_i = op1.size(0);
@@ -48,8 +49,6 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   TORCH_CHECK(op1.size(1) == dim_k,
               "addmm: Expected sparse matrix (op1) size(1)=", dim_k, ", got ", op1.size(1));
   out.resize_({dim_i, dim_j});
-
-  // TODO: why does that nnz == 0 condition exist in the COO code?
 
   auto col_indices = op1.col_indices();
   auto crow_indices = op1.crow_indices();
@@ -76,14 +75,18 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     int64_t out_stride0 = out.stride(0);
     int64_t out_stride1 = out.stride(1);   
 
-    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "sparse_csr_mm_cpu", [&] () {
-      scalar_t cast_alpha = alpha.to<scalar_t>();
-      scalar_t cast_beta = beta.to<scalar_t>();
-      scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
-      scalar_t* out_ptr = out.data_ptr<scalar_t>();
+    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "sparse_csr_mm_cpu", 
+      [&alpha, &beta, &op1, &out, &values, &crow_indices, &col_indices, &dense_stride0,
+       &dense_stride1, &out_stride0, &out_stride1]() {
+      AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_mm_crow_indices",
+        [&alpha, &beta, &op1, &out, &values, &crow_indices, &col_indices, &dense_stride0,
+         &dense_stride1, &out_stride0, &out_stride1]() {
 
-      AT_DISPATCH_INDEX_TYPES(
-        crow_indices.scalar_type(), "csr_mm_crow_indices", [&] () {
+        scalar_t cast_alpha = alpha.to<scalar_t>();
+        scalar_t cast_beta = beta.to<scalar_t>();
+        scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
+        scalar_t* out_ptr = out.data_ptr<scalar_t>();
+
         auto col_indices_accessor = col_indices.accessor<index_t, 1>();
         auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
         auto values_accessor = values.accessor<scalar_t, 1>();
