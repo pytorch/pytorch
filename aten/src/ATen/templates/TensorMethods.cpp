@@ -91,6 +91,10 @@ bool is_xpu(Tensor self) {
   return self.is_xpu();
 }
 
+bool Tensor::is_xla() const {
+    return impl_->is_xla();
+}
+
 NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
@@ -110,6 +114,10 @@ bool Tensor::has_names() const {
 
 bool is_cuda(Tensor self) {
   return self.is_cuda();
+}
+
+bool is_xla(Tensor self) {
+    return self.is_xla();
 }
 
 bool Tensor::is_hip() const {
