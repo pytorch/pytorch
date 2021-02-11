@@ -271,14 +271,14 @@ class PartialBalancedBatchSampler(Sampler[List[int]]):
         for idx in self.train_idx:
             label = self._get_label(self.d, idx)
             if label not in self.dataset:
-                self.dataset[label] = list()
+                self.dataset[label] = []
             self.dataset[label].append(idx)
 
         len_classes_dataset = [len(i) for i in self.dataset.values()]
         if any(self.balanced_classes > i for i in len_classes_dataset):
-            raise Exception('Number of balanced classes should be less than ' + str(min(len_classes_dataset)))
+            raise Exception('Number of balanced classes should be less than ->' + str(min(len_classes_dataset)))
         rand_tensor = []
-        while all(self.dataset.values()):
+        while any(self.dataset.values()):
             random.shuffle(self.num_cl_list)
             for i in self.num_cl_list:
                 stack_class = len(self.dataset[i])
