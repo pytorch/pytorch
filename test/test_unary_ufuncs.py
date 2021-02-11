@@ -1689,8 +1689,6 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('rad2deg'),
-    _TorchMathTestMeta('deg2rad'),
     _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
     _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                        refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
