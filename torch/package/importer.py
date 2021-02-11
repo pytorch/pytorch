@@ -37,7 +37,7 @@ class PackageImporter:
     """
     modules : Dict[str, Optional[types.ModuleType]]
 
-    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
+    def __init__(self, file_or_buffer: Union[str, torch._C._jit.PyTorchFileReader, Path, BinaryIO],
                  module_allowed: Callable[[str], bool] = lambda module_name: True):
         """Open `file_or_buffer` for importing. This checks that the imported package only requires modules
         allowed by `module_allowed`
@@ -53,18 +53,18 @@ class PackageImporter:
             ImportError: If the package will use a disallowed module.
         """
         self.zip_reader : Any
-        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
+        if isinstance(file_or_buffer, torch._C._jit.PyTorchFileReader):
             self.filename = '<pytorch_file_reader>'
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (Path, str)):
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                self.zip_reader = torch._C.PyTorchFileReader(self.filename)
+                self.zip_reader = torch._C._jit.PyTorchFileReader(self.filename)
             else:
                 self.zip_reader = MockZipReader(self.filename)
         else:
             self.filename = '<binary>'
-            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
+            self.zip_reader = torch._C._jit.PyTorchFileReader(file_or_buffer)
 
         self.root = _PackageNode(None)
         self.modules = {}

@@ -127,7 +127,7 @@ void initJitBackendBindings(PyObject* module) {
   //
   // this function must be called like
   //
-  //  torch._C._jit_to_backend("example_backend", module, spec)
+  //  torch._C._jit.to_backend("example_backend", module, spec)
   auto codegen_lambda = [=](const std::string& backend_name,
                             const Module& orig_module,
                             const py::dict& method_compile_spec) {

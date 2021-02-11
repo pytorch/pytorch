@@ -11,7 +11,7 @@ def _is_script_module(module):
 
 def _is_script_method(module):
     import torch.jit
-    return isinstance(module, torch._C.ScriptMethod)
+    return isinstance(module, torch._C._jit.ScriptMethod)
 
 
 def _init_script_module():

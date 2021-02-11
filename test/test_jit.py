@@ -44,7 +44,7 @@ from jit.test_complex import TestComplex  # noqa: F401
 
 # Torch
 from torch import Tensor
-from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
+from torch._C._jit import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import PY37
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
@@ -112,7 +112,7 @@ import zipfile
 
 
 def canonical(graph):
-    return torch._C._jit_pass_canonicalize(graph).str(False)
+    return torch._C._jit.pass_canonicalize(graph).str(False)
 
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
@@ -169,13 +169,13 @@ def doAutodiffCheck(testname):
 
 
 # TODO: enable TE in PE when all tests are fixed
-torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
-torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
+torch._C._jit.set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
+torch._C._jit.set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 # even though FULL_PROFILER should be our default
 # we haven't tested every single test in this file
 # but we enable FULL_PROFILER for a large subset
 # of the tests with "with enable_profiling_mode_for_profiling_tests"
-torch._C._jit_set_profiling_mode(False)
+torch._C._jit.set_profiling_mode(False)
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -503,7 +503,7 @@ class TestJit(JitTestCase):
         c = torch.rand((7, 11))
         m = torch.jit.script(M(torch.relu))
         orig_res = m(a, b, c)
-        torch._C._jit_pass_fuse_add_relu(m.graph)
+        torch._C._jit.pass_fuse_add_relu(m.graph)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
@@ -522,7 +522,7 @@ class TestJit(JitTestCase):
         c = torch.rand((7, 11))
         m = torch.jit.script(M(torch.relu_))
         orig_res = m(a, b, c)
-        torch._C._jit_pass_fuse_add_relu(m.graph)
+        torch._C._jit.pass_fuse_add_relu(m.graph)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
@@ -552,7 +552,7 @@ class TestJit(JitTestCase):
         a_copy = a.clone()
         m = torch.jit.script(Madd_(torch.relu_))
         orig_res = m(a, b)
-        torch._C._jit_pass_fuse_add_relu(m.graph)
+        torch._C._jit.pass_fuse_add_relu(m.graph)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
@@ -590,7 +590,7 @@ class TestJit(JitTestCase):
         a_copy = a.clone()
         m = torch.jit.script(Madd_out(torch.relu_))
         orig_res = m(a, b)
-        torch._C._jit_pass_fuse_add_relu(m.graph)
+        torch._C._jit.pass_fuse_add_relu(m.graph)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
@@ -954,7 +954,7 @@ class TestJit(JitTestCase):
 
     def test_script_backward_twice(self):
         def checkBackwardTwiceScript(fn, inputs, retain_graph_=False):
-            torch._C._jit_set_profiling_executor(False)
+            torch._C._jit.set_profiling_executor(False)
 
             with torch.jit.optimized_execution(True):
                 scripted_fn = torch.jit.script(fn, inputs)
@@ -1033,7 +1033,7 @@ class TestJit(JitTestCase):
 
         @torch.jit.compile(nderivs=0)
         def fn(*args):
-            in_vars, _ = torch._C._jit_flatten(args)
+            in_vars, _ = torch._C._jit.flatten(args)
             return in_vars[0] + 1
 
         for i, config in enumerate(configurations):
@@ -1117,7 +1117,7 @@ graph(%x, %y, %z):
     %o = aten::mul(%u, %y)
     return (%o)"""
         graph = parse_ir(input_str)
-        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        torch._C._jit.pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
@@ -1139,7 +1139,7 @@ graph(%x, %y, %z):
     %u = aten::mul(%p, %x)
     return (%u)"""
         graph = parse_ir(input_str)
-        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        torch._C._jit.pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
@@ -1161,7 +1161,7 @@ graph(%x, %y, %z):
     # CHECK-NEXT: return
     return (%p)"""
         graph = parse_ir(input_str)
-        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        torch._C._jit.pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c, %d):
   %q = aten::mul(%a, %b)
   %r = aten::add(%q, %c, %d)
@@ -1184,7 +1184,7 @@ graph(%x, %y, %z):
     # CHECK-NEXT: return
     return (%p)"""
         graph = parse_ir(input_str)
-        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        torch._C._jit.pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c, %d):
   %q = aten::mul(%a, %b)
   %r = aten::add(%q, %c, %d)
@@ -1206,7 +1206,7 @@ graph(%x, %y, %z):
     # CHECK-NEXT: return
     return (%p)"""
         graph = parse_ir(input_str)
-        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        torch._C._jit.pass_custom_pattern_based_rewrite_graph("""
 graph(%Pa, %Pb):
   %Pq = aten::mul(%Pa, %Pb)
   return (%Pq)""", """
@@ -1228,7 +1228,7 @@ graph(%Ra, %Rb):
                 x = self.bn(x)
                 return x
         m = torch.jit.script(Test())
-        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        torch._C._jit.pass_custom_pattern_based_rewrite_graph("""
         graph(%self, %x):
                 %conv = match::module[name="Conv2d"](%self)
                 %y = prim::CallMethod[name="forward"](%conv, %x)
@@ -1255,7 +1255,7 @@ graph(%Ra, %Rb):
         y = torch.randn(4, 1, 8, 5, requires_grad=True)
 
         graph = torch.jit.script(broadcast).graph
-        torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
+        torch._C._jit.pass_complete_shape_analysis(graph, (x, y), False)
         FileCheck().check("Double(4, 3, 8, 5, strides=[120, 40, 5, 1], device=cpu)").run(str(graph))
 
     def test_shape_analysis_unsqueeze_in_loop(self):
@@ -1272,7 +1272,7 @@ graph(%Ra, %Rb):
               -> (%4, %x.3)
           return (%x)"""
         graph = parse_ir(input_str)
-        torch._C._jit_pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
+        torch._C._jit.pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
         FileCheck().run(input_str, graph)
 
     def test_script_tensor_type(self):
@@ -1293,7 +1293,7 @@ graph(%Ra, %Rb):
         graph = parse_ir(input_str)
         x = torch.ones(1, dtype=torch.float32)[0]
         mask = x.ge(0.5)
-        torch._C._jit_pass_complete_shape_analysis(graph, (x, mask), False)
+        torch._C._jit.pass_complete_shape_analysis(graph, (x, mask), False)
         FileCheck().run(input_str, graph)
 
     # TODO: update verify to work with GraphExecutors
@@ -1347,7 +1347,7 @@ graph(%Ra, %Rb):
         g, _ = torch.jit._get_trace_graph(doit, (x, y))
         self.run_pass('dce', g)
         self.run_pass('canonicalize', g)
-        g2 = torch._C.Graph()
+        g2 = torch._C._jit.Graph()
         g_to_g2 = {}
         for node in g.inputs():
             g_to_g2[node] = g2.addInput()
@@ -1369,11 +1369,11 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
-    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
+    @unittest.skipIf(not torch._C._jit.has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     def test_cpp(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
-        torch._C._jit_run_cpp_tests()
+        torch._C._jit.run_cpp_tests()
         tests_setup.shutdown()
 
     def test_batchnorm(self):
@@ -1515,11 +1515,11 @@ graph(%Ra, %Rb):
         # between IValue and PyObject are correct
         # test for numpy object
         py_array = np.arange(15)
-        ret_py_obj = torch._C._ivalue_debug_python_object(py_array)
+        ret_py_obj = torch._C._jit._ivalue_debug_python_object(py_array)
         self.assertEqual(py_array, ret_py_obj)
 
         # test for function object
-        ret_py_obj = torch._C._ivalue_debug_python_object(F.relu)
+        ret_py_obj = torch._C._jit._ivalue_debug_python_object(F.relu)
         self.assertEqual(F.relu, ret_py_obj)
 
         # test for memory management
@@ -1529,7 +1529,7 @@ graph(%Ra, %Rb):
             # create a scope and do the conversion -> ivalue -> pyobject
             # this func return a new pyobject that refcount + 1
             inp_refcount = sys.getrefcount(inp)
-            ivalue_holder = torch._C._ivalue_debug_python_object(inp)
+            ivalue_holder = torch._C._jit._ivalue_debug_python_object(inp)
             self.assertEqual(inp_refcount + 1, sys.getrefcount(ivalue_holder))
             return ivalue_holder + 1
 
@@ -2399,9 +2399,9 @@ graph(%Ra, %Rb):
                     self.assertTrue(hasattr(input, 'type'))
                     self.assertTrue(input.type() is not None)
                 self.assertTrue(hasattr(block, 'returnNode'))
-                self.assertTrue(type(block.returnNode()) == torch._C.Node)
+                self.assertTrue(type(block.returnNode()) == torch._C._jit.Node)
                 self.assertTrue(hasattr(block, 'paramNode'))
-                self.assertTrue(type(block.paramNode()) == torch._C.Node)
+                self.assertTrue(type(block.paramNode()) == torch._C._jit.Node)
         self.assertTrue(tested_blocks)
 
     def test_export_opnames(self):
@@ -2455,8 +2455,8 @@ graph(%Ra, %Rb):
         self.assertRegex(s, r'ops')
 
     def test_profiler(self):
-        prev_opt = torch._C._get_graph_executor_optimize()
-        torch._C._set_graph_executor_optimize(False)
+        prev_opt = torch._C._jit._get_graph_executor_optimize()
+        torch._C._jit._set_graph_executor_optimize(False)
 
         def other_fn(x):
             return x * 2
@@ -2495,7 +2495,7 @@ graph(%Ra, %Rb):
             self.assertTrue(thread in other_fn_events)
             self.assertTrue(other_fn_events[thread] >= mul_time)
 
-        torch._C._set_graph_executor_optimize(prev_opt)
+        torch._C._jit._set_graph_executor_optimize(prev_opt)
 
 
 class TestFrontend(JitTestCase):
@@ -3462,14 +3462,14 @@ def foo(x):
         a.another = nn.Module()
         a.another.name = 'another'
         sa = torch.jit.script(a)
-        result = torch._C._jit_debug_module_iterators(sa._c)
+        result = torch._C._jit.debug_module_iterators(sa._c)
 
         def replace(e):
             if e is a.p:
                 return 'P'
             elif e is a.foo.b:
                 return 'B'
-            elif isinstance(e, torch._C.ScriptModule):
+            elif isinstance(e, torch._C._jit.ScriptModule):
                 return e.getattr('name')
 
             return e
@@ -5553,7 +5553,7 @@ a")
 
         graph = parse_ir(code)
         inputs = 5 * [torch.rand(26, 2048, dtype=torch.float)]
-        code = torch._C._jit_fuser_get_fused_kernel_code(graph, inputs)
+        code = torch._C._jit.fuser_get_fused_kernel_code(graph, inputs)
         FileCheck().check('sqrtf').run(code)
 
     @slowTest
@@ -5599,7 +5599,7 @@ a")
 
             graph = parse_ir(code)
             inputs = (2 if binary else 1) * [torch.rand(26, 2048, dtype=dtype)]
-            code = torch._C._jit_fuser_get_fused_kernel_code(graph, inputs)
+            code = torch._C._jit.fuser_get_fused_kernel_code(graph, inputs)
             FileCheck().check(expects).run(code)
 
         for fn in fns:
@@ -5625,7 +5625,7 @@ a")
         '''
 
         graph = parse_ir(code)
-        code = torch._C._jit_fuser_get_fused_kernel_code(graph, [torch.rand(3, 4)])
+        code = torch._C._jit.fuser_get_fused_kernel_code(graph, [torch.rand(3, 4)])
         FileCheck().check('1.282549830161864').run(code)
 
     def test_fuser_multiple_blocks(self):
@@ -7151,7 +7151,7 @@ a")
                 scope = {}
                 exec(code, globals(), scope)
                 cu = torch.jit.CompilationUnit(code)
-                torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
+                torch._C._jit.pass_complete_shape_analysis(cu.func.graph, (), False)
                 FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
 
         @torch.jit.script
@@ -7287,7 +7287,7 @@ a")
         def foo(x):
             return torch.sub(x, torch.tanh(x))
 
-        torch._C._jit_pass_complete_shape_analysis(foo.graph, (torch.tensor([0.39]),), False)
+        torch._C._jit.pass_complete_shape_analysis(foo.graph, (torch.tensor([0.39]),), False)
 
         # requires_grad property shouldn't be accidentally set by shape analysis
         self.assertTrue(foo.graph.findNode("aten::sub").output().requiresGrad() is None)
@@ -8379,7 +8379,7 @@ dedent """
                     exec(code, globals(), scope)
                     cu = torch.jit.CompilationUnit(code)
                     graph = cu.func.graph
-                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
+                    torch._C._jit.pass_complete_shape_analysis(graph, (), False)
                     input_array = [1, 2, 3]
                     for _ in range(1, input_dims):
                         input_array = [input_array]
@@ -8451,7 +8451,7 @@ dedent """
 
                     cu = torch.jit.CompilationUnit(code)
                     graph = cu.func.graph
-                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
+                    torch._C._jit.pass_complete_shape_analysis(graph, (), False)
                     # use dim=-1 to represent a python/jit scalar.
                     dim = -1 if type(first_arg) != str and type(second_arg) != str else non_jit_result.dim()
                     dtype = non_jit_result.dtype
@@ -8486,10 +8486,10 @@ dedent """
         t = torch.tensor(5)
         g = foo.graph_for(t)
         type = next(g.outputs())
-        self.assertTrue(type.type() == torch._C.TensorType.get())
+        self.assertTrue(type.type() == torch._C._jit.TensorType.get())
         g2 = foo2.graph_for(t)
         type = next(g.outputs())
-        self.assertTrue(type.type() == torch._C.TensorType.get())
+        self.assertTrue(type.type() == torch._C._jit.TensorType.get())
 
 
     def test_filecheck_parse(self):
@@ -9545,7 +9545,7 @@ dedent """
 
     def test_script_get_tracing_state(self):
         def test_if_tracing(x):
-            if torch._C._get_tracing_state():
+            if torch._C._jit._get_tracing_state():
                 return x + 1
             else:
                 return x - 1
@@ -10137,7 +10137,7 @@ dedent """
 
         graph = fn.graph
         n = next(graph.inputs())
-        self.assertTrue(n.type() == torch._C.TensorType.getInferred())
+        self.assertTrue(n.type() == torch._C._jit.TensorType.getInferred())
 
         with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
             fn(1)
@@ -10450,7 +10450,7 @@ dedent """
 
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
-        torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
+        torch._C._jit.pass_complete_shape_analysis(foo.graph, (a, b), False)
         FileCheck().check("Double(2, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(str(foo.graph))
 
     def test_shape_analysis_loop(self):
@@ -10847,14 +10847,14 @@ dedent """
         m = M()
         m = torch.jit.script(m)
         with self.assertRaisesRegex(RuntimeError, r'Dropout removal module in training mode is not yet supported'):
-            torch._C._jit_pass_remove_dropout(m._c)
+            torch._C._jit.pass_remove_dropout(m._c)
         m.eval()
         ref_res = m(data)
         # Need to inline otherwise we see instances of Function.
         # We would have to use torch.linear/dropout to get around it otherwise.
         from torch.jit._recursive import wrap_cpp_module
-        m = wrap_cpp_module(torch._C._freeze_module(m._c))
-        torch._C._jit_pass_remove_dropout(m._c)
+        m = wrap_cpp_module(torch._C._jit._freeze_module(m._c))
+        torch._C._jit.pass_remove_dropout(m._c)
         res = m(data)
         FileCheck().check_not("aten::dropout").run(str(m.graph))
         torch.testing.assert_allclose(ref_res, res, rtol=1e-2, atol=1e-3)
@@ -10864,7 +10864,7 @@ dedent """
             return x.unfold(0, 1, 1)
 
         graph = torch.jit.script(fn).graph
-        torch._C._jit_pass_complete_shape_analysis(graph, (torch.tensor(0.39),), False)
+        torch._C._jit.pass_complete_shape_analysis(graph, (torch.tensor(0.39),), False)
         out_dims = fn(torch.tensor(0.3923)).ndim
         self.assertEqual(graph.findNode("aten::unfold").output().type().dim(), out_dims)
 
@@ -12411,7 +12411,7 @@ dedent """
 
     def test_file_format_serialization(self):
         filename = tempfile.mktemp()
-        writer = torch._C.PyTorchFileWriter(filename)
+        writer = torch._C._jit.PyTorchFileWriter(filename)
         buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
         offsets = []
         for i, buf in enumerate(buffers):
@@ -12421,7 +12421,7 @@ dedent """
         writer.write_record("meta", serialized_offsets, len(serialized_offsets))
         writer.write_end_of_file()
 
-        reader = torch._C.PyTorchFileReader(filename)
+        reader = torch._C._jit.PyTorchFileReader(filename)
         serialized_offsets_read = reader.get_record("meta")
         parsed_serialized_offsets = pickle.loads(serialized_offsets)
 
@@ -15654,7 +15654,7 @@ dedent """
         graph = parse_ir(graph_str)
         a = torch.rand(10)
         b = torch.rand(10)
-        test = torch._C._jit_interpret_graph(graph, (a, b))
+        test = torch._C._jit.interpret_graph(graph, (a, b))
         ref = a * b
         self.assertEqual(test, ref)
 

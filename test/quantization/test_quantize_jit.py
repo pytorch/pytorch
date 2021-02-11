@@ -353,7 +353,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2), (x3, w3, b3)]):
             bias = b if has_bias else None
             model = torch.jit.trace(FunctionalLinear(weight, bias), [x])
-            torch._C._jit_pass_fuse_linear(model.graph)
+            torch._C._jit.pass_fuse_linear(model.graph)
             FileCheck().check("aten::linear") \
                        .run(model.graph)
             check_not = ["aten::matmul", "aten::addmm", "aten::add_", "aten::t("]
@@ -375,7 +375,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         x = torch.rand(5, 6, 5)
         w = torch.rand(5, 5, 100)
         model = torch.jit.trace(Matmul(w), [x])
-        torch._C._jit_pass_fuse_linear(model.graph)
+        torch._C._jit.pass_fuse_linear(model.graph)
         # check 3d matmul is not fused
         FileCheck().check("aten::matmul") \
                    .run(model.graph)
@@ -1019,7 +1019,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         assert len([x for x, _ in m._modules._c.items()
                     if x.startswith('relu')]) == 1, \
             "Expected to have 1 relu modules after dedup module uses"
-        torch._C._jit_pass_dedup_module_uses(m._c)
+        torch._C._jit.pass_dedup_module_uses(m._c)
         m = torch.jit._recursive.wrap_cpp_module(m._c)
         res = m(data)
         assert len([x for x, _ in m._modules._c.items()
@@ -1044,7 +1044,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         ref_res = m(x)
         FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                    .run(m.graph)
-        torch._C._jit_pass_replicate_dequantize(m.graph)
+        torch._C._jit.pass_replicate_dequantize(m.graph)
         FileCheck().check_count("aten::dequantize", 2, exactly=True) \
                    .run(m.graph)
         res = get_forward(m._c)(x)
@@ -1072,7 +1072,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         ref_res = m(x)
         FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                    .run(m.graph)
-        torch._C._jit_pass_replicate_dequantize(m.graph)
+        torch._C._jit.pass_replicate_dequantize(m.graph)
         FileCheck().check_count("aten::dequantize", 2, exactly=True) \
                    .run(m.graph)
         # check dequantize is right before CallMethod of conv
@@ -1108,7 +1108,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         ref_res = m(x, weight, bias)
         FileCheck().check("CallFunction") \
                    .run(m.graph)
-        torch._C._jit_pass_swap_functional_linear(m.graph)
+        torch._C._jit.pass_swap_functional_linear(m.graph)
         FileCheck().check("aten::linear") \
                    .check_not("CallFunction") \
                    .run(m.graph)
@@ -2587,7 +2587,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+        m = wrap_cpp_module(torch._C._jit.pass_insert_observers(
             m._c, 'forward', {'': qconfig}, inplace=False))
         m = convert_jit(m)
         # This checks that the dequantize from the output of first conv
@@ -2680,7 +2680,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+        m = wrap_cpp_module(torch._C._jit.pass_insert_observers(
             m._c, 'forward', {'': qconfig}, inplace=False))
         # Checking the model before fianlize contain unfused patterns
         # that numerically matches the model after quantize by checking

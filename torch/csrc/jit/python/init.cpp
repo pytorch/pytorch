@@ -178,9 +178,7 @@ void initJITBindings(PyObject* module) {
             return paramsDict;
           },
           pybind11::return_value_policy::move)
-      .def(
-          "pass_onnx_cast_all_constant_to_floating",
-          CastAllConstantToFloating)
+      .def("pass_onnx_cast_all_constant_to_floating", CastAllConstantToFloating)
       .def(
           "pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
@@ -204,11 +202,8 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
-      .def(
-          "pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
-      .def(
-          "pass_onnx_prepare_inplace_ops_for_onnx",
-          PrepareInplaceOpsForONNX)
+      .def("pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
+      .def("pass_onnx_prepare_inplace_ops_for_onnx", PrepareInplaceOpsForONNX)
       .def(
           "pass_onnx_node_shape_type_inference",
           [](Node* n,
@@ -1313,14 +1308,14 @@ void initJITBindings(PyObject* module) {
     toIValue(std::move(obj), type);
   });
 
-  initPythonCustomClassBindings(module);
-  initPythonIRBindings(module);
-  tracer::initPythonTracerBindings(module);
-  initTreeViewBindings(module);
-  initJitScriptBindings(module);
-  initJitBackendBindings(module);
-  initStaticRuntimeBindings(module);
-  initTensorExprBindings(module);
+  initPythonCustomClassBindings(m.ptr());
+  initPythonIRBindings(m.ptr());
+  tracer::initPythonTracerBindings(m.ptr());
+  initTreeViewBindings(m.ptr());
+  initJitScriptBindings(m.ptr());
+  initJitBackendBindings(m.ptr());
+  initStaticRuntimeBindings(m.ptr());
+  initTensorExprBindings(m.ptr());
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

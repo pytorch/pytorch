@@ -444,7 +444,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
             backend_out = prepared.run(backend_args(args))
             if isinstance(torch_out, torch.Tensor):
                 torch_out = (torch_out,)
-            torch_out, _ = torch._C._jit_flatten(torch_out)
+            torch_out, _ = torch._C._jit.flatten(torch_out)
             # NB: onnx backend NEVER returns bare numpy array
             msg = "ONNX backend returned different results from PyTorch"
             result_hint = ("If you are not using trained parameters, a difference in results\n"

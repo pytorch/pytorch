@@ -2314,7 +2314,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
 
         with torch._jit_internal._disable_emit_hooks():
             x = torch.jit.script(Linear(10, 10))
-            torch._C._jit_pass_erase_shape_information(x.graph)
+            torch._C._jit.pass_erase_shape_information(x.graph)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

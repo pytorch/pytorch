@@ -47,7 +47,7 @@ class TestFreezing(JitTestCase):
         m.eval()
         input = torch.randn(2, 2)
         output_s = m.forward(input)
-        m._c = torch._C._freeze_module(m._c)
+        m._c = torch._C._jit._freeze_module(m._c)
         buffer = io.BytesIO()
         torch.jit.save(m._c, buffer)
         buffer.seek(0)
@@ -166,7 +166,7 @@ class TestFreezing(JitTestCase):
         m.eval()
         input = torch.randn(20, 20)
         output_s = m.forward(input)
-        mf = torch._C._freeze_module(m._c)
+        mf = torch._C._jit._freeze_module(m._c)
 
         # Check if frozen module looks as below:
         # module m {
@@ -220,7 +220,7 @@ class TestFreezing(JitTestCase):
         m.eval()
         input = torch.randn(20, 20)
         output_s = m.forward(input)
-        mf = torch._C._freeze_module(m._c)
+        mf = torch._C._jit._freeze_module(m._c)
         # Check if frozen module looks as below:
         # module m {
         #   attributes {
@@ -258,7 +258,7 @@ class TestFreezing(JitTestCase):
         m.eval()
         input = torch.randn(2, 2)
         output_s = m.forward(input)
-        mf = torch._C._freeze_module(m._c)
+        mf = torch._C._jit._freeze_module(m._c)
 
         # Check if frozen module looks as below:
         # module m {
@@ -307,7 +307,7 @@ class TestFreezing(JitTestCase):
         m.eval()
         input = torch.randn(2, 2)
         output_s = m.forward(input)
-        mf = torch._C._freeze_module(m._c)
+        mf = torch._C._jit._freeze_module(m._c)
         # Check if frozen module looks as below:
         # module m {
         #   attributes {
@@ -367,7 +367,7 @@ class TestFreezing(JitTestCase):
         m.eval()
         input = torch.randn(2, 2)
         output_s = m.forward(input)
-        mf = torch._C._freeze_module(m._c)
+        mf = torch._C._jit._freeze_module(m._c)
 
         # Checking if  Frozen module looks as  below
         # module mf {
@@ -455,7 +455,7 @@ class TestFreezing(JitTestCase):
 
         m = torch.jit.script(TestModule())
         m.eval()
-        mf = torch._C._freeze_module(m._c)
+        mf = torch._C._jit._freeze_module(m._c)
         self.assertTrue(mf.hasattr('sub1'))
         self.assertTrue(mf.sub1.hasattr('a'))
         self.assertFalse(mf.sub1.hasattr('b'))
@@ -511,7 +511,7 @@ class TestFreezing(JitTestCase):
         m = TestModule()
         ms = torch.jit.script(m)
         ms.eval()
-        mf = torch._C._freeze_module(ms._c)
+        mf = torch._C._jit._freeze_module(ms._c)
         self.assertTrue(mf.hasattr('sub1'))
         self.assertTrue(mf.sub1.hasattr('a'))
         self.assertFalse(mf.sub1.hasattr('b'))
@@ -547,7 +547,7 @@ class TestFreezing(JitTestCase):
         m = TestModule()
         ms = torch.jit.script(m)
         ms.eval()
-        mf = torch._C._freeze_module(ms._c, ["sub1"])
+        mf = torch._C._jit._freeze_module(ms._c, ["sub1"])
 
         # Test that 'sub1' is preserved entirely and 'sub2' is completely folded
         self.assertTrue(mf.hasattr('sub1'))
@@ -581,7 +581,7 @@ class TestFreezing(JitTestCase):
         m = TestModule()
         ms = torch.jit.script(m)
         ms.eval()
-        mf = torch._C._freeze_module(ms._c, ["sub1"])
+        mf = torch._C._jit._freeze_module(ms._c, ["sub1"])
 
         # Test that be both sub1 and sub1 are preserved and 'b' is preserved
         # even if it is not used. To fulfill user request to preserve 'sub1'
@@ -623,7 +623,7 @@ class TestFreezing(JitTestCase):
         m = torch.jit.script(TestModule())
         m.eval()
         input = torch.randn(2, 2)
-        mf = torch._C._freeze_module(m._c)
+        mf = torch._C._jit._freeze_module(m._c)
         self.assertFalse(mf.hasattr('sub'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
@@ -644,7 +644,7 @@ class TestFreezing(JitTestCase):
 
         m = FreezeMe()
         m.eval()
-        m_f = torch._C._freeze_module(m._c)
+        m_f = torch._C._jit._freeze_module(m._c)
         self.assertTrue(m_f.hasattr('a'))
         m.forward(torch.tensor([3]))
         out = m_f.forward(torch.tensor([5]))
@@ -669,7 +669,7 @@ class TestFreezing(JitTestCase):
         v.append(4)
         m_s.a = v
         m_s.eval()
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         # Post-freezing mutating m_s.a  does not affect m_f (m_f has its own copy).
         v = m_s.a
         v.append(5)
@@ -700,7 +700,7 @@ class TestFreezing(JitTestCase):
         t = torch.tensor(5)
         m_s.modify_a(t)
         m_s.eval()
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         m.a["layer2"] += "2"
         m_s.modify_a(t)
         self.assertFalse(m_f.hasattr('a'))
@@ -721,7 +721,7 @@ class TestFreezing(JitTestCase):
         m_s = torch.jit.script(m)
         m_s.a[1] += 3.0
         m_s.eval()
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         # Post-freezing tensor attribute mutations affect m_f.
         # FIXME: deep copy all folded attributes so that m_f has full ownership.
         m_s.a[0] += 5.0
@@ -747,7 +747,7 @@ class TestFreezing(JitTestCase):
         inp = torch.tensor([2.0])
         expected = m_s.forward(inp)
         m_s.a[0][0] = 1
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         self.assertFalse(m_f.hasattr('a'))
         out = m_f.forward(inp)
         self.assertEqual(out, expected)
@@ -768,7 +768,7 @@ class TestFreezing(JitTestCase):
         m_s.eval()
         inp = torch.tensor([5])
         expected = m_s.forward(inp)
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('a'))
         m_f.a[0] -= 10
         out = m_f.forward(inp)
@@ -790,7 +790,7 @@ class TestFreezing(JitTestCase):
         inp = torch.tensor([5])
         expected = m_s.forward(inp)
         m_s.a[0][1] -= 10
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         self.assertFalse(m_f.hasattr('a'))
         out = m_f.forward(inp)
         self.assertEqual(out, expected)
@@ -809,7 +809,7 @@ class TestFreezing(JitTestCase):
         m = FreezeMe()
         m_s = torch.jit.script(m)
         m_s.eval()
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('a'))
         inp = torch.tensor([5])
         out = m_f.forward(inp)
@@ -835,7 +835,7 @@ class TestFreezing(JitTestCase):
         inp = torch.tensor([5])
         expected = m_s.forward(inp)
         with self.assertRaisesRegex(RuntimeError, "module contains attributes values that overlaps"):
-            m_f = torch._C._freeze_module(m_s._c)
+            m_f = torch._C._jit._freeze_module(m_s._c)
 
     def test_freeze_module_with_aliased_tensor_attr3(self):
         class FreezeMe(nn.Module):
@@ -853,7 +853,7 @@ class TestFreezing(JitTestCase):
         m_s.eval()
         inp = torch.tensor([5])
         expected = m_s.forward(inp)
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('a'))
         self.assertTrue(m_f.hasattr('b'))
         out = m_f.forward(inp)
@@ -878,7 +878,7 @@ class TestFreezing(JitTestCase):
         expected = m_s.forward(inp)
         m_s.a[0] -= 10
         with self.assertRaisesRegex(RuntimeError, "module contains attributes values that overlaps"):
-            m_f = torch._C._freeze_module(m_s._c)
+            m_f = torch._C._jit._freeze_module(m_s._c)
 
     def test_freeze_module_with_overlapping_attrs(self):
         a = torch.tensor([1, 2, 3, 4, 5, 6])
@@ -900,7 +900,7 @@ class TestFreezing(JitTestCase):
         expected = m_s.forward(inp)
         a[0] -= 10
         with self.assertRaisesRegex(RuntimeError, "module contains attributes values that overlaps"):
-            m_f = torch._C._freeze_module(m_s._c)
+            m_f = torch._C._jit._freeze_module(m_s._c)
 
     def test_freeze_module_with_aliased_attr(self):
         class FreezeMe(nn.Module):
@@ -917,7 +917,7 @@ class TestFreezing(JitTestCase):
         m = FreezeMe()
         m_s = torch.jit.script(m)
         m_s.eval()
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         # FIXME: It should be assertTrue. Currently scripting is making a copy for setting self.b (see #33034)
         self.assertFalse(m_f.hasattr('a'))
         self.assertFalse(m_f.hasattr('c'))
@@ -946,7 +946,7 @@ class TestFreezing(JitTestCase):
         m = FreezeMe()
         m_s = torch.jit.script(m)
         m_s.eval()
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('a'))
         inp = torch.tensor([5])
         out = m_f.forward(inp)
@@ -970,7 +970,7 @@ class TestFreezing(JitTestCase):
         m = FreezeMe()
         m_s = torch.jit.script(m)
         m_s.eval()
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('a'))
         inp = torch.tensor([5])
         out = m_f.forward(inp)
@@ -990,7 +990,7 @@ class TestFreezing(JitTestCase):
         m_s = torch.jit.script(m)
         m_s.eval()
         with self.assertRaisesRegex(RuntimeError, "attempted to freeze a module that return itself"):
-            m_f = torch._C._freeze_module(m_s._c)
+            m_f = torch._C._jit._freeze_module(m_s._c)
 
     def test_freeze_module_return_sub_module(self):
 
@@ -1005,7 +1005,7 @@ class TestFreezing(JitTestCase):
         m = FreezeMe()
         m_s = torch.jit.script(m)
         m_s.eval()
-        m_f = torch._C._freeze_module(m_s._c)
+        m_f = torch._C._jit._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('conv1'))
 
 
@@ -1036,7 +1036,7 @@ class TestFreezing(JitTestCase):
 
         model = torch.jit.script(Net())
         model.train()
-        mTrain_freezed = torch._C._freeze_module(model._c)
+        mTrain_freezed = torch._C._jit._freeze_module(model._c)
         # verify mTrain_freezed looks exactly as:
         # module {
         #   attributes {
@@ -1109,7 +1109,7 @@ class TestFreezing(JitTestCase):
         self.assertTrue(mTrain_freezed.fc2.hasattr('weight'))
         self.assertTrue(mTrain_freezed.fc2.hasattr('bias'))
         model.eval()
-        mEval_freezed = torch._C._freeze_module(model._c)
+        mEval_freezed = torch._C._jit._freeze_module(model._c)
         self.assertFalse(mEval_freezed.hasattr('conv1'))
         self.assertFalse(mEval_freezed.hasattr('conv2'))
         self.assertFalse(mEval_freezed.hasattr('dropout1'))
@@ -1125,7 +1125,7 @@ class TestFreezing(JitTestCase):
         m = torch.jit.load(buffer)
         FileCheck().check_not('GetAttr[name=') \
                    .run(m._c._get_method('forward').graph)
-        m2 = torch._C._freeze_module(model._c, preserveParameters=True)
+        m2 = torch._C._jit._freeze_module(model._c, preserveParameters=True)
         self.assertTrue(m2.hasattr('conv1'))
         self.assertTrue(m2.hasattr('conv2'))
         self.assertFalse(m2.hasattr('dropout1'))
@@ -1139,7 +1139,7 @@ class TestFreezing(JitTestCase):
         self.assertTrue(mod.weight.requires_grad)
         smod = torch.jit.script(mod)
         smod.eval()
-        fmod = torch._C._freeze_module(smod._c)
+        fmod = torch._C._jit._freeze_module(smod._c)
         self.assertTrue(mod.weight.requires_grad)
         self.assertTrue(smod.weight.requires_grad)
         self.assertFalse(fmod.hasattr('weight'))
@@ -1165,7 +1165,7 @@ class TestFreezing(JitTestCase):
 
         m = torch.jit.script(Module())
         m.eval()
-        fm = torch._C._freeze_module(m._c, ["a"])
+        fm = torch._C._jit._freeze_module(m._c, ["a"])
         # Attribute "a" is preserved
         self.assertTrue(fm.hasattr("a"))
         self.assertFalse(fm.hasattr("b"))
@@ -1192,7 +1192,7 @@ class TestFreezing(JitTestCase):
 
         m = torch.jit.script(Module())
         m.eval()
-        fm = torch._C._freeze_module(m._c, ["modify_a"])
+        fm = torch._C._jit._freeze_module(m._c, ["modify_a"])
         # Both attribute "a" and method "modify_a" are preserved
         self.assertTrue(fm.hasattr("a"))
         self.assertFalse(fm.hasattr("b"))
@@ -1219,7 +1219,7 @@ class TestFreezing(JitTestCase):
 
         m = torch.jit.script(Module())
         m.eval()
-        fm = torch._C._freeze_module(m._c, ["modify_a"])
+        fm = torch._C._jit._freeze_module(m._c, ["modify_a"])
         FileCheck().check('prim::GetAttr[name="a"]').run(fm.forward.graph)
         FileCheck().check('prim::GetAttr[name="b"]').run(fm.modify_a.graph)
 
@@ -1265,8 +1265,8 @@ class TestFreezing(JitTestCase):
             m = _static_quant(m)
             m = torch.jit.script(m)
             m.eval()
-            torch._C._jit_pass_inline(m.graph)
-            m_frozen = wrap_cpp_module(torch._C._freeze_module(m._c))
+            torch._C._jit.pass_inline(m.graph)
+            m_frozen = wrap_cpp_module(torch._C._jit._freeze_module(m._c))
             # Earlier bug resulted in _packed_params set to false.
             FileCheck().check_not('_packed_params = False').run(m_frozen._c.dump_to_str(True, True, False))
 
@@ -1331,7 +1331,7 @@ class TestFreezing(JitTestCase):
         m = torch.jit.script(Mod())
         m.eval()
         with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
-            mf = torch._C._freeze_module(m._c)
+            mf = torch._C._jit._freeze_module(m._c)
 
     def test_freeze_non_module_class_getattr(self):
         class BoxCoder(object):

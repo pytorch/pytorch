@@ -54,7 +54,7 @@ def do_input_map(fn, input):
     return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
 
 def clear_class_registry():
-    torch._C._jit_clear_class_registry()
+    torch._C._jit.clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
     torch.jit._state._script_classes.clear()
 
@@ -113,10 +113,10 @@ class JitTestCase(JitCommonTestCase):
             sys.stdout = self.sys_stdout
 
     def setHooks(self):
-        torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
+        torch._C._jit.set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
 
     def clearHooks(self):
-        torch._C._jit_set_emit_hooks(None, None)
+        torch._C._jit.set_emit_hooks(None, None)
 
     def setUp(self):
         super().setUp()
@@ -146,7 +146,7 @@ class JitTestCase(JitCommonTestCase):
                 elif node.kind() == 'prim::DifferentiableGraph':
                     get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
                 elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or 
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or
                                                     node.inputs().__next__().node().kind() == 'prim::RequiresGradCheck'):
                     get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
                 else:
@@ -156,7 +156,7 @@ class JitTestCase(JitCommonTestCase):
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
                          'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck', 'prim::RequiresGradCheck'} | set(except_for)
 
-        fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
+        fusion_groups : Dict[torch._C._jit.Block, List[torch._C._jit.Node]] = defaultdict(list)
         get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
         self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
         (graph, fusion_nodes) = list(fusion_groups.items())[0]
@@ -198,7 +198,7 @@ class JitTestCase(JitCommonTestCase):
                 # short-circuit if this is an empty function or module
                 if len(m.code) == 0:
                     return
-                if isinstance(m, torch._C.ScriptModule):
+                if isinstance(m, torch._C._jit.ScriptModule):
                     if len(m._method_names()) == 0:
                         return
 
@@ -232,8 +232,8 @@ class JitTestCase(JitCommonTestCase):
             for a, b in zip(code_files, code_files_2):
                 self.assertMultiLineEqual(a, b)
 
-            if isinstance(m, torch._C.ScriptModule):
-                self.assertTrue(torch._C._ivalue_tags_match(m, imported._c))
+            if isinstance(m, torch._C._jit.ScriptModule):
+                self.assertTrue(torch._C._jit._ivalue_tags_match(m, imported._c))
 
 
     def emitFunctionHook(self, func):
@@ -309,31 +309,31 @@ class JitTestCase(JitCommonTestCase):
         self.assertExpectedGraph(g, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
-        if isinstance(trace, torch._C.Graph):
+        if isinstance(trace, torch._C._jit.Graph):
             graph = trace
         else:
             graph = trace.graph()
 
-        torch._C._jit_pass_lint(graph)
-        torch._C._jit_pass_dce(graph)
-        torch._C._jit_pass_lint(graph)
-        graph = torch._C._jit_pass_canonicalize(graph)
-        torch._C._jit_pass_lint(graph)
+        torch._C._jit.pass_lint(graph)
+        torch._C._jit.pass_dce(graph)
+        torch._C._jit.pass_lint(graph)
+        graph = torch._C._jit.pass_canonicalize(graph)
+        torch._C._jit.pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
 
     def run_pass(self, name, trace):
-        if isinstance(trace, torch._C.Graph):
+        if isinstance(trace, torch._C._jit.Graph):
             graph = trace
             set_graph = False
         else:
             set_graph = True
             graph = trace.graph()
 
-        torch._C._jit_pass_lint(graph)
-        result = getattr(torch._C, '_jit_pass_' + name)(graph)
+        torch._C._jit.pass_lint(graph)
+        result = getattr(torch._C._jit, 'pass_' + name)(graph)
         if result is not None:
             graph = result
-        torch._C._jit_pass_lint(graph)
+        torch._C._jit.pass_lint(graph)
 
         if set_graph:
             trace.set_graph(graph)
@@ -594,30 +594,30 @@ class JitTestCase(JitCommonTestCase):
 
 @contextmanager
 def inline_everything_mode(should_inline):
-    old = torch._C._jit_get_inline_everything_mode()
-    torch._C._jit_set_inline_everything_mode(should_inline)
+    old = torch._C._jit.get_inline_everything_mode()
+    torch._C._jit.set_inline_everything_mode(should_inline)
     try:
         yield
     finally:
-        torch._C._jit_set_inline_everything_mode(old)
+        torch._C._jit.set_inline_everything_mode(old)
 
 @contextmanager
 def set_fusion_group_inlining(inlining):
-    old = torch._C._debug_get_fusion_group_inlining()
-    torch._C._debug_set_fusion_group_inlining(inlining)
+    old = torch._C._jit._debug_get_fusion_group_inlining()
+    torch._C._jit._debug_set_fusion_group_inlining(inlining)
     try:
         yield
     finally:
-        torch._C._debug_set_fusion_group_inlining(old)
+        torch._C._jit._debug_set_fusion_group_inlining(old)
 
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
-    torch._C._debug_set_autodiff_subgraph_inlining(not enabled)
+    torch._C._jit._debug_set_autodiff_subgraph_inlining(not enabled)
     try:
         yield
     finally:
-        torch._C._debug_set_autodiff_subgraph_inlining(True)
+        torch._C._jit._debug_set_autodiff_subgraph_inlining(True)
 
 def _inline_everything(fn):
     @functools.wraps(fn)
@@ -644,11 +644,11 @@ def _trace(*args, **kwargs):
 
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
-        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit.override_can_fuse_on_cpu(True)
         try:
             fn(*args, **kwargs)
         finally:
-            torch._C._jit_override_can_fuse_on_cpu(False)
+            torch._C._jit.override_can_fuse_on_cpu(False)
     return wrapper
 
 

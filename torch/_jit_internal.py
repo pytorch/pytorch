@@ -864,7 +864,7 @@ def _qualified_name(obj):
     if hasattr(obj, '_jit_override_qualname'):
         return obj._jit_override_qualname
     # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.ScriptFunction):
+    if isinstance(obj, torch._C._jit.ScriptFunction):
         return obj.qualified_name
 
     if getattr(obj, "__name__", None):
@@ -912,7 +912,7 @@ def _qualified_name(obj):
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
-class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
+class SourceContext(torch._C._jit.tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
@@ -938,7 +938,7 @@ def _get_named_tuple_properties(obj):
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
-            annotations.append(torch._C.TensorType.getInferred())
+            annotations.append(torch._C._jit.TensorType.getInferred())
     return type(obj).__name__, fields, annotations
 
 
@@ -950,19 +950,19 @@ def _create_named_tuple(t, unqual_name: str, field_names: List[str]):
 
 @contextlib.contextmanager
 def _disable_emit_hooks():
-    hooks = torch._C._jit_get_emit_hooks()
-    torch._C._jit_set_emit_hooks(None, None)
+    hooks = torch._C._jit.get_emit_hooks()
+    torch._C._jit.set_emit_hooks(None, None)
     yield
-    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+    torch._C._jit.set_emit_hooks(hooks[0], hooks[1])
 
 
 def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
     def __enter__(self):
-        self.hooks = torch._C._jit_get_emit_hooks()
-        torch._C._jit_set_emit_hooks(None, None)
+        self.hooks = torch._C._jit.get_emit_hooks()
+        torch._C._jit.set_emit_hooks(None, None)
 
     def __exit__(self, *args):
-        torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
+        torch._C._jit.set_emit_hooks(self.hooks[0], self.hooks[1])
 
 def _is_exception(obj):
     if not inspect.isclass(obj):

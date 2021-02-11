@@ -226,7 +226,7 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
     Returns:
         a :class:`PackedSequence` object
     """
-    if torch._C._get_tracing_state() and not isinstance(lengths, torch.Tensor):
+    if torch._C._jit._get_tracing_state() and not isinstance(lengths, torch.Tensor):
         warnings.warn('pack_padded_sequence has been called with a Python list of '
                       'sequence lengths. The tracer cannot track the data flow of Python '
                       'values, and it will treat them as constants, likely rendering '

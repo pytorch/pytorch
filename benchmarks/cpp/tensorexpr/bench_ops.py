@@ -1,8 +1,8 @@
 import timeit
 import torch
 
-torch._C._jit_override_can_fuse_on_cpu(True)
-torch._C._debug_set_fusion_group_inlining(False)
+torch._C._jit.override_can_fuse_on_cpu(True)
+torch._C._jit._debug_set_fusion_group_inlining(False)
 torch.set_num_threads(1)
 
 

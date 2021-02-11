@@ -3,7 +3,7 @@ import torch
 class ExecutionCounter(object):
     def try_get_trigger_value(self):
         try:
-            return torch._C._jit_get_trigger_value(self.name)
+            return torch._C._jit.get_trigger_value(self.name)
         except Exception:
             return 0
 

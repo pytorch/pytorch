@@ -37,7 +37,7 @@ def fuse_conv_bn_jit(model, inplace=False):
     """
     torch._C._log_api_usage_once("quantization_api.quantize_jit.fuse_conv_bn_jit")
     model_c = model._c
-    model_c = torch._C._jit_pass_fold_convbn(model_c)
+    model_c = torch._C._jit.pass_fold_convbn(model_c)
     if inplace:
         model._reconstruct(model_c)
     else:
@@ -51,7 +51,7 @@ def _prepare_jit(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC
         raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
     model = fuse_conv_bn_jit(model, inplace)
-    model_c = torch._C._jit_pass_insert_observers(model._c,
+    model_c = torch._C._jit.pass_insert_observers(model._c,
                                                   'forward',
                                                   scripted_qconfig_dict,
                                                   inplace,
@@ -75,19 +75,19 @@ def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
     _check_is_script_module(model)
     model.eval()
     model_c = model._c
-    model_c = torch._C._jit_pass_insert_quant_dequant(model_c, 'forward', inplace, debug, quant_type)
+    model_c = torch._C._jit.pass_insert_quant_dequant(model_c, 'forward', inplace, debug, quant_type)
     if not debug:
         # Moving model parameters to CPU since quantized operators
         # are only supported on CPU right now
         model.cpu()
         if preserved_attrs is None:
             preserved_attrs = []
-        model_c = torch._C._jit_pass_quant_finalize(model_c, quant_type, preserved_attrs)
+        model_c = torch._C._jit.pass_quant_finalize(model_c, quant_type, preserved_attrs)
     if inplace:
         model._reconstruct(model_c)
     else:
         model = wrap_cpp_module(model_c)
-    torch._C._jit_pass_constant_propagation(model.graph)
+    torch._C._jit.pass_constant_propagation(model.graph)
     return model
 
 def convert_jit(model, inplace=False, debug=False, preserved_attrs=None):
@@ -111,7 +111,7 @@ def _quantize_jit(model, qconfig_dict, run_fn=None, run_args=None, inplace=False
         run_fn(model, *run_args)
         model = convert_jit(model, True, debug)
 
-    torch._C._jit_pass_constant_propagation(model.graph)
+    torch._C._jit.pass_constant_propagation(model.graph)
     return model
 
 def quantize_jit(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):

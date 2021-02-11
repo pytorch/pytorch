@@ -73,7 +73,7 @@ class PackageExporter:
         else:  # is a byte buffer
             self.buffer = f
 
-        self.zip_file = torch._C.PyTorchFileWriter(f)
+        self.zip_file = torch._C._jit.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
         self.serialized_storages : Dict[str, Any] = {}
         self.external : List[str] = []

@@ -22,7 +22,7 @@ def check_output_types(self, func, ref_outputs, args, kwargs):
     types = [o.type() for o in graph.outputs()]
     self.assertTrue(len(types) == 1)
     t = types[0]
-    torch._C._jit_assert_is_instance(ref_outputs, t)
+    torch._C._jit.assert_is_instance(ref_outputs, t)
 
 # Test names in this set are only checked for a single derivative
 nn_functional_single_grad = frozenset('test_nn_' + name for name in [
@@ -110,8 +110,8 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
 
 class JitCommonTestCase(TestCase):
     def createFunctionFromGraph(self, trace):
-        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
-        return torch._C._create_function_from_graph("forward", graph)
+        graph = trace if isinstance(trace, torch._C._jit.Graph) else trace.graph()
+        return torch._C._jit._create_function_from_graph("forward", graph)
 
     def assertExportImport(self, trace, inputs):
         m = self.createFunctionFromGraph(trace)
@@ -143,15 +143,15 @@ class JitCommonTestCase(TestCase):
             torch.jit.save(imported, fname)
             return torch.jit.load(fname, map_location=map_location)
 
-    def autoDiffErrorMessage(self, should_autodiff_node, nodes_not_in_diff_graph, 
-                             fusion_nodes_not_found, non_fusible_nodes_being_fused, 
+    def autoDiffErrorMessage(self, should_autodiff_node, nodes_not_in_diff_graph,
+                             fusion_nodes_not_found, non_fusible_nodes_being_fused,
                              fusion_nodes_found, nodes_in_diff_graph):
         err_msg = "\nFailure in testing nodes' autodifferentiation. "
         if should_autodiff_node:
             err_msg += "One or more nodes were expected to be autodiffed, " \
                 "but were not found in specified fusible/nonfusible " \
                 "DifferentiableGraph groups. \nSpecifically:"
-            # The node is intended to appear in a differentiable graph but doesn't 
+            # The node is intended to appear in a differentiable graph but doesn't
             diff_nodes_missing = []
             # The node is intended to appear in a differentiable graph
             # outside of a fusion group but instead is in a fusion group
@@ -196,7 +196,7 @@ class JitCommonTestCase(TestCase):
                     "Did you intend for these nodes to be fused? If not, you should " \
                     "move these nodes into the test's nonfusible nodes. Otherwise your " \
                     "autodifferentiation logic might be wrong."
-        else: 
+        else:
             err_msg += "One or more nodes were not expected to be autodiffed " \
                 "but were found in a DifferentiableGraph or in a FusionGroup " \
                 "of a DifferentiableGraph. Did you intend for these nodes to be " \
@@ -226,7 +226,7 @@ class JitCommonTestCase(TestCase):
         for node in nonfusible_nodes:
             if any(g.findNode(node) is not None for g in diff_subgraphs):
                 nodes_in_diff_graph.append(node)
-            else: 
+            else:
                 nodes_not_in_diff_graph.append(node)
             if any(g.findNode(node) is not None for g in fusion_subgraphs):
                 non_fusible_nodes_being_fused.append(node)
@@ -239,14 +239,14 @@ class JitCommonTestCase(TestCase):
             if any(g.findNode(node) is not None for g in fusion_subgraphs):
                 fusion_nodes_found.append(node)
             else:
-                fusion_nodes_not_found.append(node) 
-        found_all_fusible_nodes = len(fusion_nodes_found) == len(fusible_nodes)    
+                fusion_nodes_not_found.append(node)
+        found_all_fusible_nodes = len(fusion_nodes_found) == len(fusible_nodes)
 
-        err_msg = self.autoDiffErrorMessage(should_autodiff_node, 
-                                            nodes_not_in_diff_graph, 
-                                            fusion_nodes_not_found, 
+        err_msg = self.autoDiffErrorMessage(should_autodiff_node,
+                                            nodes_not_in_diff_graph,
+                                            fusion_nodes_not_found,
                                             non_fusible_nodes_being_fused,
-                                            fusion_nodes_found, 
+                                            fusion_nodes_found,
                                             nodes_in_diff_graph)
-        self.assertEqual(should_autodiff_node, 
-                         found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)  
+        self.assertEqual(should_autodiff_node,
+                         found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)

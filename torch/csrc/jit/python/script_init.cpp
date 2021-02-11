@@ -1558,9 +1558,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("set_emit_hooks", setEmitHooks);
   m.def("get_emit_hooks", getEmitHooks);
-  m.def("clear_class_registry", []() {
-    get_python_cu()->_clear_python_cu();
-  });
+  m.def("clear_class_registry", []() { get_python_cu()->_clear_python_cu(); });
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);

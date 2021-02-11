@@ -29,18 +29,18 @@ if __name__ == "__main__":
 
 
 def to_test_backend(module, method_compile_spec):
-    return torch._C._jit_to_backend("test_backend", module, {"forward": method_compile_spec})
+    return torch._C._jit.to_backend("test_backend", module, {"forward": method_compile_spec})
 
 
 def to_test_backend_multi(module, method_compile_spec):
-    return torch._C._jit_to_backend("test_backend", module, method_compile_spec)
+    return torch._C._jit.to_backend("test_backend", module, method_compile_spec)
 
 
 def to_test_backend_selective(module, method_compile_spec, submodules):
     def _to_test_backend(module):
         return to_test_backend(module, method_compile_spec)
 
-    return torch._C._jit_to_backend_selective(module, _to_test_backend, submodules)
+    return torch._C._jit.to_backend_selective(module, _to_test_backend, submodules)
 
 
 class BasicModule(torch.nn.Module):

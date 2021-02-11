@@ -5,7 +5,7 @@ import inspect
 import string
 from textwrap import dedent
 from typing import List
-from torch._C._jit_tree_views import (
+from torch._C._jit.tree_views import (
     ClassDef, Ident, Stmt, Decl, Def, Var,
     EmptyTypeAnnotation, Param, ExprStmt, Assign,
     Delete, Return, Raise, Assert, AugAssign, While,
@@ -93,7 +93,7 @@ class FrontendError(Exception):
 
         # This has to be instantiated here so the ErrorReport is accurate to the
         # call stack when the FrontendError was raised
-        self.error_report = torch._C.ErrorReport(self.source_range)
+        self.error_report = torch._C._jit.ErrorReport(self.source_range)
 
     def __str__(self):
         return self.msg + self.error_report.what().lstrip()
@@ -177,7 +177,7 @@ def get_jit_class_def(cls, self_name):
 
     properties = get_class_properties(cls, self_name)
 
-    sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
+    sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C._jit.ErrorReport.call_stack())
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
@@ -237,7 +237,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
             but we want the result AST to have the name "forward".
         self_name: If this function is a method, what the type name of `self` is.
     """
-    sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
+    sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C._jit.ErrorReport.call_stack())
     sourcelines = normalize_source_lines(sourcelines)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
@@ -297,8 +297,8 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None):
     decl = Decl(r, param_list, return_type)
     is_method = self_name is not None
     if type_line is not None:
-        type_comment_decl = torch._C.parse_type_comment(type_line)
-        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
+        type_comment_decl = torch._C._jit.parse_type_comment(type_line)
+        decl = torch._C._jit.merge_type_from_type_comment(decl, type_comment_decl, is_method)
 
     return Def(Ident(r, def_name),
                decl,

@@ -72,7 +72,7 @@ class TestPeephole(JitTestCase):
 
         fn = torch.jit.script(f)
         s = str(fn.graph)
-        torch._C._jit_pass_peephole(fn.graph)
+        torch._C._jit.pass_peephole(fn.graph)
         self.assertEqual(s, str(fn.graph))
 
     def test_peephole_list_ops(self):

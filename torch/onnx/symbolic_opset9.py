@@ -1,5 +1,5 @@
 import torch
-from torch._C import ListType, OptionalType
+from torch._C._jit import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
 
 import torch.onnx
@@ -2206,7 +2206,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # PackPadded operators cannot be optimized out.
     if batch_first:
         input = g.op('Transpose', input, perm_i=[1, 0, 2])
-    if not lengths.type().isSubtypeOf(torch._C.TensorType.get()):
+    if not lengths.type().isSubtypeOf(torch._C._jit.TensorType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
     # We know it's a TensorType so this check is now safe.
     # It's really only necessary because those operators expand to something that

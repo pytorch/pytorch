@@ -33,8 +33,8 @@ class TestFusionPasses(QuantizationTestCase):
         # In this test case since we are directly calling ops
         # it does not matter, however if we are calling nn
         # modules we have to inline graph.
-        torch._C._jit_pass_inline(scripted_m.graph)
-        torch._C._jit_pass_fuse_quantized_add_relu(scripted_m.graph)
+        torch._C._jit.pass_inline(scripted_m.graph)
+        torch._C._jit.pass_fuse_quantized_add_relu(scripted_m.graph)
         FileCheck().check_not("aten::relu") \
                    .check("quantized::add_relu") \
                    .run(scripted_m.graph)
@@ -62,8 +62,8 @@ class TestFusionPasses(QuantizationTestCase):
         # In this test case since we are directly calling ops
         # it does not matter, however if we are calling nn
         # modules we have to inline graph.
-        torch._C._jit_pass_inline(scripted_m.graph)
-        torch._C._jit_pass_fuse_quantized_add_relu(scripted_m.graph)
+        torch._C._jit.pass_inline(scripted_m.graph)
+        torch._C._jit.pass_fuse_quantized_add_relu(scripted_m.graph)
         FileCheck().check_not("aten::relu") \
                    .check_not("quantized::add_out") \
                    .check("quantized::add_relu_out") \
@@ -84,8 +84,8 @@ class TestFusionPasses(QuantizationTestCase):
         m = MAddScalar()
         scripted_m = torch.jit.script(m)
         ref_output = scripted_m(qA, 3.)
-        torch._C._jit_pass_inline(scripted_m.graph)
-        torch._C._jit_pass_fuse_quantized_add_relu(scripted_m.graph)
+        torch._C._jit.pass_inline(scripted_m.graph)
+        torch._C._jit.pass_fuse_quantized_add_relu(scripted_m.graph)
         FileCheck().check_not("aten::relu") \
                    .check_not("quantized::add_scalar(") \
                    .check("quantized::add_scalar_relu") \
@@ -109,8 +109,8 @@ class TestFusionPasses(QuantizationTestCase):
         m = MAddScalarOut()
         scripted_m = torch.jit.script(m)
         ref_output = scripted_m(qA, 3., qC)
-        torch._C._jit_pass_inline(scripted_m.graph)
-        torch._C._jit_pass_fuse_quantized_add_relu(scripted_m.graph)
+        torch._C._jit.pass_inline(scripted_m.graph)
+        torch._C._jit.pass_fuse_quantized_add_relu(scripted_m.graph)
         FileCheck().check_not("aten::relu") \
                    .check_not("quantized::add_scalar_out") \
                    .check("quantized::add_scalar_relu_out") \

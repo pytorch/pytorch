@@ -11,7 +11,7 @@ import torch.onnx
 import torch.onnx.utils
 
 from functools import wraps
-from torch._C import OptionalType
+from torch._C._jit import OptionalType
 
 
 # Note [Edit Symbolic Files]
@@ -169,7 +169,7 @@ def _if_scalar_type_as(g, self, tensor):
     actually need to insert an ONNX cast operator here; just
     fix up the scalar.
     """
-    if isinstance(self, torch._C.Value):
+    if isinstance(self, torch._C._jit.Value):
         return self
 
     scalar_type = tensor.type().scalarType()
@@ -184,13 +184,13 @@ def _is_none(x):
     return x.node().mustBeNone()
 
 def _is_value(x):
-    return isinstance(x, torch._C.Value)
+    return isinstance(x, torch._C._jit.Value)
 
 def _is_tensor(x):
-    return x.type().isSubtypeOf(torch._C.TensorType.get())
+    return x.type().isSubtypeOf(torch._C._jit.TensorType.get())
 
 def _is_tensor_list(x):
-    return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
+    return isinstance(x.type(), torch._C._jit.ListType) and isinstance(x.type().getElementType(), torch._C._jit.TensorType)
 
 def _get_tensor_rank(x):
     if not _is_tensor(x) or x.type() is None:

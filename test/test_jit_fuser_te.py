@@ -12,8 +12,8 @@ from torch.testing import FileCheck
 # and setting them after `GRAPH_EXECUTOR` is
 # inferred erroneously runs or skips
 # some tests
-torch._C._jit_set_profiling_executor(True)
-torch._C._jit_set_profiling_mode(True)
+torch._C._jit.set_profiling_executor(True)
+torch._C._jit.set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests
@@ -46,31 +46,31 @@ def warmup_forward(f, *args):
 
 @contextlib.contextmanager
 def texpr_reductions_enabled():
-    old = torch._C._jit_set_texpr_reductions_enabled(True)
+    old = torch._C._jit.set_texpr_reductions_enabled(True)
     try:
         yield
     finally:
-        torch._C._jit_set_texpr_reductions_enabled(old)
+        torch._C._jit.set_texpr_reductions_enabled(old)
 
 class TestTEFuser(JitTestCase):
     def setUp(self):
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+        self.old_cpu_fuser_state = torch._C._jit.can_fuse_on_cpu()
+        self.old_must_use_cpu_state = torch._C._jit.get_te_must_use_llvm_cpu()
+        self.old_gpu_fuser_state = torch._C._jit.can_fuse_on_gpu()
 
-        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit.override_can_fuse_on_cpu(True)
         # TODO: force LLVM. need to add it to asan, mac, windows builds + sandcastle
-        # torch._C._jit_set_te_must_use_llvm_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
+        # torch._C._jit.set_te_must_use_llvm_cpu(True)
+        torch._C._jit.override_can_fuse_on_gpu(True)
 
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+        self.old_profiling_executor = torch._C._jit.set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._jit.set_profiling_mode(True)
 
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
+        self.old_fusion_inlining = torch._C._jit._debug_get_fusion_group_inlining()
+        torch._C._jit._debug_set_fusion_group_inlining(False)
 
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
+        self.texpr_fuser_state = torch._C._jit.texpr_fuser_enabled()
+        torch._C._jit.set_texpr_fuser_enabled(True)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
@@ -88,15 +88,15 @@ class TestTEFuser(JitTestCase):
         self.dtypes = self.int_dtypes + self.fp_dtypes
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+        torch._C._jit.set_profiling_executor(self.old_profiling_executor)
+        torch._C._jit.set_profiling_mode(self.old_profiling_mode)
 
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_must_use_cpu_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit.override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit.override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+        torch._C._jit.set_te_must_use_llvm_cpu(self.old_must_use_cpu_state)
+        torch._C._jit._debug_set_fusion_group_inlining(self.old_fusion_inlining)
 
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit.set_texpr_fuser_enabled(self.texpr_fuser_state)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -919,14 +919,14 @@ class TestTEFuser(JitTestCase):
             torch.randn(4, 4, dtype=torch.float, device='cuda:1'),
         ]
 
-        prev_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
+        prev_cache_size = torch._C._jit.debug_fuser_num_cached_kernel_specs()
 
         # There are 3 FusionGroups. Because they have the same graph, they
         # should reuse the same KernelSpec in the KernelSpec cache.
         ge = self.checkScript(fn, inputs)
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), FUSION_GROUP, 3, True)
-        new_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
+        new_cache_size = torch._C._jit.debug_fuser_num_cached_kernel_specs()
         # XXX: This assumes that the same kernel isn't already used by another test
         # FIXME: Use the TE fuser's way of querying the cache.
         # self.assertEqual(new_cache_size - prev_cache_size, 1)
@@ -1220,8 +1220,8 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(len([n for n in backward.nodes() if n.kind() == 'aten::_grad_sum_to_size']), num_grads)
 
     def test_disabled(self):
-        old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
+        old_cpu_fuser_state = torch._C._jit.can_fuse_on_cpu()
+        torch._C._jit.override_can_fuse_on_cpu(False)
 
         def fn(a):
             return a ** 2 + a
@@ -1231,7 +1231,7 @@ class TestTEFuser(JitTestCase):
         g = s.graph_for(x)
         self.assertEqual(len(self.findFusionGroups(g)), 0)
 
-        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
+        torch._C._jit.override_can_fuse_on_cpu(old_cpu_fuser_state)
 
     def data_for(self, dtype, device="cuda", size=None):
         if size is None:

@@ -305,7 +305,7 @@ class TestScriptPy3(JitTestCase):
             return tup
 
         FileCheck().check('TupleConstruct').run(foo.graph)
-        torch._C._jit_pass_lower_all_tuples(foo.graph)
+        torch._C._jit.pass_lower_all_tuples(foo.graph)
         FileCheck().check_not('TupleConstruct').run(foo.graph)
 
     def test_named_tuple_type_annotation(self):

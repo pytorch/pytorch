@@ -69,10 +69,10 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 def cppProfilingFlagsToProfilingMode():
-    old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
-    torch._C._jit_set_profiling_executor(old_prof_exec_state)
-    torch._C._jit_set_profiling_mode(old_prof_mode_state)
+    old_prof_exec_state = torch._C._jit.set_profiling_executor(True)
+    old_prof_mode_state = torch._C._jit.set_profiling_mode(True)
+    torch._C._jit.set_profiling_executor(old_prof_exec_state)
+    torch._C._jit.set_profiling_mode(old_prof_mode_state)
 
     if old_prof_exec_state:
         if old_prof_mode_state:
@@ -85,35 +85,35 @@ def cppProfilingFlagsToProfilingMode():
 @contextmanager
 def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-        old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-        old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+        old_prof_exec_state = torch._C._jit.set_profiling_executor(True)
+        old_prof_mode_state = torch._C._jit.set_profiling_mode(True)
     try:
         yield
     finally:
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            torch._C._jit_set_profiling_executor(old_prof_exec_state)
-            torch._C._jit_set_profiling_mode(old_prof_mode_state)
+            torch._C._jit.set_profiling_executor(old_prof_exec_state)
+            torch._C._jit.set_profiling_mode(old_prof_mode_state)
 
 @contextmanager
 def enable_profiling_mode():
-    old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_exec_state = torch._C._jit.set_profiling_executor(True)
+    old_prof_mode_state = torch._C._jit.set_profiling_mode(True)
     try:
         yield
     finally:
-        torch._C._jit_set_profiling_executor(old_prof_exec_state)
-        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+        torch._C._jit.set_profiling_executor(old_prof_exec_state)
+        torch._C._jit.set_profiling_mode(old_prof_mode_state)
 
 @contextmanager
 def num_profiled_runs(num_runs):
-    old_num_runs = torch._C._jit_set_num_profiled_runs(num_runs)
+    old_num_runs = torch._C._jit.set_num_profiled_runs(num_runs)
     try:
         yield
     finally:
-        torch._C._jit_set_num_profiled_runs(old_num_runs)
+        torch._C._jit.set_num_profiled_runs(old_num_runs)
 
-func_call = torch._C.ScriptFunction.__call__
-meth_call = torch._C.ScriptMethod.__call__
+func_call = torch._C._jit.ScriptFunction.__call__
+meth_call = torch._C._jit.ScriptMethod.__call__
 
 def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
@@ -132,8 +132,8 @@ def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
 # TODO fix when https://github.com/python/mypy/issues/2427 is address
-torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
-torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
+torch._C._jit.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
+torch._C._jit.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
 
 def _get_test_report_path():
     # allow users to override the test file location. We need this

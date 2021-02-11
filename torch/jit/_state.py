@@ -54,7 +54,7 @@ def enable():
 # The Python CompilationUnit. All functions and modules defined in Python will
 # live in here. It's defined in Python because doing in cpp creates static
 # destruction order issues.
-_python_cu = torch._C.CompilationUnit()
+_python_cu = torch._C._jit.CompilationUnit()
 
 
 # qualified_name => ScriptClass mapping

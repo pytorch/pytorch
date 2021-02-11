@@ -100,7 +100,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize: bool = Tr
 
     preserved_attrs = preserved_attrs if preserved_attrs is not None else []
 
-    out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs))
+    out = RecursiveScriptModule(torch._C._jit._freeze_module(mod._c, preserved_attrs))
     RecursiveScriptModule._finalize_scriptmodule(out)
     if optimize:
         optimize_frozen_module(out)
@@ -140,4 +140,4 @@ def optimize_frozen_module(mod):
         assert "batch_norm" not in str(frozen_mod.graph)
 
     """
-    torch._C._jit_pass_optimize_frozen_graph(mod.graph)
+    torch._C._jit.pass_optimize_frozen_graph(mod.graph)

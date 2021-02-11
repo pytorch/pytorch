@@ -56,11 +56,11 @@ def export_opnames(m):
     r"""
         Returns a list of operator names of a script module and its submodules
     """
-    return torch._C._export_opnames(m._c)
+    return torch._C._jit._export_opnames(m._c)
 
 
 # torch.jit.Error
-Error = torch._C.JITException
+Error = torch._C._jit.JITException
 set_module(Error, "torch.jit")
 # This is not perfect but works in common cases
 Error.__name__ = "Error"
@@ -136,5 +136,5 @@ def isinstance(obj, target_type):
     return _isinstance(obj, target_type)
 
 
-if not torch._C._jit_init():
+if not torch._C._jit.init():
     raise RuntimeError("JIT initialization failed")

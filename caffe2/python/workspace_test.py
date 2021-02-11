@@ -773,7 +773,7 @@ class TestScriptModule(test_util.TestCase):
                 load_all=1))
             self.assertTrue(workspace.HasBlob('m'))
             # TODO: make caffe2 side load return python-sided module
-            # right now it returns the base class (torch._C.ScriptModule)
+            # right now it returns the base class (torch._C._jit.ScriptModule)
             # self.assertTrue(isinstance(workspace.FetchBlob('m'), torch.jit.ScriptModule))
 
             # do something with the module

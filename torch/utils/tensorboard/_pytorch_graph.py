@@ -285,7 +285,7 @@ def graph(model, args, verbose=False):
         try:
             trace = torch.jit.trace(model, args)
             graph = trace.graph
-            torch._C._jit_pass_inline(graph)
+            torch._C._jit.pass_inline(graph)
         except RuntimeError as e:
             print(e)
             print('Error occurs, No graph saved')
