@@ -214,7 +214,8 @@ TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
     std::function<std::string(const Variable&)> var_name_lookup_fn,
     bool strict = true,
     bool force_outplace = false,
-    Module* self = nullptr);
+    Module* self = nullptr,
+    const std::vector<std::string>& argument_names = {});
 
 TORCH_API void abandon();
 
