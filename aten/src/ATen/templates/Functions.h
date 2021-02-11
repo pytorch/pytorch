@@ -150,4 +150,4 @@ inline bool is_complex(const Tensor& tensor) {
   return tensor.is_complex();
 }
 
-} // namespace at
+}
