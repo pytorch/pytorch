@@ -297,6 +297,16 @@ inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
       new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
 }
 
+// Tensor* ComputeX(
+//     const std::string& name,
+//     const std::vector<DimArg>& dim_args,
+//     const std::function<ExprHandle(const std::vector<VarHandle>&)>&
+//     body_func);
+
+Expr* SumX(
+    const std::vector<DimArg>& dim_args,
+    const std::function<ExprHandle(const std::vector<VarHandle>&)>& body);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

@@ -49,6 +49,7 @@ class RoundOff;
 class MaxTerm;
 class MinTerm;
 class ReduceOp;
+class ReduceXOp;
 class AtomicAdd;
 class SyncThreads;
 class ExternalCall;
@@ -106,6 +107,7 @@ class TORCH_API IRVisitor {
   virtual void visit(const MaxTerm* v);
   virtual void visit(const MinTerm* v);
   virtual void visit(const ReduceOp* v);
+  virtual void visit(const ReduceXOp* v);
   virtual void visit(const AtomicAdd* v);
   virtual void visit(const SyncThreads* v);
   virtual void visit(const ExternalCall* v);

@@ -68,9 +68,12 @@ TEST(Conv, Conv2D) {
 
   // FIXME: It'd be nice to have a single header that pulls in things like
   // LoopNest, IRSimplifier, etc.
+  std::clog << "tensor stmt:\n" << *conv->stmt() << "\n";
   te::LoopNest loop({conv});
+  std::clog << "root stmt before codegen:\n" << *loop.root_stmt() << "\n";
   loop.prepareForCodegen();
   te::Stmt* s = loop.root_stmt();
+  std::clog << "root stmt after codegen:\n" << *loop.root_stmt() << "\n";
   s = te::IRSimplifier::simplify(s);
 
   at::Tensor result = at::empty_like(ref);

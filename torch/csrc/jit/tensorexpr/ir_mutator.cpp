@@ -295,6 +295,21 @@ const Expr* IRMutator::mutate(const ReduceOp* v) {
       buf_new, body_new, new_output_args, new_reduce_args, v->reducer());
 }
 
+const Expr* IRMutator::mutate(const ReduceXOp* v) {
+  const Expr* body_new = v->body()->accept_mutator(this);
+
+  std::vector<const Expr*> new_rdims;
+  std::vector<const Var*> new_rvars;
+  for (auto* e : v->rdims()) {
+    new_rdims.push_back(e->accept_mutator(this));
+  }
+  for (auto* r : v->rvars()) {
+    new_rvars.push_back(static_cast<const Var*>(r->accept_mutator(this)));
+  }
+
+  return new ReduceXOp(body_new, new_rvars, new_rdims, v->reducer());
+}
+
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
   std::vector<const Expr*> params(v->nparams());
   bool any_change = false;

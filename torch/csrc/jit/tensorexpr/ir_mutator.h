@@ -52,6 +52,7 @@ class RoundOff;
 class MaxTerm;
 class MinTerm;
 class ReduceOp;
+class ReduceXOp;
 class AtomicAdd;
 class SyncThreads;
 class ExternalCall;
@@ -102,6 +103,7 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const MinTerm* v);
 
   virtual const Expr* mutate(const ReduceOp* v);
+  virtual const Expr* mutate(const ReduceXOp* v);
 
   virtual Stmt* mutate(const For* v);
   virtual Stmt* mutate(const Block* v);
