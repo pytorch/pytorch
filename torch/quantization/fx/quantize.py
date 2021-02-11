@@ -41,10 +41,10 @@ from .pattern_utils import (
 )
 
 from .graph_module import (
-    mark_observed_module,
     is_observed_module,
-    mark_observed_standalone_module,
     is_observed_standalone_module,
+    ObservedGraphModule,
+    ObservedStandaloneGraphModule,
     QuantizedGraphModule,
 )
 
@@ -138,8 +138,8 @@ def maybe_insert_observer_for_special_module(
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = observed_standalone_module.\
             _standalone_module_input_quantized_idxs.int().tolist()
-        observed_standalone_module = mark_observed_standalone_module(
-            observed_standalone_module)
+        observed_standalone_module = ObservedStandaloneGraphModule(
+            observed_standalone_module, observed_standalone_module.graph)
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name,
                 observed_standalone_module)
@@ -392,7 +392,7 @@ class Quantizer:
             qconfig_dict: Any,
             node_name_to_scope: Dict[str, Tuple[str, type]],
             prepare_custom_config_dict: Optional[Dict[str, Any]],
-            is_standalone_module: bool) -> GraphModule:
+            is_standalone_module: bool) -> ObservedGraphModule:
         """ standalone_module means it a submodule that is not inlined in
         parent module, and will be quantized separately as one unit.
 
@@ -544,9 +544,8 @@ class Quantizer:
                 observed_graph, load_arg)
 
 
-        model = GraphModule(model, observed_graph)
         self.save_state(model)
-        model = mark_observed_module(model)
+        model = ObservedGraphModule(model, observed_graph)
         if is_standalone_module:
             assert result_node is not None
             assert isinstance(result_node.args[0], Node), \
@@ -590,7 +589,7 @@ class Quantizer:
             qconfig_dict: Any,
             node_name_to_scope: Dict[str, Tuple[str, type]],
             prepare_custom_config_dict: Dict[str, Any] = None,
-            is_standalone_module: bool = False) -> GraphModule:
+            is_standalone_module: bool = False) -> ObservedGraphModule:
         return self._prepare(
             model, qconfig_dict, node_name_to_scope, prepare_custom_config_dict,
             is_standalone_module)
@@ -617,7 +616,7 @@ class Quantizer:
 
     def _convert(self, model: GraphModule, debug: bool = False,
                  convert_custom_config_dict: Dict[str, Any] = None,
-                 is_standalone_module: bool = False) -> GraphModule:
+                 is_standalone_module: bool = False) -> QuantizedGraphModule:
         """ standalone_module means it a submodule that is not inlined in
         parent module, and will be quantized separately as one unit.
 
@@ -960,7 +959,7 @@ class Quantizer:
 
     def convert(self, model: GraphModule, debug: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None,
-                is_standalone_module: bool = False) -> GraphModule:
+                is_standalone_module: bool = False) -> QuantizedGraphModule:
         quantized = self._convert(
             model, debug, convert_custom_config_dict, is_standalone_module)
         if not debug:

@@ -29,9 +29,6 @@ class ObservedGraphModule(GraphModule):
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         return ObservedGraphModule(fake_mod, self.graph)
 
-def mark_observed_module(module: GraphModule) -> GraphModule:
-    return ObservedGraphModule(module, module.graph)
-
 def is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
 
@@ -46,9 +43,6 @@ class ObservedStandaloneGraphModule(ObservedGraphModule):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         return ObservedStandaloneGraphModule(fake_mod, self.graph)
-
-def mark_observed_standalone_module(module: GraphModule) -> GraphModule:
-    return ObservedStandaloneGraphModule(module, module.graph)
 
 def is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)
