@@ -16,7 +16,7 @@ TORCH_META_FUNC(upsample_nearest3d) (
 
   // Allow for empty batch size but not other dimensions
   TORCH_CHECK(
-      input.numel() != 0 || prod_intlist(input.sizes().begin() + 1, input.sizes().end()),
+      input.numel() != 0 || c10::multiply_integers(input.sizes().begin() + 1, input.sizes().end()),
       "Non-empty 5D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
