@@ -1017,6 +1017,18 @@ struct CodeImpl {
     return *grad_executors_;
   }
 
+  const std::vector<GraphExecutor*>& diff_graph_op_executors() {
+    if (!grad_executors_) {
+      grad_executors_.emplace();
+      for (Operation& op : operator_table_) {
+        if (auto executor = detail::getDifferentiableGraphOpExecutor(op)) {
+          grad_executors_->push_back(executor);
+        }
+      }
+    }
+    return *grad_executors_;
+  }
+
   void dump(std::ostream& out, size_t i) const {
     out << i << " " << instructions_[i];
     if (instructions_[i].op == OP || instructions_[i].op == CALL ||
@@ -1714,6 +1726,10 @@ Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+const std::vector<GraphExecutor*>& Code::diff_graph_op_executors() {
+  return pImpl->diff_graph_op_executors();
 }
 
 size_t Code::num_bailouts() const {

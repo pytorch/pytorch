@@ -64,7 +64,37 @@ def fuser(name):
 
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 
+def _get_differentiable_graph_node(node, diff_node):
+    if node.kind() == 'prim::DifferentiableGraph':
+        diff_node.append(node)
+    else:
+        for block in node.blocks():
+            for n in block.nodes():
+                _get_differentiable_graph_node(n, diff_node)
 
 def _graph_for(self, *args, **kwargs):
+    dbs = self.get_debug_state()
+    eps = list(dbs.execution_plans.values())
+    if len(eps) == 1:
+      graph = eps[0].graph.copy()
+
+      # graph_executor_states for differentiable node
+      fw_states = eps[0].code.differentiable_op_executor_states()
+      diff_nodes = []
+      for n in graph.nodes():
+          _get_differentiable_graph_node(n, diff_nodes)
+
+      if len(fw_states) == len(diff_nodes):
+          # swap each differentiable graph with optimized graph in their execution plan
+          for n, state in zip(diff_nodes, fw_states):
+              #ep = list(fw_states[0].execution_plans.values())[0]
+              fw_execution_plans = list(state.execution_plans.values())
+              if len(fw_execution_plans) == 1:
+                  n.g_('Subgraph', fw_execution_plans[0].graph)
+
+      return graph
+
+    # fallback approach, we just ran the graph and return the recorded optimized
+    # graph
     self(*args, **kwargs)
     return last_executed_optimized_graph()
