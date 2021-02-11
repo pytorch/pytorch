@@ -1753,4 +1753,3 @@ if(BUILD_PYTHON)
   # Caffe2 proto files
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
-endif()

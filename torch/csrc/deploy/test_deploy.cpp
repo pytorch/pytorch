@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <torch/deploy.h>
+#include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 #include <future>
