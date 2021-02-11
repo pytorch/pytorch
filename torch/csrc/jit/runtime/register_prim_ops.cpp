@@ -640,6 +640,22 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.bool(bool a, bool b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack);
+           auto b = pop(stack);
+           push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ne.bool(bool a, bool b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack);
+           auto b = pop(stack);
+           push(stack, a != b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
          [](Stack* stack) { push(stack, IValue::uninitialized()); },
          aliasAnalysisSpecialCase()),
