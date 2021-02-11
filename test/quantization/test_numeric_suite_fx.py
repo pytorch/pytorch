@@ -453,9 +453,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         )
 
 class TestFXGraphMatcher(QuantizationTestCase):
-    # TODO(future PR): more tests
 
-    def test_conv_mod_fp32_prepared_vs_int8(self):
+    @override_qengines
+    def test_simple_mod(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
         # TODO(future PR): prevent the need for copying here, we can copy the
@@ -467,7 +467,8 @@ class TestFXGraphMatcher(QuantizationTestCase):
         expected_types = {'0': (nn.Conv2d, nnq.Conv2d)}
         self.assert_types_for_matched_node_pairs(results, expected_types, mp, mq)
 
-    def test_linear_func_fp32_prepared_vs_int8(self):
+    @override_qengines
+    def test_simple_fun(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -488,26 +489,8 @@ class TestFXGraphMatcher(QuantizationTestCase):
         expected_types = {'linear_1': (F.linear, toq.linear)}
         self.assert_types_for_matched_node_pairs(results, expected_types, mp, mq)
 
-    def test_matching_failure_node_count(self):
-        # verify that matching graphs with matching node types but
-        # different counts of matchable nodes fails
-        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
-        m2 = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
-        mp1 = prepare_fx(m1, {'': torch.quantization.default_qconfig})
-        mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
-        with self.assertRaises(GraphMatchingException) as ex:
-            results = get_matching_node_pairs(mp1, mp2)
-
-    def test_matching_failure_node_type(self):
-        # verify that matching graphs with non-matching node types fails
-        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
-        m2 = nn.Sequential(nn.Linear(1, 1)).eval()
-        mp1 = prepare_fx(m1, {'': torch.quantization.default_qconfig})
-        mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
-        with self.assertRaises(GraphMatchingException) as ex:
-            results = get_matching_node_pairs(mp1, mp2)
-
-    def test_conv_multilayer_mod_fp32_prepared_vs_int8(self):
+    @override_qengines
+    def test_simple_mod_multi(self):
         m = nn.Sequential(
             nn.Sequential(
                 nn.Conv2d(1, 1, 1),
@@ -522,7 +505,8 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # assume success if no exceptions
         results = get_matching_node_pairs(mp, mq)
 
-    def test_tensor_ops_fp32_prepared_vs_int8(self):
+    @override_qengines
+    def test_simple_tensor_ops(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -540,8 +524,33 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # assume success if no exceptions
         results = get_matching_node_pairs(mp, mq)
 
+    @override_qengines
+    def test_matching_failure_node_count(self):
+        # verify that matching graphs with matching node types but
+        # different counts of matchable nodes fails
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
+        mp1 = prepare_fx(m1, {'': torch.quantization.default_qconfig})
+        mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
+        with self.assertRaises(GraphMatchingException) as ex:
+            results = get_matching_node_pairs(mp1, mp2)
+
+    @override_qengines
+    def test_matching_failure_node_type(self):
+        # verify that matching graphs with non-matching node types fails
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        m2 = nn.Sequential(nn.Linear(1, 1)).eval()
+        mp1 = prepare_fx(m1, {'': torch.quantization.default_qconfig})
+        mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
+        with self.assertRaises(GraphMatchingException) as ex:
+            results = get_matching_node_pairs(mp1, mp2)
+
+
+class TestFXGraphMatcherModels(QuantizationTestCase):
+
+    @override_qengines
     @skip_if_no_torchvision
-    def test_mobilenet_v2_fp32_prepared_vs_int8(self):
+    def test_mobilenet_v2(self):
         # verify that mobilenetv2 graph is able to be matched
         import torchvision
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
@@ -553,8 +562,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # assume success if no exceptions
         results = get_matching_node_pairs(mp, mq)
 
+    @override_qengines
     @skip_if_no_torchvision
-    def test_mobilenet_v2_fp32_qat_prepared_vs_int8(self):
+    def test_mobilenet_v2_qat(self):
         # verify that mobilenetv2 graph is able to be matched
         import torchvision
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).float()
@@ -568,6 +578,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
 class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
 
+    @override_qengines
     def test_compare_weights_mod(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
@@ -579,6 +590,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.assertTrue(len(results) == 2)
         self.assert_ns_weight_compare_dict_valid(results)
 
+    @override_qengines
     def test_compare_weights_fun(self):
         class M(nn.Module):
             def __init__(self):
@@ -600,6 +612,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.assertTrue(len(results) == 1)
         self.assert_ns_weight_compare_dict_valid(results)
 
+    @override_qengines
     def test_match_activations_mod(self):
         m = nn.Sequential(
             torch.quantization.QuantStub(),
@@ -638,6 +651,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
+    @override_qengines
     def test_match_activations_fun(self):
         class M(nn.Module):
             def __init__(self):
@@ -685,6 +699,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
+    @override_qengines
     def test_prepare_model_with_stubs_mod(self):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
@@ -712,6 +727,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
+    @override_qengines
     def test_prepare_model_with_stubs_fun(self):
         class M(nn.Module):
             def __init__(self):
@@ -749,6 +765,11 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
+class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
+    """
+    Tests numeric suite core APIs on non-toy models.
+    """
+
     def _get_sparsenn_toy_model(self):
         class DenseTopMLP(nn.Module):
 
@@ -756,13 +777,11 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
                 super(DenseTopMLP, self).__init__()
 
                 self.dense_mlp = nn.Sequential(
-                    nn.Linear(dense_dim, dense_out) #nn.Sigmoid()
+                    nn.Linear(dense_dim, dense_out),
                 )
                 self.top_mlp = nn.Sequential(
                     nn.Linear(dense_out + embedding_dim, top_out_in),
-                    #nn.Sigmoid(),
                     nn.Linear(top_out_in, top_out_out),
-                    #nn.Sigmoid(),
                 )
 
             def forward(
@@ -799,7 +818,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
                 super(SparseNN, self).__init__()
 
                 self.model_sparse = EmbBagWrapper(self._NUM_EMBEDDINGS, self._EMBEDDING_DIM)
-                self.dense_top = DenseTopMLP(self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN, self._TOP_OUT_OUT)
+                self.dense_top = DenseTopMLP(
+                    self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN,
+                    self._TOP_OUT_OUT)
 
             def forward(
                 self,
@@ -815,6 +836,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
 
         return SparseNN()
 
+    @override_qengines
     def test_sparsenn_compare_activations(self):
         sparse_nn = self._get_sparsenn_toy_model().eval()
 
@@ -839,12 +861,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
         sparse_nn_q.model_sparse = convert_fx(sparse_nn_q.model_sparse)
 
-        # TODO(future PR): consider adding an "undo" transformation
-        # to get the original models back from NS models, to prevent the need
-        # for the user to create new models for each iteration of NS API calls
-
         # test out compare activations API
-
         sparse_nn.dense_top, sparse_nn_q.dense_top = prepare_model_outputs(
             'fp32_prepared', sparse_nn.dense_top, 'int8', sparse_nn_q.dense_top, OutputLogger)
 
@@ -857,6 +874,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.assertTrue(len(act_compare_dict) == 3)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
+    @override_qengines
     def test_sparsenn_shadow(self):
         sparse_nn = self._get_sparsenn_toy_model().eval()
 
