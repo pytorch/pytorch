@@ -445,12 +445,12 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(len(shuffle_dp), len(input_ds))
 
             random.seed(123)
-            res = [d for d in shuffle_dp]
+            res = list(d for d in shuffle_dp)
             self.assertEqual(sorted(res), exp)
 
             # Test Deterministic
             random.seed(123)
-            res2 = [d for d in shuffle_dp]
+            res2 = list(d for d in shuffle_dp)
             self.assertEqual(res, res2)
 
         shuffle_dp_nl = dp.iter.Shuffle(IDP_NoLen(range(20)), buffer_size=5)
