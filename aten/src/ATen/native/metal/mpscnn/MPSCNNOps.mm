@@ -14,6 +14,7 @@
 #include <ATen/InferSize.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/UpSample.h>
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -743,8 +744,8 @@ Tensor flatten_using_ints(
   if (start_dim == end_dim) {
     return input;
   }
-  auto slice_numel =
-      prod_intlist(input.sizes().slice(start_dim, end_dim - start_dim + 1));
+  const auto slice_numel =
+      c10::multiply_integers(input.sizes().slice(start_dim, end_dim - start_dim + 1));
   shape.reserve(input.dim() - end_dim + start_dim);
   for (int64_t i = 0; i < start_dim; i++) {
     shape.push_back(input.size(i));

@@ -3,6 +3,9 @@
 #import <ATen/native/metal/MetalUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>
 
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+
 namespace at {
 namespace native {
 namespace metal {
@@ -12,11 +15,7 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MetalTensor::Impl {
   Impl(const std::vector<int64_t>& sizes, const std::vector<int64_t>& strides)
       : _sizes(sizes),
         _strides(strides),
-        _numel(std::accumulate(
-            std::begin(_sizes),
-            std::end(_sizes),
-            (int64_t)1,
-            std::multiplies<int64_t>())),
+        _numel(c10::multiply_integers(std::begin(_sizes), std::end(_sizes))),
         _textureImpl(std::make_unique<MPSImageWrapper>(sizes)) {}
 
   IntArrayRef sizes() const {
