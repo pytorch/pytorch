@@ -697,73 +697,50 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
             samples.append(SampleInput((tensor, d, idx_nonctg, fill_val)))
     return samples
 
-def sample_inputs_max_min(op_info, device, dtype, requires_grad):
-    samples = []
-    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
+def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad):
+    inputs = []
+    args_for_binary_op  = (
+        ((S, S, S), (S, S, S),),
+        ((S, S, S), (S,),),
+        ((S,), (S, S, S),),
+        ((S, 1, S), (S, S),),
+        ((), (),),
+        ((S, S, S), (),),
+        ((), (S, S, S),),
+    )
+    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                               args=(make_tensor(other_tensor, device, dtype,
+                                                 low=None, high=None,
+                                                 requires_grad=requires_grad),),))
+                  for input_tensor, other_tensor in args_for_binary_op)
+    return inputs
+
+def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad):
+    inputs = []
+    args_for_reduction_with_dim = (
+        ((S, S, S), (1,),),
+        ((S, S, S), (1, True, ),),
+        ((), (0,),),
+        ((), (0, True,),),
+    )
+    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                               args=args,))
+                  for input_tensor, args in args_for_reduction_with_dim)
+    return inputs
+
+def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad):
+    inputs = []
+    inputs.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),))
-    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(1,),))
-    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(1, True,),))
-    samples.append(SampleInput(make_tensor((), device, dtype,
+    inputs.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),))
-    samples.append(SampleInput(make_tensor((), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(0,),))
-    samples.append(SampleInput(make_tensor((), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(0, True,),))
-    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor((S, S, S), device, dtype,
-                                                 low=None, high=None,
-                                                 requires_grad=requires_grad),),))
-    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor((S,), device, dtype,
-                                                 low=None, high=None,
-                                                 requires_grad=requires_grad),),))
-    samples.append(SampleInput(make_tensor((S,), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor((S, S, S), device, dtype,
-                                                 low=None, high=None,
-                                                 requires_grad=requires_grad),),))
-    samples.append(SampleInput(make_tensor((S, 1, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor((S, S), device, dtype,
-                                                 low=None, high=None,
-                                                 requires_grad=requires_grad),),))
-    samples.append(SampleInput(make_tensor((), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor((), device, dtype,
-                                                 low=None, high=None,
-                                                 requires_grad=requires_grad),),))
-    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor((), device, dtype,
-                                                 low=None, high=None,
-                                                 requires_grad=requires_grad),),))
-    samples.append(SampleInput(make_tensor((), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor((S, S, S), device, dtype,
-                                                 low=None, high=None,
-                                                 requires_grad=requires_grad),),))
-    return samples
+    return inputs
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((4, 3, 2, 1), device, dtype,
@@ -1813,39 +1790,65 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=True),
     OpInfo('max',
+           op=torch.max,
+           variant_test_name='binary',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           # max can have a kwarg for a tuple of tensors, not a tensor
-           supports_tensor_out=False,
            test_inplace_grad=False,
-           sample_inputs_func=sample_inputs_max_min,
+           sample_inputs_func=sample_inputs_max_min_binary,
            assert_autodiffed=True,
+           supports_tensor_out=True),
+    OpInfo('max',
+           op=torch.max,
+           variant_test_name='reduction_with_dim',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_max_min_reduction_with_dim,),
            skips=(
-               # Skip these tests as they're currently failing.
-               # Reference: https://github.com/pytorch/pytorch/pull/51244#issuecomment-772640326
+               # Skip right now as it fails due to a pybind error
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        device_type='cpu', dtypes=[torch.float32, torch.bfloat16],),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        device_type='cuda', dtypes=[torch.float32],),
-           )),
+                        device_type='cpu', dtypes=[torch.bfloat16]),)),
+    OpInfo('max',
+           op=torch.max,
+           variant_test_name='reduction_no_dim',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('min',
+           op=torch.min,
+           variant_test_name='binary',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           # min can have a kwarg for a tuple of tensors, not a tensor
-           supports_tensor_out=False,
            test_inplace_grad=False,
-           sample_inputs_func=sample_inputs_max_min,
+           sample_inputs_func=sample_inputs_max_min_binary,
            assert_autodiffed=True,
+           supports_tensor_out=True,),
+    OpInfo('min',
+           op=torch.min,
+           variant_test_name='reduction_with_dim',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
-               # Skip these tests as they're currently failing.
-               # Reference: https://github.com/pytorch/pytorch/pull/51244#issuecomment-772640326
+               # Skip right now as it fails due to a pybind error
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        device_type='cpu', dtypes=[torch.float32, torch.bfloat16],),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        device_type='cuda', dtypes=[torch.float32],),
-           )),
+                        device_type='cpu', dtypes=[torch.bfloat16]),)),
+    OpInfo('min',
+           op=torch.min,
+           variant_test_name='reduction_no_dim',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     UnaryUfuncInfo('neg',
                    ref=np.negative,
                    skip_bfloat16_grad=True,
