@@ -89,6 +89,7 @@ namespace c10 {
   _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
