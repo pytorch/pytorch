@@ -424,7 +424,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * True if this tensor has storage. See storage() for details.
    */
-  virtual bool has_storage() const;
+#ifdef DEBUG
+// Allow subclasses to check that their storage_ is never getting set in debug builds.
+  virtual
+#else
+  TENSORIMPL_MAYBE_VIRTUAL
+#endif
+  bool has_storage() const
+  // NOTE: we devirtualize this because it arguably shouldn't be an
+  // error just to ask subclasses if they have storage.
+  // This used to throw for most subclasses, but OpaqueTensorImpl
+  // wanted it to successfully return false, so we went ahead and made
+  // it a non-error.
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  {
+    return storage_;
+  }
+#else
+  ;
+#endif
 
   /**
    * Return the underlying storage of a Tensor.  Multiple tensors may share
@@ -467,14 +485,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::SparseCPU) ||
-           key_set_.has(DispatchKey::SparseCUDA) ||
-           key_set_.has(DispatchKey::SparseHIP);
+        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseHIP) ||
+        key_set_.has(DispatchKey::SparseXPU);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::QuantizedCPU) ||
-        key_set_.has(DispatchKey::QuantizedCUDA);
+        key_set_.has(DispatchKey::QuantizedCUDA) ||
+        key_set_.has(DispatchKey::QuantizedXPU);
   }
 
   bool is_meta() const {
@@ -487,6 +507,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::CUDA) ||
         key_set_.has(DispatchKey::SparseCUDA) ||
         key_set_.has(DispatchKey::QuantizedCUDA);
+  }
+
+  bool is_xpu() const {
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
+    return key_set_.has(DispatchKey::XPU) ||
+        key_set_.has(DispatchKey::SparseXPU) ||
+        key_set_.has(DispatchKey::QuantizedXPU);
   }
 
   bool is_hip() const {
@@ -743,10 +771,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for example, an index into a tensor will have a non-zero storage_offset().
    *
    * WARNING: This is NOT computed in bytes.
-   *
-   * XXX: The only thing stopping this function from being virtual is Variable.
    */
-  virtual int64_t storage_offset() const {
+  TENSORIMPL_MAYBE_VIRTUAL int64_t storage_offset() const {
     return storage_offset_;
   }
 
@@ -967,14 +993,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::CPU) ||
-             ts.has(DispatchKey::CUDA) ||
-             ts.has(DispatchKey::HIP);
+      return ts.has(DispatchKey::CPU) || ts.has(DispatchKey::CUDA) ||
+          ts.has(DispatchKey::HIP) || ts.has(DispatchKey::XPU);
     };
     auto is_sparse = [](DispatchKeySet ts) {
       return ts.has(DispatchKey::SparseCPU) ||
-             ts.has(DispatchKey::SparseCUDA) ||
-             ts.has(DispatchKey::SparseHIP);
+          ts.has(DispatchKey::SparseCUDA) || ts.has(DispatchKey::SparseHIP) ||
+          ts.has(DispatchKey::SparseXPU);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) || (is_sparse(key_set_) && is_sparse(from));
   }

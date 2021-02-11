@@ -299,6 +299,85 @@ class PoissonNLLLoss(_Loss):
                                   eps=self.eps, reduction=self.reduction)
 
 
+class GaussianNLLLoss(_Loss):
+    r"""Gaussian negative log likelihood loss.
+
+    The targets are treated as samples from Gaussian distributions with
+    expectations and variances predicted by the neural network. For a
+    D-dimensional ``target`` tensor modelled as having heteroscedastic Gaussian
+    distributions with a D-dimensional tensor of expectations ``input`` and a
+    D-dimensional tensor of positive variances ``var`` the loss is:
+
+    .. math::
+        \text{loss} = \frac{1}{2}\sum_{i=1}^D \left(\log\left(\text{max}\left(\text{var}[i],
+        \ \text{eps}\right)\right) + \frac{\left(\text{input}[i] - \text{target}[i]\right)^2}
+        {\text{max}\left(\text{var}[i], \ \text{eps}\right)}\right) + \text{const.}
+
+    where :attr:`eps` is used for stability. By default, the constant term of
+    the loss function is omitted unless :attr:`full` is ``True``. If ``var`` is
+    a scalar (implying ``target`` tensor has homoscedastic Gaussian
+    distributions) it is broadcasted to be the same size as the input.
+
+
+    Args:
+        full (bool, optional): include the constant term in the loss
+            calculation. Default: ``False``.
+        eps (float, optional): value used to clamp ``var`` (see note below), for
+            stability. Default: 1e-6.
+        reduction (string, optional): specifies the reduction to apply to the
+            output:``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
+            will be applied, ``'mean'``: the output is the average of all batch
+            member losses, ``'sum'``: the output is the sum of all batch member
+            losses. Default: ``'mean'``.
+
+    Shape:
+        - Input: :math:`(N, *)` where :math:`*` means any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Var: :math:`(N, 1)` or :math:`(N, *)`, same shape as the input
+        - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
+          ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N)`
+
+    Examples::
+
+        >>> loss = nn.GaussianNLLLoss()
+        >>> input = torch.randn(5, 2, requires_grad=True)
+        >>> target = torch.randn(5, 2)
+        >>> var = torch.ones(5, 2, requires_grad=True) #heteroscedastic
+        >>> output = loss(input, target, var)
+        >>> output.backward()
+
+
+        >>> loss = nn.GaussianNLLLoss()
+        >>> input = torch.randn(5, 2, requires_grad=True)
+        >>> target = torch.randn(5, 2)
+        >>> var = torch.ones(5, 1, requires_grad=True) #homoscedastic
+        >>> output = loss(input, target, var)
+        >>> output.backward()
+
+    Note:
+        The clamping of ``var`` is ignored with respect to autograd, and so the
+        gradients are unaffected by it.
+
+    Reference:
+        Nix, D. A. and Weigend, A. S., "Estimating the mean and variance of the
+        target probability distribution", Proceedings of 1994 IEEE International
+        Conference on Neural Networks (ICNN'94), Orlando, FL, USA, 1994, pp. 55-60
+        vol.1, doi: 10.1109/ICNN.1994.374138.
+    """
+    __constants__ = ['full', 'eps', 'reduction']
+    full: bool
+    eps: float
+
+    def __init__(self, *, full: bool = False, eps: float = 1e-6, reduction: str = 'mean') -> None:
+        super(GaussianNLLLoss, self).__init__(None, None, reduction)
+        self.full = full
+        self.eps = eps
+
+    def forward(self, input: Tensor, target: Tensor, var: Tensor) -> Tensor:
+        return F.gaussian_nll_loss(input, target, var, full=self.full, eps=self.eps, reduction=self.reduction)
+
+
 class KLDivLoss(_Loss):
     r"""The Kullback-Leibler divergence loss measure
 
@@ -1237,7 +1316,9 @@ class TripletMarginLoss(_Loss):
     Shape:
         - Input: :math:`(N, D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
-            otherwise.
+          otherwise.
+
+    Examples::
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
     >>> anchor = torch.randn(100, 128, requires_grad=True)

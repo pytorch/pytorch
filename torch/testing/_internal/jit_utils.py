@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from torch._six import StringIO
+from io import StringIO
 from collections import defaultdict
 
 import inspect
@@ -405,7 +405,9 @@ class JitTestCase(JitCommonTestCase):
                     inputs_requires_grad=False,
                     capture_output=False,
                     frames_up=1,
-                    profiling=ProfilingMode.PROFILING):
+                    profiling=ProfilingMode.PROFILING,
+                    atol=None,
+                    rtol=None):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
                 if isinstance(script, str):
@@ -455,7 +457,7 @@ class JitTestCase(JitCommonTestCase):
                         python_outputs = python_fn(*inputs)
                     if not IS_WINDOWS:
                         self.assertExpected(script_stdout[0], subname='stdout')
-                    self.assertEqual(python_outputs, opt_script_outputs)
+                    self.assertEqual(python_outputs, opt_script_outputs, atol=atol, rtol=rtol)
                 else:
                     # profiling run
                     script_outputs = scripted_fn(*recording_inputs)
@@ -464,8 +466,8 @@ class JitTestCase(JitCommonTestCase):
                     if TEST_BAILOUTS:
                         self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
                     python_outputs = python_fn(*inputs)
-                self.assertEqual(python_outputs, script_outputs)
-                self.assertEqual(script_outputs, opt_script_outputs)
+                self.assertEqual(python_outputs, script_outputs, atol=atol, rtol=rtol)
+                self.assertEqual(script_outputs, opt_script_outputs, atol=atol, rtol=rtol)
                 return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
@@ -684,3 +686,8 @@ def warmup_backward(f, *args):
             f.backward(retain_graph=True)
 
     return results
+
+# TODO: Remove me once https://bugs.python.org/issue42666 is resolved
+def make_global(*args):
+    for arg in args:
+        setattr(sys.modules[arg.__module__], arg.__name__, arg)

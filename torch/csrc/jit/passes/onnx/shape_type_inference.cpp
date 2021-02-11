@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 
@@ -200,7 +201,10 @@ bool IsSupportedNode(const Node* n) {
   return true;
 }
 
-Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
+Value* CloneValueFromListConstruct(
+    Value* v,
+    std::shared_ptr<Graph> n_graph,
+    int opset_version) {
   auto lc_node = v->node();
   TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
   // In jit/passes/onnx/peephole.cpp::eraseListConstruct,
@@ -209,7 +213,7 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
   // special case, and change from list type to tensor type. The scalar type
   // is preserved. If the elemtype is Int, insert a onnx::Concat node into
   // the graph.
-  TypePtr elem = v->type()->cast<ListType>()->getElementType();
+  TypePtr elem = v->type()->castRaw<ListType>()->getElementType();
   c10::optional<at::ScalarType> scalar_type = c10::nullopt;
   if (elem->cast<IntType>()) {
     scalar_type = at::kLong;
@@ -220,12 +224,10 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
     // order to be consumed as inputs
     std::vector<Value*> unsqueezed;
     for (auto* input : lc_node->inputs()) {
-      Node* unsqueezed_node =
-          n_graph->insertNode(n_graph->create(::c10::onnx::Unsqueeze, 1));
       auto new_input = n_graph->addInput();
       new_input->copyMetadata(input);
-      unsqueezed_node->addInput(new_input);
-      unsqueezed_node->is_(attr::axes, {0});
+      Node* unsqueezed_node = createONNXUnsqueeze(
+          n_graph.get(), n_graph->return_node(), new_input, 0, opset_version);
       unsqueezed.emplace_back(unsqueezed_node->output());
     }
     Node* concat_node =
@@ -257,34 +259,51 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
 }
 
 // Clone the node n for the new graph.
-Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
-  auto clone_node = n_graph->createClone(n, [&n_graph](Value* v) {
-    auto v_n = v->node();
-    switch (v_n->kind()) {
-      case ::c10::onnx::Constant: {
-        // Clone the input if it is constant.
-        auto constant_n = n_graph->insertNode(
-            n_graph->createClone(v_n, [](Value* v) { return v; }));
-        return constant_n->output();
-      }
-      case ::c10::prim::ListConstruct: {
-        return CloneValueFromListConstruct(v, n_graph);
-      }
-      case ::c10::prim::PackPadded: {
-        auto input = n_graph->addInput();
-        input->copyMetadata(v_n->input(0));
-        return input;
-      }
-      default: {
-        // If the input is not constant, we cannot depend on its value
-        // in shape inference. Set it to graph input in the new graph,
-        // and copy over metadata, such as datatype and shape.
-        auto input = n_graph->addInput();
-        input->copyMetadata(v);
-        return input;
-      }
-    }
-  });
+Node* CloneNodeToGraph(
+    Node* n,
+    std::shared_ptr<Graph> n_graph,
+    const ParamMap& params_dict,
+    int opset_version) {
+  auto vals_to_params_map =
+      buildValueToParamsMap(n->owningGraph()->block(), params_dict);
+  auto clone_node = n_graph->createClone(
+      n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
+        auto v_n = v->node();
+        switch (v_n->kind()) {
+          case ::c10::onnx::Constant: {
+            // Clone the input if it is constant.
+            auto constant_n = n_graph->insertNode(
+                n_graph->createClone(v_n, [](Value* v) { return v; }));
+            return constant_n->output();
+          }
+          case ::c10::prim::ListConstruct: {
+            return CloneValueFromListConstruct(v, n_graph, opset_version);
+          }
+          case ::c10::prim::PackPadded: {
+            auto input = n_graph->addInput();
+            input->copyMetadata(v_n->input(0));
+            return input;
+          }
+          default: {
+            if (vals_to_params_map.find(v) != vals_to_params_map.end()) {
+              // If the input is a parameter, insert a constant of its value as
+              // input.
+              auto val = vals_to_params_map.find(v)->second.second.toTensor();
+              return n_graph
+                  ->insertNode(n_graph->create(::c10::onnx::Constant)
+                                   ->t_(attr::value, val))
+                  ->output();
+            } else {
+              // If the input is not constant, we cannot depend on its value
+              // in shape inference. Set it to graph input in the new graph,
+              // and copy over metadata, such as datatype and shape.
+              auto input = n_graph->addInput();
+              input->copyMetadata(v);
+              return input;
+            }
+          }
+        }
+      });
   return clone_node;
 }
 
@@ -349,8 +368,8 @@ bool IsBlockReturnTypeSame(Node* n) {
     auto else_block_type = else_block->outputs()[i]->type();
     if (then_block_type->cast<TensorType>() &&
         else_block_type->cast<TensorType>()) {
-      if (then_block_type->cast<TensorType>()->scalarType() !=
-          else_block_type->cast<TensorType>()->scalarType()) {
+      if (then_block_type->castRaw<TensorType>()->scalarType() !=
+          else_block_type->castRaw<TensorType>()->scalarType()) {
         return false;
       }
     }
@@ -432,19 +451,25 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   }
 }
 
-void ONNXShapeTypeInference(Block* b, int opset_version) {
+void ONNXShapeTypeInference(
+    Block* b,
+    const ParamMap& params_dict,
+    int opset_version) {
   FetchBlockInputMetadataFromParent(b);
   for (auto n : b->nodes()) {
     for (auto subblock : n->blocks()) {
-      ONNXShapeTypeInference(subblock, opset_version);
+      ONNXShapeTypeInference(subblock, params_dict, opset_version);
     }
-    ONNXShapeTypeInference(n, opset_version);
+    ONNXShapeTypeInference(n, params_dict, opset_version);
   }
 }
 
 } // namespace
 
-void ONNXShapeTypeInference(Node* n, int opset_version) {
+void ONNXShapeTypeInference(
+    Node* n,
+    const ParamMap& params_dict,
+    int opset_version) {
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
   if (!IsSupportedNode(n)) {
@@ -453,7 +478,7 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   // Create a Graph containing only the single node n.
   // This graph is later converted to ONNX to run shape inference.
   auto n_graph = std::make_shared<Graph>();
-  auto clone_node = CloneNodeToGraph(n, n_graph);
+  auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
   n_graph->insertNode(clone_node);
 
   // Register all node outputs as graph outputs.
@@ -484,12 +509,16 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
     } catch (std::runtime_error& ex) {
       // TODO: include this as warning once we have a more consolidated warning
       // system.
+      GRAPH_DEBUG(
+          "ONNX shape inference fails with: ",
+          ex.what(),
+          " on graph: ",
+          n_graph->toString());
       const char shape_err[] = "ShapeInferenceError";
       const char type_err[] = "TypeInferenceError";
       if ((strstr(ex.what(), shape_err) == NULL) &&
           (strstr(ex.what(), type_err) == NULL))
         throw;
-      GRAPH_DEBUG("ONNX shape inference fails with: ", ex.what());
     }
     GRAPH_DEBUG(
         "ONNX graph after shape inference: ", prettyPrint(*model_proto));
@@ -552,23 +581,158 @@ void ONNXSetDynamicInputShape(
   }
 }
 
-void ONNXAssignOutputShape(
-    std::shared_ptr<Graph>& graph,
-    at::ArrayRef<at::Tensor> outputs,
+bool HasSequenceTypeOutput(Node* node) {
+  if (node->kind() == ::c10::onnx::SplitToSequence ||
+      node->kind() == ::c10::onnx::SequenceInsert ||
+      node->kind() == ::c10::onnx::SequenceEmpty ||
+      node->kind() == ::c10::onnx::SequenceErase ||
+      node->kind() == ::c10::onnx::SequenceConstruct ||
+      node->kind() == ::c10::onnx::Loop || node->kind() == ::c10::onnx::If)
+    return true;
+  return false;
+}
+
+void ONNXUpdateTypeFromTensor(
+    Value* graph_output,
+    const at::Tensor& output,
     bool onnx_shape_inference) {
-  TORCH_INTERNAL_ASSERT(graph->outputs().size() == outputs.size());
-  for (size_t i = 0; i < outputs.size(); ++i) {
-    if (onnx_shape_inference) {
-      graph->outputs()[i]->setType(MergeInferredType(
-          TensorType::create(outputs[i]), graph->outputs()[i]->type()));
-    } else {
-      graph->outputs()[i]->inferTypeFrom(outputs[i]);
-    }
+  if (onnx_shape_inference) {
+    graph_output->setType(
+        MergeInferredType(TensorType::create(output), graph_output->type()));
+  } else {
+    graph_output->inferTypeFrom(output);
   }
 }
 
-void ONNXShapeTypeInference(std::shared_ptr<Graph>& graph, int opset_version) {
-  ONNXShapeTypeInference(graph->block(), opset_version);
+void ONNXAssignOutputShape(
+    std::shared_ptr<Graph>& graph,
+    at::ArrayRef<at::Tensor> outputs,
+    const python::IODescriptor& desc,
+    bool onnx_shape_inference) {
+  size_t outputs_index = 0;
+
+  PyObject* py_obj = unflatten(outputs, desc);
+  TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
+
+  for (size_t i = 0; i < PyTuple_GET_SIZE(py_obj); ++i) {
+    PyObject* elem = PyTuple_GET_ITEM(py_obj, i);
+
+    if (PyList_Check(elem)) {
+      size_t list_len = PyList_GET_SIZE(elem);
+      if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
+        if (list_len > 0) {
+          auto& var =
+              reinterpret_cast<THPVariable*>(PyList_GET_ITEM(elem, 0))->cdata;
+          for (size_t j = 1; j < list_len; ++j) {
+            PyObject* list_elem = PyList_GET_ITEM(elem, j);
+            TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
+            auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+            TORCH_CHECK(
+                var.scalar_type() == new_var.scalar_type(),
+                "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");
+          }
+          auto elem_type = graph->outputs()
+                               .at(outputs_index)
+                               ->type()
+                               ->castRaw<ListType>()
+                               ->getElementType()
+                               ->cast<TensorType>();
+          elem_type = elem_type->withScalarType(var.scalar_type());
+          graph->outputs()
+              .at(outputs_index)
+              ->setType(MergeInferredType(
+                  graph->outputs().at(outputs_index)->type(),
+                  ListType::create(elem_type)));
+          outputs_index++;
+          TORCH_INTERNAL_ASSERT(
+              outputs_index <= graph->outputs().size(),
+              "Incorrect number of elements provided as example outputs.");
+        }
+      } else { // When torch output is a list type, but ONNX node is not a
+               // sequence type. Like prim::ListConstruct
+        size_t list_len = PyList_GET_SIZE(elem);
+        if (list_len > 0) {
+          for (size_t j = 0; j < list_len; ++j) {
+            PyObject* list_elem = PyList_GET_ITEM(elem, j);
+            TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
+            auto& var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+            graph->outputs()
+                .at(outputs_index + j)
+                ->setType(MergeInferredType(
+                    graph->outputs().at(outputs_index + j)->type(),
+                    TensorType::create(var)));
+          }
+          outputs_index += list_len;
+          TORCH_INTERNAL_ASSERT(
+              outputs_index <= graph->outputs().size(),
+              "Incorrect number of elements provided as example outputs.");
+        }
+      }
+    } else if (PyTuple_Check(elem)) {
+      size_t tuple_len = PyTuple_GET_SIZE(elem);
+      if (tuple_len > 0) {
+        for (size_t j = 0; j < tuple_len; ++j) {
+          PyObject* tuple_elem = PyTuple_GET_ITEM(elem, j);
+          TORCH_INTERNAL_ASSERT(THPVariable_Check(tuple_elem));
+          auto& var = reinterpret_cast<THPVariable*>(tuple_elem)->cdata;
+          graph->outputs()
+              .at(outputs_index + j)
+              ->setType(MergeInferredType(
+                  graph->outputs().at(outputs_index + j)->type(),
+                  TensorType::create(var)));
+        }
+        outputs_index += tuple_len;
+        TORCH_INTERNAL_ASSERT(
+            outputs_index <= graph->outputs().size(),
+            "Incorrect number of elements provided as example outputs.");
+      }
+    } else if (THPVariable_Check(elem)) {
+      at::Tensor var = reinterpret_cast<THPVariable*>(elem)->cdata;
+      ONNXUpdateTypeFromTensor(
+          graph->outputs().at(outputs_index), var, onnx_shape_inference);
+      outputs_index++;
+      TORCH_INTERNAL_ASSERT(
+          outputs_index <= graph->outputs().size(),
+          "Incorrect number of elements provided as example outputs.");
+    } else { // Dict
+      // Support for dict data type is limited to fixed size dictionaries in
+      // ONNX.
+      // Dictionary values are unrolled and keys are not preserved.
+      TORCH_INTERNAL_ASSERT(PyDict_Check(elem));
+      auto unrolled_dict = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
+      TORCH_INTERNAL_ASSERT(PyList_Check(unrolled_dict.ptr()));
+      for (size_t j = 0; j < unrolled_dict.size(); ++j) {
+        PyObject* tuple_elem = PyList_GET_ITEM(unrolled_dict.ptr(), j);
+        TORCH_INTERNAL_ASSERT(PyTuple_Check(tuple_elem));
+        TORCH_INTERNAL_ASSERT(PyTuple_GET_SIZE(tuple_elem) == 2);
+        auto& var =
+            reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(tuple_elem, 1))
+                ->cdata;
+        graph->outputs()
+            .at(outputs_index + j)
+            ->setType(MergeInferredType(
+                graph->outputs().at(outputs_index + j)->type(),
+                TensorType::create(var)));
+      }
+      outputs_index += unrolled_dict.size();
+      TORCH_INTERNAL_ASSERT(
+          outputs_index <= graph->outputs().size(),
+          "Incorrect number of elements provided as example outputs.");
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      outputs_index == graph->outputs().size(),
+      "Incorrect number of elements provided as example outputs.");
+
+  Py_DECREF(py_obj);
+}
+
+void ONNXShapeTypeInference(
+    std::shared_ptr<Graph>& graph,
+    const ParamMap& params_dict,
+    int opset_version) {
+  ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
 }
 
 } // namespace jit

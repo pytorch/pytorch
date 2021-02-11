@@ -2,7 +2,6 @@
 
 #ifdef USE_TENSORPIPE
 
-#include <gtest/gtest_prod.h>
 #include <atomic>
 #include <thread>
 
@@ -36,9 +35,6 @@ class Pipe;
 
 namespace transport {
 class Context;
-namespace uv {
-class Context;
-} // namespace uv
 } // namespace transport
 
 namespace channel {
@@ -186,7 +182,9 @@ class TensorPipeAgent : public RpcAgent {
   std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
+          {}) override;
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
@@ -210,6 +208,8 @@ class TensorPipeAgent : public RpcAgent {
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
+  tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) override;
+
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
 
@@ -218,14 +218,13 @@ class TensorPipeAgent : public RpcAgent {
   // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
-  static std::string guessUvAddress(
-      tensorpipe::transport::uv::Context& uvContext);
+  static std::string guessUvAddress();
 
- private:
-  FRIEND_TEST(TestE2ETensorPipe, TestTrainingLoop);
+  // For testing purposes.
   size_t timeoutMapSize();
   size_t numPendingResponses();
 
+ private:
   // Removes the given messageId with the given expirationTime from the
   // timeoutMap_.
   void removeFromTimeoutMap(
@@ -253,7 +252,8 @@ class TensorPipeAgent : public RpcAgent {
       Message&& message,
       std::vector<c10::DeviceIndex>&& devices,
       std::shared_ptr<LazyStreamContext> ctx,
-      std::function<void(const tensorpipe::Error&)>) noexcept;
+      std::function<void(const tensorpipe::Error&)>,
+      const tensorpipe::DeviceMap& deviceMap = {}) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(
@@ -280,14 +280,14 @@ class TensorPipeAgent : public RpcAgent {
       uint64_t requestSize,
       const std::string& destWorkerName);
 
-  inline std::vector<c10::DeviceIndex> getDevicesForTensors(
+  inline std::vector<c10::DeviceIndex> getDevicesForRemote(
       const std::string& remoteName,
       const Message& message) const;
 
 #ifdef USE_CUDA_NOT_ROCM
   // An RPC-specific CUDAFuture subclass. It overrides the extractDataPtrs
   // function to handle and only handle RPC Messages.
-  struct TORCH_CUDA_API RpcCUDAFuture final : at::cuda::CUDAFuture {
+  struct TORCH_CUDA_CPP_API RpcCUDAFuture final : at::cuda::CUDAFuture {
    public:
     using at::cuda::CUDAFuture::CUDAFuture;
 

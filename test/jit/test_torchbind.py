@@ -143,6 +143,8 @@ class TestTorchbind(JitTestCase):
         out, old, new = scripted()
         self.assertEqual(old, 7)
         self.assertEqual(new, 15)
+        # check if we can use scripted Torchbind Class
+        self.assertEqual(out.x, 15)
 
         def foo_just_getter():
             fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
@@ -161,6 +163,13 @@ class TestTorchbind(JitTestCase):
         out, x, y = scripted()
         self.assertEqual(x, 9)
         self.assertEqual(y, 6)
+
+        fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
+        old = fooGetterSetter.x
+        fooGetterSetter.x = old + 4
+        new = fooGetterSetter.x
+        self.assertEqual(old, 7)
+        self.assertEqual(new, 15)
 
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():

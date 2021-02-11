@@ -288,6 +288,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: diagflat
    .. automethod:: diagonal
    .. automethod:: fill_diagonal_
+   .. automethod:: fmax
+   .. automethod:: fmin
+   .. automethod:: diff
    .. automethod:: digamma
    .. automethod:: digamma_
    .. automethod:: dim

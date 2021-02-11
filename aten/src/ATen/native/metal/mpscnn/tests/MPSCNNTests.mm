@@ -237,6 +237,28 @@ bool test_sigmoid() {
   });
 }
 
+bool test_hardsigmoid() {
+  __block std::vector<int64_t> size{3, 3, 44, 44};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat))*12 - 6;
+    auto X2 = X.metal();
+    auto Y1 = at::native::hardsigmoid_(X);
+    auto Y2 = mpscnn::hardsigmoid_(X2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_hardswish() {
+  __block std::vector<int64_t> size{3, 3, 44, 44};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat))*12 - 6;
+    auto X2 = X.metal();
+    auto Y1 = at::native::hardswish_(X);
+    auto Y2 = mpscnn::hardswish_(X2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
 bool test_addmm() {
   bool result = true;
   for (int i = 0; i < ITER_COUNT; ++i) {
@@ -276,9 +298,50 @@ bool test_add() {
   });
 }
 
+bool test_add_broadcast() {
+  __block std::vector<int64_t> x1{2, 17, 58, 67};
+  __block std::vector<int64_t> x2{2, 17, 1, 1};
+  return TEST(x1, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::add(X1, X2);
+    auto MX1 = X1.metal();
+    auto MX2 = X2.metal();
+    auto Y2 = mpscnn::add(MX1, MX2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
 bool test_sub() {
-  __block std::vector<int64_t> x1{1, 3, 192, 192};
-  __block std::vector<int64_t> x2{1, 3, 1, 1};
+  __block std::vector<int64_t> x{5, 3, 167, 222};
+  return TEST(x, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::native::sub(X1, X2);
+    auto MX1 = X1.metal();
+    auto MX2 = X2.metal();
+    auto Y2 = mpscnn::sub(MX1, MX2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_sub_broadcast() {
+  __block std::vector<int64_t> x1{3, 3, 1, 1};
+  __block std::vector<int64_t> x2{3, 3, 192, 192};
+  return TEST(x1, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::native::sub(X1, X2);
+    auto MX1 = X1.metal();
+    auto MX2 = X2.metal();
+    auto Y2 = mpscnn::sub(MX1, MX2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_sub_broadcast2() {
+  __block std::vector<int64_t> x1{3, 3, 192, 192};
+  __block std::vector<int64_t> x2{3, 3, 1, 192};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -291,8 +354,35 @@ bool test_sub() {
 }
 
 bool test_mul() {
-  __block std::vector<int64_t> x1{1, 3, 192, 192};
-  __block std::vector<int64_t> x2{1, 3, 1, 1};
+  __block std::vector<int64_t> x{2, 7, 262, 119};
+  return TEST(x, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::native::mul(X1, X2);
+    auto MX1 = X1.metal();
+    auto MX2 = X2.metal();
+    auto Y2 = mpscnn::mul(MX1, MX2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_mul_broadcast() {
+  __block std::vector<int64_t> x1{4, 3, 192, 192};
+  __block std::vector<int64_t> x2{4, 3, 1, 1};
+  return TEST(x1, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::native::mul(X1, X2);
+    auto MX1 = X1.metal();
+    auto MX2 = X2.metal();
+    auto Y2 = mpscnn::mul(MX1, MX2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_mul_broadcast2() {
+  __block std::vector<int64_t> x1{4, 3, 192, 1};
+  __block std::vector<int64_t> x2{4, 3, 192, 192};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -352,7 +442,7 @@ bool test_upsampling_nearest2d_vec() {
   __block std::vector<int64_t> size{1, 48, 24, 24};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = torch::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = torch::native::upsample_nearest2d_cpu(
+    auto Y1 = at::native::upsample_nearest2d(
         X1,
         c10::optional<at::IntArrayRef>({}),
         c10::optional<at::ArrayRef<double>>({2, 2}));
