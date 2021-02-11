@@ -6260,7 +6260,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(32, 3)
         f = io.BytesIO()
-        torch.onnx._export(test_model, (x,), f, _retain_param_name=True)
+        torch.onnx._export(test_model, (x,), f, _retain_param_name=True, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
@@ -6310,7 +6310,7 @@ class TestONNXRuntime(unittest.TestCase):
         example_output = (test_model(x, y),)
         f = io.BytesIO()
 
-        torch.onnx.export(test_model, (x, y), f, example_outputs=example_output, _retain_param_name=True)
+        torch.onnx.export(test_model, (x, y), f, example_outputs=example_output, _retain_param_name=True, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
