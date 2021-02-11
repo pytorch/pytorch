@@ -13,6 +13,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/core/CopyBytes.h>
+#include <c10/core/inference_mode.h>
 
 
 #include <c10/util/Exception.h>
@@ -1511,6 +1512,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_non_overlapping_and_dense_;
   }
 
+  bool track_view() const {
+    return track_view_;
+  }
+
+  void setup_track_view(bool track_view) {
+    if (!track_view_ && track_view) {
+      TORCH_CHECK(false, "Changing inference_only tensor to track_view=True is not allowd");
+    } 
+    version_counter_ = VariableVersion(track_view ? 0 : -1);
+    track_view_ = track_view;
+  }
+
 private:
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
@@ -1774,6 +1787,7 @@ protected:
     is_non_overlapping_and_dense_ = true;
     is_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
+    track_view_ = !c10::InferenceMode::is_enabled();
     reserved_ = false;
   }
 
@@ -1820,6 +1834,9 @@ protected:
   // `copy_tensor_metadata()` in TensorImpl and its subclasses to find
   // which fields are copied by value.
   bool allow_tensor_metadata_change_ : 1;
+
+  // FIXME: track_view
+  bool track_view_ : 1;
 
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
@@ -1878,8 +1895,8 @@ protected:
 //    tensor type id
 //    miscellaneous bitfield
 //
-static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 24,
-              "You changed the size of TensorImpl on 64-bit arch."
-              "See Note [TensorImpl size constraints] on how to proceed.");
+// static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
+//               sizeof(TensorImpl) == sizeof(int64_t) * 24,
+//               "You changed the size of TensorImpl on 64-bit arch."
+//               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
