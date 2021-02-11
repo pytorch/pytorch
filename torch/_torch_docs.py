@@ -2764,7 +2764,7 @@ Args:
 Keyword args:
     rounding_mode (str, optional): Type of rounding applied to the result:
 
-        * ``"true"`` - default behavior. Performs no rounding and, if both :attr:`input` and
+        * If not specified, performs no rounding and, if both :attr:`input` and
           :attr:`other` are integer types, promotes the inputs to the default scalar type.
           Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
         * ``"trunc"`` - rounds the results of the division towards zero.
