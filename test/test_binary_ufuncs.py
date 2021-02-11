@@ -324,7 +324,7 @@ class TestBinaryUfuncs(TestCase):
         else:
             an, bn = a.float().cpu().numpy(), b.float().cpu().numpy()
 
-        for mode, np_ref in (("true", np.true_divide), ("floor", np.floor_divide)):
+        for mode, np_ref in ((None, np.true_divide), ("floor", np.floor_divide)):
             with np.errstate(all='ignore'):
                 expect = np_ref(an, bn)
             kwargs = dict(rounding_mode=mode) if mode is not None else {}
@@ -368,7 +368,7 @@ class TestBinaryUfuncs(TestCase):
             an, bn = a.float().cpu().numpy(), b.float().cpu().numpy()
 
         for mode, np_ref in (
-                ("true", np.true_divide),
+                (None, np.true_divide),
                 ("floor", np.floor_divide),
                 ("trunc", lambda a, b: np.trunc(np.true_divide(a, b)).astype(a.dtype))
         ):
