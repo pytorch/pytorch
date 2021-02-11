@@ -8,6 +8,7 @@
 #include <torch/torch.h>
 #include <cstring>
 
+using namespace torch::indexing;
 namespace te = torch::jit::tensorexpr;
 
 static void vectorize(te::LoopNest* ln, te::Tensor* target, int width) {
@@ -34,12 +35,15 @@ TEST(Approx, log_vml) {
   auto test = [&](const at::Tensor& A_t) {
     at::Tensor B_ref = at::log(A_t);
     at::Tensor B_t = at::empty_like(A_t);
-    cg.call({A_t.data_ptr<float>(), B_t.data_ptr<float>(), A_t.numel()});
+    auto ap = A_t.data_ptr<float>();
+    auto bp = B_t.data_ptr<float>();
+    auto rp = B_ref.data_ptr<float>();
+    cg.call({ap, bp, A_t.numel()});
     // Results should be bit-identical.
-    ASSERT_TRUE(
-        memcmp(
-            B_ref.data_ptr<float>(), B_t.data_ptr<float>(), B_ref.nbytes()) ==
-        0);
+    ASSERT_TRUE(memcmp(rp, bp, B_ref.nbytes()) == 0)
+      << "Input[:8] " << A_t.index({Slice(0, 8)}) << "\n"
+      << "Test[:8] " << B_t.index({Slice(0, 8)}) << "\n"
+      << "Ref[:8] " << B_ref.index({Slice(0, 8)});
   };
 
   // Generate every single-precision FP value in [1.0, 2.0).
