@@ -6845,6 +6845,9 @@ class TestONNXRuntime(unittest.TestCase):
             if input_data.size(0) == 1:
                 state[1] += torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
                 state[1] /= torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 3
+            for i in range(input_data.size(0)):
+                state[1] += torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+                state[1] /= torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * i
             return state
 
         class Example(torch.nn.Module):
