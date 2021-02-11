@@ -36,9 +36,9 @@ from torch.jit._state import (
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
 
-torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
-torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
-ScriptFunction = torch._C.ScriptFunction
+torch._C._jit.ScriptMethod.graph_for = _graph_for  # type: ignore
+torch._C._jit.ScriptFunction.graph_for = _graph_for  # type: ignore
+ScriptFunction = torch._C._jit.ScriptFunction
 ScriptFunction.__doc__ = """
 Functionally equivalent to a :class:`ScriptModule`, but represents a single
 function and does not have any attributes or Parameters.
@@ -69,7 +69,7 @@ def _is_new_style_class(cls):
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     defaults = torch.jit.frontend.get_default_args_for_class(obj)
-    torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
+    torch._C._jit.script_class_compile(qualified_name, ast, defaults, rcb)
     torch.jit._state._add_script_class(obj, qualified_name)
 
 
@@ -126,7 +126,7 @@ class OrderedDictWrapper(object):
 
 class OrderedModuleDict(OrderedDictWrapper):
     def __init__(self, module, python_dict):
-        super(OrderedModuleDict, self).__init__(torch._C.ModuleDict(module))
+        super(OrderedModuleDict, self).__init__(torch._C._jit.ModuleDict(module))
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
@@ -335,7 +335,7 @@ if _enabled:
             # createResolutionCallback internally adds 1 to get us to our frame, then
             # we add 1 to get to the proper surrounding scope.
             rcb = _jit_internal.createResolutionCallbackFromFrame(frames_up=1)
-            ast = torch._C._parse_source_def(src)
+            ast = torch._C._jit._parse_source_def(src)
             self._methods[ast.name().name] = ScriptMethodStub(rcb, ast, None)
 
         def _replicate_for_data_parallel(self):
@@ -403,10 +403,10 @@ if _enabled:
         @staticmethod
         def _finalize_scriptmodule(script_module):
             script_module._parameters = OrderedDictWrapper(
-                torch._C.ParameterDict(script_module._c)
+                torch._C._jit.ParameterDict(script_module._c)
             )
             script_module._buffers = OrderedDictWrapper(
-                torch._C.BufferDict(script_module._c)
+                torch._C._jit.BufferDict(script_module._c)
             )
             script_module._modules = OrderedModuleDict(
                 script_module._c, script_module._modules
@@ -429,19 +429,19 @@ if _enabled:
 
             # Copy submodules from the C++ module to this ScriptModule.
             modules = {}
-            for name, cpp_module in torch._C.ModuleDict(self._c).items():
+            for name, cpp_module in torch._C._jit.ModuleDict(self._c).items():
                 modules[name] = wrap_cpp_module(cpp_module)
             self._modules = OrderedModuleDict(self._c, modules)
 
             # Copy parameters and buffers.
-            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(self._c))
-            self._buffers = OrderedDictWrapper(torch._C.BufferDict(self._c))
+            self._parameters = OrderedDictWrapper(torch._C._jit.ParameterDict(self._c))
+            self._buffers = OrderedDictWrapper(torch._C._jit.BufferDict(self._c))
 
             # Get rid of the functions from the old C++ module.
             self.__dict__ = {
                 k: v
                 for k, v in self.__dict__.items()
-                if not isinstance(v, torch._C.ScriptMethod)
+                if not isinstance(v, torch._C._jit.ScriptMethod)
             }
             self.__dict__["_initializing"] = False
 
@@ -991,7 +991,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         ast = get_jit_def(obj, obj.__name__)
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
-        fn = torch._C._jit_script_compile(
+        fn = torch._C._jit.script_compile(
             qualified_name, ast, _rcb, get_default_args(obj)
         )
         # Forward docstrings
@@ -1027,7 +1027,7 @@ def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
     _check_overload_defaults(
         implementation_defaults, overload_defaults, overload_decl.range()
     )
-    fn = torch._C._jit_script_compile_overload(
+    fn = torch._C._jit.script_compile_overload(
         qual_name,
         overload_decl,
         impl_ast,
@@ -1095,7 +1095,7 @@ def interface(obj):
     # instead of a class interface type, an module interface type only compile
     # the user provided methods as part of the interface
     ast = get_jit_class_def(obj, obj.__name__)
-    torch._C._jit_script_interface_compile(
+    torch._C._jit.script_interface_compile(
         qualified_name, ast, rcb, is_module_interface
     )
     obj.__torch_script_interface__ = True
@@ -1106,11 +1106,11 @@ def _recursive_compile_class(obj, loc):
     _qual_name = _qualified_name(obj)
     # We're starting a new compilation, so update the error call stack in
     # case it fails
-    error_stack = torch._C.CallStack(_qual_name, loc)
+    error_stack = torch._C._jit.CallStack(_qual_name, loc)
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     _compile_and_register_class(obj, rcb, _qual_name)
 
-CompilationUnit = torch._C.CompilationUnit
+CompilationUnit = torch._C._jit.CompilationUnit
 set_module(CompilationUnit, "torch.jit")
 
 def _unwrap_optional(x):

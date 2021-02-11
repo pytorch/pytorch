@@ -9,7 +9,7 @@ from typing import cast, List, Optional, Tuple, Union
 from .check_kernel_launches import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
 import operator
 
-FileCheck = torch._C.FileCheck
+FileCheck = torch._C._jit.FileCheck
 
 __all__ = [
     'assert_allclose', 'make_non_contiguous', 'rand_like', 'randn_like'

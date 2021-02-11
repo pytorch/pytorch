@@ -294,7 +294,7 @@ def gen_script_fn_and_args(method_name, func_type, *args, **kwargs):
 # returns a function takes in (args, kwargs) and runs the compiled function
 def create_script_fn(self, method_name, func_type):
     # function returns tuple containing original output and
-    # filtered output to be used in checking gradients 
+    # filtered output to be used in checking gradients
     def script_fn(*args, **kwargs):
         fn, tensors = gen_script_fn_and_args(method_name, func_type, *args, **kwargs)
         self.assertExportImport(fn.graph, tensors)
@@ -475,7 +475,7 @@ def check_alias_annotation(method_name, args, kwargs, *, aten_name, func_type='m
     call = get_call(method_name, func_type, actuals, kwargs)
     script = script_template.format(', '.join(formals), call)
     CU = torch.jit.CompilationUnit(script)
-    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
+    torch._C._jit.check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):
     if 'module_name' in kwargs:

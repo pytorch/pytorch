@@ -348,7 +348,7 @@ class TestONNXExport(JitTestCase):
         for n in graph.nodes():
             nodes.append(n.kind())
         self.assertEqual(nodes, ['aten::linear'])
-        torch._C._jit_pass_onnx_preprocess(graph)
+        torch._C._jit.pass_onnx_preprocess(graph)
 
         nodes = []
         for n in graph.nodes():

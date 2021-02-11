@@ -121,21 +121,21 @@ Works only with Python3.\n A few examples:
 
     if args.cuda_fuser == "te":
         import torch
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        torch._C._jit_set_profiling_mode(True)
+        torch._C._jit.set_profiling_executor(True)
+        torch._C._jit.set_texpr_fuser_enabled(True)
+        torch._C._jit.override_can_fuse_on_gpu(True)
+        torch._C._jit.set_profiling_mode(True)
     elif args.cuda_fuser == "old":
         import torch
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_texpr_fuser_enabled(False)
-        torch._C._jit_override_can_fuse_on_gpu(True)
+        torch._C._jit.set_profiling_executor(False)
+        torch._C._jit.set_texpr_fuser_enabled(False)
+        torch._C._jit.override_can_fuse_on_gpu(True)
     elif args.cuda_fuser == "nvf":
         import torch
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_texpr_fuser_enabled(False)
-        torch._C._jit_set_nvfuser_enabled(True)
-        torch._C._jit_set_profiling_mode(True)
+        torch._C._jit.set_profiling_executor(True)
+        torch._C._jit.set_texpr_fuser_enabled(False)
+        torch._C._jit.set_nvfuser_enabled(True)
+        torch._C._jit.set_profiling_mode(True)
     else :
         raise ValueError("Undefined fuser: {}".format(args.cuda_fuser))
 

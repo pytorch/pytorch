@@ -25,7 +25,7 @@ class TestPythonBindings(JitTestCase):
         def fn(x: torch.Tensor):
             return 2 * x
 
-        cu = torch._C.CompilationUnit()
+        cu = torch._C._jit.CompilationUnit()
         cu.create_function("test_fn", fn.graph)
 
         inp = torch.randn(5)
@@ -46,7 +46,7 @@ class TestPythonBindings(JitTestCase):
         v = n.output()
         # check that they work
         str((n, v))
-        torch._C._jit_pass_dce(gr)
+        torch._C._jit.pass_dce(gr)
         with self.assertRaisesRegex(RuntimeError, "invalidated"):
             str(n)
         with self.assertRaisesRegex(RuntimeError, "invalidated"):

@@ -9,9 +9,9 @@ class StaticRuntime:
     def __init__(self, scripted):
         # this is an nn.Module
         if hasattr(scripted, "_c"):
-            self.static_runtime = torch._C._jit_to_static_runtime(scripted._c)
+            self.static_runtime = torch._C._jit.to_static_runtime(scripted._c)
         else:
-            self.static_runtime = torch._C._jit_to_static_runtime(scripted.graph)
+            self.static_runtime = torch._C._jit.to_static_runtime(scripted.graph)
 
     def __call__(self, *args, **kwargs):
         if not kwargs:

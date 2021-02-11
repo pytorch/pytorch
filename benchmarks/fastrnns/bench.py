@@ -229,11 +229,11 @@ if __name__ == '__main__':
     set_fuser(args.fuser, args.executor)
 
     if args.cuda_pointwise_loop_level:
-        torch._C._jit_set_te_cuda_pointwise_loop_levels(args.cuda_pointwise_loop_level)
+        torch._C._jit.set_te_cuda_pointwise_loop_levels(args.cuda_pointwise_loop_level)
     if args.cuda_pointwise_block_count:
-        torch._C._jit_set_te_cuda_pointwise_block_count(args.cuda_pointwise_block_count)
+        torch._C._jit.set_te_cuda_pointwise_block_count(args.cuda_pointwise_block_count)
     if args.cuda_pointwise_block_size:
-        torch._C._jit_set_te_cuda_pointwise_block_size(args.cuda_pointwise_block_size)
+        torch._C._jit.set_te_cuda_pointwise_block_size(args.cuda_pointwise_block_size)
 
     rnns = args.rnns or ['cudnn', 'aten', 'jit', 'jit_premul', 'jit_premul_bias', 'jit_simple',
                          'jit_multilayer', 'py']

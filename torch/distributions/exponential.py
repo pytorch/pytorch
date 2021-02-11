@@ -51,7 +51,7 @@ class Exponential(ExponentialFamily):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        if torch._C._get_tracing_state():
+        if torch._C._jit._get_tracing_state():
             # [JIT WORKAROUND] lack of support for ._exponential()
             u = torch.rand(shape, dtype=self.rate.dtype, device=self.rate.device)
             return -(-u).log1p() / self.rate

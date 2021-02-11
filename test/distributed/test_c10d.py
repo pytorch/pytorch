@@ -3012,7 +3012,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         def allreduce_hook(
             process_group: object, bucket: dist._GradBucket
-        ) -> torch._C.Future:
+        ) -> torch._C._jit.Future:
             tensors = [t / self.world_size for t in bucket.get_tensors()]
             return process_group.allreduce(tensors).get_future()
 
@@ -3736,7 +3736,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
+        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C._jit.Future:
             tensors = [t / self.world_size for t in bucket.get_tensors()]
             return process_group.allreduce(tensors).get_future()
 
@@ -3947,7 +3947,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "Communication hook: return annotation should be torch.futures.Future or torch._C.Future.",
+            "Communication hook: return annotation should be torch.futures.Future or torch._C._jit.Future.",
         ):
 
             def comm_hook(state: object, bucket: dist._GradBucket) -> int:
@@ -3957,7 +3957,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "callback must return a torch.futures.Future or torch._C.Future object, but got",
+            "callback must return a torch.futures.Future or torch._C._jit.Future object, but got",
         ):
 
             def comm_hook(state: object, bucket: dist._GradBucket):

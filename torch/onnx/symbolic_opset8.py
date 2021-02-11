@@ -58,7 +58,7 @@ def _interpolate(name, dim, interpolate_mode):
             return _unimplemented(name, "align_corners == True")
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
-            return _unimplemented(name, "torch._C.Value (output_size) indexing")
+            return _unimplemented(name, "torch._C._jit.Value (output_size) indexing")
         if scales is None:
             scales = [1. if i < 2 else
                       float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])

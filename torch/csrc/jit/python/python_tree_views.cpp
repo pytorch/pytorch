@@ -73,8 +73,8 @@ Maybe<T> wrap_maybe(const SourceRange& fallback_pos, T* val) {
 }
 
 void initTreeViewBindings(PyObject* module) {
-  auto _C = py::handle(module).cast<py::module>();
-  auto m = _C.def_submodule("_jit_tree_views");
+  auto _jit = py::handle(module).cast<py::module>();
+  auto m = _jit.def_submodule("tree_views");
 
   py::class_<SourceRange>(m, "SourceRange")
       .def(

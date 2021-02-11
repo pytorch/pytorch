@@ -30,7 +30,7 @@ def visualize(graph, name_prefix='', pb_graph=None, executors_it=None):
     value_map = {}
     pb_graph = pb_graph or graph_pb2.GraphDef()
 
-    if isinstance(graph, torch._C.GraphExecutorState):
+    if isinstance(graph, torch._C._jit.GraphExecutorState):
         visualize_graph_executor(graph, name_prefix, pb_graph,
                                  partial(visualize, pb_graph=pb_graph))
         return pb_graph

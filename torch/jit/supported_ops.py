@@ -49,7 +49,7 @@ def _get_tensor_ops():
         self = schema.arguments[0]
         if self.name != 'self':
             return False
-        if not self.type.isSubtypeOf(torch._C.TensorType.get()):
+        if not self.type.isSubtypeOf(torch._C._jit.TensorType.get()):
             return False
         return True
 
@@ -57,7 +57,7 @@ def _get_tensor_ops():
     # discover methods
     for elem in dir(torch.Tensor):
         if not _hidden(elem):
-            schemas = torch._C._jit_get_schemas_for_operator("aten::" + elem)
+            schemas = torch._C._jit.get_schemas_for_operator("aten::" + elem)
             for schema in schemas:
                 if is_tensor_method(schema):
                     methods.append(_emit_schema('Tensor', elem, schema, arg_start=1))
@@ -99,7 +99,7 @@ def _get_nn_functional_ops():
         for elem in dir(mod):
             builtin = _find_builtin(getattr(mod, elem))
             if builtin is not None:
-                schemas = torch._C._jit_get_schemas_for_operator(builtin)
+                schemas = torch._C._jit.get_schemas_for_operator(builtin)
                 for schema in schemas:
                     # remove _tan but not __and__
                     if not _hidden(elem):
@@ -146,7 +146,7 @@ def _get_torchscript_builtins():
             raise RuntimeError(f'Module for {fn} not found')
         builtin = _find_builtin(fn)
         if builtin is not None:
-            schemas = torch._C._jit_get_schemas_for_operator(builtin)
+            schemas = torch._C._jit.get_schemas_for_operator(builtin)
             for schema in schemas:
                 functions.append(_emit_schema(mod.__name__, fn.__name__, schema))
                 pass
@@ -165,7 +165,7 @@ def _get_math_builtins():
             raise RuntimeError(f'Module for {fn} not found')
         builtin = _find_builtin(fn)
         if builtin is not None:
-            schemas = torch._C._jit_get_schemas_for_operator(builtin)
+            schemas = torch._C._jit.get_schemas_for_operator(builtin)
             for schema in schemas:
                 schema_str = _emit_schema(mod.__name__, fn.__name__, schema)
                 if 'Tensor' in schema_str:
@@ -252,7 +252,7 @@ def _get_global_builtins():
         op_name = 'aten::{}'.format(fn)
         if fn in op_renames:
             op_name = op_renames[fn]
-        schemas = torch._C._jit_get_schemas_for_operator(op_name)
+        schemas = torch._C._jit.get_schemas_for_operator(op_name)
         for s in schemas:
             schematized_ops.append(_emit_schema(None, fn, s, padding=0))
         if len(schemas) > 0:

@@ -19,13 +19,13 @@ class TestMetalRewritePass(TestCase):
         scripted_model.eval()
         input_data = torch.normal(1, 20, size=data_shape)
         ref_result = scripted_model(input_data)
-        torch._C._jit_pass_metal_insert_prepacked_ops(scripted_model._c)
+        torch._C._jit.pass_metal_insert_prepacked_ops(scripted_model._c)
         if fuse_clamping_ops or prepack_removal:
-            scripted_model._c = torch._C._freeze_module(scripted_model._c)
+            scripted_model._c = torch._C._jit._freeze_module(scripted_model._c)
         if fuse_clamping_ops:
-            torch._C._jit_pass_metal_fuse_clamp_w_prepacked_conv(scripted_model._c)
+            torch._C._jit.pass_metal_fuse_clamp_w_prepacked_conv(scripted_model._c)
         if prepack_removal:
-            torch._C._jit_pass_metal_fold_prepacking_ops(scripted_model._c)
+            torch._C._jit.pass_metal_fold_prepacking_ops(scripted_model._c)
 
         buffer = io.BytesIO()
         torch.jit.save(scripted_model, buffer)

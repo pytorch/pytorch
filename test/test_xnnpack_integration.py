@@ -574,13 +574,13 @@ class TestXNNPACKRewritePass(TestCase):
                 scripted_model = torch.jit.trace(module_instance, input_data)
             scripted_model.eval()
             ref_result = scripted_model(input_data)
-            torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
+            torch._C._jit.pass_insert_prepacked_ops(scripted_model._c)
             if fuse_clamping_ops or prepack_removal:
-                scripted_model._c = torch._C._freeze_module(scripted_model._c)
+                scripted_model._c = torch._C._jit._freeze_module(scripted_model._c)
             if fuse_clamping_ops:
-                torch._C._jit_pass_fuse_clamp_w_prepacked_linear_conv(scripted_model._c)
+                torch._C._jit.pass_fuse_clamp_w_prepacked_linear_conv(scripted_model._c)
             if (prepack_removal):
-                torch._C._jit_pass_fold_prepacking_ops(scripted_model._c)
+                torch._C._jit.pass_fold_prepacking_ops(scripted_model._c)
 
             buffer = io.BytesIO()
             torch.jit.save(scripted_model, buffer)
@@ -933,7 +933,7 @@ class TestXNNPACKConv1dTransformPass(TestCase):
                 scripted_model = torch.jit.trace(module_instance, input_data)
             scripted_model.eval()
             ref_result = scripted_model(input_data)
-            torch._C._jit_pass_transform_conv1d_to_conv2d(scripted_model._c)
+            torch._C._jit.pass_transform_conv1d_to_conv2d(scripted_model._c)
             optimized_scripted_model = optimize_for_mobile(scripted_model)
 
             buffer = io.BytesIO()

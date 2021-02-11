@@ -1341,7 +1341,7 @@ void initJitScriptBindings(PyObject* module) {
         return std::make_tuple(pp.str(), consts);
       });
   m.def(
-      "_jit_script_compile",
+      "script_compile",
       [](const std::string& qualname,
          const Def& def,
          const ResolutionCallback& rcb,
@@ -1352,7 +1352,7 @@ void initJitScriptBindings(PyObject* module) {
         return script_compile_function(name, def, defaults, rcb);
       });
   m.def(
-      "_jit_script_compile_overload",
+      "script_compile_overload",
       [](const std::string& qualname,
          const Decl& overload_decl,
          const Def& implementation_def,
@@ -1398,7 +1398,7 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   m.def(
-      "_jit_script_class_compile",
+      "script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          const ClassMethodDefaults& defaults,
@@ -1466,7 +1466,7 @@ void initJitScriptBindings(PyObject* module) {
         }
       });
   m.def(
-      "_jit_script_interface_compile",
+      "script_interface_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          const ResolutionCallback& rcb,
@@ -1556,11 +1556,9 @@ void initJitScriptBindings(PyObject* module) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
 
-  m.def("_jit_set_emit_hooks", setEmitHooks);
-  m.def("_jit_get_emit_hooks", getEmitHooks);
-  m.def("_jit_clear_class_registry", []() {
-    get_python_cu()->_clear_python_cu();
-  });
+  m.def("set_emit_hooks", setEmitHooks);
+  m.def("get_emit_hooks", getEmitHooks);
+  m.def("clear_class_registry", []() { get_python_cu()->_clear_python_cu(); });
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);
@@ -1592,7 +1590,7 @@ void initJitScriptBindings(PyObject* module) {
     py::object ret = toPyObject(pyobj_ivalue);
     return ret;
   });
-  m.def("_jit_debug_module_iterators", _jit_debug_module_iterators);
+  m.def("debug_module_iterators", _jit_debug_module_iterators);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
@@ -1860,7 +1858,7 @@ void initJitScriptBindings(PyObject* module) {
       "_check_onnx_proto",
       [](const std::string& proto_string) { check_onnx_proto(proto_string); },
       py::arg("proto_string"));
-  m.def("_jit_is_script_object", [](const py::object& obj) {
+  m.def("is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
 }

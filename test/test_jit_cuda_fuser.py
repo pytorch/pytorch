@@ -18,9 +18,9 @@ os.environ['PYTORCH_CUDA_FUSER_DISABLE_FMA'] = '1'
 os.environ['PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL'] = '0'
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-    torch._C._jit_set_texpr_fuser_enabled(False)
-    torch._C._jit_set_profiling_executor(True)
-    torch._C._jit_set_profiling_mode(True)
+    torch._C._jit.set_texpr_fuser_enabled(False)
+    torch._C._jit.set_profiling_executor(True)
+    torch._C._jit.set_profiling_mode(True)
 
 FUSION_GROUP = 'prim::CudaFusionGroup'
 FUSION_GUARD = 'prim::CudaFusionGuard'
@@ -46,21 +46,21 @@ class TestCudaFuser(JitTestCase):
 
     def setUp(self):
         super(TestCudaFuser, self).setUp()
-        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        self.old_guard = torch._C._jit_set_nvfuser_guard_mode(False)
+        self.old_cpu_fuse = torch._C._jit.can_fuse_on_cpu()
+        self.old_gpu_fuse = torch._C._jit.can_fuse_on_gpu()
+        torch._C._jit.override_can_fuse_on_cpu(False)
+        torch._C._jit.override_can_fuse_on_gpu(False)
+        self.old_guard = torch._C._jit.set_nvfuser_guard_mode(False)
 
         if(RUN_CUDA):
-            self.old_nvfuser = torch._C._jit_set_nvfuser_enabled(True)
+            self.old_nvfuser = torch._C._jit.set_nvfuser_enabled(True)
 
     def tearDown(self):
         if(RUN_CUDA):
-            torch._C._jit_set_nvfuser_enabled(self.old_nvfuser)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuse)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuse)
-        torch._C._jit_set_nvfuser_guard_mode(self.old_guard)
+            torch._C._jit.set_nvfuser_enabled(self.old_nvfuser)
+        torch._C._jit.override_can_fuse_on_cpu(self.old_cpu_fuse)
+        torch._C._jit.override_can_fuse_on_gpu(self.old_gpu_fuse)
+        torch._C._jit.set_nvfuser_guard_mode(self.old_guard)
         super(TestCudaFuser, self).tearDown()
 
     def _run_helper(self, jit_op, op, *args):
@@ -498,8 +498,8 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_dynamic_size(self):
-        old_guard = torch._C._jit_set_nvfuser_guard_mode(True)
-        torch._C._jit_set_bailout_depth(20)
+        old_guard = torch._C._jit.set_nvfuser_guard_mode(True)
+        torch._C._jit.set_bailout_depth(20)
 
         def t(x: torch.Tensor, y: torch.Tensor, z: float):
             o = x + y
@@ -532,7 +532,7 @@ class TestCudaFuser(JitTestCase):
         o = t(x, y, 2.0)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, 2.0), FUSION_GUARD)
-        torch._C._jit_set_nvfuser_guard_mode(old_guard)
+        torch._C._jit.set_nvfuser_guard_mode(old_guard)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_random_topo(self):
@@ -651,8 +651,8 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_reduction_multiple_output(self):
-        old_guard = torch._C._jit_set_nvfuser_guard_mode(True)
-        torch._C._jit_set_bailout_depth(20)
+        old_guard = torch._C._jit.set_nvfuser_guard_mode(True)
+        torch._C._jit.set_bailout_depth(20)
 
         def t(x: torch.Tensor, y: torch.Tensor, scale: float, z: torch.Tensor):
             o = torch.mul(x, y)
@@ -684,7 +684,7 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             self.assertEqual(oo, jit_oo)
         self.assertGraphContains(t_jit.graph_for(x, y, scale, z), FUSION_GUARD)
-        torch._C._jit_set_nvfuser_guard_mode(old_guard)
+        torch._C._jit.set_nvfuser_guard_mode(old_guard)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -847,12 +847,12 @@ class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_register_fuser(self):
-        self.assertFalse(torch._C._jit_set_nvfuser_enabled(True))
-        self.assertTrue(torch._C._jit_nvfuser_enabled())
-        self.assertTrue(torch._C._jit_set_nvfuser_enabled(True))
-        self.assertTrue(torch._C._jit_nvfuser_enabled())
-        self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
-        self.assertFalse(torch._C._jit_nvfuser_enabled())
+        self.assertFalse(torch._C._jit.set_nvfuser_enabled(True))
+        self.assertTrue(torch._C._jit.nvfuser_enabled())
+        self.assertTrue(torch._C._jit.set_nvfuser_enabled(True))
+        self.assertTrue(torch._C._jit.nvfuser_enabled())
+        self.assertTrue(torch._C._jit.set_nvfuser_enabled(False))
+        self.assertFalse(torch._C._jit.nvfuser_enabled())
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
 
-FileCheck = torch._C.FileCheck
+FileCheck = torch._C._jit.FileCheck
 
 class TestOptimizer(TestCase):
 

@@ -24,8 +24,8 @@ from torch._jit_internal import _qualified_name
 from torch.autograd import function
 from torch.nn import Module
 
-_flatten = torch._C._jit_flatten
-_unflatten = torch._C._jit_unflatten
+_flatten = torch._C._jit.flatten
+_unflatten = torch._C._jit.unflatten
 
 
 def _create_interpreter_name_lookup_fn(frames_up=1):
@@ -122,7 +122,7 @@ class ONNXTracedModule(torch.nn.Module):
             else:
                 return tuple(out_vars)
 
-        graph, out = torch._C._create_graph_by_tracing(
+        graph, out = torch._C._jit._create_graph_by_tracing(
             wrapper,
             in_vars + module_state,
             _create_interpreter_name_lookup_fn(),
@@ -332,7 +332,7 @@ def _check_trace(
                 strict=strict,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
-                _compilation_unit=torch._C.CompilationUnit(),
+                _compilation_unit=torch._C._jit.CompilationUnit(),
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
@@ -350,14 +350,14 @@ def _check_trace(
             check_mod_func = check_mod
 
         def graph_diagnostic_info():
-            mod_canonicalized = torch._C._jit_pass_canonicalize(traced_func.graph)
-            torch._C._jit_pass_inline(mod_canonicalized)
-            torch._C._jit_pass_erase_shape_information(mod_canonicalized)
+            mod_canonicalized = torch._C._jit.pass_canonicalize(traced_func.graph)
+            torch._C._jit.pass_inline(mod_canonicalized)
+            torch._C._jit.pass_erase_shape_information(mod_canonicalized)
             mod_str = str(mod_canonicalized)
             mod_str = re.sub(r"___torch_mangle_[0-9]+\.", "", mod_str)
-            check_canonicalized = torch._C._jit_pass_canonicalize(check_mod_func.graph)
-            torch._C._jit_pass_inline(check_canonicalized)
-            torch._C._jit_pass_erase_shape_information(check_canonicalized)
+            check_canonicalized = torch._C._jit.pass_canonicalize(check_mod_func.graph)
+            torch._C._jit.pass_inline(check_canonicalized)
+            torch._C._jit.pass_erase_shape_information(check_canonicalized)
             check_str = str(check_canonicalized)
             check_str = re.sub(r"___torch_mangle_[0-9]+\.", "", check_str)
 
@@ -531,7 +531,7 @@ class TracerWarning(Warning):
 # We ignore the tracer warnings coming form inside the library, because all our shape
 # checks in nn will trigger them.
 TracerWarning.ignore_lib_warnings()
-torch._C._tracer_warn_use_python()
+torch._C._jit._tracer_warn_use_python()
 
 
 def make_tuple(example_inputs):
@@ -775,7 +775,7 @@ def trace(
         )
 
     name = _qualified_name(func)
-    traced = torch._C._create_function_from_trace(
+    traced = torch._C._jit._create_function_from_trace(
         name, func, example_inputs, var_lookup_fn, strict, _force_outplace
     )
 
@@ -976,7 +976,7 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
-    return torch._C._is_tracing()
+    return torch._C._jit._is_tracing()
 
 
 class TracedModule(ScriptModule):
@@ -1022,7 +1022,7 @@ class TracedModule(ScriptModule):
                 check_unique(buf)
         for name, val in orig.__dict__.items():
             if (
-                torch._C._jit_is_script_object(val)
+                torch._C._jit.is_script_object(val)
                 and name not in orig._parameters
                 and name not in orig._buffers
             ):

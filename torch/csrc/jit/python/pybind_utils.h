@@ -134,8 +134,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   }
 
   // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
-  // (i.e., torch._C.Future) as the only argument. If the type mismatches, an
-  // error will be thrown when waiting for the value of this returned Future.
+  // (i.e., torch._C._jit.Future) as the only argument. If the type mismatches,
+  // an error will be thrown when waiting for the value of this returned Future.
   std::shared_ptr<PythonFutureWrapper> then(py::function cb) {
     // We need this an additional layer of wrapper here to guard the
     // destruction of the py::function object. Because, the

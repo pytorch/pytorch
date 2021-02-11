@@ -15,28 +15,28 @@ if __name__ == '__main__':
 
 class TestProfiler(JitTestCase):
     def setUp(self):
-        self.prev_exec = torch._C._jit_set_profiling_executor(True)
-        self.prev_profiling = torch._C._jit_set_profiling_mode(True)
-        self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        self.can_fuse_on_cpu = torch._C._jit_can_fuse_on_cpu()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        torch._C._jit_override_can_fuse_on_cpu(True)
+        self.prev_exec = torch._C._jit.set_profiling_executor(True)
+        self.prev_profiling = torch._C._jit.set_profiling_mode(True)
+        self.inline_autodiff = torch._C._jit._debug_set_autodiff_subgraph_inlining(False)
+        self.texpr_fuser_state = torch._C._jit.texpr_fuser_enabled()
+        self.can_fuse_on_cpu = torch._C._jit.can_fuse_on_cpu()
+        torch._C._jit.set_texpr_fuser_enabled(True)
+        torch._C._jit.override_can_fuse_on_cpu(True)
         self.default_dtype = torch.get_default_dtype()
-        self.old_reduction_enabled = torch._C._jit_set_texpr_reductions_enabled(True)
+        self.old_reduction_enabled = torch._C._jit.set_texpr_reductions_enabled(True)
         torch.set_default_dtype(torch.double)
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
+        self.old_fusion_inlining = torch._C._jit._debug_get_fusion_group_inlining()
+        torch._C._jit._debug_set_fusion_group_inlining(False)
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.prev_exec)
-        torch._C._jit_set_profiling_mode(self.prev_profiling)
-        torch._C._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.can_fuse_on_cpu)
+        torch._C._jit.set_profiling_executor(self.prev_exec)
+        torch._C._jit.set_profiling_mode(self.prev_profiling)
+        torch._C._jit._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
+        torch._C._jit.set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit.override_can_fuse_on_cpu(self.can_fuse_on_cpu)
         torch.set_default_dtype(self.default_dtype)
-        torch._C._jit_set_texpr_reductions_enabled(self.old_reduction_enabled)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit.set_texpr_reductions_enabled(self.old_reduction_enabled)
+        torch._C._jit._debug_set_fusion_group_inlining(self.old_fusion_inlining)
 
     def test_tensor_type_not_determined_by_inputs(self):
         @torch.jit.script
@@ -150,7 +150,7 @@ class TestProfiler(JitTestCase):
         t = torch.rand(8, dtype=torch.float)
 
         foo_script = torch.jit.script(foo)
-        for _ in range(torch._C._jit_get_num_profiled_runs() + 1):
+        for _ in range(torch._C._jit.get_num_profiled_runs() + 1):
             foo_script(t, t, t, t, 0.1)
 
         self.assertEqual(foo(t, t, t, t, 0.1), foo_script(t, t, t, t, 0.1))

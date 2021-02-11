@@ -86,7 +86,7 @@ def _get_valid_constant(attr, v, owner_type):
         """.format(torch.typename(type(v)), owner_type, attr, constants)))
 
 
-class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
+class SourceContext(torch._C._jit.tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
 
@@ -97,7 +97,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     ConcreteModuleType doesn't have a JIT type associated with it yet, it
     must be filled in by the caller.
     """
-    concrete_type_builder = torch._C.ConcreteModuleTypeBuilder(type(nn_module))
+    concrete_type_builder = torch._C._jit.ConcreteModuleTypeBuilder(type(nn_module))
     if isinstance(nn_module, (torch.nn.ModuleDict)):
         concrete_type_builder.set_module_dict()
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
@@ -122,12 +122,12 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         try:
             if name in class_annotations and class_annotations[name] != torch.nn.Module.__annotations__["forward"]:
                 ann_to_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
-                attr_type = torch._C.InferredType(ann_to_type)
+                attr_type = torch._C._jit.InferredType(ann_to_type)
             elif isinstance(item, torch.jit.Attribute):
                 ann_to_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
-                attr_type = torch._C.InferredType(ann_to_type)
+                attr_type = torch._C._jit.InferredType(ann_to_type)
             else:
-                attr_type = torch._C._jit_try_infer_type(item)
+                attr_type = torch._C._jit.try_infer_type(item)
                 inferred = True
         except RuntimeError as re:
             raise RuntimeError(
@@ -174,7 +174,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if attr_type.success():
             assert attr_type.type().is_interface_type()
             # if the type can be inferred, it should be a module interface type
-            sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type.type())
+            sub_concrete_type = torch._C._jit.ConcreteModuleType.from_jit_type(attr_type.type())
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
             sub_concrete_type = get_module_concrete_type(item, share_types)
@@ -243,7 +243,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 scripted_fn = torch.jit.script(value)
                 concrete_type_builder.add_function_attribute(
                     name,
-                    torch._C._jit_try_infer_type(scripted_fn).type(),
+                    torch._C._jit.try_infer_type(scripted_fn).type(),
                     value)
             except Exception as e:
                 # If we fail to script the function, it isn't a hard error.
@@ -268,7 +268,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if isinstance(value, torch.jit.ScriptFunction):
             concrete_type_builder.add_function_attribute(
                 name,
-                torch._C._jit_try_infer_type(value).type(),
+                torch._C._jit.try_infer_type(value).type(),
                 value)
             continue
 
@@ -295,8 +295,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     return concrete_type_builder
 
 class ConcreteTypeStore(object):
-    type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
-    methods_compiled: Set[torch._C.ConcreteModuleType]
+    type_store: Dict[Type[Module], List[torch._C._jit.ConcreteModuleType]]
+    methods_compiled: Set[torch._C._jit.ConcreteModuleType]
 
     def __init__(self):
         # Python module type => List[ConcreteModuleType)]
@@ -404,7 +404,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         concrete_type:  The fully initialized ConcreteType of the module.
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
     """
-    cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
+    cpp_module = torch._C._jit._create_module_with_type(concrete_type.jit_type)
     method_stubs = stubs_fn(nn_module)
     property_stubs = get_property_stubs(nn_module)
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
@@ -423,7 +423,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             orig_value = getattr(nn_module, name)
             assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
             module_type = sub_concrete_type.jit_type
-            if isinstance(module_type, torch._C.InterfaceType):
+            if isinstance(module_type, torch._C._jit.InterfaceType):
                 # use the interface inference rule to compile the module
                 scripted = interface_script(module_type, orig_value)
             elif isinstance(orig_value, torch.jit.ScriptModule):
@@ -458,7 +458,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Create hooks after methods to ensure no name collisions between hooks and methods.
         # If done before, hooks can overshadow methods that aren't exported.
         create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs)
-        torch._C._run_emit_module_hook(cpp_module)
+        torch._C._jit._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
 
     # Copy the forward hooks and pre-hooks to the new ScriptModule
@@ -588,7 +588,7 @@ def make_stubs_for_overloads(overload_info):
         for overload_name, overload_fn in overloads:
             _check_no_signature(overload_fn)
             over_ast = get_jit_def(overload_fn, overload_fn.__name__, self_name="RecursiveScriptModule")
-            new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
+            new_ast = torch._C._jit._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
             overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))
     return overload_stubs
@@ -767,12 +767,12 @@ def try_compile_fn(fn, loc):
 
 def wrap_cpp_module(cpp_module):
     """
-    Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules
+    Wrap this torch._C._jit.ScriptModule in a Python ScriptModule, recursively for all submodules
     """
     def init_fn(script_module):
-        for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
+        for name, cpp_module in torch._C._jit.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
-        script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
+        script_module._concrete_type = torch._C._jit.ConcreteModuleType.from_jit_type(script_module._c._type())
 
         for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
             script_module._forward_pre_hooks[idx] = fn

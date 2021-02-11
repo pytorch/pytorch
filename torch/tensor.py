@@ -583,7 +583,7 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.__iter__, (self,), self)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
-        if torch._C._get_tracing_state():
+        if torch._C._jit._get_tracing_state():
             warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
                           'Passing a tensor of different shape won\'t change the number of '
                           'iterations executed (and might lead to errors or silently give '

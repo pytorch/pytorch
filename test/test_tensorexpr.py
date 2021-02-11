@@ -14,35 +14,35 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+        self.old_profiling_executor = torch._C._jit.set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._jit.set_profiling_mode(True)
 
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
+        self.old_cpu_fuser_state = torch._C._jit.can_fuse_on_cpu()
+        self.old_gpu_fuser_state = torch._C._jit.can_fuse_on_gpu()
+        torch._C._jit.override_can_fuse_on_cpu(True)
+        torch._C._jit.override_can_fuse_on_gpu(True)
+        self.texpr_fuser_state = torch._C._jit.texpr_fuser_enabled()
+        torch._C._jit.set_texpr_fuser_enabled(True)
+        self.old_fusion_inlining = torch._C._jit._debug_get_fusion_group_inlining()
+        torch._C._jit._debug_set_fusion_group_inlining(False)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+        torch._C._jit.set_profiling_executor(self.old_profiling_executor)
+        torch._C._jit.set_profiling_mode(self.old_profiling_mode)
 
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit.set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit.override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit.override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+        torch._C._jit._debug_set_fusion_group_inlining(self.old_fusion_inlining)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
 
 
 def warmup_and_run_forward(f, *args):
-    for _ in range(torch._C._jit_get_num_profiled_runs() + 1):
+    for _ in range(torch._C._jit.get_num_profiled_runs() + 1):
         results = f(*args)
     return results
 
@@ -1260,14 +1260,14 @@ class TestTensorExprFuser(BaseTestClass):
             return a + b + c + d
 
         for test in (test_softmax, test_log_softmax, test_softmax_neg_index):
-            old = torch._C._jit_set_texpr_reductions_enabled(True)
+            old = torch._C._jit.set_texpr_reductions_enabled(True)
             traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
             inp = torch.randn(2, 3, device=device)
             res = traced(inp, inp)
             # Use eager mode as reference.
             ref = test(inp, inp)
             np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
-            torch._C._jit_set_texpr_reductions_enabled(old)
+            torch._C._jit.set_texpr_reductions_enabled(old)
 
     def test_softmax_cpu(self):
         llvm = LLVMCodeGenExecuted()
@@ -1470,10 +1470,10 @@ class TestTensorExprFuser(BaseTestClass):
             assert torch.equal(out, test(x))
 
     def test_simple_add(self):
-        val = torch._C._jit_get_te_generate_block_code()
-        torch._C._jit_set_te_generate_block_code(True)
-        fall_bk = torch._C._jit_texpr_fallback_allowed()
-        torch._C._jit_texpr_set_fallback_allowed(True)
+        val = torch._C._jit.get_te_generate_block_code()
+        torch._C._jit.set_te_generate_block_code(True)
+        fall_bk = torch._C._jit.texpr_fallback_allowed()
+        torch._C._jit.texpr_set_fallback_allowed(True)
 
         def simple(a, b):
             return torch.add(a, b)
@@ -1485,8 +1485,8 @@ class TestTensorExprFuser(BaseTestClass):
         f = traced(a, b)
         f_test = np.full((256, 256), 2, dtype=float)
         np.testing.assert_allclose(f.numpy(), f_test)
-        torch._C._jit_set_te_generate_block_code(val)
-        torch._C._jit_texpr_set_fallback_allowed(fall_bk)
+        torch._C._jit.set_te_generate_block_code(val)
+        torch._C._jit.texpr_set_fallback_allowed(fall_bk)
 
     def test_strided_output_preserved(self):
         def foo(a, b):

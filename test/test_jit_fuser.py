@@ -18,8 +18,8 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-    torch._C._jit_set_profiling_executor(True)
-    torch._C._jit_set_profiling_mode(True)
+    torch._C._jit.set_profiling_executor(True)
+    torch._C._jit.set_profiling_mode(True)
 
 
 def strip_profiling_nodes(nodes):
@@ -682,14 +682,14 @@ class TestFuser(JitTestCase):
             torch.randn(4, 4, dtype=torch.float, device='cuda:1'),
         ]
 
-        prev_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
+        prev_cache_size = torch._C._jit.debug_fuser_num_cached_kernel_specs()
 
         # There are 3 FusionGroups. Because they have the same graph, they
         # should reuse the same KernelSpec in the KernelSpec cache.
         ge = self.checkScript(fn, inputs)
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), 'prim::FusionGroup', 3, True)
-        new_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
+        new_cache_size = torch._C._jit.debug_fuser_num_cached_kernel_specs()
         # XXX: This assumes that the same kernel isn't already used by another test
         self.assertEqual(new_cache_size - prev_cache_size, 1)
 

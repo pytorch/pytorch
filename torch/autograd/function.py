@@ -348,7 +348,7 @@ def _unflatten(input, proto):
     return unflatten_helper(input, proto)[0]
 
 
-_iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
+_iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C._jit.Value),
                                 condition_msg="jit's Values or None")
 _iter_tensors = _iter_filter(lambda x: isinstance(x, torch.Tensor), condition_msg="Tensors",
                              conversion=_jit_unwrap_structured)

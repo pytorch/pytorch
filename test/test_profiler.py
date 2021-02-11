@@ -59,8 +59,8 @@ class TestProfiler(TestCase):
         """Checks that source code attribution works for eager, TS and autograd mode
         """
         # avoid automatic inlining
-        prev_opt = torch._C._get_graph_executor_optimize()
-        torch._C._set_graph_executor_optimize(False)
+        prev_opt = torch._C._jit._get_graph_executor_optimize()
+        torch._C._jit._set_graph_executor_optimize(False)
 
         @torch.jit.script
         def ts_method_2(x, y):
@@ -102,7 +102,7 @@ class TestProfiler(TestCase):
                     "ts_method_1" in entry or
                     "ts_method_2" in entry) for entry in e.stack]))
 
-        torch._C._set_graph_executor_optimize(prev_opt)
+        torch._C._jit._set_graph_executor_optimize(prev_opt)
 
     def payload(self):
         x = torch.randn(10, 10).cuda()

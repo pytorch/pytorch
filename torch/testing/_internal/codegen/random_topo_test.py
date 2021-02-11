@@ -360,17 +360,17 @@ if __name__ == '__main__':
 
     # Register CUDA fuser
     if args.cuda_fuser:
-        torch._C._jit_set_nvfuser_enabled(True)
+        torch._C._jit.set_nvfuser_enabled(True)
 
     # Turn off legacy fuser
     if not args.legacy_fuser:
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit.override_can_fuse_on_cpu(False)
+        torch._C._jit.override_can_fuse_on_gpu(False)
 
     # Turn off profiling executor
     if not args.profiling_executor:
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
+        torch._C._jit.set_profiling_executor(False)
+        torch._C._jit.set_profiling_mode(False)
 
     # factor sorta control the depth of the model
     GRAPH_FACTOR = args.depth_factor

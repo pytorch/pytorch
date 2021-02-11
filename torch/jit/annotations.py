@@ -9,7 +9,7 @@ from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optio
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
 from ._state import _get_script_class
 
-from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
+from torch._C._jit import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, StreamObjType, FutureType, EnumType
 
@@ -20,7 +20,7 @@ from typing import Type
 
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
-    from torch._C import RRefType
+    from torch._C._jit import RRefType
 
 
 class Module(object):
@@ -273,7 +273,7 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     # Even though Python supports this case, we chose to not implement it to
     # avoid overcomplicate logic here for a rare use case. Please report a
     # feature request if you find it necessary.
-    return torch._C.unify_type_list(ir_types)
+    return torch._C._jit.unify_type_list(ir_types)
 
 
 def try_ann_to_type(ann, loc):
@@ -348,7 +348,7 @@ def try_ann_to_type(ann, loc):
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):
         return None
-    return torch._C._resolve_type_from_object(ann, loc, fake_rcb)
+    return torch._C._jit._resolve_type_from_object(ann, loc, fake_rcb)
 
 
 def ann_to_type(ann, loc):

@@ -20,7 +20,7 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
     _invoke_func = _local_invoke
     # Bypass ScriptModules when checking for async function attribute.
     bypass_type = issubclass(rref_type, torch.jit.ScriptModule) or issubclass(
-        rref_type, torch._C.ScriptModule
+        rref_type, torch._C._jit.ScriptModule
     )
     if not bypass_type:
         func = getattr(rref_type, func_name)

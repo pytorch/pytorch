@@ -26,7 +26,7 @@ def parallel_workload(x):
 
 
 if __name__ == '__main__':
-    torch._C._set_graph_executor_optimize(False)
+    torch._C._jit._set_graph_executor_optimize(False)
     parser = argparse.ArgumentParser(
         description='Profiler benchmark')
 

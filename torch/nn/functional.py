@@ -3515,7 +3515,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
-        if not torch.jit.is_scripting() and torch._C._get_tracing_state():
+        if not torch.jit.is_scripting() and torch._C._jit._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
                 (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))

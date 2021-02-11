@@ -462,9 +462,9 @@ class TestModuleInterface(JitTestCase):
 
         m = torch.jit.script(TestModule())
         m.eval()
-        mf = torch._C._freeze_module(m._c)
+        mf = torch._C._jit._freeze_module(m._c)
         # Assume interface has no aliasing
-        mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+        mf = torch._C._jit._freeze_module(m._c, freezeInterfaces = True)
         input = torch.tensor([1])
         out_s = m.forward(input)
         out_f = mf.forward(input)
@@ -511,7 +511,7 @@ class TestModuleInterface(JitTestCase):
         m.proxy_mod = m.sub
         m.eval()
         with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
-            mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+            mf = torch._C._jit._freeze_module(m._c, freezeInterfaces = True)
 
     def test_freeze_module_with_inplace_mutation_in_interface(self):
         class SubModule(torch.nn.Module):
@@ -557,7 +557,7 @@ class TestModuleInterface(JitTestCase):
         m.sub.b = m.proxy_mod.b
         m.eval()
         with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
-            mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+            mf = torch._C._jit._freeze_module(m._c, freezeInterfaces = True)
 
     def test_freeze_module_with_mutated_interface(self):
         class SubModule(torch.nn.Module):
@@ -601,7 +601,7 @@ class TestModuleInterface(JitTestCase):
         m = torch.jit.script(TestModule())
         m.eval()
         with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
-            mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+            mf = torch._C._jit._freeze_module(m._c, freezeInterfaces = True)
 
     def test_freeze_module_with_interface_and_fork(self):
         class SubModule(torch.nn.Module):
@@ -652,7 +652,7 @@ class TestModuleInterface(JitTestCase):
 
         m = torch.jit.script(MainModule())
         m.eval()
-        mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+        mf = torch._C._jit._freeze_module(m._c, freezeInterfaces = True)
 
     def test_module_apis_interface(self):
         @torch.jit.interface

@@ -844,13 +844,13 @@ class Module:
         return handle
 
     def _slow_forward(self, *input, **kwargs):
-        tracing_state = torch._C._get_tracing_state()
-        if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
+        tracing_state = torch._C._jit._get_tracing_state()
+        if not tracing_state or isinstance(self.forward, torch._C._jit.ScriptMethod):
             return self.forward(*input, **kwargs)
         recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
             # type ignore was added because at this point one knows that
-            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
+            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
             name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
                 tracing_state.push_scope(name)
@@ -883,7 +883,7 @@ class Module:
             bw_hook = hooks.BackwardHook(self, full_backward_hooks)
             input = bw_hook.setup_input_hook(input)
 
-        if torch._C._get_tracing_state():
+        if torch._C._jit._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)

@@ -1190,7 +1190,7 @@ class TestList(JitTestCase):
 
     def test_list_none(self):
         with self.assertRaisesRegex(RuntimeError, "Can not create ListType with None type"):
-            x = torch._C.ListType(None)
+            x = torch._C._jit.ListType(None)
 
 
 

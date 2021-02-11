@@ -79,7 +79,7 @@ def fork(func, *args, **kwargs):
         mod = Mod()
         assert mod(input) == torch.jit.script(mod).forward(input)
     """
-    return torch._C.fork(func, *args, **kwargs)
+    return torch._C._jit.fork(func, *args, **kwargs)
 
 
 def wait(future):
@@ -91,7 +91,7 @@ def wait(future):
     Returns:
         `T`: the return value of the the completed task
     """
-    return torch._C.wait(future)
+    return torch._C._jit.wait(future)
 
 
 _register_builtin(wait, "aten::wait")
