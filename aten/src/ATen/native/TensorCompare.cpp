@@ -290,9 +290,18 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
   return ret;
 }
 
+std::tuple<Tensor, Tensor> _mode(const Tensor& self, int64_t dim, bool keepdim) {
+  return at::native::mode(self, dim, keepdim);
+}
+
 std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  return at::native::mode_out(self, dim, keepdim, values, indices);
+}
+
+std::tuple<Tensor &,Tensor &> _mode_out(const Tensor& self, int64_t dim, bool keepdim,
+                                        Tensor& values, Tensor& indices) {
   return at::native::mode_out(self, dim, keepdim, values, indices);
 }
 
