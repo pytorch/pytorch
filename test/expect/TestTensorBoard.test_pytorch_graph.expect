@@ -74,7 +74,7 @@ node {
 node {
   name: "myLinear/Linear[l]/18"
   op: "aten::linear"
-  input: "input/input"
+  input: "input/x"
   input: "myLinear/Linear[l]/weight/17"
   input: "myLinear/Linear[l]/bias/16"
   attr {
