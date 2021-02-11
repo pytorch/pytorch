@@ -3,6 +3,7 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <cctype>
@@ -219,7 +220,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // Compute label frequency and number of dimensions covered by ellipsis
   // We do this after parsing labels to make it more readable and simpler
   // to compute the number of dimensions covered by ellipsis.
-  for (auto i = decltype(num_ops){0}; i < num_ops; ++i) {
+  for(auto i = decltype(num_ops){0}; i < num_ops; ++i) {
     const auto operand = operands[i];
     const auto labels = op_labels[i];
     const int64_t ndims = operand.dim();
@@ -252,7 +253,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // shape out_dims + sum_dims. For this, we create a mapping of label
   // to index into the permuted shape.
   std::vector<int64_t> label_perm_index(TOTAL_LABELS, -1);
-  
+
   // Current index in the permuted shape
   int64_t perm_index = 0;
 
@@ -332,10 +333,10 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   // Here we unsqueeze missing dimensions to make all operands have the same
   // number of dimensions. We take diagonals for repeated labels within the
-  // same operand. Finally we permute the operands to align dimensions as 
+  // same operand. Finally we permute the operands to align dimensions as
   // per the perm_out_index we computed above.
   std::vector<Tensor> permuted_operands;
-  for (auto i = decltype(num_ops){0}; i < num_ops; ++i) {
+  for(const auto i: c10::irange(num_ops)) {
     std::vector<int64_t> perm_shape(perm_index, -1);
     std::vector<int64_t> label_dim(TOTAL_LABELS, -1);
     Tensor operand = operands[i];
@@ -392,12 +393,12 @@ Tensor einsum(std::string equation, TensorList operands) {
   bool has_zero_size_dim = false;
   for (int64_t dim = 0; dim < perm_index; ++dim) {
     auto broadcast_size = permuted_operands[0].size(dim);
-    for (auto i = decltype(num_ops){1}; i < num_ops; ++i) {
+    for (const auto i: c10::irange(1, num_ops)) {
       const auto dim_size = permuted_operands[i].size(dim);
       if (broadcast_size != dim_size && broadcast_size != 1 && dim_size != 1) {
         std::ostringstream msg;
         msg << "einsum() operands do not broadcast with remapped shapes [original->remapped]:";
-        for (auto j = decltype(num_ops){0}; j < num_ops; ++j) {
+        for(const auto j: c10::irange(num_ops)) {
           msg << " " << operands[j].sizes() << "->"
               << permuted_operands[j].sizes();
         }
@@ -435,7 +436,7 @@ Tensor einsum(std::string equation, TensorList operands) {
     }
   }
 
-  for (auto i = decltype(num_ops){1}; i < num_ops; ++i) {
+  for (const auto i: c10::irange(1, num_ops)) {
     Tensor operand = permuted_operands[i];
     std::vector<int64_t> sum_dims;
 

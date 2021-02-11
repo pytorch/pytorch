@@ -1,12 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/impl/CUDAGuardImpl.h>
-#include <c10/core/impl/InlineEvent.h>
-#include <c10/core/Event.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/core/Event.h>
+#include <c10/core/impl/InlineEvent.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/impl/CUDAGuardImpl.h>
+#include <c10/util/irange.h>
 
 #include <cuda_runtime.h>
 
@@ -186,7 +187,7 @@ TEST(TestStream, StreamPoolTest) {
 
   std::unordered_set<cudaStream_t> stream_set{};
   bool hasDuplicates = false;
-  for (auto i = decltype(streams.size()){0}; i < streams.size(); ++i) {
+  for (const auto i: c10::irange(streams.size())) {
     cudaStream_t cuda_stream = streams[i];
     auto result_pair = stream_set.insert(cuda_stream);
     if (!result_pair.second)
