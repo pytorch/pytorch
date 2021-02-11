@@ -1851,8 +1851,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_max_min_binary,
-           assert_autodiffed=True,
-           supports_tensor_out=True),
+           assert_autodiffed=True,),
     OpInfo('max',
            op=torch.max,
            variant_test_name='reduction_with_dim',
@@ -1861,6 +1860,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
+           supports_tensor_out=False,
            skips=(
                # Skip right now as it fails due to a pybind error
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
@@ -1872,6 +1872,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
+           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('min',
            op=torch.min,
@@ -1881,8 +1882,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_max_min_binary,
-           assert_autodiffed=True,
-           supports_tensor_out=True,),
+           assert_autodiffed=True,),
     OpInfo('min',
            op=torch.min,
            variant_test_name='reduction_with_dim',
@@ -1890,6 +1890,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
+           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
                # Skip right now as it fails due to a pybind error
@@ -1902,6 +1903,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
+           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
