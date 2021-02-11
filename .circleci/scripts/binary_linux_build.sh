@@ -7,6 +7,10 @@ source /env
 # Defaults here so they can be changed in one place
 export MAX_JOBS=${MAX_JOBS:-$(( $(nproc) - 2 ))}
 
+if [[ "${DESIRED_CUDA}" == "cu111" ]]; then
+  export BUILD_SPLIT_CUDA="ON"
+fi
+
 # Parse the parameters
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
   build_script='conda/build_pytorch.sh'
