@@ -246,7 +246,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
     For reproducibility, we recommend explicitly setting PyTorch's seed before
     invoking this function.
 
-    Arguments:
+    Args:
         model (torch.nn.Module): the model to be exported and verified
         args (tuple of arguments): the inputs to
             the model, e.g., such that ``model(*args)`` is a valid

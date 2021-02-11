@@ -178,12 +178,12 @@ genrule(
 genrule(
     name = "sleef_h",
     srcs = [
-        "src/libm/sleeflibm_header.h.org",
+        "src/libm/sleeflibm_header.h.org.in",
         "src/libm/sleeflibm_footer.h.org",
     ],
     outs = ["build/include/sleef.h"],
     cmd = "{ " + "; ".join([
-        "cat $(location src/libm/sleeflibm_header.h.org)",
+        "cat $(location src/libm/sleeflibm_header.h.org.in)",
         "$(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__",
         "$(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ sse2",
         "$(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ sse4",

@@ -26,8 +26,8 @@ class TestBackend : public PyTorchBackendInterface {
 
     // Return the same string as a value for every key in method_compile_spec.
     auto handles = c10::Dict<std::string, std::string>();
-    for (auto it = spec.begin(), end = spec.end(); it != end; ++it) {
-      handles.insert(it->key(), it->key());
+    for (const auto& it : spec) {
+      handles.insert(it.key(), it.key());
     }
     return c10::impl::toGenericDict(handles);
   }
@@ -67,8 +67,14 @@ class TestBackend : public PyTorchBackendInterface {
   }
 };
 
+c10::IValue preprocess(
+    const Module& mod,
+    const c10::Dict<IValue, IValue>& method_compile_spec) {
+  return mod._ivalue();
+}
+
 namespace {
-static auto cls = torch::jit::backend<TestBackend>("test_backend");
+static auto cls = torch::jit::backend<TestBackend>("test_backend", preprocess);
 }
 
 } // namespace jit

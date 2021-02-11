@@ -47,18 +47,22 @@ namespace at { namespace native {
 
 enum class CPUCapability {
   DEFAULT = 0,
+#ifdef HAVE_VSX_CPU_DEFINITION
+  VSX = 1,
+#else
   AVX = 1,
   AVX2 = 2,
+#endif
   NUM_OPTIONS
 };
 
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
-struct CAFFE2_API DispatchStub;
+struct TORCH_API DispatchStub;
 
 template <typename rT, typename T, typename... Args>
-struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
+struct TORCH_API DispatchStub<rT (*)(Args...), T> {
   using FnPtr = rT (*) (Args...);
 
   DispatchStub() = default;
@@ -77,10 +81,10 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
       }
       return (*fptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::CUDA) {
-      AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
+      TORCH_INTERNAL_ASSERT(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
       return (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::HIP) {
-      AT_ASSERTM(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
+      TORCH_INTERNAL_ASSERT(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
       return (*hip_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else {
       AT_ERROR("DispatchStub: unsupported device type", device_type);
@@ -92,17 +96,23 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     (void)capability;
 #ifdef HAVE_AVX2_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::AVX2)) {
-      AT_ASSERTM(AVX2, "DispatchStub: missing AVX2 kernel");
+      TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
       return AVX2;
     }
 #endif
 #ifdef HAVE_AVX_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::AVX)) {
-      AT_ASSERTM(AVX, "DispatchStub: missing AVX kernel");
+      TORCH_INTERNAL_ASSERT(AVX, "DispatchStub: missing AVX kernel");
       return AVX;
     }
 #endif
-    AT_ASSERTM(DEFAULT, "DispatchStub: missing default kernel");
+#ifdef HAVE_VSX_CPU_DEFINITION
+    if (capability >= static_cast<int>(CPUCapability::VSX)) {
+      TORCH_INTERNAL_ASSERT(VSX, "DispatchStub: missing VSX kernel");
+      return VSX;
+    }
+#endif
+    TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
     return DEFAULT;
   }
 
@@ -123,6 +133,9 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   static FnPtr AVX2;
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+  static FnPtr VSX;
 #endif
 };
 
@@ -154,7 +167,7 @@ struct RegisterHIPDispatch {
     name(const name&) = delete;            \
     name& operator=(const name&) = delete; \
   };                                       \
-  extern CAFFE2_API struct name name
+  extern TORCH_API struct name name
 
 #define DEFINE_DISPATCH(name) struct name name
 
@@ -173,10 +186,17 @@ struct RegisterHIPDispatch {
 #define REGISTER_AVX2_DISPATCH(name, fn)
 #endif
 
+#ifdef HAVE_VSX_CPU_DEFINITION
+#define REGISTER_VSX_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, VSX, fn)
+#else
+#define REGISTER_VSX_DISPATCH(name, fn)
+#endif
+
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
   REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
   REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
-  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))
+  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))          \
+  REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
   static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);

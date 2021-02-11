@@ -252,6 +252,24 @@ class TestCloneNet(test_util.TestCase):
 
 
 class TestExternalInputs(test_util.TestCase):
+    def testAddExternalInputShouldRaiseIfDuplicate(self):
+        net = core.Net("test")
+        net.AddExternalInput(
+            schema.Struct(("x", schema.Scalar(np.float))),
+        )
+        with self.assertRaises(AssertionError):
+            net.AddExternalInput(
+                schema.Struct(("x", schema.Scalar(np.float))),
+            )
+
+    def testAddExternalInputShouldRaiseIfDuplicateInSameCall(self):
+        net = core.Net("test")
+        with self.assertRaises(AssertionError):
+            net.AddExternalInput(
+                schema.Struct(("x", schema.Scalar(np.float))),
+                schema.Struct(("x", schema.Scalar(np.float))),
+            )
+
     def testSetInputRecordWithBlobs(self):
         net = core.Net("test")
         record = schema.NewRecord(net, schema.Struct(

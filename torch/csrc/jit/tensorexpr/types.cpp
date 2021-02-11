@@ -9,33 +9,26 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-bool is_integral(const ScalarType& type) {
-  switch (type) {
-    case ScalarType::Bool:
-    case ScalarType::Byte:
-    case ScalarType::Char:
-    case ScalarType::Short:
-    case ScalarType::Int:
-    case ScalarType::Long:
-      return true;
-    default:
-      return false;
-  }
+static bool is_c10_type(const ScalarType& type) {
+  return type < ScalarType::Undefined;
+}
 
-  return false;
+bool is_integral(const ScalarType& type) {
+  return is_c10_type(type)
+      ? c10::isIntegralType(static_cast<c10::ScalarType>(type), true)
+      : false;
 }
 
 bool is_floating_point(const ScalarType& type) {
-  switch (type) {
-    case ScalarType::Half:
-    case ScalarType::Float:
-    case ScalarType::Double:
-      return true;
-    default:
-      return false;
-  }
+  return is_c10_type(type)
+      ? c10::isFloatingType(static_cast<c10::ScalarType>(type))
+      : false;
+}
 
-  return false;
+bool is_signed(const ScalarType& type) {
+  return is_c10_type(type)
+      ? c10::isSignedType(static_cast<c10::ScalarType>(type))
+      : false;
 }
 
 Dtype Dtype::scalar_dtype() const {

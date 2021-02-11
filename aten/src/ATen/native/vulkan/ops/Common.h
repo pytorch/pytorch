@@ -9,39 +9,35 @@
 namespace at {
 namespace native {
 namespace vulkan {
+namespace ops {
 
-template <typename To, typename From>
-inline constexpr To safe_downcast_internal(const From v) {
-  typedef std::common_type_t<From, To> Type;
-  constexpr Type min{static_cast<Type>(std::numeric_limits<To>::lowest())};
-  constexpr Type max{static_cast<Type>(std::numeric_limits<To>::max())};
-  TORCH_CHECK(min <= v && v <= max, "Cast failed: out of range");
-  return static_cast<To>(v);
-}
+struct Layout final {
+  // 4D Activation Maps
+  struct Activation4D final {
+    static constexpr size_t batch = 0u;
+    static constexpr size_t channels = 1u;
+    static constexpr size_t height = 2u;
+    static constexpr size_t width = 3u;
+  };
 
-template <typename To, typename From>
-inline constexpr bool is_signed_to_unsigned() {
-  return std::is_signed<From>::value && std::is_unsigned<To>::value;
-}
+  // Convolution Filters
+  struct Filter final {
+    static constexpr size_t output = 0u;
+    static constexpr size_t input = 1u;
+    static constexpr size_t height = 2u;
+    static constexpr size_t width = 3u;
+  };
 
-template <
-    typename To,
-    typename From,
-    std::enable_if_t<is_signed_to_unsigned<To, From>(), bool> = true>
-inline constexpr To safe_downcast(const From v) {
-  TORCH_CHECK(v >= From{}, "Cast failed: negative signed to unsigned");
-  return safe_downcast_internal<To, From>(v);
-}
+  // Parameters (Pooling Kernels, Dilation, Padding, Stride, etc.)
+  struct Parameter final {
+    static constexpr size_t height = 0u;
+    static constexpr size_t width = 1u;
+  };
+};
 
-template <
-    typename To,
-    typename From,
-    std::enable_if_t<!is_signed_to_unsigned<To, From>(), bool> = true>
-inline constexpr To safe_downcast(const From v) {
-  return safe_downcast_internal<To, From>(v);
-}
-
+} // namespace ops
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
 #endif /* USE_VULKAN_API */

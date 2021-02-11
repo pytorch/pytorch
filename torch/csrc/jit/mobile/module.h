@@ -1,5 +1,5 @@
 #pragma once
-//#include <ATen/core/function_schema.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/method.h>
 
@@ -8,6 +8,27 @@ namespace jit {
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
 
+// A CompilationUnit object is the one that gets executed by the lite
+// interpreter.
+//
+// A CompilationUnit object contains a list of Method Objects. These are methods
+// that appear in the original PyTorch Model. These method correspond to Python
+// member functions of the Model class.
+//
+// Methods in turn contain a Function, and a back-pointer to the Module that
+// owns this Method instance.
+//
+// A Function contains a Code Object (code_) which is defined in interpreter.h
+//
+// A Code object contains the following:
+//
+// std::vector<Instruction> instructions_;
+// std::vector<c10::OperatorName> op_names_;
+// std::vector<std::function<void(Stack&)>> operators_;
+// std::vector<c10::IValue> constants_;
+// std::vector<c10::TypePtr> types_;
+// size_t register_size_; // Aggregated output size.
+//
 class CompilationUnit {
  public:
   void register_function(std::unique_ptr<Function> fn);
@@ -20,6 +41,14 @@ class CompilationUnit {
   std::vector<std::unique_ptr<Function>> methods_;
 };
 
+// A Torch Mobile Module is a representation of the model (trained in case
+// of inference). A Mobile Module contains
+//
+// 1. data (object_)
+// 2. metadata (optional) about the model (metadata_ from the metadata.pkl
+//    file added after training)
+// 3. Compilation Unit (cu_)
+//
 class TORCH_API Module {
  public:
   Module(
@@ -66,6 +95,7 @@ class TORCH_API Module {
   const std::unordered_map<std::string, std::string> metadata() const {
     return metadata_;
   }
+  const std::vector<Method> get_methods() const;
 
   c10::IValue attr(const std::string& name, c10::IValue or_else) const {
     if (auto r = object_->type()->findAttributeSlot(name)) {

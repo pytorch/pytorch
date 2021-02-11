@@ -284,7 +284,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
  * Very lightweight logging for the first time API usage. It's beneficial for
  * tracking of individual functionality usage in larger applications.
  *
- * In order to ensure light-weightness of logging, we utilize static variable
+ * In order to ensure light-weightedness of logging, we utilize static variable
  * trick - LogAPIUsage will be invoked only once and further invocations will
  * just do an atomic check.
  *
@@ -299,6 +299,59 @@ BINARY_COMP_HELPER(LessEquals, <=)
 // API usage logging capabilities
 C10_API void SetAPIUsageLogger(std::function<void(const std::string&)> logger);
 C10_API void LogAPIUsage(const std::string& context);
+
+// PyTorch ddp usage logging capabilities
+// DDPLoggingData holds data that can be logged in applications
+// for analysis and debugging. Data structure is defined in
+// c10 directory so that it can be easily imported by both c10
+// and torch files.
+// TODO -- right now starting with logging a small set of straightforward
+// fields, will add more fields as follow ups such as performance stats,
+// internal states and env variables and etc.
+struct DDPLoggingData {
+// Data that can be got during DistributedDataParallel construction time
+  int world_size = -1;
+  int rank = -1;
+  std::string module_name = "";
+  std::vector<int> device_ids = std::vector<int>();
+  int output_device = -1;
+  std::string backend_name = "";
+  // The DDPLoggingData is logged in which iteration of the training loop,
+  // 0 if the data is logged during DistributedDataParallel construction time.
+  int iteration = -1;
+  // Parameter's data type
+  std::string dtype = "";
+  // Total parameters size (Bytes)
+  int total_parameter_size_bytes = -1;
+  // The number of parameter tensors
+  int num_parameter_tensors = -1;
+  // A list of bucket sizes (Bytes) calculated during construction time
+  std::vector<int> bucket_sizes = std::vector<int>();
+
+
+  // Environment variables
+  std::string master_port = "";
+  std::string master_addr = "";
+  std::string cuda_visible_devices = "";
+  std::string gloo_socket_ifname = "";
+  std::string gloo_device_transport = "";
+  std::string nccl_socket_ifname = "";
+  std::string nccl_blocking_wait = "";
+  std::string nccl_debug = "";
+  std::string nccl_nthreads = "";
+  std::string nccl_ib_timeout = "";
+
+  // DistributedDataParallel constructor input parameters
+  bool broadcast_buffers = false;
+  float bucket_cap_mb = -1.0;
+  bool find_unused_parameters = false;
+  bool gradient_as_bucket_view = false;
+
+  // Runtime states
+};
+
+C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
+C10_API void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData);
 
 namespace detail {
 // Return value is needed to do the static variable initialization trick

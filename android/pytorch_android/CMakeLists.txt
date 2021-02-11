@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.4.1)
 project(pytorch_jni CXX)
+
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 message(STATUS "ANDROID_STL:${ANDROID_STL}")
@@ -14,17 +17,13 @@ endif()
 if(NOT TRACE_ENABLED)
   message(STATUS "TRACE_ENABLED OFF")
 endif()
+
 set(USE_VULKAN OFF)
-if(DEFINED ENV{USE_VULKAN})
-  if($ENV{USE_VULKAN} STREQUAL "1")
-    message(STATUS "USE_VULKAN ON")
-    set(USE_VULKAN ON)
-  endif()
-endif()
 
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
 
 if(ANDROID_ABI)
+  set(USE_VULKAN ON)
   set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
   set(BUILD_SUBDIR ${ANDROID_ABI})
 elseif(BUILD_LIBTORCH_WITH_JNI)
@@ -68,8 +67,8 @@ target_compile_options(pytorch_jni PRIVATE
   -fexceptions
 )
 
-target_include_directories(pytorch_jni PUBLIC
-    ${libtorch_include_DIR}
+target_include_directories(pytorch_jni BEFORE
+   PUBLIC $<BUILD_INTERFACE:${libtorch_include_DIR}>
 )
 
 set(fbjni_DIR ${CMAKE_CURRENT_LIST_DIR}/../libs/fbjni/)
@@ -155,3 +154,13 @@ if(USE_VULKAN)
 endif()
 
 target_link_libraries(pytorch_jni ${pytorch_jni_LIBS})
+
+install(TARGETS pytorch_jni
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}) #For windows
+
+if(MSVC)
+  install(FILES $<TARGET_PDB_FILE:pytorch_jni> DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
+  install(TARGETS pytorch_jni DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()

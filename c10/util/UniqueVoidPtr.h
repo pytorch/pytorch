@@ -10,7 +10,7 @@ using DeleterFnPtr = void (*)(void*);
 namespace detail {
 
 // Does not delete anything
-CAFFE2_API void deleteNothing(void*);
+TORCH_API void deleteNothing(void*);
 
 // A detail::UniqueVoidPtr is an owning smart pointer like unique_ptr, but
 // with three major differences:

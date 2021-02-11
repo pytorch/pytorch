@@ -60,7 +60,7 @@ static LeakyStreamInternals default_streams[C10_COMPILE_TIME_MAX_GPUS];
 // in the pool to be returned when a stream is requested (round-robin fashion
 // , see the note in CUDAStream.h).
 //
-// unique_ptr<T[]> is used instead of vector<T> because T might be non-moveable
+// unique_ptr<T[]> is used instead of vector<T> because T might be non-movable
 // and non-copyable.
 static std::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
@@ -175,7 +175,7 @@ static StreamId CUDAStream_getStreamId(const LeakyStreamInternals* ptr) {
         StreamIdType::HIGH, ptr - high_priority_streams[device_index].data());
   }
 
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       0,
       "Could not compute stream ID for ",
       ptr,
@@ -197,7 +197,7 @@ static void initGlobalStreamState() {
   num_gpus = device_count();
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
-  AT_ASSERTM(
+  TORCH_CHECK(
       num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
@@ -269,7 +269,7 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
   size_t si = streamIdIndex(s.unwrap().id());
   switch (st) {
     case StreamIdType::DEFAULT:
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           si == 0,
           "Unrecognized stream ",
           s.unwrap(),
@@ -284,7 +284,7 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
     case StreamIdType::HIGH:
       return &high_priority_streams[device_index][si];
     default:
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           0,
           "Unrecognized stream ",
           s.unwrap(),

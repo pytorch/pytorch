@@ -21,6 +21,8 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
+def rref_isinstance(rref, cls_to_check):
+    return isinstance(rref.local_value(), cls_to_check)
 
 def sleep(t):
     time.sleep(t)
@@ -355,6 +357,10 @@ class MyScriptModule(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self) -> Tensor:
+        return self.a
+
+    @torch.jit.script_method
+    def custom_func(self) -> Tensor:
         return self.a
 
 
@@ -894,17 +900,14 @@ class JitRpcTest(
         # wait for local MyScriptModule instantiation to finish,
         # otherwise it could instantiate MyScriptModule in parallel with
         # server thread in the below
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
 
         # rpc_sync still accepts script class and run it in
         # the same code path as python call.
         ret = rpc.rpc_sync(dst_worker_name, MyScriptClass, args=(self.rank,))
 
-        # rpc_sync does not accept script module and script module method.
-        with self.assertRaisesRegex(RuntimeError, "ScriptModules cannot be deepcopied"):
-            ret = rpc.rpc_sync(dst_worker_name, MyScriptModule, args=(self.rank,))
-
+        # rpc_sync does not accept script module method.
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(TypeError, "pickle"):
@@ -948,6 +951,42 @@ class JitRpcTest(
                 run_ref_script_module,
                 args=(remote_ref, torch.ones(self.rank)),
             )
+
+    @dist_init
+    def test_create_script_module_on_remote(self):
+        dst_name = worker_name((self.rank + 1) % self.world_size)
+        # Construct on remote end with rpc_sync
+        created_script_module = rpc.rpc_sync(
+            dst_name, MyScriptModule, args=(self.rank,)
+        )
+        # Forward should output a ones tensor of self.rank.
+        self.assertTrue(isinstance(created_script_module, torch.jit.ScriptModule))
+        rank_ones_tensor = created_script_module()
+        self.assertEqual(torch.ones(self.rank), rank_ones_tensor)
+
+        # Construct ScriptModule with rpc.remote.
+        remote_script_module = rpc.remote(dst_name, MyScriptModule, args=(self.rank,))
+        # Verify it is an instance of ScriptModule on remote end.
+        remote_end_is_script = rpc.rpc_sync(
+            remote_script_module.owner(),
+            rref_isinstance,
+            args=(remote_script_module, torch.jit.ScriptModule),
+        )
+        self.assertTrue(remote_end_is_script)
+        # Run forward pass remotely.
+        remote_forward_output = remote_script_module.rpc_sync().forward()
+        self.assertEqual(remote_forward_output, torch.ones(self.rank))
+        # Run function defined on ScriptModule remotely.
+        remote_func_output = remote_script_module.rpc_sync().custom_func()
+        self.assertEqual(remote_func_output, torch.ones(self.rank))
+        # Ensure we can transfer ScriptModule RRef to this rank and run
+        # forward pass.
+        local_script_module = remote_script_module.to_here()
+        self.assertTrue(isinstance(local_script_module, torch.jit.ScriptModule))
+        rank_ones_tensor = local_script_module()
+        self.assertEqual(rank_ones_tensor, torch.ones(self.rank))
+        local_script_func_output = local_script_module.custom_func()
+        self.assertEqual(local_script_func_output, torch.ones(self.rank))
 
     @dist_init
     def test_load_script_module_with_pickled_rref(self):

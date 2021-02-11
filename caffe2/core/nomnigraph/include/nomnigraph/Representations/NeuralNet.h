@@ -41,7 +41,7 @@ class NeuralNetData;
 /// a saved void* pointer for external use.  Derived classes
 /// add richer semantics to the annotation and it is encouraged
 /// to use them.
-class CAFFE2_API Annotation {
+class TORCH_API Annotation {
  public:
   enum class AnnotationKind { Generic, Caffe2 };
 
@@ -57,7 +57,7 @@ class CAFFE2_API Annotation {
   const AnnotationKind kind_;
 };
 
-class CAFFE2_API NeuralNetOperator : public Instruction {
+class TORCH_API NeuralNetOperator : public Instruction {
  public:
   /// Discriminator for LLVM-style RTTI (isa<>)
   enum class NNKind {
@@ -132,7 +132,7 @@ class CAFFE2_API NeuralNetOperator : public Instruction {
   std::unique_ptr<Annotation> extraAnnotation_;
 };
 
-class CAFFE2_API NeuralNetData : public Data {
+class TORCH_API NeuralNetData : public Data {
  public:
   /// Discriminator for LLVM-style RTTI (isa<>)
   enum class NNDataKind { Generic, Tensor };
@@ -155,7 +155,7 @@ class CAFFE2_API NeuralNetData : public Data {
   NNDataKind kind_;
 };
 
-class CAFFE2_API Tensor : public NeuralNetData {
+class TORCH_API Tensor : public NeuralNetData {
  public:
   enum class DataType { Generic, Float, Half, Int8 };
   enum class Layout { Generic, NCHW, NHWC };
@@ -208,21 +208,21 @@ class CAFFE2_API Tensor : public NeuralNetData {
 
 #include "nomnigraph/Generated/OpClasses.h"
 
-class CAFFE2_API While : public NeuralNetOperator {
+class TORCH_API While : public NeuralNetOperator {
  public:
   While() : NeuralNetOperator(NNKind::While, Opcode::Branch) {}
   NOMNIGRAPH_DEFINE_NN_RTTI(While);
   ~While() {}
 };
 
-class CAFFE2_API NNPhi : public NeuralNetOperator {
+class TORCH_API NNPhi : public NeuralNetOperator {
  public:
   NNPhi() : NeuralNetOperator(NNKind::NNPhi, Opcode::Phi) {}
   NOMNIGRAPH_DEFINE_NN_RTTI(NNPhi);
   ~NNPhi() {}
 };
 
-class CAFFE2_API GenericOperator : public NeuralNetOperator {
+class TORCH_API GenericOperator : public NeuralNetOperator {
  public:
   GenericOperator() : NeuralNetOperator(NNKind::GenericOperator) {}
   GenericOperator(std::string name)
@@ -244,7 +244,7 @@ using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>>;
 using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>>;
 using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 
-struct CAFFE2_API NNModule {
+struct TORCH_API NNModule {
   NNGraph dataFlow;
   NNCFGraph controlFlow;
   std::unordered_set<NNGraph::NodeRef> inputs;
@@ -464,41 +464,41 @@ NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
 }
 
 /// NeuralNetData specific helpers.
-CAFFE2_API bool hasProducer(NNGraph::NodeRef n);
-CAFFE2_API NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
-CAFFE2_API bool hasConsumer(NNGraph::NodeRef n);
-CAFFE2_API std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n);
+TORCH_API bool hasProducer(NNGraph::NodeRef n);
+TORCH_API NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
+TORCH_API bool hasConsumer(NNGraph::NodeRef n);
+TORCH_API std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n);
 
-CAFFE2_API bool hasInputs(NNGraph::NodeRef n);
-CAFFE2_API std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n);
-CAFFE2_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
+TORCH_API bool hasInputs(NNGraph::NodeRef n);
+TORCH_API std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n);
+TORCH_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
 
-CAFFE2_API std::set<NNGraph::NodeRef> getInputs(const NNSubgraph& sg);
-CAFFE2_API std::set<NNGraph::NodeRef> getOutputs(const NNSubgraph& sg);
+TORCH_API std::set<NNGraph::NodeRef> getInputs(const NNSubgraph& sg);
+TORCH_API std::set<NNGraph::NodeRef> getOutputs(const NNSubgraph& sg);
 
 // Get the name of the node regardless of underlying type.
-CAFFE2_API std::string getName(NNGraph::NodeRef n);
+TORCH_API std::string getName(NNGraph::NodeRef n);
 
 // Replace the producer of the first argument with the second argument
-CAFFE2_API void replaceProducer(
+TORCH_API void replaceProducer(
     NNGraph::NodeRef tensorNode,
     NNGraph::NodeRef newProducer);
 // Set all consumers of first argument to consume the second argument
-CAFFE2_API void replaceAllUsesWith(
+TORCH_API void replaceAllUsesWith(
     NNGraph::NodeRef oldTensorNode,
     NNGraph::NodeRef newTensorNode);
 // Set the second argument to consume the inputs of the first argument
-CAFFE2_API void replaceAsConsumer(
+TORCH_API void replaceAsConsumer(
     NNGraph::NodeRef oldConsumer,
     NNGraph::NodeRef newConsumer);
 
 // Create an output tensor node
-CAFFE2_API NNGraph::NodeRef
+TORCH_API NNGraph::NodeRef
 createOutput(NNModule* nn, NNGraph::NodeRef producer, std::string name);
 
 // Hack for windows compiler.
 template <typename T, typename... Args>
-CAFFE2_API NNGraph::NodeRef createOperator(NNModule* nn, Args... args);
+TORCH_API NNGraph::NodeRef createOperator(NNModule* nn, Args... args);
 
 // Create an operator
 template <typename T, typename... Args>
@@ -506,7 +506,7 @@ NNGraph::NodeRef createOperator(NNModule* nn, Args... args) {
   return nn->dataFlow.createNode(util::make_unique<T>(args...));
 }
 
-CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
+TORCH_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
 struct C10_EXPORT NodeHelper {};
@@ -517,12 +517,12 @@ using NNMatchPredicate = nom::matcher::MatchPredicate<NNGraph>;
 // Commonly used node predicate.
 
 // The node has a single output and the output has a single consumer.
-CAFFE2_API bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
+TORCH_API bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
 // The node has a unique consumer (there may be multiple edges from output
 // to the single consumer).
-CAFFE2_API bool hasUniqueConsumer(NNGraph::NodeRef nodeRef);
+TORCH_API bool hasUniqueConsumer(NNGraph::NodeRef nodeRef);
 
-CAFFE2_API NNMatchPredicate matchExternalTensorNode();
+TORCH_API NNMatchPredicate matchExternalTensorNode();
 
 } // namespace nn
 

@@ -18,6 +18,7 @@ from pt import ( # noqa
     quantization_test,
     qunary_test,
     qembedding_pack_test,
+    qembeddingbag_test,
 )
 
 

@@ -17,7 +17,7 @@ class Tensor;
 // serves as a replacement return value for Tensor::type(). Previously,
 // Tensor::type() returned Type&, but we are changing Type to not be
 // dtype-specific.
-class CAFFE2_API DeprecatedTypeProperties {
+class TORCH_API DeprecatedTypeProperties {
  public:
   DeprecatedTypeProperties(Backend backend, ScalarType scalar_type)
     : backend_(backend), scalar_type_(scalar_type) {}

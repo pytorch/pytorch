@@ -22,23 +22,23 @@ namespace c10 {
 DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device);
 
 inline ScalarType dtype_or_default(c10::optional<ScalarType> dtype) {
-  return dtype.has_value() ? *dtype : get_default_dtype_as_scalartype();
+  return value_or_else(dtype, [] {return get_default_dtype_as_scalartype();});
 }
 
 inline caffe2::TypeMeta dtype_or_default(c10::optional<caffe2::TypeMeta> dtype) {
-  return dtype.has_value() ? *dtype : get_default_dtype();
+  return value_or_else(dtype, [] {return get_default_dtype();});
 }
 
 inline Layout layout_or_default(c10::optional<Layout> layout) {
-  return layout.has_value() ? *layout : kStrided;
+  return layout.value_or(kStrided);
 }
 
 inline Device device_or_default(c10::optional<Device> device) {
-  return device.has_value() ? *device : Device(kCPU);
+  return value_or_else(device, [] {return Device(kCPU);});
 }
 
 inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
-  return pinned_memory.has_value() ? *pinned_memory : false;
+  return pinned_memory.value_or(false);
 }
 
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
@@ -120,6 +120,8 @@ inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
 ///
 /// To get around this, we templatize the `Device` constructor. Since overload
 /// resolution is done before template resolution, our problem is solved.
+
+DispatchKey computeDispatchKey(optional<ScalarType> dtype, optional<Layout> layout, optional<Device> device);
 
 
 struct C10_API TensorOptions {
@@ -402,7 +404,7 @@ struct C10_API TensorOptions {
     return DispatchKeySet(computeDispatchKey());
   }
 
-  inline DispatchKey computeDispatchKey() const {
+  DispatchKey computeDispatchKey() const {
     return c10::computeDispatchKey(optTypeMetaToScalarType(dtype_opt()), layout_opt(), device_opt());
   }
 
@@ -502,7 +504,7 @@ struct C10_API TensorOptions {
   // NB: We didn't use c10::optional here, because then we can't pack
   // the has_***_ boolean fields.
 
-  Device device_ = at::kCPU; // 32-bit
+  Device device_ = at::kCPU; // 16-bit
   caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 16-bit
   Layout layout_ = at::kStrided; // 8-bit
   MemoryFormat memory_format_ = MemoryFormat::Contiguous; // 8-bit
@@ -605,6 +607,12 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             }
             return DispatchKey::CUDA;
           }
+          case DeviceType::XPU: {
+            if (isQIntType(dtype_)) {
+              return DispatchKey::QuantizedXPU;
+            }
+            return DispatchKey::XPU;
+          }
           case DeviceType::MKLDNN:
             return DispatchKey::MKLDNN;
           case DeviceType::OPENGL:
@@ -637,6 +645,8 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::SparseCUDA;
           case DeviceType::HIP:
             return DispatchKey::SparseHIP;
+          case DeviceType::XPU:
+            return DispatchKey::SparseXPU;
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", device_.type());
         }
@@ -689,8 +699,16 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::Vulkan;
   } else if (tid == DispatchKey::Metal) {
     return DeviceType::Metal;
+  } else if (tid == DispatchKey::QuantizedCPU) {
+    return DeviceType::CPU;
+  } else if (tid == DispatchKey::XPU) {
+    return DeviceType::XPU;
+  } else if (tid == DispatchKey::SparseXPU) {
+    return DeviceType::XPU;
+  } else if (tid == DispatchKey::QuantizedXPU) {
+    return DeviceType::XPU;
   } else {
-    AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
+    TORCH_INTERNAL_ASSERT(false, "Unknown DispatchKey: ", tid);
   }
 }
 
