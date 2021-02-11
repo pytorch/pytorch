@@ -109,6 +109,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_cuda", "prim"},
            {"is_xpu", "prim"},
            {"is_sparse", "prim"},
+           {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
