@@ -250,6 +250,17 @@ void IRVisitor::visit(const ReduceOp* v) {
   }
 }
 
+void IRVisitor::visit(const ReduceXOp* v) {
+  v->body()->accept(this);
+
+  for (auto* e : v->rvars()) {
+    e->accept(this);
+  }
+  for (auto* r : v->rdims()) {
+    r->accept(this);
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
