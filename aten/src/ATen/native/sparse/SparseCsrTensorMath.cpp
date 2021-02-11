@@ -77,10 +77,10 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
 
     AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "sparse_csr_mm_cpu", 
       [&alpha, &beta, &op1, &out, &values, &crow_indices, &col_indices, &dense_stride0,
-       &dense_stride1, &out_stride0, &out_stride1]() {
+       &dense_stride1, &out_stride0, &out_stride1, &dim_k]() {
       AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_mm_crow_indices",
         [&alpha, &beta, &op1, &out, &values, &crow_indices, &col_indices, &dense_stride0,
-         &dense_stride1, &out_stride0, &out_stride1]() {
+         &dense_stride1, &out_stride0, &out_stride1, &dim_k]() {
 
         scalar_t cast_alpha = alpha.to<scalar_t>();
         scalar_t cast_beta = beta.to<scalar_t>();
