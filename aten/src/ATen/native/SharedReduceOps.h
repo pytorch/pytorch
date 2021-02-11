@@ -103,7 +103,7 @@ struct WelfordOps {
   inline C10_DEVICE res_t project(acc_t acc) const {
     auto mean = acc.mean;
     combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
-		auto var = acc.m2 / divisor;
+    auto var = acc.m2 / divisor;
     detail::pair<scalar_t, scalar_t> results{take_sqrt ? device_sqrt(var) : var, (scalar_t)mean};
     return results;
   }
