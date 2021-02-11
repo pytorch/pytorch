@@ -701,7 +701,7 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
 
 def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad):
     inputs = []
-    args_for_binary_op  = (
+    args_for_binary_op = (
         ((S, S, S), (S, S, S),),
         ((S, S, S), (S,),),
         ((S,), (S, S, S),),
@@ -737,11 +737,11 @@ def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_gr
 def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad):
     inputs = []
     inputs.append(SampleInput(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),))
+                                          low=None, high=None,
+                                          requires_grad=requires_grad),))
     inputs.append(SampleInput(make_tensor((), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),))
+                                          low=None, high=None,
+                                          requires_grad=requires_grad),))
     return inputs
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
