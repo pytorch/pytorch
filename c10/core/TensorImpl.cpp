@@ -75,6 +75,12 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   init_bitfields();
   setup_track_view(track_view_);
 
+  if (!key_set.empty()) {
+    TORCH_INTERNAL_ASSERT(data_type == ScalarType::Undefined || device_opt_.has_value());
+    // UndefinedTensorImpl is a singleton, so we skip logging it
+    C10_LOG_API_USAGE_ONCE("tensor.create");
+  }
+
   // After we removed Autograd keys from globally enabled set, every Tensor must be created with
   // a backend DispatchKey and an AutogradBackend key.
   // We automatically add the corresponding autograd key to key_set_ so that backends can stay
@@ -83,14 +89,6 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // add AutogradBackend key when the tensor requires grad.
   DispatchKey k = key_set.highestPriorityBackendTypeId();
   key_set_ = key_set.add(getAutogradKeyFromBackend(k));
-
-  if (!key_set.empty()) {
-    TORCH_INTERNAL_ASSERT(data_type == ScalarType::Undefined || device_opt_.has_value());
-    // UndefinedTensorImpl is a singleton, so we skip logging it
-    C10_LOG_API_USAGE_ONCE("tensor.create");
-  }
-
-
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.

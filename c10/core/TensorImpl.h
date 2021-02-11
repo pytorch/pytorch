@@ -239,14 +239,10 @@ struct C10_API VariableVersion {
   VariableVersion(int32_t version = 0)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
 
-  bool inference_only() const {
-    return version_counter_->version_ < 0;
-  }
-
   void bump() noexcept {
     // version_counter only makes sense in training context and it's banned
     // in inference_only mode for performance reason.
-    TORCH_CHECK(!inference_only(),
+    TORCH_CHECK(version_counter_->version_ >= 0,
       "Inplace update to a Tensor created in InferenceOnlyMode is not allowed, try switching to the out-of-place version of the operator");
     ++version_counter_->version_;
   }
