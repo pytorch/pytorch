@@ -885,6 +885,7 @@ else:
     class RecursiveScriptClass(object):  # type: ignore
         def __init__(self):
             super().__init__()
+
     class ScriptModule(torch.nn.Module):  # type: ignore
         def __init__(self, arg=None):
             super().__init__()

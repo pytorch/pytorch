@@ -152,33 +152,46 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
-      auto object = py::cast<py::object>(obj);
-      if (auto mod = as_module(object)) {
+      if (auto mod = as_module(py::cast<py::object>(obj))) {
         // if obj is already a ScriptModule, just return its ivalue
         return mod.value()._ivalue();
       }
+      // otherwise is a normal class object, we create a fresh
+      // ivalue::Object to use from the py object.
+      // 1. create a bare ivalue
+      const size_t numAttrs = classType->numAttributes();
+      auto cu = classType->compilation_unit();
+      auto userObj = c10::ivalue::Object::create(
+          c10::StrongTypePtr(cu, classType), numAttrs);
 
-      // Check if the obj is a ScriptClass.
-      if (py::isinstance(
-              obj,
-              py::module::import("torch.jit").attr("RecursiveScriptClass"))) {
-        auto inst = py::cast<Object>(obj.attr("_c"));
-        return inst._ivalue();
-      }
+      // 2. copy all the contained types
+      for (size_t slot = 0; slot < numAttrs; slot++) {
+        const auto& attrType = classType->getAttribute(slot);
+        const auto& attrName = classType->getAttributeName(slot);
 
-      // Custom class?
-      try {
-        Object* script_object = object.cast<Object*>();
-        return script_object->_ivalue();
-      } catch (...) {
-        throw py::cast_error(c10::str(
-            "Object ",
-            py::str(obj),
-            " is not a TorchScript compatible type;"
-            " it must be scripted with torch.jit.script(instance)"
-            " before being passed as a value for an argument of type ",
-            type->repr_str()));
+        if (!py::hasattr(obj, attrName.c_str())) {
+          throw py::cast_error(c10::str(
+              "Tried to cast object to type ",
+              type->repr_str(),
+              " but object",
+              " was missing attribute ",
+              attrName));
+        }
+
+        try {
+          const auto& contained = py::getattr(obj, attrName.c_str());
+          userObj->setSlot(slot, toIValue(contained, attrType));
+        } catch (std::exception& e) {
+          throw py::cast_error(c10::str(
+              "Could not cast attribute '",
+              attrName,
+              "' to type ",
+              attrType->repr_str(),
+              ": ",
+              e.what()));
+        }
       }
+      return userObj;
     }
     case TypeKind::InterfaceType: {
       auto interfaceType = type->expect<InterfaceType>();
