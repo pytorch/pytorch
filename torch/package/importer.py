@@ -17,6 +17,7 @@ from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _
     _normalize_path
 from ._mock_zipreader import MockZipReader
 from ._mangling import PackageMangler, demangle
+from ._package_utils import _print_file_structure
 
 class PackageImporter:
     """Importers allow you to load code written to packages by PackageExporter.
@@ -88,6 +89,9 @@ class PackageImporter:
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
+
+    def print_file_structure(self, skip_storage: bool = True, path_includes: str = ".*"):
+        _print_file_structure(self.filename, self.zip_reader.get_all_records(), skip_storage, path_includes)
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return

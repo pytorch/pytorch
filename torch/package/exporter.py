@@ -6,6 +6,7 @@ from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
+from ._package_utils import _print_file_structure
 from ._stdlib import is_stdlib_module
 import types
 import importlib
@@ -69,12 +70,15 @@ class PackageExporter:
         """
         if isinstance(f, (Path, str)):
             f = str(f)
+            self.name = f
             self.buffer: Optional[BinaryIO] = None
         else:  # is a byte buffer
+            self.name = '<binary>'
             self.buffer = f
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
+        self._written_records : List[str] = []
         self.serialized_storages : Dict[str, Any] = {}
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
@@ -124,6 +128,9 @@ class PackageExporter:
         else:
             is_package = path.name == '__init__.py'
             self.save_source_string(module_name, _read_file(file_or_directory), is_package, dependencies, file_or_directory)
+
+    def print_file_structure(self, path_includes: str = ".*"):
+        _print_file_structure(self.name, self._written_records, False, path_includes) 
 
     def save_source_string(self, module_name: str, src: str, is_package: bool = False,
                            dependencies: bool = True, orig_file_name: str = None):
@@ -415,6 +422,7 @@ node [shape=box];
         if isinstance(str_or_bytes, str):
             str_or_bytes = str_or_bytes.encode('utf-8')
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
+        self._written_records.append(filename)
 
     def close(self):
         """Write the package to the filesystem. Any calls after close are now invalid.
