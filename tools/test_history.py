@@ -24,16 +24,43 @@ def get_git_commit_history(
     ]
 
 
-def get_ossci_json(
+def get_ossci_jsons(
     *,
     bucket: Any,
     sha: str,
-    job: str
-) -> Any:
-    objs = list(bucket.objects.filter(Prefix=f"test_time/{sha}/{job}"))
-    if len(objs) == 0:
-        return {}
-    return json.loads(bz2.decompress(objs[0].get()['Body'].read()))
+    jobs: Optional[List[str]]
+) -> Dict[str, Any]:
+    prefix = f"test_time/{sha}/"
+    objs: List[Any]
+    if jobs is None:
+        objs = list(bucket.objects.filter(Prefix=prefix))
+    else:
+        objs = []
+        for job in jobs:
+            objs.extend(list(bucket.objects.filter(Prefix=f"{prefix}{job}/")))
+    # initial pass to avoid downloading more than necessary
+    # in the case where there are multiple reports for a single sha+job
+    uniqueified = {obj.key.split('/')[2]: obj for obj in objs}
+    return {
+        job: json.loads(bz2.decompress(obj.get()['Body'].read()))
+        for job, obj in uniqueified.items()
+    }
+
+
+def get_case(
+    *,
+    data: Any,
+    suite_name: str,
+    test_name: str,
+) -> Optional[Dict[str, Any]]:
+    suite = data.get('suites', {}).get(suite_name)
+    if suite:
+        testcase_times = {
+            case['name']: case
+            for case in suite['cases']
+        }
+        return testcase_times.get(test_name)
+    return None
 
 
 def case_status(case: Dict[str, Any]) -> Optional[str]:
@@ -45,41 +72,71 @@ def case_status(case: Dict[str, Any]) -> Optional[str]:
 
 def make_column(
     *,
-    bucket: Any,
-    sha: str,
-    job: str,
+    data: Any,
     suite_name: str,
     test_name: str,
     digits: int,
 ) -> str:
     decimals = 3
     num_length = digits + 1 + decimals
+    case = get_case(data=data, suite_name=suite_name, test_name=test_name)
+    if case:
+        status = case_status(case)
+        if status:
+            return f'{status.rjust(num_length)} '
+        else:
+            return f'{case["seconds"]:{num_length}.{decimals}f}s'
+    return ' ' * (num_length + 1)
 
-    data = get_ossci_json(bucket=bucket, sha=sha, job=job)
-    suite = data.get('suites', {}).get(suite_name)
-    if suite:
-        testcase_times = {
-            case['name']: case
-            for case in suite['cases']
-        }
-        case = testcase_times.get(test_name)
+
+def make_columns(
+    *,
+    bucket: Any,
+    sha: str,
+    jobs: List[str],
+    suite_name: str,
+    test_name: str,
+    digits: int,
+) -> str:
+    jsons = get_ossci_jsons(bucket=bucket, sha=sha, jobs=jobs)
+    return ' '.join(
+        make_column(
+            data=jsons.get(job, {}),
+            suite_name=suite_name,
+            test_name=test_name,
+            digits=digits,
+        )
+        for job in jobs
+    )
+
+
+def make_lines(
+    *,
+    bucket: Any,
+    sha: str,
+    jobs: Optional[List[str]],
+    suite_name: str,
+    test_name: str,
+) -> List[str]:
+    jsons = get_ossci_jsons(bucket=bucket, sha=sha, jobs=jobs)
+    lines = []
+    for job, data in jsons.items():
+        case = get_case(data=data, suite_name=suite_name, test_name=test_name)
         if case:
             status = case_status(case)
-            if status:
-                return f'{status.rjust(num_length)} '
-            else:
-                return f'{case["seconds"]:{num_length}.{decimals}f}s'
-    return ' ' * (num_length + 1)
+            lines.append(f'{job} {case["seconds"]} {status or ""}')
+    return lines
 
 
 def display_history(
     *,
     bucket: Any,
     commits: List[Tuple[str, datetime]],
-    jobs: List[str],
+    jobs: Optional[List[str]],
     suite_name: str,
     test_name: str,
     delta: int,
+    mode: str,
     digits: int,
 ) -> None:
     prev_time = datetime.now()
@@ -87,18 +144,28 @@ def display_history(
         if (prev_time - time).total_seconds() < delta * 3600:
             continue
         prev_time = time
-        columns = [
-            make_column(
+        lines: List[str]
+        if mode == 'columns':
+            assert jobs is not None
+            lines = [make_columns(
                 bucket=bucket,
                 sha=sha,
-                job=job,
+                jobs=jobs,
                 suite_name=suite_name,
                 test_name=test_name,
                 digits=digits,
+            )]
+        else:
+            assert mode == 'multiline'
+            lines = make_lines(
+                bucket=bucket,
+                sha=sha,
+                jobs=jobs,
+                suite_name=suite_name,
+                test_name=test_name,
             )
-            for job in jobs
-        ]
-        print(f"{time} {sha} {' '.join(columns)}".rstrip())
+        for line in lines:
+            print(f"{time} {sha} {line}".rstrip())
 
 
 if __name__ == "__main__":
@@ -106,6 +173,11 @@ if __name__ == "__main__":
         __file__,
         description='Display the history of a test.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        'mode',
+        choices=['columns', 'multiline'],
+        help='output format',
     )
     parser.add_argument(
         '--pytorch',
@@ -126,8 +198,13 @@ if __name__ == "__main__":
     parser.add_argument(
         '--digits',
         type=int,
-        help='number of digits to display before the decimal point',
+        help='(columns) number of digits to display before the decimal point',
         default=4,
+    )
+    parser.add_argument(
+        '--all',
+        action='store_true',
+        help='(multiline) ignore listed jobs, show all jobs for each commit',
     )
     parser.add_argument(
         'suite',
@@ -141,6 +218,7 @@ if __name__ == "__main__":
         'job',
         nargs='*',
         help='names of jobs to display columns for, in order',
+        default=[],
     )
     args = parser.parse_args()
 
@@ -152,9 +230,10 @@ if __name__ == "__main__":
     display_history(
         bucket=bucket,
         commits=commits,
-        jobs=args.job,
+        jobs=None if args.all else args.job,
         suite_name=args.suite,
         test_name=args.test,
         delta=args.delta,
+        mode=args.mode,
         digits=args.digits,
     )
