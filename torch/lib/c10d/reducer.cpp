@@ -1182,7 +1182,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
 void Reducer::save_thread_local_state() {
   std::lock_guard<std::mutex> guard(mutex_);
-  thread_local_state_ = at::ThreadLocalState();
+  // Don't preserve grad_mode across thread boundaries, as we will be passing
+  // from forward pass to autograd engine backward pass callbacks.
+  thread_local_state_ = at::ThreadLocalState(/* keep_grad_mode */ false);
 }
 
 void Reducer::finalize_backward() {
