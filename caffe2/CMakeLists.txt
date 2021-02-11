@@ -12,7 +12,7 @@ if(MSVC)
 endif()
 
 # Debug messages - if you want to get a list of source files and examine
-# target information enable the following by -DPRINT_CMAKE_DEBUG_INFO=ON.
+# target information, enable the following by -DPRINT_CMAKE_DEBUG_INFO=ON.
 set(PRINT_CMAKE_DEBUG_INFO FALSE CACHE BOOL "print cmake debug information")
 if(PRINT_CMAKE_DEBUG_INFO)
   include(../cmake/DebugHelper.cmake)
@@ -193,8 +193,6 @@ if(BUILD_SPLIT_CUDA)
   endforeach()
 endif()
 
-# Debug messages - if you want to get a list of source files, enable the
-# following.
 if(PRINT_CMAKE_DEBUG_INFO)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
