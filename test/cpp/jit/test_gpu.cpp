@@ -1225,19 +1225,6 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
         = T2[ki38]
         * T0[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)];
     }
-  } else {
-    for(size_t ki38 = 0; ki38 < 1; ++ki38) {
-      if ((((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x) < T0.size[0])) {
-        T2[ki38]
-          = T0[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)]
-          * T1[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)];
-      }
-      if ((((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x) < T0.size[0])) {
-        T3[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)]
-          = T2[ki38]
-          * T0[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)];
-      }
-    }
   }
 }
 )";
@@ -12044,6 +12031,72 @@ TEST(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
   auto t3 = t0.unsqueeze(-1).expand(shape) + t1;
 
   testValidate(&fusion, cg_outputs, aten_inputs, {t3}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionSizeOneLoop_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Progressively broadcast tensors
+  TensorView* tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  TensorView* tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  TensorView* tv2 = makeSymbolicTensor(3);
+  fusion.addInput(tv2);
+
+  TensorView* tv3 = broadcast(tv0, {false, true});
+  TensorView* tv4 = add(tv3, tv1);
+  TensorView* tv5 = add(tv4, tv2);
+
+  fusion.addOutput(tv5);
+
+  // Split inner dimension
+  tv5->split(1, 8);
+  // Merge middle dims with outer dimensions
+  tv5->merge(2);
+  tv5->merge(0);
+
+  // tv5[I0*I1o, I1i*I2]
+  // Get a dim of size 1 to unswitch
+  tv5->split(0, 1, false);
+
+  // Compute everything inline
+  tv0->computeAt(tv5, -1);
+
+  tv5->axis(0)->parallelize(ParallelType::Unswitch);
+  tv5->axis(1)->parallelize(ParallelType::BIDx);
+  tv5->axis(2)->parallelize(ParallelType::TIDx);
+
+  // Make sure the unswitched loop does not have an else clause.
+  GpuLower gpulw(&fusion);
+  for (const auto& kir_node : gpulw.kernel()->irNodes()) {
+    if (auto fl = dynamic_cast<kir::ForLoop*>(kir_node.get())) {
+      if (fl->iter_domain()->parallelType() != ParallelType::Unswitch) {
+        continue;
+      }
+      if (auto pred = dynamic_cast<kir::IfThenElse*>(fl->parentScope())) {
+        TORCH_CHECK(!pred->hasElse());
+      }
+    }
+  }
+
+  const int x = 11;
+  const int y = 12;
+  const int z = 13;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({x}, options);
+  at::Tensor t1 = at::randn({x, y}, options);
+  at::Tensor t2 = at::randn({z, x, y}, options);
+  std::vector<IValue> aten_inputs = {t0, t1, t2};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto t6 = (t0.unsqueeze(-1) + t1).unsqueeze(0) + t2;
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {t6}, __LINE__, __FILE__);
 }
 
 } // namespace jit

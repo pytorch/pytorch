@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -152,7 +153,12 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   if (!non_trivial_pred_found_) {
     loop_replacement_map_.insert({fl, inlined_loop});
   } else {
-    unroll_ite->elseBody().push_back(inlined_loop);
+    kir::ExpressionEvaluator eval;
+    const auto result = eval.evaluate(fl->iter_domain()->rawExtent());
+    // No need to generate the else part if the extent is 1
+    if (!(result.has_value() && result.value() == 1)) {
+      unroll_ite->elseBody().push_back(inlined_loop);
+    }
     loop_replacement_map_.insert({fl, unroll_ite});
   }
 }
