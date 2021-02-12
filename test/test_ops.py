@@ -371,7 +371,7 @@ class TestCommon(JitCommonTestCase):
         # NOTE: only tests on first sample
         sample = samples[0]
 
-        # Note: [Scipting Data Preparation]
+        # [Scripting Data Preparation]
         # Prepare data for test scripting
         # Below we prepare strings of args/kwargs with and without type annotations.
         # These strings are inserted into function template strings which is then torch scripted.

@@ -340,6 +340,13 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
         self.supports_complex_to_float = supports_complex_to_float
+
+        # test_unary_ufuncs.py generates its own inputs to test the consistency 
+        # of the operator on sliced tensors, non-contig tensors, etc.
+        # `sample_kwargs` is a utility function to provide kwargs
+        # to those inputs if required (eg. clamp).
+        # It should return two dictionaries, first holding kwarg for
+        # torch operator and second one for reference NumPy operator.
         self.sample_kwargs = sample_kwargs
 
         # Epsilon to ensure grad and gradgrad checks don't test values

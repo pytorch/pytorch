@@ -208,7 +208,7 @@ class TestUnaryUfuncs(TestCase):
         torch_kwargs, numpy_kwargs = op.sample_kwargs(device, dtype, t)
         expected = op(t, **torch_kwargs)
 
-        # Refer: [Scipting Data Preparation] in test_ops.py
+        # Refer: [Scripting Data Preparation] in test_ops.py
         args = [f"t{i}" for i in range(len([t]))]
         args_annot_kw = args + \
             [f"{k}: {type(v).__name__}" for k, v in torch_kwargs.items()]
