@@ -278,20 +278,23 @@ C10_API std::string GetExceptionString(const std::exception& e);
         #cond "INTERNAL ASSERT FAILED at" C10_STRINGIZE(__FILE__)); \
   }
 #else
-#define TORCH_INTERNAL_ASSERT(cond, ...)                        \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
-    ::c10::detail::torchCheckFail(                              \
-        __func__, __FILE__, static_cast<uint32_t>(__LINE__),    \
-        ([&]() C10_NOINLINE {                                   \
-          return ::c10::str(                                    \
-              #cond " INTERNAL ASSERT FAILED at "               \
-              C10_STRINGIZE(__FILE__)                           \
-              ":"                                               \
-              C10_STRINGIZE(__LINE__)                           \
-              ", please report a bug to PyTorch. ",             \
-              ::c10::str(__VA_ARGS__)                           \
-          );                                                    \
-        })());                                                  \
+// TODO: evaluate whether a wrapper function around c10::str() would give the compiler
+// a place to outline argument calls if helpful.
+// It would be nice if we could build a combined string literal out of
+// the TORCH_INTERNAL_ASSERT prefix and a user-provided string literal
+// as the first argument, but there doesn't seem to be any good way to
+// do that while still supporting having a first argument that isn't a
+// string literal.
+#define TORCH_INTERNAL_ASSERT(cond, ...)                     \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                      \
+    ::c10::detail::torchInternalAssertFail(                  \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__), \
+        #cond "INTERNAL ASSERT FAILED at "                   \
+        C10_STRINGIZE(__FILE__)                              \
+        ":"                                                  \
+        C10_STRINGIZE(__LINE__)                              \
+        ", please report a bug to PyTorch. ",                \
+        c10::str(__VA_ARGS__));                              \
   }
 #endif
 
@@ -363,6 +366,17 @@ namespace detail {
 
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg);
+
+// The c10::str() call that creates userMsg can have 1 of 3 return
+// types depending on the number and types of arguments passed to
+// TORCH_INTERNAL_ASSERT.  0 arguments will get a
+// CompileTimeEmptyString, 1 const char * will be passed straight
+// through, and anything else will get converted to std::string.
+[[noreturn]] C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const char* userMsg);
+[[noreturn]] inline C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, ::c10::detail::CompileTimeEmptyString userMsg) {
+  torchCheckFail(func, file, line, condMsg);
+}
+[[noreturn]] C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const std::string& userMsg);
 
 } // namespace detail
 } // namespace c10
