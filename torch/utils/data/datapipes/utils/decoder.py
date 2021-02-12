@@ -5,9 +5,6 @@ import pickle
 import re
 import os
 
-import numpy as np
-import PIL
-import PIL.Image
 import json
 import tempfile
 import io
@@ -135,6 +132,8 @@ class ImageHandler:
         self.imagespec = imagespec.lower()
 
     def __call__(self, key, data):
+        import numpy as np
+        import PIL.Image
         extension = re.sub(r".*[.]", "", key)
         if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
             return None
