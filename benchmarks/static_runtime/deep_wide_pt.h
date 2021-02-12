@@ -50,7 +50,7 @@ struct DeepAndWideFast : torch::nn::Module {
       torch::Tensor wide) {
     torch::NoGradGuard no_grad;
     if (!allocated) {
-      auto wide_offset = at::native::add(wide, mu_);
+      auto wide_offset = at::add(wide, mu_);
       auto wide_normalized = at::native::mul(wide_offset, sigma_);
       // Placeholder for ReplaceNaN
       auto wide_preproc = at::native::clamp(wide_normalized, -10.0, 10.0);
@@ -82,7 +82,7 @@ struct DeepAndWideFast : torch::nn::Module {
     } else {
       // Potential optimization: add and mul could be fused together (e.g. with
       // Eigen).
-      at::native::add_out(prealloc_tensors[0], wide, mu_);
+      at::add_out(prealloc_tensors[0], wide, mu_);
       at::native::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
 
       at::native::clamp_out(

@@ -60,7 +60,7 @@ CAFFE_KNOWN_TYPE(bool*)
 CAFFE_KNOWN_TYPE(char*)
 CAFFE_KNOWN_TYPE(int*)
 
-// For some of the compilers, long is definied separately from int32_t and
+// For some of the compilers, long is defined separately from int32_t and
 // int64_t. As a result we will need to actually define them separately.
 // It is recommended that one does NOT use long - use int32_t and int64_t
 // explicitly. Explicit long type annotation may go away in the future.

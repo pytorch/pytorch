@@ -7,6 +7,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 
 CONSTRAINTS = [
     (constraints.real,),
+    (constraints.real_vector,),
     (constraints.positive,),
     (constraints.greater_than, [-10., -2, 0, 2, 10]),
     (constraints.greater_than, 0),
@@ -27,6 +28,7 @@ CONSTRAINTS = [
     (constraints.half_open_interval, -2, -1),
     (constraints.half_open_interval, 1, 2),
     (constraints.simplex,),
+    (constraints.corr_cholesky,),
     (constraints.lower_cholesky,),
 ]
 
@@ -49,7 +51,11 @@ def test_biject_to(constraint_fn, args, is_cuda):
     except NotImplementedError:
         pytest.skip('`biject_to` not implemented.')
     assert t.bijective, "biject_to({}) is not bijective".format(constraint)
-    x = torch.randn(5, 5, dtype=torch.double)
+    if constraint_fn is constraints.corr_cholesky:
+        # (D * (D-1)) / 2 (where D = 4) = 6 (size of last dim)
+        x = torch.randn(6, 6, dtype=torch.double)
+    else:
+        x = torch.randn(5, 5, dtype=torch.double)
     if is_cuda:
         x = x.cuda()
     y = t(x)
@@ -62,7 +68,7 @@ def test_biject_to(constraint_fn, args, is_cuda):
     assert torch.allclose(x, x2), "Error in biject_to({}) inverse".format(constraint)
 
     j = t.log_abs_det_jacobian(x, y)
-    assert j.shape == x.shape[:x.dim() - t.event_dim]
+    assert j.shape == x.shape[:x.dim() - t.domain.event_dim]
 
 
 @pytest.mark.parametrize('constraint_fn, args', [(c[0], c[1:]) for c in CONSTRAINTS])
@@ -72,7 +78,11 @@ def test_biject_to(constraint_fn, args, is_cuda):
 def test_transform_to(constraint_fn, args, is_cuda):
     constraint = build_constraint(constraint_fn, args, is_cuda=is_cuda)
     t = transform_to(constraint)
-    x = torch.randn(5, 5, dtype=torch.double)
+    if constraint_fn is constraints.corr_cholesky:
+        # (D * (D-1)) / 2 (where D = 4) = 6 (size of last dim)
+        x = torch.randn(6, 6, dtype=torch.double)
+    else:
+        x = torch.randn(5, 5, dtype=torch.double)
     if is_cuda:
         x = x.cuda()
     y = t(x)

@@ -358,6 +358,8 @@ class Reducer {
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
+
+  friend class Logger;
 };
 
 // This is equivalent to take_tensors but returns indices into the

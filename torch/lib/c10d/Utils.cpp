@@ -1,18 +1,18 @@
-#include <c10d/Utils.hpp>
-
-#ifndef _WIN32
+#ifdef _WIN32
+#include <c10d/WinSockUtils.hpp>
+#else
+#include <c10d/UnixSockUtils.hpp>
 #include <netdb.h>
 #include <sys/poll.h>
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-
-#include <fcntl.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
+#include <fcntl.h>
 #include <memory>
 #include <string>
 #include <thread>
@@ -23,7 +23,6 @@ namespace tcputil {
 namespace {
 
 constexpr int LISTEN_QUEUE_SIZE = 2048;
-const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 void setSocketNoDelay(int socket) {
   int flag = 1;
@@ -82,7 +81,7 @@ std::pair<int, PortType> listen(PortType port) {
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -106,18 +105,14 @@ std::pair<int, PortType> listen(PortType port) {
               nextAddr->ai_family,
               nextAddr->ai_socktype,
               nextAddr->ai_protocol))
-
-      int optval = 1;
-      SYSCHECK_ERR_RETURN_NEG1(
-          ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
-
+      SYSCHECK_ERR_RETURN_NEG1(tcputil::setSocketAddrReUse(socket))
       SYSCHECK_ERR_RETURN_NEG1(
           ::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
       SYSCHECK_ERR_RETURN_NEG1(::listen(socket, LISTEN_QUEUE_SIZE))
       break;
 
     } catch (const std::system_error& e) {
-      ::close(socket);
+      tcputil::closeSocket(socket);
       nextAddr = nextAddr->ai_next;
 
       // we have tried all addresses but could not start
@@ -203,7 +198,7 @@ int connect(
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -236,55 +231,11 @@ int connect(
               nextAddr->ai_socktype,
               nextAddr->ai_protocol))
 
-      ResourceGuard socketGuard([socket]() { ::close(socket); });
+      ResourceGuard socketGuard([socket]() { tcputil::closeSocket(socket); });
 
       // We need to connect in non-blocking mode, so we can use a timeout
-      SYSCHECK_ERR_RETURN_NEG1(::fcntl(socket, F_SETFL, O_NONBLOCK));
+      waitSocketConnected(socket, nextAddr, timeout, start);
 
-      int ret = ::connect(socket, nextAddr->ai_addr, nextAddr->ai_addrlen);
-
-      if (ret != 0 && errno != EINPROGRESS) {
-        throw std::system_error(errno, std::system_category());
-      }
-
-      struct ::pollfd pfd;
-      pfd.fd = socket;
-      pfd.events = POLLOUT;
-
-      int64_t pollTimeout = -1;
-      if (timeout != kNoTimeout) {
-        // calculate remaining time and use that as timeout for poll()
-        const auto elapsed = std::chrono::high_resolution_clock::now() - start;
-        const auto remaining =
-            std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
-            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
-        pollTimeout = std::max(
-            static_cast<int64_t>(0), static_cast<int64_t>(remaining.count()));
-      }
-      int numReady = ::poll(&pfd, 1, pollTimeout);
-      if (numReady < 0) {
-        throw std::system_error(errno, std::system_category());
-      } else if (numReady == 0) {
-        errno = 0;
-        throw std::runtime_error(kConnectTimeoutMsg);
-      }
-
-      socklen_t errLen = sizeof(errno);
-      errno = 0;
-      ::getsockopt(socket, SOL_SOCKET, SO_ERROR, &errno, &errLen);
-
-      // `errno` is set when:
-      //  1. `getsockopt` has failed
-      //  2. there is awaiting error in the socket
-      //  (the error is saved to the `errno` variable)
-      if (errno != 0) {
-        throw std::system_error(errno, std::system_category());
-      }
-
-      // Disable non-blocking mode
-      int flags;
-      SYSCHECK_ERR_RETURN_NEG1(flags = ::fcntl(socket, F_GETFL));
-      SYSCHECK_ERR_RETURN_NEG1(::fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
       socketGuard.release();
       break;
 
@@ -321,10 +272,10 @@ std::tuple<int, std::string> accept(
     const std::chrono::milliseconds& timeout) {
   // poll on listen socket, it allows to make timeout
   std::unique_ptr<struct ::pollfd[]> events(new struct ::pollfd[1]);
-  events[0] = {.fd = listenSocket, .events = POLLIN};
+  events[0] = tcputil::getPollfd(listenSocket, POLLIN);
 
   while (true) {
-    int res = ::poll(events.get(), 1, timeout.count());
+    int res = tcputil::poll(events.get(), 1, timeout.count());
     if (res == 0) {
       throw std::runtime_error(
           "waiting for processes to "
@@ -357,4 +308,3 @@ std::tuple<int, std::string> accept(
 }
 } // namespace tcputil
 } // namespace c10d
-#endif

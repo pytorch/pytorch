@@ -2,11 +2,11 @@
 
 #include <functional>
 
-#include <c10d/comm.hpp>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
+#include <c10d/comm.hpp>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
@@ -713,6 +713,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
       GradBucket grad_bucket(
+          next_bucket_,
           tensors,
           // Since currently we do not support single-process multiple-device
           // mode, we can assume only one replica in the bucket.
@@ -1034,6 +1035,18 @@ void Reducer::prepare_for_backward(
       unused_parameters_.insert(
           unused_parameters_.end(), indices.begin(), indices.end());
     }
+  }
+
+  // Warn user about unnecessary perf hit if all parameters were used.
+  if (unused_parameters_.empty()) {
+    TORCH_WARN_ONCE(
+        "find_unused_parameters=True was specified in DDP constructor, "
+        "but did not find any unused parameters. This flag results in an extra "
+        "traversal of the autograd graph every iteration, which can adversely "
+        "affect performance. If your model indeed never has any unused "
+        "parameters, consider turning this flag off. Note that this warning may "
+        "be a false positive your model has flow control causing later iterations "
+        "to have unused parameters.");
   }
 }
 
@@ -1388,8 +1401,8 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_comm_hook or register_builtin_comm_hook can only be called once.");
-  // TODO(@sinannasir): Single-process multiple-device mode support for DDP
-  // communication hook. Related to GH Issue #42542.
+  // TODO(#42542): Single-process multiple-device mode support for DDP
+  // communication hook.
   TORCH_CHECK(
       replicas_.size() == 1,
       "Communication hook does not support single-process multiple-device mode.");
@@ -1406,6 +1419,11 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       replicas_.size() == 1,
       "Communication hook does not support single-process multiple-device mode.");
+  // TODO: Support GLOO and MPI backends for DDP communication hook.
+  TORCH_CHECK(
+      process_group_->getBackendName() == "nccl",
+      "register_builtin_comm_hook currently can only support NCCL backend, but the current backend is %s.",
+      process_group_->getBackendName());
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:

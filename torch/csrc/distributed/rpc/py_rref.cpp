@@ -137,8 +137,7 @@ c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
   // Marking hasValue to false, as this Future is only used for signaling
   // profiler to update profiling result and the profiler does not retrieve
   // any value from it.
-  return wrapFutureMessageInJitFuture(
-      rref_->getOwnerCreationFuture(), false /* hasValue */);
+  return toPyJitFuture(rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
 c10::intrusive_ptr<JitFuture> PyRRef::getProfilingFuture() const {
@@ -229,20 +228,22 @@ std::string PyRRef::str() const {
   }
 }
 
-py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
+py::object PyRRef::createRRefProxy(
+    const RRefProxyType& type,
+    float timeoutSeconds) const {
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   pybind11::gil_scoped_acquire ag;
   auto& functions = pythonRpcHandler.getRRefProxyFunctions();
   auto& ctor = functions.rrefProxyCtor_;
   switch (type) {
     case RRefProxyType::RPC_SYNC: {
-      return ctor(*this, functions.rpcSync_);
+      return ctor(*this, functions.rpcSync_, timeoutSeconds);
     }
     case RRefProxyType::RPC_ASYNC: {
-      return ctor(*this, functions.rpcAsync_);
+      return ctor(*this, functions.rpcAsync_, timeoutSeconds);
     }
     case RRefProxyType::REMOTE: {
-      return ctor(*this, functions.remote_);
+      return ctor(*this, functions.remote_, timeoutSeconds);
     }
     default: {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);
@@ -250,16 +251,17 @@ py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
   }
 }
 
-py::object PyRRef::getRRefType() {
+py::object PyRRef::getRRefType(float timeout, bool blocking) {
   // GIL is not released when calling this function.
   if (!type_.has_value()) {
     pybind11::gil_scoped_release release;
     auto& pythonRpcHandler = PythonRpcHandler::getInstance();
     auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
     pybind11::gil_scoped_acquire acquire;
-    type_ = isOwner() ? typeFuncs.onOwner_(*this) : typeFuncs.onUser_(*this);
+    type_ = isOwner() ? typeFuncs.onOwner_(*this, blocking)
+                      : typeFuncs.onUser_(*this, timeout, blocking);
   }
-
+  // Returns py::object that can be Python type or future.
   return *type_;
 }
 
@@ -335,7 +337,7 @@ void PyRRef::backward(
         ->send(
             rpcAgent->getWorkerInfo(rref->owner()),
             std::move(rrefBackwardReq).toMessage())
-        ->wait();
+        ->waitAndThrow();
   }
 }
 

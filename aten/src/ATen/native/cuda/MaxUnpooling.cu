@@ -169,7 +169,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
             oheight,
             owidth,
             output.data_ptr<scalar_t>());
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }));
   if (self.ndimension() == 3) {
     output.resize_({numChannels, oheight, owidth});
@@ -343,7 +343,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
               oH,
               oW,
               offsetZ);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           totalZ -= 65535;
           offsetZ += 65535;
         }
@@ -446,7 +446,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
             oheight,
             owidth,
             grad_input.data_ptr<scalar_t>());
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }));
   return grad_input;
 }
@@ -550,7 +550,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
               indices.packed_accessor64<int64_t, 4>(),
               grad_input_reshaped.packed_accessor64<scalar_t, 4>(),
               offsetZ);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           totalZ -= 65535;
           offsetZ += 65535;
         }

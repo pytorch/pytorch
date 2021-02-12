@@ -8,10 +8,11 @@ namespace at {
 namespace native {
 
 Tensor& mkldnn_add_out(
-    Tensor& result,
     const Tensor& self,
     const Tensor& other,
-    Scalar alpha) {
+    Scalar alpha,
+    Tensor& result
+    ) {
   TORCH_CHECK(false, "mkldnn_add_out: ATen not compiled with MKLDNN support");
 }
 
@@ -46,10 +47,11 @@ namespace at {
 namespace native {
 
 Tensor& mkldnn_add_out(
-    Tensor& result,
     const Tensor& self,
     const Tensor& other,
-    Scalar alpha) {
+    Scalar alpha,
+    Tensor& result
+    ) {
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& y = itensor_from_mkldnn(other);
 
@@ -73,7 +75,7 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::mkldnn_add_out(self, self, other, alpha);
+  return native::mkldnn_add_out(self, other, alpha, self);
 }
 
 Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) {

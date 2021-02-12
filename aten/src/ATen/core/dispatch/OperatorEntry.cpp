@@ -21,7 +21,6 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , schema_()
 , dispatchTable_()
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
-, manuallyBoxedKernel_()
 , kernels_()
 , cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
@@ -120,10 +119,6 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
                "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"), "\n",
                "       new kernel: ", debug
     );
-  }
-
-  if (manuallyBoxedKernel_.has_value()) {
-    kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_);
   }
 
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
@@ -331,19 +326,6 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   }
 }
 
-void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func) {
-  TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_);
-  manuallyBoxedKernel_ = func;
-
-  for (auto& kv : kernels_) {
-    for (auto& k : kv.second) {
-      k.kernel.setManuallyBoxedKernel_(func);
-    }
-  }
-  // Refresh entries in dispatchTable_
-  updateDispatchTableFull_(dispatcher);
-}
-
 void OperatorEntry::checkInvariants() const {
   if (schema_) {
     TORCH_INTERNAL_ASSERT(schema_->schema.operator_name() == name_, dumpState());
@@ -379,6 +361,19 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   str << "]";
   return str.str();
 }
+
+void OperatorEntry::reportSignatureError(std::string name) const {
+  TORCH_CHECK(false,
+        "\nTried to access or call an operator with a wrong signature.\n",
+        "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+        "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
+        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
+        "    ", cpp_signature_->debug, "\n",
+        "  accessed/called as: ", name, "\n",
+        "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
+        "Please make sure that the function signature matches the signature in the operator registration call."
+  );
+};
 
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.

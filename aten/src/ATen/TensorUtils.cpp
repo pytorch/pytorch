@@ -1,7 +1,7 @@
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
-
-#include <ATen/ATen.h>
+#include <c10/util/accumulate.h>
 
 #include <ostream>
 #include <sstream>
@@ -17,6 +17,25 @@ std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
     out << "argument #" << t.pos << " '" << t.name << "'";
   }
   return out;
+}
+
+void checkDim(
+    CheckedFrom c,
+    const Tensor& tensor,
+    const char* name,
+    int pos, // 1-indexed
+    int64_t dim) {
+  TORCH_CHECK(
+      tensor.dim() == dim,
+      "Expected ",
+      dim,
+      "-dimensional tensor, but got ",
+      tensor.dim(),
+      "-dimensional tensor for ",
+      TensorGeometryArg(TensorArg({tensor, name, pos})),
+      " (while checking arguments for ",
+      c,
+      ")");
 }
 
 void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim) {
@@ -335,7 +354,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
-  const int64_t numel = prod_intlist(oldshape);
+  const int64_t numel = c10::multiply_integers(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
     return oldstride.vec();
   }

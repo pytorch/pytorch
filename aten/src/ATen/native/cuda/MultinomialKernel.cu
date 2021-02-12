@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -73,6 +74,7 @@ void renormRows(Tensor& t) {
         <<<grid, block, block.x * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
             rows, cols);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
@@ -113,7 +115,7 @@ __device__ int binarySearchForMultinomial(scalar_t* cumdist,
 
 template <typename scalar_t>
 __global__ void
-sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
+sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
                                  int totalSamples,
                                  int64_t* dest,
                                  int64_t distributions,
@@ -124,11 +126,16 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
 
+  auto seeds = at::cuda::philox::unpack(philox_args);
+
   // global index formula for 2D grid of 1D blocks
   int idx = blockIdx.y * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, idx, seeds.second, &state);
+  curand_init(std::get<0>(seeds),
+              idx,
+              std::get<1>(seeds),
+              &state);
 
   // The block determines the distribution for which we generate a point
   for (int64_t curDist = blockIdx.y;
@@ -293,7 +300,11 @@ sampleMultinomialOnce(int64_t* dest,
   }
 }
 
-void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, c10::optional<Generator> generator) {
+void multinomial_with_replacement_kernel_impl(
+    Tensor& result,
+    const Tensor& self,
+    const int64_t n_sample,
+    c10::optional<Generator> generator) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(generator, cuda::detail::getDefaultCUDAGenerator());
 
   int inputSize = self.dim();
@@ -342,6 +353,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                   self_v.stride(0),
                   self_v.stride(1)
           );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // Generic, slow implementation with memory allocations
 
@@ -361,9 +373,8 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       // Prefix sum along rows
       at::_cumsum_out(prefixSum, normDist, 1);
 
-      std::pair<uint64_t, uint64_t> rng_engine_inputs;
+      PhiloxCudaState rng_engine_inputs;
 
-      if (with_replacement) {
         // Binary search is warp divergent (so effectively we're running
         // with just a single thread), but for better utilization,
         // we need each block to have at least 4 warps.
@@ -381,23 +392,21 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
           // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
           // offset is 4 times that.
           auto offset = ((numDist-1)/grid.y+1)*4;
-          rng_engine_inputs = gen->philox_engine_inputs(offset);
+          rng_engine_inputs = gen->philox_cuda_state(offset);
         }
         // Sample with replacement
 
         sampleMultinomialWithReplacement
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-            rng_engine_inputs,
+                rng_engine_inputs,
                 n_sample,
                 result.data_ptr<int64_t>(),
                 numDist, numCategories,
                 prefixSum.data_ptr<scalar_t>(),
                 normDist.data_ptr<scalar_t>());
-      }
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 
   if (inputSize == 1) {
     result.resize_({n_sample});
@@ -405,6 +414,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 }
 }
 
-REGISTER_DISPATCH(multinomial_stub, &multinomial_kernel_impl);
-
+REGISTER_DISPATCH(
+    multinomial_with_replacement_stub,
+    &multinomial_with_replacement_kernel_impl);
 }}

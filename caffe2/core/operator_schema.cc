@@ -307,8 +307,8 @@ OpSchema::Arg(const char* name, const char* description, bool required) {
 }
 
 #define DEFINE_STANDARG_ARG(name, str)                                \
-  CAFFE2_API const char* OpSchema::Arg_##name = #str;                 \
-  CAFFE2_API OpSchema& OpSchema::Arg##name(const char* description) { \
+  TORCH_API const char* OpSchema::Arg_##name = #str;                 \
+  TORCH_API OpSchema& OpSchema::Arg##name(const char* description) { \
     return Arg(#str, description, true);                              \
   }
 

@@ -177,7 +177,7 @@ struct GraphFuser {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    auto device = v->type()->expect<TensorType>()->device();
+    auto device = v->type()->expectRef<TensorType>().device();
     if (!device) {
       return !strict_fuser_check;
     }
@@ -185,6 +185,8 @@ struct GraphFuser {
       return canFuseOnCPU();
     } else if ((*device).is_cuda()) {
       return canFuseOnGPU();
+    } else if ((*device).is_xpu()) {
+      return false;
     }
     throw std::runtime_error("Unknown device");
   }
@@ -1124,12 +1126,12 @@ struct GraphFuser {
   }
 
   void run() {
-    // TODO: old fuser is not maintained internally, somewhere it is being turned on
-    // inadvertently for certain workflows. make this a no-op until we identify
-    // location
-    #if defined(FBCODE_CAFFE2)
-        return;
-    #endif
+// TODO: old fuser is not maintained internally, somewhere it is being turned on
+// inadvertently for certain workflows. make this a no-op until we identify
+// location
+#if defined(FBCODE_CAFFE2)
+    return;
+#endif
 
     // Run the pass until no changes are made.
     // This is necessary, because the algorithm can miss out on certain fusion
@@ -1253,7 +1255,7 @@ void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
 
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
-    std::function<bool(Node*)> fn,
+    const std::function<bool(Node*)>& fn,
     Symbol kind,
     size_t arg_limit) {
   AliasDb db(graph);

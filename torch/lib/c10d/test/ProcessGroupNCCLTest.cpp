@@ -177,9 +177,9 @@ class AllreduceNCCLTest : public NCCLTest {
     // Make sure enabling profile does not make any issue. Note, in single
     // process multi-device mode we do not expect any events be populated for
     // collective operations, since profiling for that mode is not supported.
-    enableProfiler({ProfilerState::CPU});
+    enableProfilerLegacy({ProfilerState::CPU});
     auto results = pg_->allreduce(tensors_);
-    disableProfiler();
+    disableProfilerLegacy();
     return results;
   }
 };
@@ -468,5 +468,18 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
   {
     TemporaryFile file;
     testReduceScatter(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testBackendName) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    auto test = NCCLTestBase(file.path);
+    test.initialize(rank_, size_);
+    EXPECT_EQ(
+      test.getProcessGroup().getBackendName(), std::string(c10d::NCCL_BACKEND_NAME));
   }
 }

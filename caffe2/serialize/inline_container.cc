@@ -65,7 +65,7 @@ PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
 }
 
 PyTorchStreamReader::PyTorchStreamReader(
-    std::unique_ptr<ReadAdapterInterface> in)
+    std::shared_ptr<ReadAdapterInterface> in)
     : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
   init();
 }
@@ -115,7 +115,12 @@ void PyTorchStreamReader::init() {
   // version check
   at::DataPtr version_ptr;
   size_t version_size;
-  std::tie(version_ptr, version_size) = getRecord("version");
+  if (hasRecord(".data/version")) {
+    std::tie(version_ptr, version_size) = getRecord(".data/version");
+  } else {
+    TORCH_CHECK(hasRecord("version"))
+    std::tie(version_ptr, version_size) = getRecord("version");
+  }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
   AT_ASSERTM(
@@ -357,7 +362,11 @@ void PyTorchStreamWriter::writeEndOfFile() {
   // Rewrites version info
   std::string version = c10::to_string(version_);
   version.push_back('\n');
-  writeRecord("version", version.c_str(), version.size());
+  if (version_ >= 0x6L) {
+    writeRecord(".data/version", version.c_str(), version.size());
+  } else {
+    writeRecord("version", version.c_str(), version.size());
+  }
 
   AT_ASSERT(!finalized_);
   finalized_ = true;

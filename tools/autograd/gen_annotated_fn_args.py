@@ -20,7 +20,8 @@ import textwrap
 
 from typing import Dict, List, Any
 
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager
+from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.context import with_native_function
 from tools.codegen.model import *
 import tools.codegen.api.python as python
 from .gen_python_functions import should_generate_py_binding, is_py_torch_function, is_py_nn_function, is_py_variable_method
@@ -52,7 +53,7 @@ def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
 @with_native_function
 def gen_annotated_args(f: NativeFunction) -> str:
     out_args: List[Dict[str, Any]] = []
-    for arg in f.func.arguments:
+    for arg in f.func.arguments.flat_positional:
         if arg.default is not None:
             continue
         out_arg: Dict[str, Any] = {}

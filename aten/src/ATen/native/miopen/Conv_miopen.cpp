@@ -624,7 +624,6 @@ Tensor miopen_convolution(
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
-  setMIOpenStreamToCurrent();
   CheckedFrom c = "miopen_convolution";
   auto output_t = miopen_convolution_forward(
     c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
@@ -699,7 +698,6 @@ Tensor miopen_depthwise_convolution(
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
-  setMIOpenStreamToCurrent();
   CheckedFrom c = "miopen_depthwise_convolution";
   auto output_t = miopen_depthwise_convolution_forward(
     c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
@@ -716,7 +714,6 @@ Tensor miopen_convolution_transpose_backward_input(
 {
   TensorArg grad_output { grad_output_t,  "grad_output", 1 },
             weight      { weight_t, "weight", 2 };
-  setMIOpenStreamToCurrent();
   return miopen_convolution_forward(
     "miopen_convolution_transpose_backward_input",
     grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
@@ -827,7 +824,6 @@ Tensor miopen_convolution_backward_input(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
-  setMIOpenStreamToCurrent();
   return miopen_convolution_backward_input(
       "miopen_convolution_backward_input",
       input_size, grad_output, weight,
@@ -897,7 +893,6 @@ Tensor miopen_depthwise_convolution_backward_input(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
-  setMIOpenStreamToCurrent();
   return miopen_depthwise_convolution_backward_input(
       "miopen_depthwise_convolution_backward_input",
       input_size, grad_output, weight,
@@ -1087,7 +1082,6 @@ Tensor miopen_convolution_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  setMIOpenStreamToCurrent();
   return miopen_convolution_backward_weight(
       "miopen_convolution_backward_weight",
       weight_size, grad_output, input,
@@ -1103,7 +1097,6 @@ Tensor miopen_convolution_transpose_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  setMIOpenStreamToCurrent();
   return miopen_convolution_backward_weight(
       "miopen_convolution_backward_weight",
       weight_size, input, grad_output,
@@ -1119,7 +1112,6 @@ Tensor miopen_depthwise_convolution_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  setMIOpenStreamToCurrent();
   return miopen_depthwise_convolution_backward_weight(
       "miopen_depthwise_convolution_backward_weight",
       weight_size, grad_output, input,
@@ -1136,7 +1128,6 @@ Tensor miopen_convolution_backward_bias(
     const Tensor& grad_output_t)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
-  setMIOpenStreamToCurrent();
 
   auto grad_bias_t = at::empty( { grad_output->size(output_channels_dim) }, grad_output->options());
 

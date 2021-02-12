@@ -1,9 +1,8 @@
-
-
 import unittest
 
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
+import datetime
 import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -32,7 +31,7 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
         batch_size=st.integers(1, 5),
         max_weight=st.integers(0, 100),
     )
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_slws_fused_8bit_rowwise_acc32_nnpi(
         self, seed, num_rows, embedding_dim, batch_size, max_weight
     ):
@@ -148,7 +147,7 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
 
 
     @given(seed=st.integers(0, 65535))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_small_sls_acc32(self, seed):
         workspace.GlobalInit(
             [

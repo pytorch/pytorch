@@ -1,22 +1,23 @@
 #include <ATen/ATen.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/TensorFactories.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/TensorFactories.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
+
 #include <thrust/device_ptr.h>
-#include <thrust/sort.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
+#include <thrust/sort.h>
 
 #include <algorithm>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
 
 namespace at {
 namespace native {
@@ -47,7 +48,7 @@ Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::op
   check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
-  int64_t nelements = prod_intlist(size);
+  int64_t nelements = c10::multiply_integers(size);
   auto dtype = dtype_or_default(dtype_opt);
   auto dtype_meta = scalarTypeToTypeMeta(dtype);
   int64_t size_bytes = nelements * dtype_meta.itemsize();
@@ -357,6 +358,7 @@ Tensor tril_indices_cuda(
         col,
         tril_size - rectangle_size,
         tril_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
 
@@ -434,6 +436,7 @@ Tensor triu_indices_cuda(
         col,
         rectangle_size,
         triu_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
 

@@ -11,7 +11,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-
 #ifdef USE_TENSORPIPE
 
 class TestE2ETensorPipe : public TestE2EBase {
@@ -49,6 +48,15 @@ class TestE2ETensorPipe : public TestE2EBase {
 // challenging and we don't have a good solution yet.
 TEST_F(TestE2ETensorPipe, TestTrainingLoop) {
   runTrainingLoop();
+  // Ensure the tensorpipe internal state is cleared up.
+  auto tensorpipeAgent = std::static_pointer_cast<TensorPipeAgent>(rpcAgent);
+
+  // Shutdown RPC agent for all RPCs to clean up.
+  tensorpipeAgent->join();
+  tensorpipeAgent->shutdown();
+  ASSERT_EQ(0, tensorpipeAgent->numPendingResponses());
+  ASSERT_EQ(0, tensorpipeAgent->timeoutMapSize());
+  ASSERT_EQ(0, tensorpipeAgent->messageIdToTimeoutMapSize());
 }
 
 #endif

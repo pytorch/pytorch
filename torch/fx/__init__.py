@@ -1,91 +1,91 @@
 # type: ignore
 r'''
-**This feature is experimental and its stability is not currently guaranteed. Proceed at your own risk**
+**This feature is under a Beta release and its API may change.**
 
-FX is a toolkit for capturing and transforming functional PyTorch programs. It
-consists of GraphModule and a corresponding intermediate representation (IR). When GraphModule is constructed
-with an `nn.Module` instance as its argument, GraphModule will trace through the computation of that Module's
-`forward` method symbolically and record those operations in the FX intermediate representation.
+FX is a toolkit for developers to use to transform ``nn.Module``
+instances. FX consists of three main components: a **symbolic tracer,**
+an **intermediate representation**, and **Python code generation**. A
+demonstration of these components in action:
 
-```
-import torch
-from torch.fx import symbolic_trace
+::
 
-class MyModule(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.param = torch.nn.Parameter(torch.rand(3, 4))
-        self.linear = torch.nn.Linear(4, 5)
+    import torch
+    # Simple module for demonstration
+    class MyModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.param = torch.nn.Parameter(torch.rand(3, 4))
+            self.linear = torch.nn.Linear(4, 5)
 
+        def forward(self, x):
+            return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+
+    module = MyModule()
+
+    from torch.fx import symbolic_trace
+    # Symbolic tracing frontend - captures the semantics of the module
+    symbolic_traced : torch.fx.GraphModule = symbolic_trace(module)
+
+    # High-level intermediate representation (IR) - Graph representation
+    print(symbolic_traced.graph)
+    """
+    graph(x):
+        %param : [#users=1] = self.param
+        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %param), kwargs = {})
+        %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
+        %clamp_1 : [#users=1] = call_method[target=clamp](args = (%linear_1,), kwargs = {min: 0.0, max: 1.0})
+        return clamp_1
+    """
+
+    # Code generation - valid Python code
+    print(symbolic_traced.code)
+    """
     def forward(self, x):
-        return torch.topk(torch.sum(self.linear(x + self.linear.weight).relu(), dim=-1), 3)
+        param = self.param
+        add_1 = x + param;  x = param = None
+        linear_1 = self.linear(add_1);  add_1 = None
+        clamp_1 = linear_1.clamp(min = 0.0, max = 1.0);  linear_1 = None
+        return clamp_1
+    """
 
-m = MyModule()
-gm = symbolic_trace(m)
-```
+The **symbolic tracer** performs “symbolic execution” of the Python
+code. It feeds fake values, called Proxies, through the code. Operations
+on theses Proxies are recorded. More information about symbolic tracing
+can be found in the :func:`symbolic_trace` and :class:`Tracer`
+documentation.
 
-The Intermediate Representation centers around a 5-opcode format:
+The **intermediate representation** is the container for the operations
+that were recorded during symbolic tracing. It consists of a list of
+Nodes that represent function inputs, callsites (to functions, methods,
+or :class:`torch.nn.Module` instances), and return values. More information
+about the IR can be found in the documentation for :class:`Graph`. The
+IR is the format on which transformations are applied.
 
-```
-print(gm.graph)
-```
+**Python code generation** is what makes FX a Python-to-Python (or
+Module-to-Module) transformation toolkit. For each Graph IR, we can
+create valid Python code matching the Graph’s semantics. This
+functionality is wrapped up in :class:`GraphModule`, which is a
+:class:`torch.nn.Module` instance that holds a :class:`Graph` as well as a
+``forward`` method generated from the Graph.
 
-```
-graph(x):
-    %linear_weight : [uses=1] = self.linear.weight
-    %add_1 : [uses=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
-    %linear_1 : [uses=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
-    %relu_1 : [uses=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-    %sum_1 : [uses=1] = call_function[target=<built-in method sum of type object at 0x7fad0a3c16a0>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
-    %topk_1 : [uses=1] = call_function[target=<built-in method topk of type object at 0x7fad0a3c16a0>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
-    return topk_1
-```
+Taken together, this pipeline of components (symbolic tracing →
+intermediate representation → transforms → Python code generation)
+constitutes the Python-to-Python transformation pipeline of FX. In
+addition, these components can be used separately. For example,
+symbolic tracing can be used in isolation to capture a form of
+the code for analysis (and not transformation) purposes. Code
+generation can be used for programmatically generating models, for
+example from a config file. There are many uses for FX!
 
-The semantics are as follows:
-
-- `placeholder` represents a function input. The `name` attribute specifies the name this value will take on.
-  `target` is similarly the name of the argument. `args` holds either: 1) nothing, or 2) a single argument
-  denoting the default parameter of the function input. `kwargs` is don't-care. Placeholders correspond to
-  the function parameters (e.g. `x`) in the graph printout.
-- `get_attr` retrieves a parameter from the module hierarchy. `name` is similarly the name the result of the
-   fetch is assigned to. `target` is the fully-qualified name of the parameter's position in the module hierarchy.
-   `args` and `kwargs` are don't-care
-- `call_function` applies a free function to some values. `name` is similarly the name of the value to assign
-  to. `target` is the function to be applied. `args` and `kwargs` represent the arguments to the function,
-  following the Python calling convention
-- `call_module` applies a module in the module hierarchy's `forward()` method to given arguments. `name` is
-  as previous. `target` is the fully-qualified name of the module in the module hierarchy to call.
-  `args` and `kwargs` represent the arguments to invoke the module on, _including the self argument_.
-- `call_method` calls a method on a value. `name` is as similar. `target` is the string name of the method
-  to apply to the `self` argument. `args` and `kwargs` represent the arguments to invoke the module on,
-  _including the self argument_.
-- `output` contains the output of the traced function in its `args[0]` attribute. This corresponds to the "return" statement
-  in the Graph printout.
-
-GraphModule automatically generates Python code for the operations it symbolically observed:
-
-```
-print(gm.code)
-```
-
-```
-def forward(self, x):
-    linear_weight = self.linear.weight
-    add_1 = x + linear_weight
-    linear_1 = self.linear(add_1)
-    relu_1 = linear_1.relu()
-    sum_1 = torch.sum(relu_1, dim = -1)
-    topk_1 = torch.topk(sum_1, 3)
-    return topk_1
-
-```
-
-Because this code is valid PyTorch code, the resulting `GraphModule` can be used in any context another
-`nn.Module` can be used, including in TorchScript tracing/compilation.
+Several example transformations can be found at the
+`examples <https://github.com/pytorch/examples/tree/master/fx>`__
+repository.
 '''
 
 from .graph_module import GraphModule
-from .symbolic_trace import symbolic_trace, Tracer
+from .symbolic_trace import symbolic_trace, Tracer, wrap
 from .graph import Graph
 from .node import Node, map_arg
 from .proxy import Proxy
+from .interpreter import Interpreter as Interpreter, Transformer as Transformer
+from .subgraph_rewriter import replace_pattern
