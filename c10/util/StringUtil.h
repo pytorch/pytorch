@@ -51,7 +51,7 @@ inline std::ostream& _str(std::ostream& ss, const T& t) {
 }
 
 template <>
-inline std::ostream& _str<CompileTimeEmptyString>(std::ostream& ss, const CompileTimeEmptyString& t) {
+inline std::ostream& _str<CompileTimeEmptyString>(std::ostream& ss, const CompileTimeEmptyString&) {
   return ss;
 }
 
