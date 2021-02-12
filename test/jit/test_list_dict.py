@@ -192,7 +192,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_empty_iterable(self):
         def fn():
-            return dict([]) # noqa: C406
+            return dict([])    # noqa: C406
 
         self.checkScript(fn, ())
 

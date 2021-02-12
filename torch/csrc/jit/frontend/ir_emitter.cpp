@@ -2975,10 +2975,10 @@ struct to_ir {
         return iterable_tree;
       }
       case prim::list: {
-        return emitApplySpecialFormForList(form, apply, type_hint);
+        return emitApplySpecialFormForList(apply, type_hint);
       }
       case prim::dict: {
-        return emitApplySpecialFormForDict(form, apply, type_hint);
+        return emitApplySpecialFormForDict(apply, type_hint);
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
@@ -2986,7 +2986,6 @@ struct to_ir {
   }
 
   std::shared_ptr<SugaredValue> emitApplySpecialFormForList(
-      Symbol& form,
       Apply& apply,
       const TypePtr& type_hint = nullptr) {
     if (apply.inputs().size() == 0) {
@@ -3032,12 +3031,11 @@ struct to_ir {
   }
 
   std::shared_ptr<SugaredValue> emitApplySpecialFormForDict(
-      Symbol& form,
       Apply& apply,
       const TypePtr& type_hint = nullptr) {
     auto add_kwargs = [&](Value* dc_value) {
       NamedValue self = NamedValue(apply.range(), "self", dc_value);
-      for (auto kwarg : apply.attributes()) {
+      for (const auto& kwarg : apply.attributes()) {
         auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
         auto k = emitExpr(name);
         auto v = emitExpr(kwarg.value());
@@ -3161,12 +3159,12 @@ struct to_ir {
       // Gather all the existing tuples in the input iterable
       if (!apply.inputs().empty()) {
         auto tuple_list = ListLiteral(apply.inputs()[0]).inputs();
-        for (auto tuple : tuple_list) {
+        for (const auto& tuple : tuple_list) {
           exprs.push_back(tuple);
         }
       }
       // Create tuples out of each kwarg and gather them as well
-      for (auto attr : apply.attributes()) {
+      for (const auto& attr : apply.attributes()) {
         auto k = StringLiteral::create(apply.range(), attr.name().name());
         auto v = attr.value();
         auto tuple_inputs = List<Expr>::create(apply.range(), {k, v});
