@@ -52,10 +52,7 @@ class VarSubMutator : public IRMutator {
       }
     }
 
-    return new ReduceOp(
-        body,
-        new_inner,
-        var->reducer());
+    return new ReduceOp(body, new_inner, var->reducer());
   }
 
  private:

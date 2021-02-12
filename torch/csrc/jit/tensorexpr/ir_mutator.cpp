@@ -285,8 +285,7 @@ const Expr* IRMutator::mutate(const ReduceOp* v) {
     new_reduce_args.push_back(static_cast<const Var*>(r->accept_mutator(this)));
   }
 
-  return new ReduceOp(
-      body_new, new_reduce_args, v->reducer());
+  return new ReduceOp(body_new, new_reduce_args, v->reducer());
 }
 
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
