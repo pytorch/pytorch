@@ -1144,6 +1144,7 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
   // because in the case where two outputs lie on the same path, we still need to explore past
   // the first output or we would miss the nodes that are required to compute the second output.
   int output_idx = 0;
+  auto min_seq_nr = std::numeric_limits<uint64_t>::max();
   for (auto & output_edge : outputs) {
     // (0) `is_needed` above corresponds to `exec_info_[fn].needed_`
     Node *output = output_edge.function.get();
@@ -1160,8 +1161,14 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
       }
       info.captures_->emplace_back(output_edge.input_nr, output_idx++);
     }
+    auto seq_nr = output->actual_sequence_nr();
+    min_seq_nr = (min_seq_nr < seq_nr) ? min_seq_nr : seq_nr;
   }
   captured_vars_.resize(output_idx);
+
+  // AccumulateGrad may have an actual_sequence_nr greater than its parent
+  const size_t discount = 10;
+  auto seq_nr_threshold = min_seq_nr > discount ? min_seq_nr - discount : 0;
 
   struct Frame {
     Frame (Node *fn) : fn_(fn), next_next_fn_(0) {}
@@ -1203,7 +1210,11 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
 
     if (child_fn) {
       // (2) next child exists but has not been seen
-      stack.emplace_back(child_fn);
+      if (child_fn->actual_sequence_nr() >= seq_nr_threshold) {
+        // we only recurse if this child_fn was created later than the earliest created
+        // output nodes
+        stack.emplace_back(child_fn);
+      }
     } else {
       // (3) no next child exists for `fn` means its `needed` has already been
       // finalized. pop stack and update parent

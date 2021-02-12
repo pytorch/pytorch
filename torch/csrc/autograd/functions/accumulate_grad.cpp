@@ -15,10 +15,12 @@ using at::Tensor;
 namespace torch { namespace autograd {
 
 // AccumulateGrad sets sequence_nr to the max value so it's always called
-// ASAP during backwards.
+// ASAP during backwards. We also store the actual_sequence_nr it otherwise
+// would've been for future use.
 AccumulateGrad::AccumulateGrad(Variable variable_)
-    : Node(/*sequence_nr=*/UINT64_MAX)
-    , variable(std::move(variable_)) {
+    : Node(/*sequence_nr=*/UINT64_MAX),
+    variable(std::move(variable_)),
+    actual_sequence_nr_(at::sequence_number::get_and_increment()) {
   add_input_metadata(variable);
 }
 

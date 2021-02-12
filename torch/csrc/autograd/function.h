@@ -262,6 +262,14 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return sequence_nr_;
   }
 
+  // Sequence number is currently being (mis?)used to also represent priority in the
+  // engine (for AccumulateGrad nodes, sequence_nr returns UINT64_MAX). We should
+  // probably rewrite it so sequence_nr is actually sequence_nr and we'd have
+  // something like `priority()` that uses sequence_nr to compute a priority score.
+  virtual uint64_t actual_sequence_nr() const noexcept {
+    return sequence_nr_;
+  }
+
   // assigning a node as a parent to this node
   void assign_parent();
 
