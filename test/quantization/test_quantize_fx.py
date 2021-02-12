@@ -294,7 +294,7 @@ class TestQuantizeFx(QuantizationTestCase):
     Unit tests for functionalities
     """
     @skipIfNoFBGEMM
-    def test_functional_no_debug(self):
+    def test_functional_not_reference(self):
         """ Test quantizing functional conv and linear
         """
         tests = self._get_conv_linear_test_cases()
@@ -309,11 +309,11 @@ class TestQuantizeFx(QuantizationTestCase):
                 inputs, quant_type,
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
-                debug=False)
+                reference=False)
 
     @skipIfNoFBGEMM
-    def test_functional_debug(self):
-        """ Test quantizing functional conv and linear with debug option
+    def test_functional_reference(self):
+        """ Test quantizing functional conv and linear with reference option
         """
         tests = self._get_conv_linear_test_cases()
         for (is_dynamic, ModuleClass, module_constructor_inputs,
@@ -327,7 +327,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
                 expected_node_occurrence=node_occurrence,
-                debug=True)
+                reference=True)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
@@ -346,7 +346,7 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'': qconfig}
         prepared = prepare_fx(m, qconfig_dict)
-        quantized = convert_fx(prepared, debug=True)
+        quantized = convert_fx(prepared, reference=True)
         qparams = (quantized._input_scale_0, quantized._input_zero_point_0)
         weight_obs = qconfig.weight()
         weight_obs(quantized.weight)
@@ -465,14 +465,14 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         for (ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
-            for debug in [True, False]:
+            for reference in [True, False]:
                 node_occurrence = dict()
                 if weight_prepack_node:
                     node_occurrence[weight_prepack_node] = 0
                 m = ModuleClass(*module_constructor_inputs).eval()
                 qconfig_dict = {"": float16_dynamic_qconfig}
                 m = prepare_fx(m, qconfig_dict)
-                m = convert_fx(m, debug=debug)
+                m = convert_fx(m, reference=reference)
                 self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 

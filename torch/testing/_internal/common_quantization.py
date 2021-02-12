@@ -497,20 +497,20 @@ class QuantizationTestCase(TestCase):
             print('input graph:', model.graph)
         models = {}
         outputs = {}
-        for d in [True, False]:
+        for reference in [True, False]:
             if dynamic:
-                models[d] = quantize_dynamic_jit(model, qconfig_dict, debug=d)
+                models[reference] = quantize_dynamic_jit(model, qconfig_dict, reference=reference)
                 # make sure it runs
-                outputs[d] = models[d](inputs)
+                outputs[reference] = models[reference](inputs)
             else:
                 # module under test can contain in-place ops, and we depend on
                 # input data staying constant for comparisons
                 inputs_copy = copy.deepcopy(inputs)
-                models[d] = quantize_jit(
+                models[reference] = quantize_jit(
                     model, qconfig_dict, test_only_eval_fn, [inputs_copy], inplace=False,
-                    debug=d)
+                    reference=reference)
                 # make sure it runs
-                outputs[d] = models[d](*inputs[0])
+                outputs[reference] = models[reference](*inputs[0])
 
         if debug:
             print('debug graph:', models[True].graph)
@@ -608,7 +608,7 @@ class QuantizationTestCase(TestCase):
                                expected_node=None,
                                expected_node_occurrence=None,
                                expected_node_list=None,
-                               debug=False,
+                               reference=False,
                                print_debug_info=False,
                                custom_qconfig=None,
                                prepare_expected_node=None,
@@ -633,7 +633,7 @@ class QuantizationTestCase(TestCase):
                                 NodeSpec.call_module(nnq.Conv2d),
                                 NodeSpec.call_function(F.hardtanh_),
                                 NodeSpec.call_method('dequantize')]
-                    debug: if True, enables debug mode
+                    reference: if True, enables reference mode
                     print_debug_info: if True, prints debug info
                     custom_qconfig: overrides default qconfig
                     prepare_expected_node: same as expected_node, but for prepare
@@ -685,11 +685,11 @@ class QuantizationTestCase(TestCase):
 
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
-            qgraph_debug = convert_fx(prepared_copy, debug=True)
+            qgraph_reference = convert_fx(prepared_copy, reference=True)
             result = qgraph(*inputs)
-            result_debug = qgraph_debug(*inputs)
+            result_reference = qgraph_reference(*inputs)
 
-            qgraph_to_check = qgraph_debug if debug else qgraph
+            qgraph_to_check = qgraph_reference if reference else qgraph
             if print_debug_info:
                 print()
                 print('quantized model:\n', qgraph_to_check)

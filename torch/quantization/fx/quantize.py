@@ -614,7 +614,7 @@ class Quantizer:
                             weight_observer_module()
         return
 
-    def _convert(self, model: GraphModule, debug: bool = False,
+    def _convert(self, model: GraphModule, reference: bool = False,
                  convert_custom_config_dict: Dict[str, Any] = None,
                  is_standalone_module: bool = False) -> GraphModule:
         """ standalone_module means it a submodule that is not inlined in
@@ -851,7 +851,7 @@ class Quantizer:
                         quantized = 0 in out_quant_idxs
 
                     result = obj.convert(
-                        self, node, load_arg, debug=debug,
+                        self, node, load_arg, reference=reference,
                         convert_custom_config_dict=convert_custom_config_dict)
                     if not is_observed_standalone_module_node:
                         quantized = is_output_quantized(node, obj)
@@ -957,12 +957,12 @@ class Quantizer:
         quantized = GraphModule(quantized_root, folded_graph)
         return quantized
 
-    def convert(self, model: GraphModule, debug: bool = False,
+    def convert(self, model: GraphModule, reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None,
                 is_standalone_module: bool = False) -> GraphModule:
         quantized = self._convert(
-            model, debug, convert_custom_config_dict, is_standalone_module)
-        if not debug:
+            model, reference, convert_custom_config_dict, is_standalone_module)
+        if not reference:
             quantized = self._fold_weight(quantized)
         return quantized
 
