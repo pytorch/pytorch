@@ -1184,8 +1184,12 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad):
     return output
 
 def sample_kwargs_clamp(device, dtype, input):
-    min_val = random.randint(2, 42)
-    max_val = random.randint(47, 95)
+    if dtype is torch.uint8:
+        min_val, max_val = (random.randint(1, 3), random.randint(4, 8))
+    elif dtype.is_floating_point:
+        min_val, max_val = (random.uniform(-8, 0), random.uniform(1, 8))
+    else:
+        min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))
     return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
 
 def sample_inputs_diag(op_info, device, dtype, requires_grad):
@@ -1496,6 +1500,7 @@ op_db: List[OpInfo] = [
                                   dtypes=[torch.complex64, torch.complex128]),)),
     UnaryUfuncInfo('clamp',
                    aliases=('clip', ),
+                   decorators=(precisionOverride({torch.bfloat16: 7e-2, torch.float16: 1e-2}),),
                    ref=np.clip,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and(torch.bfloat16),
