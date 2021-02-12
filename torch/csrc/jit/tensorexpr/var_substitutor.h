@@ -53,10 +53,7 @@ class VarSubMutator : public IRMutator {
     }
 
     return new ReduceOp(
-        const_cast<Buf*>(var->accumulator()),
-        body,
-        new_inner,
-        var->reducer());
+        const_cast<Buf*>(var->accumulator()), body, new_inner, var->reducer());
   }
 
  private:

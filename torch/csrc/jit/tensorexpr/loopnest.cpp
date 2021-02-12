@@ -264,10 +264,7 @@ class Vectorizer : public IRMutator {
 
     auto* out = try_vectorize(v, inputs, [&]() {
       return ExprHandle(new ReduceOp(
-          v->accumulator(),
-          inputs[0],
-          v->reduce_args(),
-          v->reducer()));
+          v->accumulator(), inputs[0], v->reduce_args(), v->reducer()));
     });
     return out;
   }
@@ -2142,15 +2139,19 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
 class SwapReduce : public IRMutator {
  public:
-  SwapReduce(const ReduceOp* old_reduce, ReduceOp* new_reduce, const std::vector<const Expr*>& new_indices)
-    : old_reduce_(old_reduce), new_reduce_(new_reduce), new_indices_(new_indices) {}
+  SwapReduce(
+      const ReduceOp* old_reduce,
+      ReduceOp* new_reduce,
+      const std::vector<const Expr*>& new_indices)
+      : old_reduce_(old_reduce),
+        new_reduce_(new_reduce),
+        new_indices_(new_indices) {}
 
   Stmt* mutate(const Store* v) override {
     if (const ReduceOp* op = dynamic_cast<const ReduceOp*>(v->value())) {
       if (op == old_reduce_) {
         auto buf = new_reduce_->accumulator();
-        return new Store(
-            buf, new_indices_, new_reduce_, new IntImm(1));
+        return new Store(buf, new_indices_, new_reduce_, new IntImm(1));
       }
     }
     return IRMutator::mutate(v);
@@ -2264,7 +2265,7 @@ void LoopNest::rfactor(
 
   auto old_outer = dynamic_cast<Store*>(st)->indices();
   auto new_outer = old_outer;
-  
+
   For* root_for = nullptr;
   For* target_for = nullptr;
   std::set<const Var*> reduce_args = {
@@ -2351,8 +2352,8 @@ void LoopNest::rfactor(
       reduce_op->accumulator(), old_outer, tmp_buf, new_outer);
   const Expr* new_body = reduce_op->body()->accept_mutator(&bufReplacer);
 
-  auto first_reduce = new ReduceOp(
-      tmp_buf, new_body, new_inner, reduce_op->reducer());
+  auto first_reduce =
+      new ReduceOp(tmp_buf, new_body, new_inner, reduce_op->reducer());
 
   auto second_reduce_load_indices = old_outer;
   second_reduce_load_indices.emplace_back(reduction_var);
