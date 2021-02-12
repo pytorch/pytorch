@@ -104,6 +104,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr),
+      topological_nr_(at::sequence_number::peek()),
       next_edges_(std::move(next_edges)) {
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
@@ -231,15 +232,41 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
   void set_next_edge(size_t index, Edge edge) {
+    Node* node = edge.function.get();
+    if (node) {
+      auto topo_nr = edge.function.get()->topological_nr();
+      if (topological_nr_ <= topo_nr) {
+        topological_nr_ = topo_nr + 1;
+      }
+    }
+
     next_edges_[index] = std::move(edge);
   }
 
   void add_next_edge(Edge edge) {
+    Node* node = edge.function.get();
+    if (node) {
+      auto topo_nr = edge.function.get()->topological_nr();
+      if (topological_nr_ <= topo_nr) {
+        topological_nr_ = topo_nr + 1;
+      }
+    }
     next_edges_.push_back(std::move(edge));
   }
 
   void set_next_edges(edge_list&& next_edges) {
     next_edges_ = std::move(next_edges);
+
+    for(const auto& next_edge : next_edges_) {
+      Node* node = next_edge.function.get();
+      if (!node) {
+        continue;
+      }
+      auto topo_nr = node->topological_nr();
+      if (topological_nr_ <= topo_nr) {
+        topological_nr_ = topo_nr + 1;
+      }
+    }
   }
 
   const edge_list& next_edges() const noexcept {
@@ -262,12 +289,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return sequence_nr_;
   }
 
-  // Sequence number is currently being (mis?)used to also represent priority in the
-  // engine (for AccumulateGrad nodes, sequence_nr returns UINT64_MAX). We should
-  // probably rewrite it so sequence_nr is actually sequence_nr and we'd have
-  // something like `priority()` that uses sequence_nr to compute a priority score.
-  virtual uint64_t actual_sequence_nr() const noexcept {
-    return sequence_nr_;
+  // The topological order number of this `Node`
+  uint64_t topological_nr() const noexcept {
+    return topological_nr_;
   }
 
   // assigning a node as a parent to this node
@@ -398,6 +422,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Since `Node`s are neither copyable nor moveable, we can have const
   // fields.
   const uint64_t sequence_nr_;
+
+  // Topological ordering of nodes
+  uint64_t topological_nr_;
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;

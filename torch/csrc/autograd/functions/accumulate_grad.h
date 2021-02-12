@@ -36,10 +36,6 @@ struct TORCH_API AccumulateGrad : public Node {
     return new_grad;
   }
 
-  virtual uint64_t actual_sequence_nr() const noexcept override {
-    return actual_sequence_nr_;
-  }
-
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
   // Otherwise, uses 'update_grad' to update the grad for the variable.
@@ -231,7 +227,6 @@ struct TORCH_API AccumulateGrad : public Node {
   }
 
   Variable variable;
-  uint64_t actual_sequence_nr_;
 };
 
 #undef CHECK_RESULT

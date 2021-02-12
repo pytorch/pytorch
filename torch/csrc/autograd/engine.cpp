@@ -825,20 +825,16 @@ void Engine::evaluate_function(
 }
 
 inline static uint64_t compute_min_sequence_nr(const edge_list& outputs) {
-  // Computes the mininum sequence number among all the outputs and applies
-  // a small constant discount to take into account the lazy creation of AccumulateGrad
+  // Computes the mininum sequence number among all the outputs
   if (outputs.empty()) {
     return 0;
   }
   auto min_seq_nr = std::numeric_limits<uint64_t>::max();
   for (auto & output_edge : outputs) {
-    Node *output = output_edge.function.get();
-    auto seq_nr = output->actual_sequence_nr();
+    auto seq_nr = output_edge.function.get()->topological_nr();
     min_seq_nr = (min_seq_nr < seq_nr) ? min_seq_nr : seq_nr;
   }
-  // AccumulateGrad may have an actual_sequence_nr greater than its parent
-  const size_t discount = 10;
-  return min_seq_nr > discount ? min_seq_nr - discount : 0;
+  return min_seq_nr;
 }
 
 auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_seq_nr) -> void {
@@ -851,7 +847,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_seq_
   auto& dependencies = task.dependencies_;
   while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
-    if (fn->actual_sequence_nr() < min_seq_nr) {
+    if (fn->topological_nr() < min_seq_nr) {
       continue;
     }
     for (const auto& edge : fn->next_edges()) {
@@ -1224,7 +1220,7 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
 
     if (child_fn) {
       // (2) next child exists but has not been seen
-      if (child_fn->actual_sequence_nr() < min_seq_nr) {
+      if (child_fn->topological_nr() < min_seq_nr) {
         // child created before the first output means this child cannot have
         // an edge to output
         continue;
