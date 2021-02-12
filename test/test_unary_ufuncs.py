@@ -11,7 +11,7 @@ import unittest
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, IS_MACOS, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
+    suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
     gradcheck)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
@@ -464,14 +464,13 @@ class TestUnaryUfuncs(TestCase):
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
 
-    @unittest.skipIf(IS_MACOS, "Skip Reference: https://github.com/pytorch/pytorch/issues/47500")
     @dtypes(torch.cfloat, torch.cdouble)
     def test_sqrt_complex_edge_values(self, device, dtype):
         # Test Reference: https://github.com/pytorch/pytorch/pull/47424
         x = torch.tensor(0. - 1.0000e+20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
-        x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
+        x = torch.tensor((-1.0e+60 if dtype == torch.cdouble else -1.0e+20) - 4988429.2j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
     @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
