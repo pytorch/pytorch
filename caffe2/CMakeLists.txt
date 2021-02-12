@@ -12,9 +12,9 @@ if(MSVC)
 endif()
 
 # Debug messages - if you want to get a list of source files and examine
-# target information enable the following by `set(ADD_DEBUG_INFO TRUE)`.
-set(ADD_DEBUG_INFO FALSE)
-if(ADD_DEBUG_INFO)
+# target information, enable the following by -DPRINT_CMAKE_DEBUG_INFO=ON.
+set(PRINT_CMAKE_DEBUG_INFO FALSE CACHE BOOL "print cmake debug information")
+if(PRINT_CMAKE_DEBUG_INFO)
   include(../cmake/DebugHelper.cmake)
 endif()
 
@@ -193,7 +193,7 @@ if(BUILD_SPLIT_CUDA)
   endforeach()
 endif()
 
-if(ADD_DEBUG_INFO)
+if(PRINT_CMAKE_DEBUG_INFO)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
     message(STATUS "  " ${tmp})
@@ -511,7 +511,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
   list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
 
-  if(ADD_DEBUG_INFO)
+  if(PRINT_CMAKE_DEBUG_INFO)
     message(STATUS "Interpreter sources: ")
     foreach(tmp ${LIBTORCH_CMAKE_SRCS})
       message(STATUS "  " ${tmp})
@@ -1285,6 +1285,11 @@ elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
 endif()
 
+if(PRINT_CMAKE_DEBUG_INFO)
+  print_target_properties(torch)
+  print_target_properties(torch_cpu)
+endif()
+
 # Install PDB files for MSVC builds
 if(MSVC AND BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:torch_cpu> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
@@ -1455,11 +1460,6 @@ endif()
 
 add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
 target_link_libraries(lite_interpreter_demo torch_library)
-if(ADD_DEBUG_INFO)
-  print_target_properties(torch)
-  print_target_properties(lite_interpreter_demo)
-  print_target_properties(torch_cpu)
-endif()
 
 # ---[ Test binaries.
 if(BUILD_TEST)

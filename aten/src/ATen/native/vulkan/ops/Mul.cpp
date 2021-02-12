@@ -44,6 +44,7 @@ Tensor mul_scalar(
           },
           VK_KERNEL(mul_scalar),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -99,6 +100,7 @@ Tensor& mul_scalar_(
           },
           VK_KERNEL(mul_scalar_),
           v_self.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
