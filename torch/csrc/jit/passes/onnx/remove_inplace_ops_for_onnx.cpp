@@ -316,6 +316,10 @@ Value* MatchIfBlocksOutputForValue(
     Value* orig_data,
     Block* outer_block,
     Value* origOutput) {
+  if (outer_block->owningNode()->kind() == prim::Loop)
+    return outer_block->owningNode()->outputs().at(
+        outer_block->owningNode()->outputs().size() - 1);
+
   if (outer_block->owningNode()->kind() != prim::If)
     return nullptr;
 
@@ -467,8 +471,8 @@ void RegisterInplaceNodeInLoopBlocks(
     next_node = outer_block->owningNode();
     next_node->addOutput()->setType(new_inplace_node->type());
     next_block = next_node->owningBlock();
-    if (next_node->kind() ==
-        prim::Loop) // Do not register input if nested in If block
+    if (next_node->kind() == prim::Loop) // Do not register input if nested in
+                                         // If block. Register in Loop blocks.
       node_list.emplace_back(std::make_pair(outer_block, next_node));
   }
 
@@ -485,11 +489,10 @@ void RegisterInplaceNodeInLoopBlocks(
     node_list.pop_back();
   }
 
-  // Update inplace node inputs inside the inner most block.
-  auto prev_data = block_node->inputs().at(0);
-  while (inplace_ops.find(prev_data->node()->kind()) != inplace_ops.end()) {
-    prev_data = prev_data->node()->inputs().at(0);
-  }
+  // Update inplace node inputs inside the outer most block.
+  auto outer_block_node = outer_block->owningNode();
+  auto prev_data =
+      outer_block_node->inputs().at(outer_block_node->inputs().size() - 1);
   for (auto node : block_node->owningBlock()->nodes()) {
     size_t idx = 0;
     for (auto inputs_ : node->inputs()) {
@@ -874,7 +877,7 @@ Value* findArgumentAsInputParam(
       name);
 }
 
-Node* insertCloneBeforeNode(
+Node* insertCloneAfterNode(
     const std::shared_ptr<Graph>& graph,
     Value* orig_data,
     Node* node) {
@@ -902,16 +905,24 @@ Node* insertCloneBeforeNode(
 Value* registerSetAttrInBlocks(
     const std::shared_ptr<Graph>& graph,
     Block* block,
-    Value* newValue,
+    Node* cloneNode,
     Value* origValue,
     const std::string& output_name) {
-  auto cloneNode = insertCloneBeforeNode(graph, newValue, block->return_node());
   auto next_node = block->owningNode();
+
+  RegisterInplaceNodeInLoopBlocks(
+      origValue, cloneNode->output(), cloneNode, block, next_node);
 
   RegisterInplaceNodeInIfBlocks(
       origValue, cloneNode->output(), block, next_node, output_name);
 
-  return MatchIfBlocksOutputForValue(origValue, block, cloneNode->output());
+  Value* output = nullptr;
+  while (nullptr != block->owningNode() &&
+         block != origValue->node()->owningBlock()) {
+    output = MatchIfBlocksOutputForValue(origValue, block, cloneNode->output());
+    block = block->owningNode()->owningBlock();
+  }
+  return output;
 }
 
 void trackAndRegisterAttributesInBlocks(
@@ -958,20 +969,22 @@ void trackAndRegisterAttributesInBlocks(
       // If inside a block, keep the output value to register in block
       // output.
       auto block_ = n->owningBlock();
+      Node* cloneNode = insertCloneAfterNode(graph, n->inputs().at(1), n);
       if (block_->owningNode() &&
-          block_->owningNode()->kind() == prim::If) { // TODO: Add loop
-
+          (block_->owningNode()->kind() == prim::If ||
+           block_->owningNode()->kind() == prim::Loop)) {
         auto attrValue = (setAttrValues.find(fullName) != setAttrValues.end())
             ? setAttrValues[fullName]
             : allAttrValues[fullName];
 
         auto blockOutput = registerSetAttrInBlocks(
-            graph, block_, n->inputs().at(1), attrValue, fullName);
+            graph, block_, cloneNode, attrValue, fullName);
+
         nextSetAttrValues[fullName] = blockOutput;
       }
       // SetAttr writes a value to an attr. Keep this
       // in the setAttrValues map.
-      setAttrValues[fullName] = n->inputs().at(1);
+      setAttrValues[fullName] = cloneNode->output();
     }
   } else if (n->kind() == prim::GetAttr) { // Handle GetAttr node
     if (setAttrValues.find(fullName) != setAttrValues.end()) {
@@ -979,8 +992,7 @@ void trackAndRegisterAttributesInBlocks(
       // Read its value from setAttrValues map.
       auto set_attr_node_input = setAttrValues[fullName];
       // Clone SetAttr input
-      auto cloneNode = insertCloneBeforeNode(graph, set_attr_node_input, n);
-      n->output()->replaceAllUsesAfterNodeWith(n, cloneNode->output());
+      n->output()->replaceAllUsesAfterNodeWith(n, set_attr_node_input);
     } else if (allAttrValues.find(fullName) != allAttrValues.end()) {
       // Attr has not been set earlier in the graph. Replace it with the
       // graph parameter if exists.
@@ -1019,10 +1031,7 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
       PrepareCopyForONNX(n);
     } else if (n->kind() == aten::index_put || n->kind() == aten::index_put_) {
       PrepareIndexPutForONNX(n);
-    } else if (mr.inplaceOpVariant(
-                   n)) { // n->kind().is_aten() &&
-                         // n->schema().name().at(n->schema().name().size()
-                         // - 1) == '_') {
+    } else if (mr.inplaceOpVariant(n)) {
       PrepareInplaceOpsInBlocksForONNX(n);
     } else if (n->kind() == aten::pop) {
       PrepareListPopForONNX(n);
