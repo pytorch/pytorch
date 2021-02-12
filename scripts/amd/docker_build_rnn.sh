@@ -1,0 +1,1 @@
+sudo docker build -f scripts/amd/amd.short.dockerfile -t rnn_test .

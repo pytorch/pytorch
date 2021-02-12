@@ -1,0 +1,1268 @@
+test_batch_istft_cpu (__main__.TestFFTCPU) ... /opt/conda/lib/python3.6/site-packages/torch/functional.py:655: UserWarning: istft will require a complex-valued input tensor in a future PyTorch release. Matching the output from stft with return_complex=True.  (Triggered internally at  /dockerx/pytorch/aten/src/ATen/native/SpectralOps.cpp:779.)
+  normalized, onesided, length, return_complex)
+ok
+test_complex_istft_real_equiv_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_complex_stft_definition_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_complex_stft_onesided_cpu (__main__.TestFFTCPU) ... ok
+test_complex_stft_real_equiv_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_complex_stft_roundtrip_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_complex_stft_roundtrip_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_cufft_plan_cache_cpu_float64 (__main__.TestFFTCPU) ... skipped 'Only runs on cuda'
+test_empty_fft_fft_fft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_fft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_fft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_fft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_fftn_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_fftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_fftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_fftn_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_hfft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_hfft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_hfft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_hfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ifft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ifft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ifft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ifft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ifftn_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ifftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ifftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ifftn_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ihfft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_ihfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_irfft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_irfft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_irfft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_irfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_irfftn_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_irfftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_irfftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_irfftn_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_rfft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_rfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_rfftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_fft_rfftn_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft2_fftn_equivalence_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fft2_fftn_equivalence_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fft2_invalid_cpu (__main__.TestFFTCPU) ... ok
+test_fft2_numpy_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fft2_numpy_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_fft_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_fft_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_fftn_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_fftn_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_hfft_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_hfft_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_ifft_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_ifft_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_ifftn_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_ifftn_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_ihfft_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_ihfft_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_irfft_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_irfft_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_irfftn_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_irfftn_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_rfft_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_rfft_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_rfftn_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_and_bfloat16_errors_fft_rfftn_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_ifft_rfft_irfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_input_modification_cpu (__main__.TestFFTCPU) ... ok
+test_fft_invalid_dtypes_cpu (__main__.TestFFTCPU) ... ok
+test_fft_round_trip_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fft_round_trip_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fft_round_trip_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fft_round_trip_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_int8 (__main__.TestFFTCPU) ... ok
+test_fftfreq_numpy_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftfreq_numpy_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fftfreq_out_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftfreq_out_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fftn_invalid_fft_fftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fftn_invalid_fft_fftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftn_invalid_fft_ifftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fftn_invalid_fft_ifftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftn_invalid_fft_irfftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fftn_invalid_fft_irfftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftn_invalid_fft_rfftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftn_round_trip_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fftn_round_trip_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fftn_round_trip_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftn_round_trip_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fftshift_frequencies_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftshift_frequencies_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fftshift_numpy_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fftshift_numpy_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fftshift_numpy_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftshift_numpy_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_istft_linearity_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_istft_of_sine_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_istft_round_trip_simple_cases_cpu_float64 (__main__.TestFFTCPU)
+stft -> istft should recover the original signale ... ok
+test_istft_round_trip_various_params_cpu_float64 (__main__.TestFFTCPU)
+stft -> istft should recover the original signale ... ok
+test_istft_throws_cpu (__main__.TestFFTCPU)
+istft should throw exception for invalid parameters ... ok
+test_reference_1d_fft_fft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_fft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_fft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_fft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_hfft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_hfft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_hfft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_hfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_ifft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_ifft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_ifft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_ifft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_ihfft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_ihfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_irfft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_irfft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_irfft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_irfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_rfft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_1d_fft_rfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_fftn_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_fftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_fftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_fftn_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_ifftn_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_ifftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_ifftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_ifftn_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_irfftn_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_irfftn_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_irfftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_irfftn_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_rfftn_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_reference_nd_fft_rfftn_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_stft_cpu_float64 (__main__.TestFFTCPU) ... /opt/conda/lib/python3.6/site-packages/torch/functional.py:581: UserWarning: stft will soon require the return_complex parameter be given for real inputs, and will further require that return_complex=True in a future PyTorch release. (Triggered internally at  /dockerx/pytorch/aten/src/ATen/native/SpectralOps.cpp:635.)
+  normalized, onesided, return_complex)
+ok
+test_stft_requires_complex_cpu (__main__.TestFFTCPU) ... ok
+test_stft_roundtrip_complex_window_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_stft_roundtrip_complex_window_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_batch_istft_cuda (__main__.TestFFTCUDA) ... FAIL
+test_complex_istft_real_equiv_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_complex_stft_definition_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_complex_stft_onesided_cuda (__main__.TestFFTCUDA) ... ok
+test_complex_stft_real_equiv_cuda_complex128 (__main__.TestFFTCUDA) ... FAIL
+test_complex_stft_roundtrip_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_complex_stft_roundtrip_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_cufft_plan_cache_cuda_float64 (__main__.TestFFTCUDA) ... ERROR
+test_empty_fft_fft_fft_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_fft_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_fft_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_fft_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_fftn_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_fftn_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_fftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_fftn_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_hfft_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_hfft_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_hfft_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_hfft_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ifft_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ifft_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ifft_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ifft_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ifftn_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ifftn_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ifftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ifftn_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ihfft_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_ihfft_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_irfft_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_irfft_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_irfft_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_irfft_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_irfftn_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_irfftn_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_irfftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_irfftn_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_rfft_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_rfft_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_rfftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_fft_rfftn_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_fft2_fftn_equivalence_cuda_complex64 (__main__.TestFFTCUDA) ... FAIL
+test_fft2_fftn_equivalence_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_fft2_invalid_cuda (__main__.TestFFTCUDA) ... ok
+test_fft2_numpy_cuda_complex128 (__main__.TestFFTCUDA) ... FAIL
+test_fft2_numpy_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_fft_half_and_bfloat16_errors_fft_fft_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_fft_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_fftn_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_fftn_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_hfft_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_hfft_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_ifft_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_ifft_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_ifftn_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_ifftn_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_ihfft_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_ihfft_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_irfft_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_irfft_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_irfftn_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_irfftn_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_rfft_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_rfft_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_rfftn_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_and_bfloat16_errors_fft_rfftn_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_ifft_rfft_irfft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_fft_input_modification_cuda (__main__.TestFFTCUDA) ... ok
+test_fft_invalid_dtypes_cuda (__main__.TestFFTCUDA) ... ok
+test_fft_round_trip_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_fft_round_trip_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fft_round_trip_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_fft_round_trip_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_fft_type_promotion_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_fft_type_promotion_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fft_type_promotion_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fft_type_promotion_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_fft_type_promotion_cuda_int8 (__main__.TestFFTCUDA) ... ok
+test_fftfreq_numpy_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fftfreq_numpy_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_fftfreq_out_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fftfreq_out_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_fftn_invalid_fft_fftn_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fftn_invalid_fft_fftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fftn_invalid_fft_ifftn_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fftn_invalid_fft_ifftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fftn_invalid_fft_irfftn_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fftn_invalid_fft_irfftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fftn_invalid_fft_rfftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fftn_round_trip_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_fftn_round_trip_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fftn_round_trip_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_fftn_round_trip_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_fftshift_frequencies_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fftshift_frequencies_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_fftshift_numpy_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_fftshift_numpy_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fftshift_numpy_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fftshift_numpy_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_istft_linearity_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_istft_of_sine_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_istft_round_trip_simple_cases_cuda_float64 (__main__.TestFFTCUDA)
+stft -> istft should recover the original signale ... ok
+test_istft_round_trip_various_params_cuda_float64 (__main__.TestFFTCUDA)
+stft -> istft should recover the original signale ... ok
+test_istft_throws_cuda (__main__.TestFFTCUDA)
+istft should throw exception for invalid parameters ... ok
+test_reference_1d_fft_fft_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_reference_1d_fft_fft_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_reference_1d_fft_fft_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_fft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_hfft_cuda_complex128 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_hfft_cuda_complex64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_hfft_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_hfft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_ifft_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_reference_1d_fft_ifft_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_reference_1d_fft_ifft_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_ifft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_ihfft_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_ihfft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_irfft_cuda_complex128 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_irfft_cuda_complex64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_irfft_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_irfft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_rfft_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_reference_1d_fft_rfft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_nd_fft_fftn_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_reference_nd_fft_fftn_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_reference_nd_fft_fftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_reference_nd_fft_fftn_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_reference_nd_fft_ifftn_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_reference_nd_fft_ifftn_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_reference_nd_fft_ifftn_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_reference_nd_fft_ifftn_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_reference_nd_fft_irfftn_cuda_complex128 (__main__.TestFFTCUDA) ... FAIL
+test_reference_nd_fft_irfftn_cuda_complex64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_nd_fft_irfftn_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_reference_nd_fft_irfftn_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_reference_nd_fft_rfftn_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_reference_nd_fft_rfftn_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_stft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_stft_requires_complex_cuda (__main__.TestFFTCUDA) ... ok
+test_stft_roundtrip_complex_window_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_stft_roundtrip_complex_window_cuda_float64 (__main__.TestFFTCUDA) ... ok
+
+======================================================================
+ERROR: test_cufft_plan_cache_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 286, in instantiated_test
+    raise rte
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 702, in multi_fn
+    return fn(slf, devices, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 678, in only_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 624, in test_cufft_plan_cache
+    with plan_cache_max_size(devices[0], max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
+  File "/opt/conda/lib/python3.6/site-packages/torch/backends/cuda/__init__.py", line 77, in __getattr__
+    return getattr(self[torch.cuda.current_device()], name)
+  File "/opt/conda/lib/python3.6/site-packages/torch/backends/cuda/__init__.py", line 21, in __get__
+    return self.getter(obj.device_index)
+RuntimeError: cuFFT with HIP is not supported
+
+======================================================================
+FAIL: test_batch_istft_cuda (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 1197, in test_batch_istft
+    self.assertEqual(i_original.repeat(1, 1), i_single, atol=1e-6, rtol=0, exact_dtype=True)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!With rtol=0 and atol=1e-06, found 4 element(s) (out of 4) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 0.06985293701291084 (-0.09313724935054779 vs. -0.023284312337636948), which occurred at index (0, 1).
+
+======================================================================
+FAIL: test_complex_stft_real_equiv_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 885, in test_complex_stft_real_equiv
+    self.assertEqual(expected, actual)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!Real parts failed to compare as equal! With rtol=1e-07 and atol=1e-07, found 2300 element(s) (out of 2300) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 6.740903201413019 (0.12732363832205024 vs. 6.868226839735069), which occurred at index (49, 0).
+
+======================================================================
+FAIL: test_complex_stft_roundtrip_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 784, in test_complex_stft_roundtrip
+    self.assertEqual(x_roundtrip, x)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!With rtol=1e-07 and atol=1e-07, found 600 element(s) (out of 600) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 3.3709136254371512 (0.9160237625377121 vs. -2.454889862899439), which occurred at index 68.
+
+======================================================================
+FAIL: test_fft2_fftn_equivalence_cuda_complex64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 425, in test_fft2_fftn_equivalence
+    self.assertEqual(actual, expect)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!With rtol=1.3e-06 and atol=1e-05, found 32 element(s) (out of 32) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 0.22019865363836288 (0.03619711846113205 vs. -0.18400153517723083), which occurred at index (3, 2).
+
+======================================================================
+FAIL: test_fft2_fftn_equivalence_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 425, in test_fft2_fftn_equivalence
+    self.assertEqual(actual, expect)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!With rtol=1.3e-06 and atol=1e-05, found 31 element(s) (out of 32) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 0.24263576231896877 (0.003774857148528099 vs. -0.23886090517044067), which occurred at index (2, 6).
+
+======================================================================
+FAIL: test_fft2_numpy_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 380, in test_fft2_numpy
+    self.assertEqual(actual, expected)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.0635234028152808 and 0.12541498218954547 gives a difference of 0.18893838500482626, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.016303947684641e-05!
+
+======================================================================
+FAIL: test_fft2_numpy_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 380, in test_fft2_numpy
+    self.assertEqual(actual, expected)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.19405153511740236 and 0.2066018682740422 gives a difference of 0.40065340339144456, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0268582428756256e-05!
+
+======================================================================
+FAIL: test_fft_ifft_rfft_irfft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 606, in test_fft_ifft_rfft_irfft
+    self._test_fft_ifft_rfft_irfft(device, dtype)
+  File "test_spectral_ops.py", line 574, in _test_fft_ifft_rfft_irfft
+    _test_real((100,), 1)
+  File "test_spectral_ops.py", line 567, in _test_real
+    self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='rfft and irfft')
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!With rtol=0 and atol=1e-08, found 100 element(s) (out of 100) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 24.257781370552028 (23.669156669694818 vs. -0.5886247008572111), which occurred at index 6.
+rfft and irfft
+
+======================================================================
+FAIL: test_fft_round_trip_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 175, in test_fft_round_trip
+    forward != torch.fft.fft or x.is_complex()))
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!Real parts failed to compare as equal! With rtol=1.3e-06 and atol=1e-05, found 67 element(s) (out of 67) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 3.005229789763689 (2.994863510131836 vs. -0.010366279631853104), which occurred at index 46.
+
+======================================================================
+FAIL: test_fft_round_trip_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 175, in test_fft_round_trip
+    forward != torch.fft.fft or x.is_complex()))
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!Real parts failed to compare as equal! With rtol=1e-07 and atol=1e-07, found 80 element(s) (out of 80) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 18.44778518222925 (-17.724026660905327 vs. 0.7237585213239224), which occurred at index 17.
+
+======================================================================
+FAIL: test_fftn_round_trip_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 317, in test_fftn_round_trip
+    forward != torch.fft.fftn or x.is_complex()))
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!With rtol=1.3e-06 and atol=1e-05, found 20 element(s) (out of 20) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 2.2774136066436768 (2.2774136066436768 vs. 4.583354834597123e-18), which occurred at index (3, 3).
+
+======================================================================
+FAIL: test_fftn_round_trip_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 317, in test_fftn_round_trip
+    forward != torch.fft.fftn or x.is_complex()))
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!With rtol=1e-07 and atol=1e-07, found 20 element(s) (out of 20) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 3.5550632594154425 (-3.545589496606714 vs. 0.009473762808728522), which occurred at index (1, 1).
+
+======================================================================
+FAIL: test_reference_1d_fft_fft_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part 2.802596928649634e-45 and -1.9729785770177841 gives a difference of 1.9729785770177841, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.2564872150123121e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_fft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part -11.981024724429076 and -0.37511135786599104 gives a difference of 11.605913366563085, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0487644765225788e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_hfft_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -10.856315716192023 and -11.128634735357883 gives a difference of 0.27231901916585954, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 2.446722515596525e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_hfft_cuda_complex64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.37254899740219116 and 10.110131070017815 gives a difference of 10.482680067420006, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 2.3143170391023162e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_hfft_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.37254899740219116 and -2.6445469856262207 gives a difference of 2.2719979882240295, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.3437911081314088e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_hfft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing 4.4122353153075995 and -2.4159763557627665 gives a difference of 6.828211671070366, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.3140769262491597e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_ifft_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part 0.01421387866139412 and -0.029447441448026627 gives a difference of 0.04366132010942075, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0038281673882435e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_ifft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part -0.9984187270357563 and -0.03125927982216592 gives a difference of 0.9671594472135904, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0040637063768816e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_ihfft_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part 0.01421387866139412 and -0.029447441448026627 gives a difference of 0.04366132010942075, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0038281673882435e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_ihfft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part -0.9984187270357563 and -0.0312592798221661 gives a difference of 0.9671594472135902, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0040637063768817e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_irfft_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.08637086177669498 and -0.08430783890422638 gives a difference of 0.002063022872468595, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0109600190575495e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_irfft_cuda_complex64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.0028223409317433834 and 0.07659190204558951 gives a difference of 0.07941424297733289, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0099569472659268e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_irfft_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.0028223409317433834 and -0.020034446860804703 gives a difference of 0.01721210592906132, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0026044780919046e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_irfft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing 0.2005561506958 and -0.10981710708012575 gives a difference of 0.3103732577759257, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0142762239204164e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_rfft_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part 0.035065069794654846 and -1.9729785770177841 gives a difference of 2.008043646812439, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.2564872150123121e-05!
+
+======================================================================
+FAIL: test_reference_1d_fft_rfft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 136, in test_reference_1d
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part -11.981024724429076 and -0.37511135786599326 gives a difference of 11.605913366563083, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0487644765225792e-05!
+
+======================================================================
+FAIL: test_reference_nd_fft_irfftn_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 277, in test_reference_nd
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.0635234028152808 and 0.12541498218954547 gives a difference of 0.18893838500482626, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.016303947684641e-05!
+
+======================================================================
+FAIL: test_reference_nd_fft_irfftn_cuda_complex64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 277, in test_reference_nd
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing 0.0 and -0.16042265808209777 gives a difference of 0.16042265808209777, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0208549455506727e-05!
+
+======================================================================
+FAIL: test_reference_nd_fft_irfftn_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 277, in test_reference_nd
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing 2785.2802734375 and -0.2304774890653789 gives a difference of 2785.5107509265654, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0299620735784994e-05!
+
+======================================================================
+FAIL: test_reference_nd_fft_irfftn_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 277, in test_reference_nd
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.19405153511740236 and 0.2066018682740422 gives a difference of 0.40065340339144456, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0268582428756256e-05!
+
+======================================================================
+FAIL: test_reference_nd_fft_rfftn_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 277, in test_reference_nd
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part -4.57304961963199e+19 and -4.94322007894516 gives a difference of 4.57304961963199e+19, but the allowed difference with rtol=1.3e-06 and atol=0.0001 is only 0.00010642618610262871!
+
+======================================================================
+FAIL: test_reference_nd_fft_rfftn_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 255, in test_wrapper
+    return test(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 714, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 277, in test_reference_nd
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1199, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1077, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1210, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part -1.1681720813215857 and 3.714277586535465 gives a difference of 4.882449667857051, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.4828560862496106e-05!
+
+======================================================================
+FAIL: test_stft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 874, in wrapper
+    method(*args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 281, in instantiated_test
+    result = test_fn(self, *args)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 572, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 729, in test_stft
+    _test((10,), 7, center=center)
+  File "test_spectral_ops.py", line 720, in _test
+    self.assertEqual(result, ref_result, atol=7e-6, rtol=0, msg='stft comparison against librosa', exact_dtype=False)
+  File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1165, in assertEqual
+    super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+AssertionError: False is not true : Tensors failed to compare as equal!With rtol=0 and atol=7e-06, found 64 element(s) (out of 80) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 7.042726283829486 (-3.481399878563306 vs. 3.561326405266181), which occurred at index (0, 8, 0).
+stft comparison against librosa
+
+----------------------------------------------------------------------
+Ran 286 tests in 72.940s
+
+FAILED (failures=35, errors=1, skipped=1)
+Fail to import hypothesis in common_utils, tests are not derandomized

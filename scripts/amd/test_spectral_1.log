@@ -1,0 +1,1181 @@
+test_batch_istft_cpu (__main__.TestFFTCPU) ... /root/.local/lib/python3.6/site-packages/torch/functional.py:587: UserWarning: The function torch.irfft is deprecated and will be removed in a future PyTorch release. Use the new torch.fft module functions, instead, by importing torch.fft and calling torch.fft.ifft or torch.fft.irfft. (Triggered internally at  /var/lib/jenkins/pytorch/aten/src/ATen/native/SpectralOps.cpp:602.)
+  normalized, onesided, length, return_complex)
+ok
+test_complex_istft_real_equiv_cpu_complex128 (__main__.TestFFTCPU) ... /root/.local/lib/python3.6/site-packages/torch/functional.py:587: UserWarning: The function torch.ifft is deprecated and will be removed in a future PyTorch release. Use the new torch.fft module functions, instead, by importing torch.fft and calling torch.fft.ifft or torch.fft.ifftn. (Triggered internally at  /var/lib/jenkins/pytorch/aten/src/ATen/native/SpectralOps.cpp:578.)
+  normalized, onesided, length, return_complex)
+ok
+test_complex_stft_definition_cpu_complex128 (__main__.TestFFTCPU) ... /root/.local/lib/python3.6/site-packages/torch/functional.py:516: UserWarning: The function torch.fft is deprecated and will be removed in PyTorch 1.8. Use the new torch.fft module functions, instead, by importing torch.fft and calling torch.fft.fft or torch.fft.fftn. (Triggered internally at  /var/lib/jenkins/pytorch/aten/src/ATen/native/SpectralOps.cpp:567.)
+  normalized, onesided, return_complex)
+ok
+test_complex_stft_onesided_cpu (__main__.TestFFTCPU) ... /root/.local/lib/python3.6/site-packages/torch/functional.py:516: UserWarning: stft will require the return_complex parameter be explicitly  specified in a future PyTorch release. Use return_complex=False  to preserve the current behavior or return_complex=True to return  a complex output. (Triggered internally at  /var/lib/jenkins/pytorch/aten/src/ATen/native/SpectralOps.cpp:653.)
+  normalized, onesided, return_complex)
+/root/.local/lib/python3.6/site-packages/torch/functional.py:516: UserWarning: The function torch.rfft is deprecated and will be removed in a future PyTorch release. Use the new torch.fft module functions, instead, by importing torch.fft and calling torch.fft.fft or torch.fft.rfft. (Triggered internally at  /var/lib/jenkins/pytorch/aten/src/ATen/native/SpectralOps.cpp:590.)
+  normalized, onesided, return_complex)
+ok
+test_complex_stft_real_equiv_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_complex_stft_roundtrip_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_complex_stft_roundtrip_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_cufft_plan_cache_cpu_float64 (__main__.TestFFTCPU) ... skipped 'Only runs on cuda'
+test_empty_fft_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_empty_fft_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_empty_fft_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_empty_fft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_backward_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fft_backward_cpu_float64 (__main__.TestFFTCPU) ... /root/.local/lib/python3.6/site-packages/torch/autograd/__init__.py:204: UserWarning: Casting complex values to real discards the imaginary part (Triggered internally at  /var/lib/jenkins/pytorch/aten/src/ATen/native/Copy.cpp:162.)
+  inputs, allow_unused)
+ok
+test_fft_function_clobbered_cpu (__main__.TestFFTCPU) ... ok
+test_fft_half_errors_cpu_bfloat16 (__main__.TestFFTCPU) ... ok
+test_fft_half_errors_cpu_float16 (__main__.TestFFTCPU) ... ok
+test_fft_ifft_rfft_irfft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_input_modification_cpu (__main__.TestFFTCPU) ... ok
+test_fft_invalid_dtypes_cpu (__main__.TestFFTCPU) ... ok
+test_fft_numpy_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fft_numpy_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fft_numpy_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fft_numpy_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_round_trip_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fft_round_trip_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fft_round_trip_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fft_round_trip_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fft_type_promotion_cpu_int8 (__main__.TestFFTCPU) ... ok
+test_fftn_backward_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fftn_backward_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fftn_invalid_cpu (__main__.TestFFTCPU) ... ok
+test_fftn_numpy_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fftn_numpy_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fftn_numpy_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftn_numpy_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_fftn_round_trip_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_fftn_round_trip_cpu_complex64 (__main__.TestFFTCPU) ... ok
+test_fftn_round_trip_cpu_float32 (__main__.TestFFTCPU) ... ok
+test_fftn_round_trip_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_istft_linearity_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_istft_of_sine_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_istft_round_trip_simple_cases_cpu_float64 (__main__.TestFFTCPU)
+stft -> istft should recover the original signale ... ok
+test_istft_round_trip_various_params_cpu_float64 (__main__.TestFFTCPU)
+stft -> istft should recover the original signale ... ok
+test_istft_throws_cpu (__main__.TestFFTCPU)
+istft should throw exception for invalid parameters ... ok
+test_stft_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_stft_roundtrip_complex_window_cpu_complex128 (__main__.TestFFTCPU) ... ok
+test_stft_roundtrip_complex_window_cpu_float64 (__main__.TestFFTCPU) ... ok
+test_batch_istft_cuda (__main__.TestFFTCUDA) ... ok
+test_complex_istft_real_equiv_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_complex_stft_definition_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_complex_stft_onesided_cuda (__main__.TestFFTCUDA) ... ok
+test_complex_stft_real_equiv_cuda_complex128 (__main__.TestFFTCUDA) ... FAIL
+test_complex_stft_roundtrip_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_complex_stft_roundtrip_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_cufft_plan_cache_cuda_float64 (__main__.TestFFTCUDA) ... ERROR
+test_empty_fft_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_empty_fft_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_fft_backward_cuda_complex128 (__main__.TestFFTCUDA) ... ERROR
+test_fft_backward_cuda_float64 (__main__.TestFFTCUDA) ... ERROR
+test_fft_function_clobbered_cuda (__main__.TestFFTCUDA) ... ok
+test_fft_half_errors_cuda_bfloat16 (__main__.TestFFTCUDA) ... ok
+test_fft_half_errors_cuda_float16 (__main__.TestFFTCUDA) ... ok
+test_fft_ifft_rfft_irfft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_fft_input_modification_cuda (__main__.TestFFTCUDA) ... ok
+test_fft_invalid_dtypes_cuda (__main__.TestFFTCUDA) ... ok
+test_fft_numpy_cuda_complex128 (__main__.TestFFTCUDA) ... FAIL
+test_fft_numpy_cuda_complex64 (__main__.TestFFTCUDA) ... FAIL
+test_fft_numpy_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_fft_numpy_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_fft_round_trip_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_fft_round_trip_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fft_round_trip_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_fft_round_trip_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_fft_type_promotion_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_fft_type_promotion_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fft_type_promotion_cuda_float32 (__main__.TestFFTCUDA) ... ok
+test_fft_type_promotion_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_fft_type_promotion_cuda_int8 (__main__.TestFFTCUDA) ... ok
+test_fftn_backward_cuda_complex128 (__main__.TestFFTCUDA) ... ERROR
+test_fftn_backward_cuda_float64 (__main__.TestFFTCUDA) ... ERROR
+test_fftn_invalid_cuda (__main__.TestFFTCUDA) ... ok
+test_fftn_numpy_cuda_complex128 (__main__.TestFFTCUDA) ... FAIL
+test_fftn_numpy_cuda_complex64 (__main__.TestFFTCUDA) ... FAIL
+test_fftn_numpy_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_fftn_numpy_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_fftn_round_trip_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_fftn_round_trip_cuda_complex64 (__main__.TestFFTCUDA) ... ok
+test_fftn_round_trip_cuda_float32 (__main__.TestFFTCUDA) ... FAIL
+test_fftn_round_trip_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_istft_linearity_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_istft_of_sine_cuda_float64 (__main__.TestFFTCUDA) ... ok
+test_istft_round_trip_simple_cases_cuda_float64 (__main__.TestFFTCUDA)
+stft -> istft should recover the original signale ... ok
+test_istft_round_trip_various_params_cuda_float64 (__main__.TestFFTCUDA)
+stft -> istft should recover the original signale ... ok
+test_istft_throws_cuda (__main__.TestFFTCUDA)
+istft should throw exception for invalid parameters ... ok
+test_stft_cuda_float64 (__main__.TestFFTCUDA) ... FAIL
+test_stft_roundtrip_complex_window_cuda_complex128 (__main__.TestFFTCUDA) ... ok
+test_stft_roundtrip_complex_window_cuda_float64 (__main__.TestFFTCUDA) ... ok
+
+======================================================================
+ERROR: test_cufft_plan_cache_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 639, in multi_fn
+    return fn(slf, devices, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 615, in only_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 624, in test_cufft_plan_cache
+    with plan_cache_max_size(devices[0], max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
+  File "/root/.local/lib/python3.6/site-packages/torch/backends/cuda/__init__.py", line 77, in __getattr__
+    return getattr(self[torch.cuda.current_device()], name)
+  File "/root/.local/lib/python3.6/site-packages/torch/backends/cuda/__init__.py", line 21, in __get__
+    return self.getter(obj.device_index)
+RuntimeError: cuFFT with HIP is not supported
+
+======================================================================
+ERROR: test_fft_backward_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 351, in test_fft_backward
+    self.assertTrue(torch.autograd.gradcheck(test_fn, (input,)))
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 390, in gradcheck
+    checkIfNumericalAnalyticAreClose(a, n, j)
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 372, in checkIfNumericalAnalyticAreClose
+    'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 289, in fail_test
+    raise RuntimeError(msg)
+RuntimeError: Jacobian mismatch for output 0 with respect to input 0,
+numerical:tensor([[ 1.0000e+00,  1.0000e+00,  1.0000e+00,  ...,  1.0000e+00,
+          1.0000e+00,  1.0000e+00],
+        [ 1.0000e+00, -1.0000e+00,  1.0000e+00,  ..., -1.0000e+00,
+          1.0000e+00, -1.0000e+00],
+        [ 2.0000e+00,  1.9977e+00,  1.9909e+00,  ...,  1.9796e+00,
+          1.9909e+00,  1.9977e+00],
+        ...,
+        [ 1.7764e-09,  9.5164e-02, -1.9011e-01,  ..., -2.8463e-01,
+          1.9011e-01, -9.5164e-02],
+        [ 1.0000e+00, -1.0000e+00,  1.0000e+00,  ..., -1.0000e+00,
+          1.0000e+00, -1.0000e+00],
+        [-1.0000e+00, -1.0000e+00, -1.0000e+00,  ..., -1.0000e+00,
+         -1.0000e+00, -1.0000e+00]], device='cuda:0', dtype=torch.float64)
+analytical:tensor([[ 1.0000e+00,  1.0000e+00,  1.0000e+00,  ...,  1.0000e+00,
+          1.0000e+00,  1.0000e+00],
+        [-0.0000e+00, -0.0000e+00, -0.0000e+00,  ..., -0.0000e+00,
+         -0.0000e+00, -0.0000e+00],
+        [ 2.0000e+00,  1.9977e+00,  1.9909e+00,  ...,  1.9796e+00,
+          1.9909e+00,  1.9977e+00],
+        ...,
+        [ 1.8849e-16,  9.5164e-02, -1.9011e-01,  ..., -2.8463e-01,
+          1.9011e-01, -9.5164e-02],
+        [ 1.0000e+00, -1.0000e+00,  1.0000e+00,  ..., -1.0000e+00,
+          1.0000e+00, -1.0000e+00],
+        [-0.0000e+00, -0.0000e+00, -0.0000e+00,  ..., -0.0000e+00,
+         -0.0000e+00, -0.0000e+00]], device='cuda:0', dtype=torch.float64)
+
+
+======================================================================
+ERROR: test_fft_backward_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 351, in test_fft_backward
+    self.assertTrue(torch.autograd.gradcheck(test_fn, (input,)))
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 383, in gradcheck
+    "Gradients failed to compare equal for grad output = 1j. ")
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 372, in checkIfNumericalAnalyticAreClose
+    'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 289, in fail_test
+    raise RuntimeError(msg)
+RuntimeError: Gradients failed to compare equal for grad output = 1j. Jacobian mismatch for output 0 with respect to input 0,
+numerical:tensor([[ 0.0000e+00, -3.7055e+37, -2.8288e+37,  0.0000e+00,  2.8288e+37,
+          3.7055e+37],
+        [ 0.0000e+00,  2.8437e+38,  2.5807e+38,  0.0000e+00, -2.5807e+38,
+         -2.8437e+38],
+        [ 0.0000e+00, -4.3644e+38, -2.5556e+38,  0.0000e+00,  2.5556e+38,
+          4.3644e+38],
+        [ 0.0000e+00,  2.7265e+38,  9.6083e+38,  0.0000e+00, -9.6083e+38,
+         -2.7265e+38],
+        [ 0.0000e+00, -3.0952e+39, -3.6077e+38,  0.0000e+00,  3.6077e+38,
+          3.0952e+39],
+        [ 0.0000e+00, -3.7677e+39, -5.3267e+39,  0.0000e+00,  5.3267e+39,
+          3.7677e+39],
+        [ 0.0000e+00, -1.0707e+39,  1.0643e+40,  0.0000e+00, -1.0643e+40,
+          1.0707e+39],
+        [ 0.0000e+00, -1.4213e+40, -4.9354e+40,  0.0000e+00,  4.9354e+40,
+          1.4213e+40],
+        [ 0.0000e+00, -9.6367e+39,  9.5787e+40,  0.0000e+00, -9.5787e+40,
+          9.6367e+39],
+        [ 0.0000e+00, -1.2792e+41, -4.4419e+41,  0.0000e+00,  4.4419e+41,
+          1.2792e+41],
+        [ 0.0000e+00, -8.6731e+40,  8.6208e+41,  0.0000e+00, -8.6208e+41,
+          8.6731e+40],
+        [ 0.0000e+00, -1.1513e+42, -3.9977e+42,  0.0000e+00,  3.9977e+42,
+          1.1513e+42],
+        [ 0.0000e+00, -7.8057e+41,  7.7587e+42,  0.0000e+00, -7.7587e+42,
+          7.8057e+41],
+        [ 0.0000e+00, -1.0361e+43, -3.5979e+43,  0.0000e+00,  3.5979e+43,
+          1.0361e+43],
+        [ 0.0000e+00, -7.0252e+42,  6.9828e+43,  0.0000e+00, -6.9828e+43,
+          7.0252e+42],
+        [ 0.0000e+00, -9.3253e+43, -3.2381e+44,  0.0000e+00,  3.2381e+44,
+          9.3253e+43],
+        [ 0.0000e+00, -6.3227e+43,  6.2846e+44,  0.0000e+00, -6.2846e+44,
+          6.3227e+43],
+        [ 0.0000e+00, -8.3928e+44, -2.9143e+45,  0.0000e+00,  2.9143e+45,
+          8.3928e+44],
+        [ 0.0000e+00, -5.6904e+44,  5.6561e+45,  0.0000e+00, -5.6561e+45,
+          5.6904e+44],
+        [ 0.0000e+00, -7.5535e+45, -2.6229e+46,  0.0000e+00,  2.6229e+46,
+          7.5535e+45],
+        [ 0.0000e+00, -5.1214e+45,  5.0905e+46,  0.0000e+00, -5.0905e+46,
+          5.1214e+45],
+        [ 0.0000e+00, -6.7981e+46, -2.3606e+47,  0.0000e+00,  2.3606e+47,
+          6.7981e+46],
+        [ 0.0000e+00, -4.6092e+46,  4.5814e+47,  0.0000e+00, -4.5814e+47,
+          4.6092e+46],
+        [ 0.0000e+00, -6.1183e+47, -2.1245e+48,  0.0000e+00,  2.1245e+48,
+          6.1183e+47],
+        [ 0.0000e+00, -4.1483e+47,  4.1233e+48,  0.0000e+00, -4.1233e+48,
+          4.1483e+47],
+        [ 0.0000e+00, -5.5065e+48, -1.9121e+49,  0.0000e+00,  1.9121e+49,
+          5.5065e+48],
+        [ 0.0000e+00, -3.7335e+48,  3.7110e+49,  0.0000e+00, -3.7110e+49,
+          3.7335e+48],
+        [ 0.0000e+00, -4.9558e+49, -1.7209e+50,  0.0000e+00,  1.7209e+50,
+          4.9558e+49],
+        [ 0.0000e+00, -3.3601e+49,  3.3399e+50,  0.0000e+00, -3.3399e+50,
+          3.3601e+49],
+        [ 0.0000e+00, -4.4603e+50, -1.5488e+51,  0.0000e+00,  1.5488e+51,
+          4.4603e+50],
+        [ 0.0000e+00, -3.0241e+50,  3.0059e+51,  0.0000e+00, -3.0059e+51,
+          3.0241e+50],
+        [ 0.0000e+00, -4.0142e+51, -1.3939e+52,  0.0000e+00,  1.3939e+52,
+          4.0142e+51],
+        [ 0.0000e+00, -2.7217e+51,  2.7053e+52,  0.0000e+00, -2.7053e+52,
+          2.7217e+51],
+        [ 0.0000e+00, -3.6128e+52, -1.2545e+53,  0.0000e+00,  1.2545e+53,
+          3.6128e+52],
+        [ 0.0000e+00, -2.4495e+52,  2.4348e+53,  0.0000e+00, -2.4348e+53,
+          2.4495e+52],
+        [ 0.0000e+00, -3.2515e+53, -1.1291e+54,  0.0000e+00,  1.1291e+54,
+          3.2515e+53],
+        [ 0.0000e+00, -2.2046e+53,  2.1913e+54,  0.0000e+00, -2.1913e+54,
+          2.2046e+53],
+        [ 0.0000e+00, -2.9264e+54, -1.0162e+55,  0.0000e+00,  1.0162e+55,
+          2.9264e+54],
+        [ 0.0000e+00, -1.9841e+54,  1.9722e+55,  0.0000e+00, -1.9722e+55,
+          1.9841e+54],
+        [ 0.0000e+00, -2.6337e+55, -9.1455e+55,  0.0000e+00,  9.1455e+55,
+          2.6337e+55],
+        [ 0.0000e+00, -1.7857e+55,  1.7749e+56,  0.0000e+00, -1.7749e+56,
+          1.7857e+55],
+        [ 0.0000e+00, -2.3704e+56, -8.2309e+56,  0.0000e+00,  8.2309e+56,
+          2.3704e+56],
+        [ 0.0000e+00, -1.6071e+56,  1.5975e+57,  0.0000e+00, -1.5975e+57,
+          1.6071e+56],
+        [ 0.0000e+00, -2.1333e+57, -7.4078e+57,  0.0000e+00,  7.4078e+57,
+          2.1333e+57],
+        [ 0.0000e+00, -1.4464e+57,  1.4377e+58,  0.0000e+00, -1.4377e+58,
+          1.4464e+57],
+        [ 0.0000e+00, -1.9200e+58, -6.6670e+58,  0.0000e+00,  6.6670e+58,
+          1.9200e+58],
+        [ 0.0000e+00, -1.3018e+58,  1.2939e+59,  0.0000e+00, -1.2939e+59,
+          1.3018e+58],
+        [ 0.0000e+00, -1.7280e+59, -6.0003e+59,  0.0000e+00,  6.0003e+59,
+          1.7280e+59],
+        [ 0.0000e+00, -1.1716e+59,  1.1645e+60,  0.0000e+00, -1.1645e+60,
+          1.1716e+59],
+        [ 0.0000e+00, -1.5552e+60, -5.4003e+60,  0.0000e+00,  5.4003e+60,
+          1.5552e+60],
+        [ 0.0000e+00, -1.0544e+60,  1.0481e+61,  0.0000e+00, -1.0481e+61,
+          1.0544e+60],
+        [ 0.0000e+00, -1.3997e+61, -4.8603e+61,  0.0000e+00,  4.8603e+61,
+          1.3997e+61],
+        [ 0.0000e+00, -9.4900e+60,  9.4328e+61,  0.0000e+00, -9.4328e+61,
+          9.4900e+60],
+        [ 0.0000e+00, -1.2597e+62, -4.3742e+62,  0.0000e+00,  4.3742e+62,
+          1.2597e+62],
+        [ 0.0000e+00, -8.5410e+61,  8.4895e+62,  0.0000e+00, -8.4895e+62,
+          8.5410e+61],
+        [ 0.0000e+00, -1.1337e+63, -3.9368e+63,  0.0000e+00,  3.9368e+63,
+          1.1337e+63],
+        [ 0.0000e+00, -7.6869e+62,  7.6406e+63,  0.0000e+00, -7.6406e+63,
+          7.6869e+62],
+        [ 0.0000e+00, -1.0204e+64, -3.5431e+64,  0.0000e+00,  3.5431e+64,
+          1.0204e+64],
+        [ 0.0000e+00, -6.9182e+63,  6.8765e+64,  0.0000e+00, -6.8765e+64,
+          6.9182e+63],
+        [ 0.0000e+00, -9.1833e+64, -3.1888e+65,  0.0000e+00,  3.1888e+65,
+          9.1833e+64],
+        [ 0.0000e+00, -6.2264e+64,  6.1889e+65,  0.0000e+00, -6.1889e+65,
+          6.2264e+64],
+        [ 0.0000e+00, -8.2650e+65, -2.8699e+66,  0.0000e+00,  2.8699e+66,
+          8.2650e+65],
+        [ 0.0000e+00, -5.6037e+65,  5.5700e+66,  0.0000e+00, -5.5700e+66,
+          5.6037e+65],
+        [ 0.0000e+00, -7.4385e+66, -2.5829e+67,  0.0000e+00,  2.5829e+67,
+          7.4385e+66],
+        [ 0.0000e+00, -5.0434e+66,  5.0130e+67,  0.0000e+00, -5.0130e+67,
+          5.0434e+66],
+        [ 0.0000e+00, -6.6946e+67, -2.3247e+68,  0.0000e+00,  2.3247e+68,
+          6.6946e+67],
+        [ 0.0000e+00, -4.5390e+67,  4.5117e+68,  0.0000e+00, -4.5117e+68,
+          4.5390e+67]], device='cuda:0', dtype=torch.float64)
+analytical:tensor([[ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000, -0.8660, -0.8660,  0.0000,  0.8660,  0.8660],
+        [ 0.0000, -0.8660,  0.8660,  0.0000, -0.8660,  0.8660],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.8660, -0.8660,  0.0000,  0.8660, -0.8660],
+        [ 0.0000,  0.8660,  0.8660,  0.0000, -0.8660, -0.8660],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+        [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]],
+       device='cuda:0', dtype=torch.float64)
+
+
+======================================================================
+ERROR: test_fftn_backward_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 483, in test_fftn_backward
+    self.assertTrue(torch.autograd.gradcheck(test_fn, inputs))
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 390, in gradcheck
+    checkIfNumericalAnalyticAreClose(a, n, j)
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 372, in checkIfNumericalAnalyticAreClose
+    'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 289, in fail_test
+    raise RuntimeError(msg)
+RuntimeError: Jacobian mismatch for output 0 with respect to input 0,
+numerical:tensor([[ 0.0313,  0.0313,  0.0313,  ...,  0.0313,  0.0313,  0.0313],
+        [-0.0313,  0.0312, -0.0313,  ...,  0.0313, -0.0313,  0.0313],
+        [ 0.0625,  0.0442,  0.0000,  ..., -0.0442,  0.0000,  0.0442],
+        ...,
+        [ 0.0000, -0.0442,  0.0625,  ..., -0.0442,  0.0000,  0.0442],
+        [ 0.0313, -0.0313,  0.0313,  ...,  0.0313,  0.0313,  0.0313],
+        [ 0.0313,  0.0313,  0.0313,  ...,  0.0313, -0.0313,  0.0313]],
+       device='cuda:0', dtype=torch.float64)
+analytical:tensor([[ 3.1250e-02,  3.1250e-02,  3.1250e-02,  ...,  3.1250e-02,
+          3.1250e-02,  3.1250e-02],
+        [ 0.0000e+00,  0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,
+          0.0000e+00,  0.0000e+00],
+        [ 6.2500e-02,  4.4194e-02, -2.7061e-18,  ..., -4.4194e-02,
+          2.7061e-18,  4.4194e-02],
+        ...,
+        [ 0.0000e+00, -4.4194e-02,  6.2500e-02,  ..., -4.4194e-02,
+         -1.1209e-18,  4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02,  ..., -1.9135e-18,
+          1.9135e-18, -1.9135e-18],
+        [ 0.0000e+00,  0.0000e+00,  0.0000e+00,  ...,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02]], device='cuda:0', dtype=torch.float64)
+
+
+======================================================================
+ERROR: test_fftn_backward_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 483, in test_fftn_backward
+    self.assertTrue(torch.autograd.gradcheck(test_fn, inputs))
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 390, in gradcheck
+    checkIfNumericalAnalyticAreClose(a, n, j)
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 372, in checkIfNumericalAnalyticAreClose
+    'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
+  File "/root/.local/lib/python3.6/site-packages/torch/autograd/gradcheck.py", line 289, in fail_test
+    raise RuntimeError(msg)
+RuntimeError: Jacobian mismatch for output 0 with respect to input 0,
+numerical:tensor([[ 3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02],
+        [ 6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  0.0000e+00,  4.4194e-02,  6.2500e-02,  4.4194e-02,
+          0.0000e+00, -4.4194e-02, -6.2500e-02, -4.4194e-02,  0.0000e+00,
+          4.4194e-02,  6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,
+         -6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,  6.2500e-02,
+          4.4194e-02,  2.7756e-11, -4.4194e-02, -6.2500e-02, -4.4194e-02,
+         -6.9389e-12,  4.4194e-02],
+        [ 6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,
+          0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00],
+        [ 6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02, -6.2500e-02,
+          4.4194e-02,  0.0000e+00, -4.4194e-02,  6.2500e-02, -4.4194e-02,
+          0.0000e+00,  4.4194e-02, -6.2500e-02,  4.4194e-02,  0.0000e+00,
+         -4.4194e-02,  6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,
+         -6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,  6.2500e-02,
+         -4.4194e-02,  0.0000e+00,  4.4194e-02, -6.2500e-02,  4.4194e-02,
+          0.0000e+00, -4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02],
+        [ 3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02],
+        [ 6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  0.0000e+00,  4.4194e-02,  0.0000e+00, -4.4194e-02,
+         -6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,  6.2500e-02,
+          4.4194e-02, -6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,
+          6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,  0.0000e+00,
+          4.4194e-02,  6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,
+         -6.2500e-02, -4.4194e-02],
+        [ 6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00,  0.0000e+00, -6.2500e-02,
+          0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,  0.0000e+00,
+          6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02],
+        [ 6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02, -6.2500e-02,
+          4.4194e-02,  0.0000e+00, -4.4194e-02,  6.9389e-12, -4.4194e-02,
+          6.2500e-02, -4.4194e-02, -6.9389e-12,  4.4194e-02, -6.2500e-02,
+          4.4194e-02, -6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,
+          6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,  0.0000e+00,
+          4.4194e-02, -6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,
+          6.2500e-02, -4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02],
+        [ 3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02],
+        [ 6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  0.0000e+00,  4.4194e-02, -6.2500e-02, -4.4194e-02,
+          0.0000e+00,  4.4194e-02,  6.2500e-02,  4.4194e-02,  0.0000e+00,
+         -4.4194e-02,  6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,
+         -6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02, -6.2500e-02,
+         -4.4194e-02, -2.7756e-11,  4.4194e-02,  6.2500e-02,  4.4194e-02,
+          6.9389e-12, -4.4194e-02],
+        [ 6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00, -6.2500e-02,
+          0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02,  0.0000e+00],
+        [ 6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02, -6.2500e-02,
+          4.4194e-02,  0.0000e+00, -4.4194e-02, -6.2500e-02,  4.4194e-02,
+          0.0000e+00, -4.4194e-02,  6.2500e-02, -4.4194e-02,  0.0000e+00,
+          4.4194e-02,  6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,
+         -6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02, -6.2500e-02,
+          4.4194e-02,  2.7756e-11, -4.4194e-02,  6.2500e-02, -4.4194e-02,
+         -6.9389e-12,  4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02],
+        [ 3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02],
+        [ 6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  0.0000e+00,  4.4194e-02,  0.0000e+00,  4.4194e-02,
+          6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02, -6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,
+          6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,  0.0000e+00,
+         -4.4194e-02, -6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,
+          6.2500e-02,  4.4194e-02],
+        [ 6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,
+          0.0000e+00,  6.2500e-02],
+        [ 6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02, -6.2500e-02,
+          4.4194e-02,  0.0000e+00, -4.4194e-02, -6.9389e-12,  4.4194e-02,
+         -6.2500e-02,  4.4194e-02,  6.9389e-12, -4.4194e-02,  6.2500e-02,
+         -4.4194e-02, -6.2500e-02,  4.4194e-02,  0.0000e+00, -4.4194e-02,
+          6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,  0.0000e+00,
+         -4.4194e-02,  6.2500e-02, -4.4194e-02,  0.0000e+00,  4.4194e-02,
+         -6.2500e-02,  4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02]], device='cuda:0', dtype=torch.float64)
+analytical:tensor([[ 3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02],
+        [ 6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  2.7061e-18,  4.4194e-02,  6.2500e-02,  4.4194e-02,
+         -2.7061e-18, -4.4194e-02, -6.2500e-02, -4.4194e-02,  2.7061e-18,
+          4.4194e-02,  6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02,
+         -6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02,  6.2500e-02,
+          4.4194e-02, -2.7061e-18, -4.4194e-02, -6.2500e-02, -4.4194e-02,
+          2.7061e-18,  4.4194e-02],
+        [ 6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,
+          0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00],
+        [ 6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02, -6.2500e-02,
+          4.4194e-02, -2.7061e-18, -4.4194e-02,  6.2500e-02, -4.4194e-02,
+          2.7061e-18,  4.4194e-02, -6.2500e-02,  4.4194e-02, -2.7061e-18,
+         -4.4194e-02,  6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02,
+         -6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02,  6.2500e-02,
+         -4.4194e-02,  2.7061e-18,  4.4194e-02, -6.2500e-02,  4.4194e-02,
+         -2.7061e-18, -4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02],
+        [ 3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  1.9135e-18,  1.9135e-18,
+          1.9135e-18,  1.9135e-18,  1.9135e-18,  1.9135e-18,  1.9135e-18,
+          1.9135e-18, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -1.9135e-18,
+         -1.9135e-18, -1.9135e-18, -1.9135e-18, -1.9135e-18, -1.9135e-18,
+         -1.9135e-18, -1.9135e-18],
+        [ 6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  2.7061e-18,  4.4194e-02,  3.8270e-18, -4.4194e-02,
+         -6.2500e-02, -4.4194e-02, -3.8270e-18,  4.4194e-02,  6.2500e-02,
+          4.4194e-02, -6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02,
+          6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02, -3.8270e-18,
+          4.4194e-02,  6.2500e-02,  4.4194e-02,  3.8270e-18, -4.4194e-02,
+         -6.2500e-02, -4.4194e-02],
+        [ 6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00,  3.8270e-18, -6.2500e-02,
+         -3.8270e-18,  6.2500e-02,  3.8270e-18, -6.2500e-02, -3.8270e-18,
+          6.2500e-02, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00, -3.8270e-18,
+          6.2500e-02,  3.8270e-18, -6.2500e-02, -3.8270e-18,  6.2500e-02,
+          3.8270e-18, -6.2500e-02],
+        [ 6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02, -6.2500e-02,
+          4.4194e-02, -2.7061e-18, -4.4194e-02,  3.8270e-18, -4.4194e-02,
+          6.2500e-02, -4.4194e-02, -3.8270e-18,  4.4194e-02, -6.2500e-02,
+          4.4194e-02, -6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02,
+          6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02, -3.8270e-18,
+          4.4194e-02, -6.2500e-02,  4.4194e-02,  3.8270e-18, -4.4194e-02,
+          6.2500e-02, -4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  1.9135e-18, -1.9135e-18,
+          1.9135e-18, -1.9135e-18,  1.9135e-18, -1.9135e-18,  1.9135e-18,
+         -1.9135e-18, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -1.9135e-18,
+          1.9135e-18, -1.9135e-18,  1.9135e-18, -1.9135e-18,  1.9135e-18,
+         -1.9135e-18,  1.9135e-18],
+        [ 3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02],
+        [ 6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  2.7061e-18,  4.4194e-02, -6.2500e-02, -4.4194e-02,
+          2.7061e-18,  4.4194e-02,  6.2500e-02,  4.4194e-02, -2.7061e-18,
+         -4.4194e-02,  6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02,
+         -6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  2.7061e-18,  4.4194e-02,  6.2500e-02,  4.4194e-02,
+         -2.7061e-18, -4.4194e-02],
+        [ 6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00, -6.2500e-02,
+          0.0000e+00,  6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,
+          6.2500e-02,  0.0000e+00],
+        [ 6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02, -6.2500e-02,
+          4.4194e-02, -2.7061e-18, -4.4194e-02, -6.2500e-02,  4.4194e-02,
+         -2.7061e-18, -4.4194e-02,  6.2500e-02, -4.4194e-02,  2.7061e-18,
+          4.4194e-02,  6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02,
+         -6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02, -6.2500e-02,
+          4.4194e-02, -2.7061e-18, -4.4194e-02,  6.2500e-02, -4.4194e-02,
+          2.7061e-18,  4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02, -3.1250e-02,
+          3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02],
+        [ 3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,  3.1250e-02,
+          3.1250e-02,  3.1250e-02,  3.1250e-02, -1.9135e-18, -1.9135e-18,
+         -1.9135e-18, -1.9135e-18, -1.9135e-18, -1.9135e-18, -1.9135e-18,
+         -1.9135e-18, -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,
+         -3.1250e-02, -3.1250e-02, -3.1250e-02, -3.1250e-02,  1.9135e-18,
+          1.9135e-18,  1.9135e-18,  1.9135e-18,  1.9135e-18,  1.9135e-18,
+          1.9135e-18,  1.9135e-18],
+        [ 6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02,  2.7061e-18,  4.4194e-02, -3.8270e-18,  4.4194e-02,
+          6.2500e-02,  4.4194e-02,  3.8270e-18, -4.4194e-02, -6.2500e-02,
+         -4.4194e-02, -6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02,
+          6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02,  3.8270e-18,
+         -4.4194e-02, -6.2500e-02, -4.4194e-02, -3.8270e-18,  4.4194e-02,
+          6.2500e-02,  4.4194e-02],
+        [ 6.2500e-02,  0.0000e+00, -6.2500e-02,  0.0000e+00,  6.2500e-02,
+          0.0000e+00, -6.2500e-02,  0.0000e+00, -3.8270e-18,  6.2500e-02,
+          3.8270e-18, -6.2500e-02, -3.8270e-18,  6.2500e-02,  3.8270e-18,
+         -6.2500e-02, -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,
+         -6.2500e-02,  0.0000e+00,  6.2500e-02,  0.0000e+00,  3.8270e-18,
+         -6.2500e-02, -3.8270e-18,  6.2500e-02,  3.8270e-18, -6.2500e-02,
+         -3.8270e-18,  6.2500e-02],
+        [ 6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02, -6.2500e-02,
+          4.4194e-02, -2.7061e-18, -4.4194e-02, -3.8270e-18,  4.4194e-02,
+         -6.2500e-02,  4.4194e-02,  3.8270e-18, -4.4194e-02,  6.2500e-02,
+         -4.4194e-02, -6.2500e-02,  4.4194e-02, -2.7061e-18, -4.4194e-02,
+          6.2500e-02, -4.4194e-02,  2.7061e-18,  4.4194e-02,  3.8270e-18,
+         -4.4194e-02,  6.2500e-02, -4.4194e-02, -3.8270e-18,  4.4194e-02,
+         -6.2500e-02,  4.4194e-02],
+        [ 3.1250e-02, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02, -1.9135e-18,  1.9135e-18,
+         -1.9135e-18,  1.9135e-18, -1.9135e-18,  1.9135e-18, -1.9135e-18,
+          1.9135e-18, -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,
+         -3.1250e-02,  3.1250e-02, -3.1250e-02,  3.1250e-02,  1.9135e-18,
+         -1.9135e-18,  1.9135e-18, -1.9135e-18,  1.9135e-18, -1.9135e-18,
+          1.9135e-18, -1.9135e-18]], device='cuda:0', dtype=torch.float64)
+
+
+======================================================================
+FAIL: test_complex_stft_real_equiv_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 885, in test_complex_stft_real_equiv
+    self.assertEqual(expected, actual)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1136, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Tensors failed to compare as equal! Real parts failed to compare as equal! With rtol=1e-07 and atol=1e-07, found 2300 element(s) (out of 2300) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 6.740903201413019 (0.12732363832205024 vs. 6.868226839735069), which occurred at index (49, 0).
+
+======================================================================
+FAIL: test_complex_stft_roundtrip_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 783, in test_complex_stft_roundtrip
+    self.assertEqual(x_roundtrip, x)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1136, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Tensors failed to compare as equal! With rtol=1e-07 and atol=1e-07, found 600 element(s) (out of 600) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 3.3709136254371512 (0.9160237625377121 vs. -2.454889862899439), which occurred at index 68.
+
+======================================================================
+FAIL: test_fft_ifft_rfft_irfft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 606, in test_fft_ifft_rfft_irfft
+    self._test_fft_ifft_rfft_irfft(device, dtype)
+  File "test_spectral_ops.py", line 564, in _test_fft_ifft_rfft_irfft
+    _test_real((100,), 1)
+  File "test_spectral_ops.py", line 556, in _test_real
+    self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='rfft and irfft')
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1136, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : rfft and irfft
+
+======================================================================
+FAIL: test_fft_numpy_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 182, in test_fft_numpy
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1058, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1173, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -10.856315716192023 and -11.128634735357883 gives a difference of 0.27231901916585954, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 2.446722515596525e-05!
+
+======================================================================
+FAIL: test_fft_numpy_cuda_complex64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 182, in test_fft_numpy
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1058, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1173, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing 10.70384407043457 and 10.110131070017815 gives a difference of 0.5937130004167557, but the allowed difference with rtol=1.3e-06 and atol=0.0001 is only 0.00011314317039102316!
+
+======================================================================
+FAIL: test_fft_numpy_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 182, in test_fft_numpy
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1058, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1173, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part -26.200889587402344 and 1.2607226520776749 gives a difference of 27.46161223948002, but the allowed difference with rtol=1.3e-06 and atol=0.0001 is only 0.00010163893944770098!
+
+======================================================================
+FAIL: test_fft_numpy_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 182, in test_fft_numpy
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1058, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1173, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing the real part 0.08820401848272752 and 7.859540827983109 gives a difference of 7.771336809500381, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 2.021740307637804e-05!
+
+======================================================================
+FAIL: test_fft_round_trip_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 221, in test_fft_round_trip
+    forward != torch.fft.fft or x.is_complex()))
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1136, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Tensors failed to compare as equal! Real parts failed to compare as equal! With rtol=1.3e-06 and atol=1e-05, found 80 element(s) (out of 80) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 17.023193776607513 (-16.50628662109375 vs. 0.5169071555137634), which occurred at index 61.
+
+======================================================================
+FAIL: test_fft_round_trip_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 221, in test_fft_round_trip
+    forward != torch.fft.fft or x.is_complex()))
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1136, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Tensors failed to compare as equal! Real parts failed to compare as equal! With rtol=1e-07 and atol=1e-07, found 80 element(s) (out of 80) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 18.44778518222925 (-17.724026660905327 vs. 0.7237585213239224), which occurred at index 17.
+
+======================================================================
+FAIL: test_fftn_numpy_cuda_complex128 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 400, in test_fftn_numpy
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1058, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1173, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing 0.17994193103126604 and 0.12541498218954547 gives a difference of 0.054526948841720574, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.016303947684641e-05!
+
+======================================================================
+FAIL: test_fftn_numpy_cuda_complex64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 400, in test_fftn_numpy
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1058, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1173, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.11365357786417007 and -0.16042265808209777 gives a difference of 0.046769080217927694, but the allowed difference with rtol=1.3e-06 and atol=0.0001 is only 0.00010020854945550673!
+
+======================================================================
+FAIL: test_fftn_numpy_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 400, in test_fftn_numpy
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1058, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1173, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing -0.1460142433643341 and -0.12532590003684163 gives a difference of 0.020688343327492476, but the allowed difference with rtol=1.3e-06 and atol=0.0001 is only 0.0001001629236700479!
+
+======================================================================
+FAIL: test_fftn_numpy_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 400, in test_fftn_numpy
+    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1162, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1058, in assertEqual
+    exact_dtype=exact_dtype, exact_device=exact_device)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1173, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Scalars failed to compare as equal! Comparing 0.03477031094722484 and 0.011617331753731194 gives a difference of 0.023152979193493645, but the allowed difference with rtol=1.3e-06 and atol=1e-05 is only 1.0015102531279851e-05!
+
+======================================================================
+FAIL: test_fftn_round_trip_cuda_float32 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 440, in test_fftn_round_trip
+    forward != torch.fft.fftn or x.is_complex()))
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1136, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Tensors failed to compare as equal! With rtol=1.3e-06 and atol=1e-05, found 20 element(s) (out of 20) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 3.8888529539108276 (2.2511463165283203 vs. -1.6377066373825073), which occurred at index (3, 2).
+
+======================================================================
+FAIL: test_fftn_round_trip_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 651, in only_fn
+    return fn(self, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 440, in test_fftn_round_trip
+    forward != torch.fft.fftn or x.is_complex()))
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1136, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : Tensors failed to compare as equal! With rtol=1e-07 and atol=1e-07, found 20 element(s) (out of 20) whose difference(s) exceeded the margin of error (including 0 nan comparisons). The greatest difference was 5.082908457155065 (4.131468478848602 vs. -0.9514399783064628), which occurred at index (3, 1).
+
+======================================================================
+FAIL: test_stft_cuda_float64 (__main__.TestFFTCUDA)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 827, in wrapper
+    method(*args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 273, in instantiated_test
+    result = test_fn(self, *args)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py", line 508, in dep_fn
+    return fn(slf, device, *args, **kwargs)
+  File "test_spectral_ops.py", line 727, in test_stft
+    _test((10,), 7, center=center)
+  File "test_spectral_ops.py", line 718, in _test
+    self.assertEqual(result, ref_result, atol=7e-6, rtol=0, msg='stft comparison against librosa', exact_dtype=False)
+  File "/root/.local/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 1136, in assertEqual
+    self.assertTrue(result, msg=msg)
+AssertionError: False is not true : stft comparison against librosa
+
+----------------------------------------------------------------------
+Ran 104 tests in 263.609s
+
+FAILED (failures=16, errors=5, skipped=1)
+Fail to import hypothesis in common_utils, tests are not derandomized

@@ -1,0 +1,1 @@
+bash .jenkins/pytorch/test.sh
