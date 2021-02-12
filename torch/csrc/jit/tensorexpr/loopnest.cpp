@@ -2300,6 +2300,9 @@ void LoopNest::rfactor(
     return;
   }
 
+  auto old_outer = dynamic_cast<Store*>(st)->indices();
+  auto new_outer = old_outer;
+  
   For* root_for = nullptr;
   For* target_for = nullptr;
   std::set<const Var*> reduce_args = {
@@ -2359,7 +2362,6 @@ void LoopNest::rfactor(
 
   auto old_acc = reduce_op->accumulator();
   auto new_inner = reduce_op->reduce_args();
-  auto new_outer = reduce_op->output_args();
   bool found = false;
   for (size_t i = 0; i < new_inner.size(); ++i) {
     if (new_inner[i] == reduction_var) {
@@ -2384,18 +2386,18 @@ void LoopNest::rfactor(
   new_outer.emplace_back(reduction_var);
 
   BufReplacer bufReplacer(
-      reduce_op->accumulator(), reduce_op->output_args(), tmp_buf, new_outer);
+      reduce_op->accumulator(), old_outer, tmp_buf, new_outer);
   const Expr* new_body = reduce_op->body()->accept_mutator(&bufReplacer);
 
   auto first_reduce = new ReduceOp(
       tmp_buf, new_body, new_outer, new_inner, reduce_op->reducer());
 
-  auto second_reduce_load_indices = reduce_op->output_args();
+  auto second_reduce_load_indices = old_outer;
   second_reduce_load_indices.emplace_back(reduction_var);
   auto second_reduce_load = new Load(
       reduce_op->dtype(), tmp_buf, second_reduce_load_indices, new IntImm(1));
   auto second_reduce = reduce_op->reducer()(
-      old_acc, second_reduce_load, reduce_op->output_args(), {reduction_var});
+      old_acc, second_reduce_load, old_outer, {reduction_var});
 
   // 1) replace target for loop (which is a reduction loop)
   // with an iterative for loop by removing the reduction var from the
@@ -2441,7 +2443,7 @@ void LoopNest::rfactor(
   }
 
   auto second_buf = dynamic_cast<const Buf*>(second_reduce->accumulator());
-  std::vector<const Expr*> second_indices = {second_reduce->output_args()};
+  std::vector<const Expr*> second_indices = {old_outer};
   if (insertion_point &&
       dynamic_cast<For*>(insertion_point->get_parent())->var() ==
           target_for->var()) {
