@@ -55,7 +55,7 @@ Backends that come with PyTorch
 PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
 By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
 distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
-included if you build PyTorch from source. (e.g.building PyTorch on a host that has MPI
+included if you build PyTorch from source. (e.g. building PyTorch on a host that has MPI
 installed.)
 
 .. warning ::
@@ -275,7 +275,7 @@ Distributed Key-Value Store
 
 The distributed package comes with a distributed key-value store, which can be
 used to share information between processes in the group as well as to
-initialize the distributed pacakge in
+initialize the distributed package in
 :func:`torch.distributed.init_process_group` (by explicitly creating the store
 as an alternative to specifying ``init_method``.) There are 3 choices for
 Key-Value Stores: :class:`~torch.distributed.TCPStore`,

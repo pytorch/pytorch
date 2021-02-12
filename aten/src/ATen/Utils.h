@@ -2,11 +2,11 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
+#include <ATen/Formatting.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
-
-#include <c10/core/ScalarType.h>
-#include <ATen/Formatting.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -89,22 +89,6 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
   return res;
 }
 
-inline int64_t sum_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 0ll);
-}
-
-//std::accumulate infers return type from `init` type, so if `init` type is not enough to hold the result, computation can overflow
-//the next 2 functions set `init` type to int64_t to avoid overflow.
-template<typename C, typename std::enable_if<std::is_integral<typename C::value_type>::value, int>::type = 0>
-inline int64_t prod_intlist(const C &container){
-    return std::accumulate(container.begin(), container.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
-}
-
-template<typename Iter,
-typename std::enable_if<std::is_integral<typename std::iterator_traits<Iter>::value_type>::value, int>::type = 0>
-inline int64_t prod_intlist(Iter begin, Iter end){
-    return std::accumulate(begin, end, static_cast<int64_t>(1), std::multiplies<int64_t>());
-}
 /**
  * Utility function to static cast input Generator* to
  * the backend generator type (CPU/CUDAGeneratorImpl etc.)
