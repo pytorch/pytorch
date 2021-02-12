@@ -120,7 +120,6 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             if (isinstance(node.value, ast.Call)
                     and node.targets[0].attr in self.class_level_annotations):
                 self.visiting_class_level_ann = True
-        # `node.targets[0]` didn't have an `attr` attribute
         except AttributeError:
             return
         self.generic_visit(node)
@@ -132,7 +131,10 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         method and see if it conforms to our attribute annotation rules.
         """
         # If we have a local variable
-        if node.target.value.id != "self":
+        try:
+            if node.target.value.id != "self":
+                return
+        except AttributeError:
             return
 
         # If we have an attribute that's already been annotated at the
