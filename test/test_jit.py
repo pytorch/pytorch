@@ -1049,7 +1049,7 @@ class TestJit(JitTestCase):
         def fn(x):
             return torch.sum(x)
 
-        def fn1(x, dim:int):
+        def fn1(x, dim: int):
             return torch.sum(x, dim)
 
         x = torch.randn(3, 4)

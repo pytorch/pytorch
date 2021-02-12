@@ -1030,7 +1030,7 @@ RegisterOperators reg2({
           // To handle cases where the List only contains int,
           // For eg., x : List[Float] = [1, 2, 3], the sum is
           // casted to int.
-          if(std::floor(sum) == sum) {
+          if (std::floor(sum) == sum) {
             push(stack, int(sum));
           } else {
             push(stack, sum);
@@ -1043,7 +1043,7 @@ RegisterOperators reg2({
           c10::List<bool> l = pop(stack).toBoolList();
           auto sum = 0;
           for (const auto& elem : l) {
-            if(elem) {
+            if (elem) {
               sum += 1;
             }
           }
