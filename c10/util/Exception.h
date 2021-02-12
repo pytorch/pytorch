@@ -285,24 +285,25 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
 // (unlike assert()).
 //
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_INTERNAL_ASSERT(cond, ...)      \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
-        #cond " INTERNAL ASSERT FAILED at"    \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
+#define TORCH_INTERNAL_ASSERT(cond, ...)                            \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                             \
+    ::c10::detail::torchCheckFail(                                  \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__),        \
+        #cond "INTERNAL ASSERT FAILED at" C10_STRINGIZE(__FILE__)); \
   }
 #else
-#define TORCH_INTERNAL_ASSERT(cond, ...)      \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error, ::c10::str(        \
-        #cond " INTERNAL ASSERT FAILED at "   \
-        C10_STRINGIZE(__FILE__)               \
-        ":"                                   \
-        C10_STRINGIZE(__LINE__)               \
-        ", please report a bug to PyTorch. ", \
-        ::c10::str(__VA_ARGS__)               \
-    ));                                       \
+#define TORCH_INTERNAL_ASSERT(cond, ...)                        \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
+    ::c10::detail::torchCheckFail(                              \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__),    \
+        ::c10::str(                                             \
+            #cond " INTERNAL ASSERT FAILED at "                 \
+            C10_STRINGIZE(__FILE__)                             \
+            ":"                                                 \
+            C10_STRINGIZE(__LINE__)                             \
+            ", please report a bug to PyTorch. ",               \
+            ::c10::str(__VA_ARGS__)                             \
+        ));                                                     \
   }
 #endif
 
