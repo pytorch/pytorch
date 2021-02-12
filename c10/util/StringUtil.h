@@ -80,7 +80,7 @@ struct _str_wrapper<std::string> final {
 
 template<>
 struct _str_wrapper<const char*> final {
-  static std::string call(const char* str) {
+  static const char* call(const char* str) {
     return str;
   }
 };
