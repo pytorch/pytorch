@@ -403,8 +403,7 @@ c10::intrusive_ptr<JitFuture> RRefContext::getOwnerRRef(
     // Scenario (2) retrieving an existing RRef
     // Marks IValue Future as completed with the RRef IValue.
     auto owner = iter->second;
-    auto rrefPtr =
-        c10::static_intrusive_pointer_cast<c10::RRefInterface>(owner);
+    auto rrefPtr = fromOwnerRRef(owner);
 
     auto futureOwner =
         c10::make_intrusive<JitFuture>(RRefType::create(owner->type()));
