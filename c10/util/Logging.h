@@ -69,12 +69,44 @@ C10_API void UpdateLoggingLevelsFromFlags();
     const std::string& msg,
     const void* caller = nullptr);
 
+[[noreturn]] C10_API void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller = nullptr);
+
+[[noreturn]] C10_API inline void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    detail::CompileTimeEmptyString msg,
+    const void* caller = nullptr) {
+  ThrowEnforceNotMet(file, line, condition, "", caller);
+}
+
 [[noreturn]] C10_API void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
     const char* condition,
     const std::string& msg,
     const void* caller = nullptr);
+
+[[noreturn]] C10_API void ThrowEnforceFiniteNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller = nullptr);
+
+[[noreturn]] C10_API inline void ThrowEnforceFiniteNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    detail::CompileTimeEmptyString msg,
+    const void* caller = nullptr) {
+  ThrowEnforceFiniteNotMet(file, line, condition, "", caller);
+}
 
 constexpr bool IsUsingGoogleLogging() {
 #ifdef C10_USE_GLOG
