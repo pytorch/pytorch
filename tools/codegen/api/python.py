@@ -816,12 +816,14 @@ def argument_type_str_pyi(t: Type) -> str:
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f'Sequence[{elem}]'
+    
+    else: 
+        raise RuntimeError(f'unrecognized type {repr(t)}')
 
     if add_optional:
         ret = 'Optional[' + ret + ']'
+        
     return ret
-
-    raise RuntimeError(f'unrecognized type {repr(t)}')
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
