@@ -1,3 +1,5 @@
+# test: trigger iOS nightly build
+
 Pod::Spec.new do |s|
     s.name             = 'LibTorch'
     s.version          = '1.7.1'
