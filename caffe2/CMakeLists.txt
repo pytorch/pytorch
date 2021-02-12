@@ -1458,8 +1458,8 @@ if(BUILD_MOBILE_TEST)
   endforeach()
 endif()
 
-add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
-target_link_libraries(lite_interpreter_demo torch_library)
+# add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
+# target_link_libraries(lite_interpreter_demo torch_library)
 
 # ---[ Test binaries.
 if(BUILD_TEST)
