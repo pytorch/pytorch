@@ -9,8 +9,6 @@ from .importer import BaseImporter
 
 
 class ModuleEnvError(Exception):
-    """Raised by ModuleEnv.check_obj."""
-
     pass
 
 
@@ -90,9 +88,6 @@ class ModuleEnv:
             name: If set, use this name instead of looking up __name__ or __qualname__ on `obj`.
                 This is only here to match how Pickler handles __reduce__ functions that return a string,
                 don't use otherwise.
-            check_obj: If true, check that retrieving the returned name produces the same object as `obj`.
-                This should only be false if you plan to call `check_obj()` somewhere else.
-
         Returns:
             A tuple (parent_module_name, attr_name) that can be used to retrieve `obj` from this environment.
             Use it like:
@@ -100,7 +95,7 @@ class ModuleEnv:
                 obj = getattr(mod, attr_name)
 
         Raises:
-            ModuleEnvError: `check_obj()` has failed.
+            ModuleEnvError: we couldn't retrieve a name, because a different object shadows it.
         """
         if name is None:
             name = getattr(obj, "__qualname__", None)
@@ -113,84 +108,47 @@ class ModuleEnv:
         # details.
         module_name = demangle(orig_module_name)
 
-        if check_obj:
+        # Check that this name will indeed return the correct object
+        try:
             module = self.import_module(module_name)
             obj2, _ = _getattribute(module, name)
-            self.check_obj(obj, obj2, name)
+        except (ImportError, KeyError, AttributeError):
+            raise ModuleEnvError(
+                f"{obj} was not found as {module_name}.{name}"
+            ) from None
 
-        return module_name, name
+        if obj is obj2:
+            return module_name, name
+
+        def get_obj_info(obj):
+            module_name = getattr(obj, "__module__", self._whichmodule)
+            is_mangled_ = is_mangled(module_name)
+            location = (
+                get_mangle_prefix(module_name)
+                if is_mangled_
+                else "the current Python environment"
+            )
+            importer_name = (
+                f"the importer for {get_mangle_prefix(module_name)}"
+                if is_mangled_
+                else "'DefaultImporter'"
+            )
+            return module_name, location, importer_name
+
+        obj_module_name, obj_location, obj_importer_name = get_obj_info(obj)
+        obj2_module_name, obj2_location, obj2_importer_name = get_obj_info(obj2)
+        msg = (
+            f"\n\nThe object provided is from '{obj_module_name}', "
+            f"which is coming from {obj_location}."
+            f"\nHowever, when we import '{obj2_module_name}', it's coming from {obj2_location}."
+            "\nTo fix this, make sure 'PackageExporter.module_env' lists "
+            f"{obj_importer_name} before {obj2_importer_name}."
+        )
+        raise ModuleEnvError(msg)
 
     def is_default(self) -> bool:
         """Returns true if this ModuleEnv only represents the default Python environment."""
         return self._importers == [DefaultImporter]
-
-    def check_obj(self, obj, obj2, name=None):
-        """Checks that two objects are the same identity.
-
-        Don't use this method, prefer to use the automatic check in `get_name`.
-        It's only separate to help implement CustomImportPickler.
-
-        Args:
-            obj: The object that the user gave us. This will be treated as such in error messaging.
-            obj2: The object retrieve by looking up a name in `self`.
-            name: If set, use this name instead of looking up __name__ or __qualname__ in error reporting.
-                This is only here to match how Pickler handles __reduce__ functions that return a string,
-                don't use otherwise.
-
-        Returns:
-            None
-
-        Raises:
-            ModuleEnvError: The two objects are not the same identity. The exception message will contain
-                a description and suggestions for fixing the issue.
-        """
-        if obj is obj2:
-            return
-
-        if name is None:
-            name = getattr(obj, "__qualname__", None)
-        if name is None:
-            name = obj.__name__
-
-        orig_module_name = self._whichmodule(obj, name)
-        obj_module_name = getattr(obj, "__module__", orig_module_name)
-        obj2_module_name = getattr(obj2, "__module__", self._whichmodule(obj2, name))
-
-        is_obj_mangled = is_mangled(obj_module_name)
-        is_obj2_mangled = is_mangled(obj2_module_name)
-
-        msg = ""
-        if is_obj_mangled or is_obj2_mangled:
-            obj_location = (
-                get_mangle_prefix(obj_module_name)
-                if is_obj_mangled
-                else "the current Python environment"
-            )
-            obj2_location = (
-                get_mangle_prefix(obj2_module_name)
-                if is_obj2_mangled
-                else "the current Python environment"
-            )
-
-            obj_importer_name = (
-                f"the importer for {get_mangle_prefix(obj_module_name)}"
-                if is_obj_mangled
-                else "'DefaultImporter'"
-            )
-            obj2_importer_name = (
-                f"the importer for {get_mangle_prefix(obj2_module_name)}"
-                if is_obj2_mangled
-                else "'DefaultImporter'"
-            )
-
-            msg = (
-                f"\n\nThe object provided is from '{orig_module_name}', "
-                f"which is coming from {obj_location}."
-                f"\nHowever, when we import '{obj2_module_name}', it's coming from {obj2_location}."
-                "\nTo fix this, make sure 'PackageExporter.importers' lists "
-                f"{obj_importer_name} before {obj2_importer_name}."
-            )
-        raise ModuleEnvError(msg)
 
     def _whichmodule(self, obj, name):
         """Find the module an object belongs to.

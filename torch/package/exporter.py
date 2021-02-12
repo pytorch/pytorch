@@ -8,7 +8,6 @@ from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
 from .module_environment import ModuleEnv
-from .importer import BaseImporter
 import types
 from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, Optional
 from pathlib import Path
@@ -45,18 +44,15 @@ class PackageExporter:
     for further code dependencies (`dependencies=True`). It looks for import statements,
     resolves relative references to qualified module names, and calls :method:`require_module`
     on each it finds, recursively resolving dependencies.
-
     """
 
-    importers: List[BaseImporter]
-    """ A list of functions that will be called in order to find the module assocated
-    with module names referenced by other modules or by pickled objects. Initialized to
-    `[importlib.import_module]` by default. When pickling code or objects that was loaded
-    from an imported packaged, that `importer.import_module` should be put into the importer list.
-    When a name conflict occurs between importers, the first importer in the list takes precedence,
-    and only objects that refer to this first importers class can be saved
+    """ A module environment that will be searched in order to find the module assocated with module names
+    referenced by other modules or by pickled objects. The default module environment just uses DefaultImporter,
+    which searches the Python environment. When pickling code or objects loaded from an imported package,
+    you should create a ModuleEnv that has that `PackageImporter` listed first. When a name conflict occurs
+    between importers, the first importer in the list takes precedence.
     """
-
+    module_env: ModuleEnv
 
     def __init__(self, f: Union[str, Path, BinaryIO], verbose: bool = True):
         """
@@ -80,7 +76,7 @@ class PackageExporter:
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
-        self.module_env : ModuleEnv = ModuleEnv()
+        self.module_env = ModuleEnv()
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
 

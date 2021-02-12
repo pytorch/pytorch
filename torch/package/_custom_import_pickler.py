@@ -19,27 +19,15 @@ class CustomImportPickler(_Pickler):
         write = self.write
         memo = self.memo
 
-        # CHANGED: Get the name from the module enviroment instead of Python environment.
-        module_name, name = self.module_env.get_name(obj, name, check_obj=False)
-
+        # CHANGED: import module from module environment instead of __import__
         try:
-            # CHANGED: import module from module environment instead of
-            # __import__
-            module = self.module_env.import_module(module_name)
-            obj2, parent = _getattribute(module, name)
-        except (ImportError, KeyError, AttributeError):
-            raise PicklingError(
-                "Can't pickle %r: it's not found as %s.%s" %
-                (obj, module_name, name)) from None
-        else:
-            # CHANGED: error check is sunk into check_obj to provide a better error message
-            try:
-                self.module_env.check_obj(obj, obj2, name)
-            except ModuleEnvError as err:
-                obj2_module_name = getattr(obj2, "__module__", module_name)
-                msg = f"Can't pickle {obj}: it's not the same object as '{obj2_module_name}.{name}'."
-                msg += str(err)
-                raise PicklingError(msg) from err
+            module_name, name = self.module_env.get_name(obj, name, check_obj=False)
+        except ModuleEnvError as err:
+            raise PicklingError(f"Can't pickle {obj}: {str(err)}") from None
+
+        module = self.module_env.import_module(module_name)
+        _, parent = _getattribute(module, name)
+        # END CHANGED
 
         if self.proto >= 2:
             code = _extension_registry.get((module_name, name))
