@@ -396,17 +396,17 @@ struct Environment {
       }
     }
     if (as_simple_value) {
-      if (!annotated_type) {
-        annotated_type = as_simple_value->type();
-      }
-      if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
+      if (annotated_type &&
+          !as_simple_value->type()->isSubtypeOf(annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
             << annotated_type->repr_str()
             << " but is being assigned to a value of type "
             << as_simple_value->type()->repr_str();
       }
-      insertStore(name, loc, as_simple_value, annotated_type);
+      auto value_store_type =
+          annotated_type ? annotated_type : as_simple_value->type();
+      insertStore(name, loc, as_simple_value, value_store_type);
     } else {
       value_table[name] = std::move(value);
     }
@@ -1259,6 +1259,15 @@ struct to_ir {
       const TernaryIf& expr,
       const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
+    // If the cond expr is a static value, then we metacompile the `if`
+    // statemement and only emit true or false branch
+    if (cond_value.staticIf()) {
+      if (*cond_value.staticIf()) {
+        return emitExpr(expr.true_expr(), type_hint);
+      } else {
+        return emitExpr(expr.false_expr(), type_hint);
+      }
+    }
     auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
     auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
@@ -2980,67 +2989,101 @@ struct to_ir {
       Symbol& form,
       Apply& apply,
       const TypePtr& type_hint = nullptr) {
-          if (apply.inputs().size() == 0) {
-          TypePtr type = type_hint ? type_hint : ListType::ofTensors();
-          if (!type->cast<ListType>()) {
-            throw ErrorReport(apply.range())
-                << "Expected list type annotation for list(), found "
-                << type_hint->repr_str();
-          }
-          return std::make_shared<SimpleValue>(
-              graph
-                  ->insertNode(graph->createList(
-                      type->expectRef<ListType>().getElementType(), {}))
-                  ->output());
-        }
-        // list(iter) desugars to [_elem for _elem in iter]
-        checkApplyNumInputs(apply, 1);
-        auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
-
-        // aten::list builtin op is registered for List and Str input
-        // dispatch to the builtin op to avoid perf slowdown on existing uses
-        if (auto simple = asSimple(iter_input)) {
-          if (simple->type()->cast<ListType>() ||
-              simple->type()->cast<StringType>()) {
-            return std::make_shared<SimpleValue>(emitBuiltinCall(
-                apply.range(), *method.graph(), aten::list, {simple}, {}));
-          }
-        }
-        const std::string& iter_name = createTempName("$_iter");
-        environment_stack->setSugaredVar(
-            apply.range(),
-            iter_name,
-            iter_input,
-            /*annotated_type=*/nullptr);
-
-        const std::string& elem_name = createTempName("$_elem");
-        auto ident =
-            Var::create(apply.range(), Ident::create(apply.range(), elem_name));
-        auto iter =
-            Var::create(apply.range(), Ident::create(apply.range(), iter_name));
-        auto lc = ListComp::create(apply.range(), ident, ident, iter);
-        return std::make_shared<SimpleValue>(
-            emitListComprehension(lc, type_hint));
+    if (apply.inputs().size() == 0) {
+      TypePtr type = type_hint ? type_hint : ListType::ofTensors();
+      if (!type->cast<ListType>()) {
+        throw ErrorReport(apply.range())
+            << "Expected list type annotation for list(), found "
+            << type_hint->repr_str();
+      }
+      return std::make_shared<SimpleValue>(
+          graph
+              ->insertNode(graph->createList(
+                  type->expectRef<ListType>().getElementType(), {}))
+              ->output());
     }
+    // list(iter) desugars to [_elem for _elem in iter]
+    checkApplyNumInputs(apply, 1);
+    auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+
+    // aten::list builtin op is registered for List and Str input
+    // dispatch to the builtin op to avoid perf slowdown on existing uses
+    if (auto simple = asSimple(iter_input)) {
+      if (simple->type()->cast<ListType>() ||
+          simple->type()->cast<StringType>()) {
+        return std::make_shared<SimpleValue>(emitBuiltinCall(
+            apply.range(), *method.graph(), aten::list, {simple}, {}));
+      }
+    }
+    const std::string& iter_name = createTempName("$_iter");
+    environment_stack->setSugaredVar(
+        apply.range(),
+        iter_name,
+        iter_input,
+        /*annotated_type=*/nullptr);
+
+    const std::string& elem_name = createTempName("$_elem");
+    auto ident =
+        Var::create(apply.range(), Ident::create(apply.range(), elem_name));
+    auto iter =
+        Var::create(apply.range(), Ident::create(apply.range(), iter_name));
+    auto lc = ListComp::create(apply.range(), ident, ident, iter);
+    return std::make_shared<SimpleValue>(emitListComprehension(lc, type_hint));
+  }
 
   std::shared_ptr<SugaredValue> emitApplySpecialFormForDict(
       Symbol& form,
       Apply& apply,
       const TypePtr& type_hint = nullptr) {
-    auto treat_as_empty_container = [&]{
+    auto add_kwargs = [&](Value* dc_value) {
+      NamedValue self = NamedValue(apply.range(), "self", dc_value);
+      for (auto kwarg : apply.attributes()) {
+        auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
+        auto k = emitExpr(name);
+        auto v = emitExpr(kwarg.value());
+        NamedValue input_k = NamedValue(kwarg.range(), "", k);
+        NamedValue input_v = NamedValue(kwarg.range(), "", v);
+        emitBuiltinCall(
+            kwarg.range(),
+            *graph,
+            aten::_set_item,
+            {self, input_k, input_v},
+            {});
+      }
+    };
+
+    auto treat_as_empty_container = [&] {
       if (apply.inputs().empty() && !apply.attributes().empty()) {
         return true;
       }
-      if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_DICT_LITERAL) {
+      if (!apply.inputs().empty() &&
+          apply.inputs()[0].kind() == TK_DICT_LITERAL) {
         auto dict_lit = DictLiteral(apply.inputs()[0]);
         return dict_lit.key_inputs().empty() && dict_lit.value_inputs().empty();
       }
-      if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_LIST_LITERAL) {
+      if (!apply.inputs().empty() &&
+          apply.inputs()[0].kind() == TK_LIST_LITERAL) {
         auto list_lit = ListLiteral(apply.inputs()[0]);
         return list_lit.inputs().empty();
       }
       return false;
     };
+
+    // If possible, just cast what we have to a Dict and add the
+    // kwargs by hand. This is not only the simplest solution; it also
+    // hits cases like `dict(dict([1, 2, 3]))` or `dict(x)` (where `x`
+    // is some previously-defined variable)
+    if (!apply.inputs().empty()) {
+      auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+      if (auto simple = asSimple(iter_input)) {
+        if (simple->type()->cast<DictType>()) {
+          auto dc_value = emitBuiltinCall(
+              apply.range(), *method.graph(), aten::dict, {simple}, {});
+          add_kwargs(dc_value);
+          return std::make_shared<SimpleValue>(dc_value);
+        }
+      }
+    }
 
     // If we have a call with an empty container, or if we have a
     // call with kwargs only
@@ -3056,8 +3099,11 @@ struct to_ir {
       if (!type_hint) {
         type = DictType::create(StringType::get(), TensorType::get());
       }
-      TORCH_CHECK(type->expect<DictType>(), "Expected a type annotation "
-        "of Dict for dict constructor dict(), got ", type_hint->str());
+      TORCH_CHECK(
+          type->expect<DictType>(),
+          "Expected a type annotation "
+          "of Dict for dict constructor dict(), got ",
+          type_hint->str());
       return std::make_shared<SimpleValue>(
           graph
               ->insertNode(graph->createDict(
@@ -3071,18 +3117,9 @@ struct to_ir {
     // Special case logic for if we have a dict comprehension
     if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_DICT_COMP) {
       auto dc = DictComp(apply.inputs()[0]);
-      auto dc_node = emitDictComprehension(dc, type_hint);
-      NamedValue self = NamedValue(dc.range(), "self", dc_node);
-      for (auto kwarg : apply.attributes()) {
-        auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
-        auto k = emitExpr(name);
-        auto v = emitExpr(kwarg.value());
-        NamedValue input_k = NamedValue(kwarg.range(), "", k);
-        NamedValue input_v = NamedValue(kwarg.range(), "", v);
-      emitBuiltinCall(
-        kwarg.range(), *graph, aten::_set_item, {self, input_k, input_v}, {});
-      }
-      return std::make_shared<SimpleValue>(dc_node);
+      auto dc_value = emitDictComprehension(dc, type_hint);
+      add_kwargs(dc_value);
+      return std::make_shared<SimpleValue>(dc_value);
     }
 
     // We can't feasibly register all possible key x value
@@ -3099,8 +3136,8 @@ struct to_ir {
           dict_lit.key_inputs().size() == dict_lit.value_inputs().size());
       for (auto key_it = dict_lit.key_inputs().begin(),
                 val_it = dict_lit.value_inputs().begin();
-            key_it != dict_lit.key_inputs().end();
-            ++key_it, ++val_it) {
+           key_it != dict_lit.key_inputs().end();
+           ++key_it, ++val_it) {
         auto tuple_inputs =
             List<Expr>::create(apply.range(), {*key_it, *val_it});
         auto tuple = TupleLiteral::create(apply.range(), tuple_inputs);
@@ -3117,7 +3154,9 @@ struct to_ir {
 
     // If we have kwargs to include, we'll take a similar approach
     // to the above logic and standardize the Apply node
-    if (!apply.attributes().empty()) {
+    if (!apply.attributes().empty() &&
+        (apply.inputs().empty() ||
+         apply.inputs()[0].kind() == TK_LIST_LITERAL)) {
       std::vector<Expr> exprs;
       // Gather all the existing tuples in the input iterable
       if (!apply.inputs().empty()) {
@@ -3138,24 +3177,26 @@ struct to_ir {
       auto ll = ListLiteral::create(apply.range(), expr_list);
       auto new_inputs = List<Expr>::create(apply.range(), {ll});
       auto new_kwargs = List<Attribute>::create(apply.range(), {});
-      apply = Apply::create(
-          apply.range(), apply.callee(), new_inputs, new_kwargs);
+      apply =
+          Apply::create(apply.range(), apply.callee(), new_inputs, new_kwargs);
     }
 
     checkApplyNumInputs(apply, 1);
 
     auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+
     const std::string& iter_name = createTempName("$_iter");
     const std::string& key_name = createTempName("$_key");
     const std::string& value_name = createTempName("$_value");
 
-    auto key = Var::create(
-        apply.range(), Ident::create(apply.range(), key_name));
-    auto value = Var::create(
-        apply.range(), Ident::create(apply.range(), value_name));
-    auto target = TupleLiteral::create(apply.range(), List<Expr>::create(apply.range(), {key, value}));
-    auto iter = Var::create(
-        apply.range(), Ident::create(apply.range(), iter_name));
+    auto key =
+        Var::create(apply.range(), Ident::create(apply.range(), key_name));
+    auto value =
+        Var::create(apply.range(), Ident::create(apply.range(), value_name));
+    auto target = TupleLiteral::create(
+        apply.range(), List<Expr>::create(apply.range(), {key, value}));
+    auto iter =
+        Var::create(apply.range(), Ident::create(apply.range(), iter_name));
 
     environment_stack->setSugaredVar(
         apply.range(),
@@ -3164,21 +3205,10 @@ struct to_ir {
         /*annotated_type=*/nullptr);
 
     auto dc = DictComp::create(apply.range(), key, value, target, iter);
-    auto dc_node = emitDictComprehension(dc, type_hint);
-    NamedValue self = NamedValue(dc.range(), "self", dc_node);
+    auto dc_value = emitDictComprehension(dc, type_hint);
+    add_kwargs(dc_value);
 
-    for (auto kwarg : apply.attributes()) {
-      auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
-      auto k = emitExpr(name);
-      auto v = emitExpr(kwarg.value());
-      NamedValue input_k = NamedValue(kwarg.range(), "", k);
-      NamedValue input_v = NamedValue(kwarg.range(), "", v);
-    emitBuiltinCall(
-      kwarg.range(), *graph, aten::_set_item, {self, input_k, input_v}, {});
-    }
-
-    return std::make_shared<SimpleValue>(dc_node);
-
+    return std::make_shared<SimpleValue>(dc_value);
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {

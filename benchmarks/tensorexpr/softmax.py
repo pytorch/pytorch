@@ -3,18 +3,22 @@ import scipy.special
 
 
 class SoftmaxBench(benchmark.Benchmark):
-    def __init__(self, mode, device, M, N):
-        super().__init__(mode, device)
+    def __init__(self, mode, device, dtype, M, N):
+        super().__init__(mode, device, dtype)
         self.M = M
         self.N = N
-        self.data = self.rand([M, N], device=device, requires_grad=self.requires_grad)
+        self.dtype = dtype
+        self.inputs = [self.randn(
+            [M, N], device=device, dtype=dtype, requires_grad=self.requires_grad
+        )]
 
-    def forward(self):
-        y = self.softmax(self.data, dim=1)
+    def forward(self, inputs):
+        x = self.add(inputs, 0.001)
+        y = self.softmax(x, dim=-1, dtype=self.dtype)
         return y
 
     def reference(self):
-        return scipy.special.softmax(self.numpy(self.data), axis=1)
+        return scipy.special.softmax(self.numpy(self.inputs), axis=-1)
 
     def config(self):
         return [self.M, self.N]
@@ -39,7 +43,11 @@ class SoftmaxBench(benchmark.Benchmark):
 
     @staticmethod
     def default_configs():
-        return [[128, 1 << 16]]
+        return [
+            [480, 20],
+            [1 << 15, 32],
+            [128, 1 << 16],
+        ]
 
 
 benchmark.register_benchmark_class(SoftmaxBench)

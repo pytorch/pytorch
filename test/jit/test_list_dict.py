@@ -20,6 +20,35 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestList(JitTestCase):
+    def test_list_bool_conversion(self):
+        def if_predicate(l: List[int]):
+            if l:
+                s = 0
+                for n in l:
+                    s += n
+
+                return s
+            else:
+                return -1
+
+        self.checkScript(if_predicate, ([1, 2, 3],))
+        self.checkScript(if_predicate, ([],))
+
+        def while_predicate(l: List[int]):
+            s = 0
+
+            while l:
+                s += l.pop()
+
+        self.checkScript(while_predicate, ([1, 2, 3],))
+        self.checkScript(while_predicate, ([],))
+
+        def ternary_predicate(l: List[int]):
+            return "non-empty" if l else "empty"
+
+        self.checkScript(ternary_predicate, ([1, 2, 3],))
+        self.checkScript(ternary_predicate, ([],))
+
     def test_in_check(self):
         def int_in(x: List[int]) -> bool:
             return 2 in x
@@ -221,6 +250,26 @@ class TestList(JitTestCase):
             def fn():
                 x: Dict[int, str] = dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
                 return x
+
+    def test_dict_keyword_with_nested_call(self):
+        def fn():
+            return dict(dict(foo=1, bar=2, baz=3))
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_previously_declared_variable(self):
+        def fn():
+            d = {"foo" : 1, "bar" : 2}
+            return dict(d)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_previously_declared_variable_and_kwargs(self):
+        def fn():
+            d = {"foo" : 1, "bar" : 2}
+            return dict(d, baz=3)
+
+        self.checkScript(fn, ())
 
     def test_min_bool_list(self):
         def jit_min_list(a: List[bool], b: List[bool]) -> List[bool]:
@@ -527,7 +576,6 @@ class TestList(JitTestCase):
             return x
         with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
             self.checkScript(test_index_slice_out_of_bounds_index, (a,))
-
 
     def test_mutable_list_append(self):
         def test_append():
@@ -1253,6 +1301,34 @@ class TestDict(JitTestCase):
 
     def dict_bool(self):
         return {True: 1}
+
+    def test_dict_bool_conversion(self):
+        def if_predicate(d: Dict[int, int]):
+            if d:
+                s, t = 0, 0
+                for k, v in d.items():
+                    s += k
+                    t += v
+
+                return s, t
+            else:
+                return -1, -1
+
+        self.checkScript(if_predicate, ({1: 2, 3: 5},))
+        self.checkScript(if_predicate, ({},))
+
+        def while_predicate(d: Dict[int, int]):
+            while d:
+                d.clear()
+
+        self.checkScript(while_predicate, ({1: 2, 3: 5},))
+        self.checkScript(while_predicate, ({},))
+
+        def ternary_predicate(d: Dict[int, int]):
+            return "non-empty" if d else "empty"
+
+        self.checkScript(ternary_predicate, ({1: 2, 3: 5},))
+        self.checkScript(ternary_predicate, ({},))
 
     def test_del(self):
         def inputs():
