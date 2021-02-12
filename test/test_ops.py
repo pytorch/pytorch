@@ -260,9 +260,10 @@ class TestCommon(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
+        if dtype == torch.bfloat16:
+            self.skipTest("Skipped! JIT doesn't support Bfloat16")
         test_backward = op.supports_autograd and (
-            (dtype.is_complex and op.test_complex_grad) or
-            (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
+            (dtype.is_complex and op.test_complex_grad) or dtype.is_floating_point)
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
