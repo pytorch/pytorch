@@ -71,12 +71,6 @@ struct TORCH_API InferenceModule {
   std::shared_ptr<torch::jit::Graph> graph;
   std::unique_ptr<c10::FunctionSchema> schema;
 
-  std::unordered_map<Value*, size_t> value_to_reg;
-  std::vector<Value*> values; // useful for debugging
-  std::vector<size_t> input_regs; // inputs to the graph
-  std::vector<size_t> output_regs; // outputs of the graph
-  std::vector<size_t> internals;
-  size_t reused_regs = 0;
   InferenceModuleOptions opts;
 
  private:
@@ -159,11 +153,13 @@ class TORCH_API StaticRuntime {
     return nodes_;
   }
 
-  const std::vector<IValue>& get_registers() {
-    return reg_;
+  size_t num_inputs() const {
+    return inputs_.size();
   }
 
-  size_t num_outputs() const;
+  size_t num_outputs() const {
+    return outputs_.size();
+  }
 
   inline const std::vector<IValue*>& outputs() const {
     return outputs_;
@@ -174,7 +170,6 @@ class TORCH_API StaticRuntime {
   std::shared_ptr<InferenceModule> module_;
   StaticRuntimeOptions opts_;
   // IValue table (including inputs, outputs, intermediates, and weights)
-  std::vector<IValue> reg_;
   std::vector<IValue> constants_;
   std::vector<IValue> inputs_;
   std::vector<IValue*> outputs_;
