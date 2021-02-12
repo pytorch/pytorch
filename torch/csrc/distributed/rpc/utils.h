@@ -3,7 +3,6 @@
 #include <c10/core/Device.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
-#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
 
@@ -87,18 +86,6 @@ TORCH_API void populateRemoteProfiledEvents(
     const torch::autograd::profiler::ProfilerConfig& profilerConfig,
     const std::vector<std::vector<torch::autograd::profiler::LegacyEvent>>&
         eventLists);
-
-// Casts from c10::RRefInterface to OwnerRRef
-inline TORCH_API c10::intrusive_ptr<OwnerRRef> fromRRefInterface(
-    const c10::intrusive_ptr<c10::RRefInterface>& rrefInterface) {
-  return c10::static_intrusive_pointer_cast<OwnerRRef>(rrefInterface);
-}
-
-// Casts from OwnerRRef to c10::RRefInterface
-inline TORCH_API c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
-    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) {
-  return c10::static_intrusive_pointer_cast<c10::RRefInterface>(ownerRRef);
-}
 
 } // namespace rpc
 } // namespace distributed
