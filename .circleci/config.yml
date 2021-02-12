@@ -7164,7 +7164,6 @@ workflows:
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_lite_interpreter_build
           build_lite_interpreter: "1"
-          context: org-member
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_12_0_0_arm64_lite_interpreter_build

@@ -168,6 +168,12 @@ cmake_minimum_required(VERSION 3.4.1)
 
 project(pytorch_jni_lite CXX)
 
+if(BUILD_LITE_INTERPRETER)
+  message(STATUS "yes BUILD_LITE_INTERPRETER: ${BUILD_LITE_INTERPRETER")
+else()
+  message(STATUS "no BUILD_LITE_INTERPRETER: ${BUILD_LITE_INTERPRETER}")
+endif()
+
 include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 14)
