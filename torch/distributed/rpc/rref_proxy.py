@@ -32,7 +32,7 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
             except BaseException as err:
                 # Future corresponding to rref type had an error, propagate
                 # error instead of issuing RPC.
-                ret = torch.futures.Future()
+                ret = torch.futures.Future()  # type: ignore
                 ret.set_exception(err)
                 return ret
 
@@ -60,7 +60,7 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
         # Create a future whose result is the result of the above rpc_api()
         # future. We don't simply return rref_type.then(cb) since the user would
         # have to call wait() twice to access the future result.
-        ret_fut = torch.futures.Future()
+        ret_fut = torch.futures.Future()  # type: ignore
 
         def set_result_from_rpc(rpc_fut):
             # Propagate RPC result (or error) to ret_fut.
