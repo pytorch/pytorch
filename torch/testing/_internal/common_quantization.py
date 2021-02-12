@@ -497,20 +497,20 @@ class QuantizationTestCase(TestCase):
             print('input graph:', model.graph)
         models = {}
         outputs = {}
-        for reference in [True, False]:
+        for debug in [True, False]:
             if dynamic:
-                models[reference] = quantize_dynamic_jit(model, qconfig_dict, reference=reference)
+                models[debug] = quantize_dynamic_jit(model, qconfig_dict, debug=debug)
                 # make sure it runs
-                outputs[reference] = models[reference](inputs)
+                outputs[debug] = models[debug](inputs)
             else:
                 # module under test can contain in-place ops, and we depend on
                 # input data staying constant for comparisons
                 inputs_copy = copy.deepcopy(inputs)
-                models[reference] = quantize_jit(
+                models[debug] = quantize_jit(
                     model, qconfig_dict, test_only_eval_fn, [inputs_copy], inplace=False,
-                    reference=reference)
+                    debug=debug)
                 # make sure it runs
-                outputs[reference] = models[reference](*inputs[0])
+                outputs[debug] = models[debug](*inputs[0])
 
         if debug:
             print('debug graph:', models[True].graph)
