@@ -75,6 +75,23 @@ Reducer::Reducer(
     initialize_buckets(std::move(bucket_indices));
   }
 
+  // Check whether the module is multi_device_module
+  {
+    std::set<int> unique_devices;
+    for (const auto& bucket : buckets_) {
+      if (bucket.replicas.size() >= 1) {
+        auto device_idx = int(bucket.replicas[0].contents.device().index());
+        if (unique_devices.find(device_idx) == unique_devices.end()) {
+          unique_devices.insert(device_idx);
+          if (unique_devices.size() > 1) {
+            is_multi_device_module_ = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   // All variables are expected to have their `grad_fn` set to the gradient
   // accumulation function (since they are leafs in the autograd graph).
   // We store pointers to these functions such that we can check if they are
@@ -696,10 +713,10 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     if (num_buckets_ready_ == 1) {
       if (replicas_[0][0].is_cuda()) {
         #ifdef USE_CUDA
-        // Record event only for single process single device.
-        // No need to set_device() here, as autograd thread has already set
-        // it properly.
-        if (replicas_.size() == 1) {
+        // Record event only for single process single device
+        // and single device module. No need to set_device() here,
+        // as autograd thread has already set it properly.
+        if (replicas_.size() == 1 && !is_multi_device_module_) {
            gpu_timer_.backward_comm_start.record();
         }
         #endif
@@ -990,8 +1007,9 @@ void Reducer::prepare_for_forward() {
   num_iterations_++;
   if (replicas_[0][0].is_cuda()) {
     #ifdef USE_CUDA
-    // Record event only for single process single device.
-    if (replicas_.size() == 1) {
+    // Record event only for single process single device
+    // and single device module.
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
       // Create and record event on the replicas_[0][0].device().
       at::cuda::set_device(replicas_[0][0].device().index());
       gpu_timer_.forward_start.record();
@@ -1022,8 +1040,9 @@ void Reducer::prepare_for_backward(
 
   if (replicas_[0][0].is_cuda()) {
     #ifdef USE_CUDA
-    // Record event only for single process single device.
-    if (replicas_.size() == 1) {
+    // Record event only for single process single device
+    // and single device module.
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
       // Create and record event on the replicas_[0][0].device().
       at::cuda::set_device(replicas_[0][0].device().index());
       gpu_timer_.backward_compute_start.record();
@@ -1228,10 +1247,11 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 void Reducer::finalize_backward() {
   if (replicas_[0][0].is_cuda()) {
     #ifdef USE_CUDA
-    // Record event only for single process single device.
+    // Record event only for single process single device
+    // and single device module.
     // No need to set_device() here, as autograd thread has already set
     // it properly.
-    if (replicas_.size() == 1) {
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
       gpu_timer_.backward_compute_end.record();
     }
     #endif
@@ -1312,10 +1332,11 @@ void Reducer::finalize_backward() {
 
   if (replicas_[0][0].is_cuda()) {
     #ifdef USE_CUDA
-    // Record event only for single process single device.
+    // Record event only for single process single device
+    // and single device module.
     // No need to set_device() here, as autograd thread has already set
     // it properly.
-    if (replicas_.size() == 1) {
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
       gpu_timer_.backward_comm_end.record();
     }
     #endif

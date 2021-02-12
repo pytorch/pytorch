@@ -2,7 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/ResizeCommon.h>
+#include <ATen/TensorUtils.h>
 #include <TH/THTensor.hpp>
+
 
 namespace at { namespace native {
 

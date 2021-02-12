@@ -367,6 +367,8 @@ class Reducer {
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
   std::vector<std::vector<int64_t>> backward_stats_;
 
+  bool is_multi_device_module_ = false;
+
   // Following variables are to help build dynamic bucket order
   bool has_rebuilt_bucket_;
   std::vector<at::Tensor> rebuilt_params_;
