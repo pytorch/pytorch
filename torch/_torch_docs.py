@@ -2741,7 +2741,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.div, r"""
-div(input, other, *, rounding_mode='true' out=None) -> Tensor
+div(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -2764,7 +2764,7 @@ Args:
 Keyword args:
     rounding_mode (str, optional): Type of rounding applied to the result:
 
-        * ``"true"`` - default behavior. Performs no rounding and, if both :attr:`input` and
+        * None - default behavior. Performs no rounding and, if both :attr:`input` and
           :attr:`other` are integer types, promotes the inputs to the default scalar type.
           Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
         * ``"trunc"`` - rounds the results of the division towards zero.
@@ -2806,7 +2806,7 @@ Examples::
 """.format(**common_args))
 
 add_docstr(torch.divide, r"""
-divide(input, other, *, rounding_mode='true', out=None) -> Tensor
+divide(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Alias for :func:`torch.div`.
 """)
@@ -9210,7 +9210,7 @@ Example::
 add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
-Alias for :func:`torch.div` with ``rounding_mode='true'``.
+Alias for :func:`torch.div` with ``rounding_mode=None``.
 """.format(**common_args))
 
 add_docstr(torch.trunc,
