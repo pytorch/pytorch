@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <ATen/TracerMode.h>
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 
