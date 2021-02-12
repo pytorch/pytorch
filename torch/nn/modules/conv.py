@@ -1018,6 +1018,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     out_channels: int 
     kernel_size: Tuple[int, ...]
     weight: UninitializedParameter
+    bias: UninitializedParameter
 
     def reset_parameters(self) -> None:
         # has_uninitialized_params is defined in parent class and it is using a protocol on self
@@ -1041,6 +1042,9 @@ class _LazyConvXdMixin(LazyModuleMixin):
             else:
                 self.weight.materialize((
                     self.out_channels, self.in_channels // self.groups, *self.kernel_size))
+            assert isinstance(self.bias, UninitializedParameter)
+            if self.bias is not None:
+                self.bias.materialize((self.out_channels,))
             self.reset_parameters()
 
 
@@ -1085,16 +1089,19 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             dilation,
             groups,
-            bias,
+            False,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConv2d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1138,16 +1145,19 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             dilation,
             groups,
-            bias,
+            False,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConv3d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1191,16 +1201,19 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             dilation,
             groups,
-            bias,
+            False,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1242,17 +1255,20 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             output_padding,
             groups,
-            bias,
+            False,
             dilation,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1294,17 +1310,20 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             output_padding,
             groups,
-            bias,
+            False,
             dilation,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1346,14 +1365,17 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             output_padding,
             groups,
-            bias,
+            False,
             dilation,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()

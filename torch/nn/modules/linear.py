@@ -212,8 +212,11 @@ class LazyLinear(LazyModuleMixin, Linear):
     weight: UninitializedParameter
 
     def __init__(self, out_features: int, bias: bool = True) -> None:
-        super().__init__(0, out_features, bias)
-        self.weight = UninitializedParameter()    
+        super().__init__(0, 0, False)
+        self.weight = UninitializedParameter()
+        self.out_features = out_features
+        if bias:
+            self.bias = UninitializedParameter()
 
     def reset_parameters(self) -> None:
         if not self.has_uninitialized_params() and self.in_features != 0:
@@ -224,5 +227,6 @@ class LazyLinear(LazyModuleMixin, Linear):
             with torch.no_grad():
                 self.in_features = input.shape[-1]
                 self.weight.materialize((self.out_features, self.in_features))  # type: ignore
+                self.bias.materialize((self.out_features,))  # type: ignore
                 self.reset_parameters()
 # TODO: PartialLinear - maybe in sparse?

@@ -145,13 +145,15 @@ class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
 
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
         super(_LazyBatchNorm, self).__init__(
-            0, eps, momentum, affine, track_running_stats)
+            0, eps, momentum, False, False)
+        self.affine = affine
+        self.track_running_stats = track_running_stats
         if self.affine:
             self.weight = UninitializedParameter()
             self.bias = UninitializedParameter()
         if self.track_running_stats:
-            self.running_mean = UninitializedBuffer()
-            self.running_var = UninitializedBuffer()
+            self.register_buffer('running_mean', UninitializedBuffer())
+            self.register_buffer('running_var', UninitializedBuffer())
 
     def reset_parameters(self) -> None:
         if not self.has_uninitialized_params() and self.num_features != 0:
