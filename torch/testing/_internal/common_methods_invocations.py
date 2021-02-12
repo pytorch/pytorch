@@ -3,6 +3,7 @@ from itertools import product
 from operator import mul, itemgetter
 import collections
 import operator
+import random
 
 import torch
 import numpy as np
@@ -322,6 +323,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
                  sample_inputs_func=sample_inputs_unary,
+                 sample_kwargs=lambda device, dtype, input: ({}, {}),
                  supports_sparse=False,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
@@ -338,6 +340,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
         self.supports_complex_to_float = supports_complex_to_float
+        self.sample_kwargs = sample_kwargs
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -1173,6 +1176,11 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad):
     output += [SampleInput(empty_tensor, args=(0.0, 1.0)), ]
     return output
 
+def sample_kwargs_clamp(device, dtype, input):
+    min_val = random.randint(2, 42)
+    max_val = random.randint(47, 95)
+    return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
+
 def sample_inputs_diag(op_info, device, dtype, requires_grad):
     vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
 
@@ -1486,11 +1494,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
-                   skips=(
-                       # Skip all unary ufuncs tests as we call op(tensor) and min/max args are not passed
-                       # Reference: https://github.com/pytorch/pytorch/issues/51242
-                       SkipInfo('TestUnaryUfuncs'),
-                   ),
+                   sample_kwargs=sample_kwargs_clamp,
                    sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
