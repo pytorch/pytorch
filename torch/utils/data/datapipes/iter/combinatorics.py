@@ -60,6 +60,7 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
     """
     datapipe: IterDataPipe[T_co]
     buffer_size: int
+    _buffer: List[T_co]
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
@@ -69,19 +70,19 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
         assert buffer_size > 0, "buffer_size should be larger than 0"
         self.datapipe = datapipe
         self.buffer_size = buffer_size
+        self._buffer = []
 
     def __iter__(self) -> Iterator[T_co]:
-        buf: List[T_co] = []
         for x in self.datapipe:
-            if len(buf) == self.buffer_size:
+            if len(self._buffer) == self.buffer_size:
                 idx = random.randint(0, self.buffer_size - 1)
-                yield buf[idx]
-                buf[idx] = x
+                yield self._buffer[idx]
+                self._buffer[idx] = x
             else:
-                buf.append(x)
-        random.shuffle(buf)
-        while buf:
-            yield buf.pop()
+                self._buffer.append(x)
+        random.shuffle(self._buffer)
+        while self._buffer:
+            yield self._buffer.pop()
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
