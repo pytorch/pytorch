@@ -191,22 +191,23 @@ Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
     resultBuffer.copy_(dense);
   }
 
-  // Use just one wrapper since both indices have the same type.
-  AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_csr", [&] {
-    auto values_accessor = src_values.accessor<scalar_t, 1>();
-    scalar_t *out_ptr = out.data_ptr<scalar_t>();
-    scalar_t cast_value = alpha.to<scalar_t>();
-
+  AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_csr",
+    [&src_values, &out, &alpha, &src_crow_indices, &src_col_indices]() {
     AT_DISPATCH_INDEX_TYPES(
-      src_crow_indices.scalar_type(), "csr_add_out_crow_indices", [&] () {
+      src_crow_indices.scalar_type(), "csr_add_out_crow_indices",
+      [&src_values, &out, &alpha, &src_crow_indices, &src_col_indices]() {
+      auto values_accessor = src_values.accessor<scalar_t, 1>();
+      scalar_t *out_ptr = out.data_ptr<scalar_t>();
+      scalar_t cast_value = alpha.to<scalar_t>();
+      
       auto crow_indices_accessor = src_crow_indices.accessor<index_t, 1>();
       auto col_indices_accessor = src_col_indices.accessor<index_t, 1>();
+      auto out_strides0 = out.strides()[0];
+      auto out_strides1 = out.strides()[1];
 
       for (int32_t irow = 0; irow < src_crow_indices.size(0)-1; ++irow) {
         int32_t start_index = crow_indices_accessor[irow];
         int32_t end_index = crow_indices_accessor[irow + 1];
-        auto out_strides0 = out.strides()[0];
-        auto out_strides1 = out.strides()[1];
 
         for (int i = start_index; i < end_index; ++i) {
           auto icol = col_indices_accessor[i];
