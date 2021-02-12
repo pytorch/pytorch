@@ -8,10 +8,6 @@ UndefinedTensorImpl::UndefinedTensorImpl()
 : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), c10::nullopt) {
 }
 
-IntArrayRef UndefinedTensorImpl::sizes() const {
-  AT_ERROR("sizes() called on undefined Tensor");
-}
-
 int64_t UndefinedTensorImpl::size(int64_t d) const {
   AT_ERROR("size(dim) called on an undefined Tensor");
 }
@@ -20,20 +16,19 @@ int64_t UndefinedTensorImpl::stride(int64_t d) const {
   AT_ERROR("stride(dim) called on an undefined Tensor");
 }
 
-int64_t UndefinedTensorImpl::dim() const {
-  AT_ERROR("dim() called on undefined Tensor");
-}
-
+#ifdef DEBUG
 bool UndefinedTensorImpl::has_storage() const {
-  AT_ERROR("has_storage() called on undefined Tensor");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "UndefinedTensorImpl assumes that storage_ is never set");
+  return false;
 }
+#endif
 
 const Storage& UndefinedTensorImpl::storage() const {
   AT_ERROR("storage() called on undefined Tensor");
 }
 
-int64_t UndefinedTensorImpl::storage_offset() const {
-  AT_ERROR("storage_offset() called on an undefined Tensor");
+void UndefinedTensorImpl::set_storage_offset(int64_t) {
+  AT_ERROR("set_storage_offset() called on an undefined Tensor");
 }
 
 IntArrayRef UndefinedTensorImpl::strides() const {

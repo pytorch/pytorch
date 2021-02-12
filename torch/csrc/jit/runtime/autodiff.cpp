@@ -253,12 +253,13 @@ class GradientHelper {
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
       AT_ASSERT(tuple_outputs.size() == size_t(3));
-      return {tuple_outputs[0],
-              tuple_outputs[1],
-              nullptr,
-              tuple_outputs[2],
-              nullptr,
-              nullptr};
+      return {
+          tuple_outputs[0],
+          tuple_outputs[1],
+          nullptr,
+          tuple_outputs[2],
+          nullptr,
+          nullptr};
 
     } else if (
         node->matches(
@@ -282,14 +283,15 @@ class GradientHelper {
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
       AT_ASSERT(tuple_outputs.size() == size_t(3));
-      return {tuple_outputs[0],
-              tuple_outputs[1],
-              tuple_outputs[2],
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr};
+      return {
+          tuple_outputs[0],
+          tuple_outputs[1],
+          tuple_outputs[2],
+          nullptr,
+          nullptr,
+          nullptr,
+          nullptr,
+          nullptr};
     }
 
     throw std::runtime_error(

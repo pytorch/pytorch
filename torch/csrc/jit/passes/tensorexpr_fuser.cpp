@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -54,15 +56,11 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 }
 
 namespace tensorexpr {
-bool isSupported(Node* node) {
-  // For Block codegen we allow limited ops.
-  if (tensorexpr::getTEGenerateBlockCode()) {
-    return isSupportedForBlock(node);
-  }
 
+static const OperatorSet& supported_eltwise_set() {
   // clang-format off
   // breaks up the schema strings so they are no longer discoverable with ctrl-F
-  static const OperatorSet supported_operator_set{
+    static const OperatorSet supported_eltwise_set{
       "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
       "aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
       "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
@@ -132,14 +130,12 @@ bool isSupported(Node* node) {
       // "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor", TODO: requires 0-dim Tensor
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
-      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
       "aten::sigmoid(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::expm1(Tensor self) -> Tensor",
-      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
       "aten::frac(Tensor self) -> Tensor",
       // TODO: uncomment once we can handle rand+broadcasts
       // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
@@ -163,6 +159,17 @@ bool isSupported(Node* node) {
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
+  // clang-format on
+
+  return supported_eltwise_set;
+}
+
+bool isSupported(Node* node) {
+  // For Block codegen we allow limited ops.
+  if (tensorexpr::getTEGenerateBlockCode()) {
+    return isSupportedForBlock(node);
+  }
+
   static const OperatorSet cuda_only_operator_set{
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
   };
@@ -172,9 +179,14 @@ bool isSupported(Node* node) {
       "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
       "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   };
+  static const OperatorSet supported_misc_set{
+      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
+      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
+  };
   // clang-format on
 
-  if (node->isMemberOf(supported_operator_set) ||
+  if (node->isMemberOf(supported_eltwise_set()) ||
+      node->isMemberOf(supported_misc_set) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
     // of a node being uniquely determined by its input types.
@@ -333,7 +345,8 @@ void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
 
 void insertTypeGuard(
     Node* guarded_node,
-    tensor_type_converter_t type_converter) {
+    tensor_type_converter_t type_converter,
+    Symbol kind) {
   GRAPH_DEBUG("Inserting a typecheck guard for a node", *guarded_node);
   auto subgraph = SubgraphUtils::getSubgraph(guarded_node);
 
@@ -370,7 +383,7 @@ void insertTypeGuard(
   // of the check (bool).
   Node* typecheck_node =
       guarded_node->owningGraph()
-          ->create(prim::TypeCheck, inputs_to_check, inputs_to_check.size() + 1)
+          ->create(kind, inputs_to_check, inputs_to_check.size() + 1)
           ->insertBefore(guarded_node);
   typecheck_node->tys_(attr::types, guard_types);
   Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
@@ -480,18 +493,6 @@ class TensorExprFuser {
     }
 
     for (Node* n : subgraph->nodes()) {
-      // XXX: Use of shape_of.emplace is crucial to the output shape
-      // optimization!
-      if (n->kind() == aten::cat) {
-        // This is a bit more involved, because we have to account for the case
-        // when inputs have different shapes, but fortunately those tensors are
-        // always outputs, and so we can simply avoid replacing their queries,
-        // because it won't help us.
-        continue;
-      }
-      if (n->kind() == prim::Constant) {
-        continue;
-      }
       if (n->kind() == prim::ConstantChunk) {
         Node* sizes_node = graph->insertNode(
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
@@ -511,6 +512,13 @@ class TensorExprFuser {
         shape_of.emplace(outputs.at(outputs.size() - 1), last_size);
         continue;
       }
+
+      // we only support shape calculations for elementwise and
+      // a few exceptions (e.g. prim::ConstantChunk, etc) listed above
+      if (!n->isMemberOf(tensorexpr::supported_eltwise_set())) {
+        continue;
+      }
+
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
         return v->type()->isSubtypeOf(TensorType::get());
       });
@@ -807,7 +815,7 @@ class TensorExprFuser {
       if (!v->isCompleteTensor()) {
         return false;
       }
-      if (*v->type()->cast<TensorType>()->dim() == 0) {
+      if (*v->type()->castRaw<TensorType>()->dim() == 0) {
         return false;
       }
     }
@@ -974,6 +982,12 @@ class TensorExprFuser {
 
     REQ(tensorexpr::isSupported(node));
     REQ(typesAreSupported(node));
+
+    // A hook to optimizations limitter to allow bisecting the pass
+    if (!JIT_OPT_ALLOWED) {
+      return false;
+    }
+
     return true;
   }
 
@@ -1092,7 +1106,10 @@ class TensorExprFuser {
     for (Node* fusion_group : fusion_groups) {
       removeOutputsUsedOnlyInSize(fusion_group);
       liftTensorConstantsFromFusionGroups(fusion_group);
-      insertTypeGuard(fusion_group, [](const TensorTypePtr& t) { return t; });
+      insertTypeGuard(
+          fusion_group,
+          [](const TensorTypePtr& t) { return t; },
+          prim::TypeCheck);
     }
   }
 

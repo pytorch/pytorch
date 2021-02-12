@@ -6,19 +6,18 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/core/Storage.h>
-#include <c10/core/TensorOptions.h>
+#include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/SizesAndStrides.h>
-#include <c10/core/CopyBytes.h>
-
-
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Optional.h>
 #include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -393,7 +392,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
    */
-  virtual IntArrayRef sizes() const;
+  TENSORIMPL_MAYBE_VIRTUAL IntArrayRef sizes() const
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  {
+    return sizes_and_strides_.sizes_arrayref();
+  }
+#else
+  ;
+#endif
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
@@ -405,12 +411,37 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the number of dimensions of this tensor.  Note that 0-dimension
    * represents a Tensor that is a Scalar, e.g., one that has a single element.
    */
-  virtual int64_t dim() const;
+  TENSORIMPL_MAYBE_VIRTUAL int64_t dim() const
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  {
+    return sizes_and_strides_.size();
+  }
+#else
+  ;
+#endif
 
   /**
    * True if this tensor has storage. See storage() for details.
    */
-  virtual bool has_storage() const;
+#ifdef DEBUG
+// Allow subclasses to check that their storage_ is never getting set in debug builds.
+  virtual
+#else
+  TENSORIMPL_MAYBE_VIRTUAL
+#endif
+  bool has_storage() const
+  // NOTE: we devirtualize this because it arguably shouldn't be an
+  // error just to ask subclasses if they have storage.
+  // This used to throw for most subclasses, but OpaqueTensorImpl
+  // wanted it to successfully return false, so we went ahead and made
+  // it a non-error.
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  {
+    return storage_;
+  }
+#else
+  ;
+#endif
 
   /**
    * Return the underlying storage of a Tensor.  Multiple tensors may share
@@ -453,14 +484,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::SparseCPU) ||
-           key_set_.has(DispatchKey::SparseCUDA) ||
-           key_set_.has(DispatchKey::SparseHIP);
+        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseHIP) ||
+        key_set_.has(DispatchKey::SparseXPU);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::QuantizedCPU) ||
-        key_set_.has(DispatchKey::QuantizedCUDA);
+        key_set_.has(DispatchKey::QuantizedCUDA) ||
+        key_set_.has(DispatchKey::QuantizedXPU);
   }
 
   bool is_meta() const {
@@ -473,6 +506,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::CUDA) ||
         key_set_.has(DispatchKey::SparseCUDA) ||
         key_set_.has(DispatchKey::QuantizedCUDA);
+  }
+
+  bool is_xpu() const {
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
+    return key_set_.has(DispatchKey::XPU) ||
+        key_set_.has(DispatchKey::SparseXPU) ||
+        key_set_.has(DispatchKey::QuantizedXPU);
+  }
+
+  bool is_xla() const {
+    return key_set_.has(DispatchKey::XLA);
   }
 
   bool is_hip() const {
@@ -729,10 +774,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for example, an index into a tensor will have a non-zero storage_offset().
    *
    * WARNING: This is NOT computed in bytes.
-   *
-   * XXX: The only thing stopping this function from being virtual is Variable.
    */
-  virtual int64_t storage_offset() const {
+  TENSORIMPL_MAYBE_VIRTUAL int64_t storage_offset() const {
     return storage_offset_;
   }
 
@@ -953,14 +996,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::CPU) ||
-             ts.has(DispatchKey::CUDA) ||
-             ts.has(DispatchKey::HIP);
+      return ts.has(DispatchKey::CPU) || ts.has(DispatchKey::CUDA) ||
+          ts.has(DispatchKey::HIP) || ts.has(DispatchKey::XPU);
     };
     auto is_sparse = [](DispatchKeySet ts) {
       return ts.has(DispatchKey::SparseCPU) ||
-             ts.has(DispatchKey::SparseCUDA) ||
-             ts.has(DispatchKey::SparseHIP);
+          ts.has(DispatchKey::SparseCUDA) || ts.has(DispatchKey::SparseHIP) ||
+          ts.has(DispatchKey::SparseXPU);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) || (is_sparse(key_set_) && is_sparse(from));
   }
@@ -1072,11 +1114,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       Resize(newDims);
       return;
     }
-    auto newNumel = std::accumulate(
-        newDims.begin(),
-        newDims.end(),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>());
+    const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       sizes_and_strides_.set_sizes(newDims);
       numel_ = newNumel;
@@ -1133,11 +1171,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // TODO: eliminate newCapacity.
     SmallVector<int64_t, 5> newCapacity(sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
     newCapacity[0] = outer_dim;
-    auto newNumel = std::accumulate(
-        newCapacity.begin(),
-        newCapacity.end(),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>());
+    auto newNumel = c10::multiply_integers(newCapacity);
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       return;
     }
@@ -1423,7 +1457,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This function doesn't rearrange data and assumes tensor is a memory
    * contiguous
    */
-  virtual void empty_tensor_restride(MemoryFormat memory_format) {
+  void empty_tensor_restride(MemoryFormat memory_format) {
     #ifdef DEBUG
         TORCH_INTERNAL_ASSERT(compute_numel() == numel_,
         "If you are seeing this error, that means empty_tensor_restride was "
@@ -1724,13 +1758,6 @@ protected:
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // The set of DispatchKeys which describe this tensor.  NB: this
-  // does NOT include Autograd (historically, it did, but
-  // not anymore!)
-  //
-  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
-  DispatchKeySet key_set_;
-
   // Tensor is contiguous
   bool is_contiguous_ = true;
 
@@ -1795,6 +1822,13 @@ protected:
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
+
+  // The set of DispatchKeys which describe this tensor.  NB: this
+  // does NOT include Autograd (historically, it did, but
+  // not anymore!)
+  //
+  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
+  DispatchKeySet key_set_;
 };
 
 // Note [TensorImpl size constraints]
@@ -1827,6 +1861,7 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
+//    named tensor metadata pointer
 //    version counter pointer
 //    PyObject pointer
 //    SizesAndStrides size/pointer
@@ -1842,13 +1877,11 @@ protected:
 //    SizesAndStrides strides (pre-allocated 4)
 //    storage offset
 //    numel
-//    data type
-//    (optional) device
-//    tensor type id
-//    miscellaneous bitfield
+//    data type, device_opt, is_contiguous, bitfields
+//    DispatchKeySet
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 24,
+              sizeof(TensorImpl) == sizeof(int64_t) * 23,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

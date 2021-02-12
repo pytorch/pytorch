@@ -466,16 +466,21 @@ void conv2d_dw(
     const float output_max) {
   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct Block final {
-      ivec2 kernel;
+      uvec3 extents;
+      int32_t src_filter_width;
+      ivec4 kernel;
       ivec2 stride;
       ivec2 padding;
       ivec2 dilate;
       vec2 clamp;
-      ivec2 src_filter;
     } block {
+      v_output.extents(),
+      safe_downcast<int32_t>(src_filter[Layout::Filter::width]),
       {
         safe_downcast<int32_t>(filter[Layout::Filter::width]),
         safe_downcast<int32_t>(filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
       },
       {
         safe_downcast<int32_t>(stride[Layout::Parameter::width]),
@@ -493,10 +498,6 @@ void conv2d_dw(
         output_min,
         output_max,
       },
-      {
-        safe_downcast<int32_t>(src_filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(src_filter[Layout::Filter::height]),
-      },
     };
 
     context->dispatch(
@@ -510,6 +511,7 @@ void conv2d_dw(
         },
         VK_KERNEL(conv2d_dw),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -554,15 +556,14 @@ void conv2d_pw(
     const float output_max) {
   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct Block final {
-      ivec2 kernel;
+      uvec3 extents;
+      int32_t ic;
       ivec2 stride;
       ivec2 padding;
       vec2 clamp;
     } block {
-      {
-        safe_downcast<int32_t>(filter[Layout::Filter::input]),
-        safe_downcast<int32_t>(filter[Layout::Filter::output]),
-      },
+      v_output.extents(),
+      safe_downcast<int32_t>(filter[Layout::Filter::input]),
       {
         safe_downcast<int32_t>(stride[Layout::Parameter::width]),
         safe_downcast<int32_t>(stride[Layout::Parameter::height]),
@@ -588,6 +589,7 @@ void conv2d_pw(
         },
         VK_KERNEL(conv2d_pw),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -634,18 +636,27 @@ void conv2d(
     const float output_max) {
   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct Block final {
+      uvec3 extents;
+      int32_t ic4;
       ivec4 kernel;
+      ivec2 ikernel;
       ivec2 stride;
       ivec2 padding;
       ivec2 dilate;
       vec2 clamp;
       ivec4 src_filter;
     } block {
+      v_output.extents(),
+      safe_downcast<int32_t>(filter[Layout::Filter::input] / 4),
       {
         safe_downcast<int32_t>(filter[Layout::Filter::width]),
         safe_downcast<int32_t>(filter[Layout::Filter::height]),
-        safe_downcast<int32_t>(filter[Layout::Filter::input]),
-        safe_downcast<int32_t>(filter[Layout::Filter::output]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
+      },
+      {
+        safe_downcast<int32_t>(src_filter[Layout::Filter::width] * 4),
+        safe_downcast<int32_t>(src_filter[Layout::Filter::height]),
       },
       {
         safe_downcast<int32_t>(stride[Layout::Parameter::width]),
@@ -663,12 +674,6 @@ void conv2d(
         output_min,
         output_max,
       },
-      {
-        safe_downcast<int32_t>(src_filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(src_filter[Layout::Filter::height]),
-        safe_downcast<int32_t>(src_filter[Layout::Filter::width] * 4),
-        0,
-      },
     };
 
     context->dispatch(
@@ -682,6 +687,7 @@ void conv2d(
         },
         VK_KERNEL(conv2d),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -772,8 +778,8 @@ void conv2d_old(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d_nogroup_clamp),
-        //VK_KERNEL(conv2d_nogroup_clamp_1x),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(

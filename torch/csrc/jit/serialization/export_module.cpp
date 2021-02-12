@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
-#include <torch/csrc/jit/mobile/common_const.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/method.h>
@@ -31,30 +30,8 @@ namespace torch {
 namespace jit {
 
 char const* toString(OpCode op);
+
 namespace {
-
-struct tensor_value_hash {
-  std::size_t operator()(const at::Tensor& tensor) const {
-    std::stringstream tensor_stream;
-    tensor_stream << tensor;
-    std::string tensor_str = tensor_stream.str();
-    std::size_t h1 = std::hash<std::string>{}(tensor_str);
-    return h1;
-  }
-};
-
-struct tensor_value_equal {
-  bool operator()(const at::Tensor& a, const at::Tensor& b) const {
-    std::stringstream a_stream;
-    a_stream << a;
-    std::string a_str = a_stream.str();
-
-    std::stringstream b_stream;
-    b_stream << b;
-    std::string b_str = b_stream.str();
-    return a_str == b_str;
-  }
-};
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -132,10 +109,7 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
-    const std::
-        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
-            constants_from_jit,
-    bool save_mobile_debug_info = false) {
+    bool save_mobile_debug_info) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -169,9 +143,10 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         auto method_name_idx =
             code.constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{INTERFACE_CALL,
-                              static_cast<int32_t>(method_name_idx),
-                              static_cast<uint16_t>(node->inputs().size())};
+        Instruction new_instr{
+            INTERFACE_CALL,
+            static_cast<int32_t>(method_name_idx),
+            static_cast<uint16_t>(node->inputs().size())};
         instructions_copy[i] = new_instr;
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -207,11 +182,6 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       }
     } else {
       TORCH_CHECK(
-          ins.op != CREATE_OBJECT,
-          "CREATE_OBJECT is not supported in mobile module. ",
-          "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
-      TORCH_CHECK(
           isOpSupportedInMobile(ins.op),
           toString(ins.op),
           " is not supported in mobile module.");
@@ -237,46 +207,74 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // Make a copy of the constants and append the method names
   // that we emitted for the converted INTERFACE_CALL nodes above.
   auto constants = code.constant_table();
-  std::vector<IValue> deduplicated_constants;
-  for (const auto& constant : constants) {
-    if (constant.isTensor()) {
-      const auto& constant_tensor = constant.toTensor();
-      if (constants_from_jit.find(constant_tensor) ==
-          constants_from_jit.end()) {
-        deduplicated_constants.emplace_back(constant);
-      } else {
-        auto index = IValue(constants_from_jit.at(constant_tensor));
-        auto key_with_index =
-            Tup(std::vector<IValue>{IValue(mobile::kTensorJitIndex), index});
-
-        deduplicated_constants.emplace_back(key_with_index);
-      }
-    } else {
-      deduplicated_constants.emplace_back(constant);
-    }
-  }
-
   for (auto& method_name : method_names) {
-    deduplicated_constants.emplace_back(std::move(method_name));
+    constants.emplace_back(std::move(method_name));
   }
 
   // types
   std::vector<IValue> types;
   types.reserve(code.type_table().size());
+  static const std::string torch_prefix("__torch__");
+  static const std::string class_prefix("__torch__.torch.classes");
   for (const TypePtr& t : code.type_table()) {
-    types.emplace_back(t->annotation_str());
+    auto type_str = t->annotation_str();
+    if (type_str.find(torch_prefix) == 0) {
+      TORCH_CHECK(
+          type_str.find(class_prefix) == 0,
+          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "are not supported in lite interpreter. ",
+          "Workaround: instead of using arbitrary class type (class Foo()), ",
+          "define a pytorch class (class Foo(torch.nn.Module)).");
+    }
+    types.emplace_back(type_str);
   }
 
   // since the register location is embedded into the bytecode, pass the
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto table = Table({{"instructions", Tup(instructions)},
-                      {"operators", Tup(operators)},
-                      {"constants", Tup(deduplicated_constants)},
-                      {"types", Tup(types)},
-                      {"register_size", register_size}});
-  auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
+  auto codeTable = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
+
+  // schema
+  const auto& schema = func.getSchema();
+  TORCH_CHECK(
+      schema.overload_name().empty(), // @TODO: is this check correct?
+      "Overloads are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_vararg(), "Python *args are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_varret(),
+      "A variable number of return values is not supported in mobile modules.");
+  auto makeArgTuple = [](const std::vector<Argument>& args) {
+    std::vector<IValue> argTables;
+    for (auto&& arg : args) {
+      TORCH_CHECK(
+          !arg.N(),
+          "Arguments with known list lengths are not supported in mobile modules.");
+      TORCH_CHECK(
+          !arg.kwarg_only(),
+          "Keyword-only arguments are not supported in mobile modules.");
+      argTables.emplace_back(Table({
+          {"name", arg.name()},
+          {"type", arg.type()->annotation_str()},
+          {"default_value", arg.default_value()},
+      }));
+    }
+    return Tup(argTables);
+  };
+  auto schemaTable = Table({
+      {"arguments", makeArgTuple(schema.arguments())},
+      {"returns", makeArgTuple(schema.returns())},
+  });
+
+  // function tuple
+  auto bytecode_vals =
+      Tup({func.qualname().qualifiedName(), codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
   if (save_mobile_debug_info) {
@@ -305,10 +303,8 @@ void setstateTuple(
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
     if (setstate.isGraphFunction()) {
-      std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
-          empty_map;
       auto func_tuple =
-          getFunctionTuple(module, setstate, empty_map, save_mobile_debug_info);
+          getFunctionTuple(module, setstate, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
       if (save_mobile_debug_info) {
         debug_info_elements->push_back(func_tuple.second.value());
@@ -329,17 +325,14 @@ void setstateTuple(
 
 void moduleMethodsTuple(
     const Module& module,
-    std::vector<c10::IValue>& elements,
+    std::vector<c10::IValue>& elements, // note: appended to in-place
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
-    const std::
-        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
-            constants_from_jit,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
-    auto func_tuple = getFunctionTuple(
-        module, method.function(), constants_from_jit, save_mobile_debug_info);
+    auto func_tuple =
+        getFunctionTuple(module, method.function(), save_mobile_debug_info);
     elements.push_back(func_tuple.first);
     if (save_mobile_debug_info) {
       debug_info_elements->push_back(func_tuple.second.value());
@@ -388,21 +381,9 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-
-    std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
-        constants_from_jit;
-
-    for (size_t i = 0; i < ivalue_constants.size(); i++) {
-      if (ivalue_constants[i].isTensor() &&
-          constants_from_jit.find(ivalue_constants[i].toTensor()) ==
-              constants_from_jit.end()) {
-        constants_from_jit[ivalue_constants[i].toTensor()] = i;
-      }
-    }
-
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info, constants_from_jit);
+      writeByteCode(module, save_mobile_debug_info);
       writeMobileMetadata(module, extra_files);
     }
 
@@ -530,12 +511,7 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(
-      const Module& module,
-      bool save_mobile_debug_info,
-      const std::
-          unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
-              constants_from_jit) {
+  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -545,15 +521,10 @@ class ScriptModuleSerializer {
       debug_info_elements->emplace_back(
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
+
     moduleMethodsTuple(
-        module,
-        elements,
-        debug_info_elements,
-        constants_from_jit,
-        save_mobile_debug_info);
-
+        module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
-
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
@@ -642,15 +613,8 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   c10::optional<std::vector<c10::IValue>> debug_info_elements;
-  std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
-      empty_map;
-
   moduleMethodsTuple(
-      m,
-      elements,
-      debug_info_elements,
-      empty_map,
-      false /* save_mobile_debug_info */);
+      m, elements, debug_info_elements, false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =

@@ -144,6 +144,36 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         self.checkModule(TestModule(pg_nccl), (torch.rand((2, 3)),))
 
 
+class StoreTest(JitTestCase):
+    def setUp(self):
+        super(StoreTest, self).setUp()
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+        self.filestore = torch.classes.dist_c10d.FileStore(self.file.name, 1)
+        self.prefix = "test_prefix"
+
+    def test_create_file_store(self):
+        # test FileStore creation in JIT
+        @torch.jit.script
+        def create_file_store(
+            path: str,
+            num_workers: int
+        ) -> torch.classes.dist_c10d.FileStore:
+            return torch.classes.dist_c10d.FileStore(path, num_workers)
+
+        create_file_store(self.file.name, 1)
+
+    def test_create_prefix_store(self):
+        # test PrefixStore creation in JIT
+        @torch.jit.script
+        def create_prefix_file_store(
+            store: torch.classes.dist_c10d.Store,
+            prefix: str
+        ) -> torch.classes.dist_c10d.PrefixStore:
+            return torch.classes.dist_c10d.PrefixStore(prefix, store)
+
+        create_prefix_file_store(self.filestore, self.prefix)
+
+
 @unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class C10dFrontendJitTest(JitTestCase):
     def setUp(self):

@@ -223,6 +223,6 @@ class LazyLinear(LazyModuleMixin, Linear):
         if self.has_uninitialized_params():
             with torch.no_grad():
                 self.in_features = input.shape[-1]
-                self.weight.materialize((self.out_features, self.in_features))
+                self.weight.materialize((self.out_features, self.in_features))  # type: ignore
                 self.reset_parameters()
 # TODO: PartialLinear - maybe in sparse?

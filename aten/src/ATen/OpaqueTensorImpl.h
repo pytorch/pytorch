@@ -64,15 +64,14 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have set_storage_offset");
   }
 
+#ifdef DEBUG
   bool has_storage() const override {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "OpaqueTensorImpl assumes that storage_ is never set");
     return false;
   }
+#endif
 
   const Storage& storage() const override {
-    AT_ERROR("opaque tensors do not have storage");
-  }
-
-  int64_t storage_offset() const override {
     AT_ERROR("opaque tensors do not have storage");
   }
 

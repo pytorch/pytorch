@@ -84,7 +84,8 @@ fi
 # CircleCI docker images could install conda as jenkins user, or use the OS's python package.
 PIP=$(which pip)
 PIP_USER=$(stat --format '%U' $PIP)
-if [[ "$PIP_USER" = root ]]; then
+CURRENT_USER=$(id -u -n)
+if [[ "$PIP_USER" = root && "$CURRENT_USER" != root ]]; then
   MAYBE_SUDO=sudo
 fi
 
@@ -160,12 +161,12 @@ pip install --user pytest-sugar
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # Check out torch/vision at Jun 11 2020 commit
   # This hash must match one in .jenkins/pytorch/test.sh
-  pip install -q --user git+https://github.com/pytorch/vision.git@e70c91a9ff9b8a20e05c133aec6ec3ed538c32fb
+  pip install -q --user git+https://github.com/pytorch/vision.git@ae0d80b3c52dc98b3a9763bdb974c3ef7b6eb83d
   pip install -q --user ninja
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    pip install -q --user onnxruntime==1.5.2
+    pip install -q --user onnxruntime==1.6.0
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
