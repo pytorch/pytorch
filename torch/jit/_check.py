@@ -217,7 +217,10 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
 
         containers = {"List", "Dict", "Optional"}
 
-        ann_type = node.args[0].value.id    # type: ignore
+        try:
+            ann_type = node.args[0].value.id    # type: ignore
+        except AttributeError:
+            return
 
         if ann_type not in containers:
             return
