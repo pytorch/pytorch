@@ -666,7 +666,7 @@ void RRefContext::recordThreadLocalPendingRRefs() {
 c10::intrusive_ptr<JitFuture> RRefContext::waitForThreadLocalPendingRRefs() {
   auto jitFuturePtr = c10::make_intrusive<JitFuture>(BoolType::get());
   if (userTable_.empty()) {
-    jitFuturePtr->markCompleted();
+    jitFuturePtr->markCompleted(true);
   } else {
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
