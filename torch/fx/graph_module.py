@@ -5,7 +5,7 @@ from torch.nn.modules.module import _addindent
 from torch.package.module_environment import ModuleEnv
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
-from .graph import Graph, _is_from_torch
+from .graph import Graph, _is_from_torch, _builtin_names, PythonCode
 import copy
 import sys
 import traceback
@@ -37,20 +37,17 @@ linecache.getlines = patched_getline
 
 
 def _forward_from_src(src: str, globals: Dict[str, Any]):
+    # avoid mutating the passed in dict
+    globals = globals.copy()
     exec_with_source(src, globals)
     return globals['forward']
 
 
 def _format_import_statement(name: str, obj: Any, module_env: ModuleEnv) -> str:
-    # Special globals that we hard code
-    if name == 'torch' or _is_from_torch(obj):
+    if name in _builtin_names:
+        return _builtin_names[name].import_str
+    if _is_from_torch(name):
         return 'import torch'
-    if name == 'NoneType':
-        return 'NoneType = type(None)'
-    if name == 'inf':
-        return 'from math import inf'
-    if name == 'nan':
-        return 'from math import nan'
 
     module_name, attr_name = module_env.get_name(obj)
     return f'from {module_name} import {attr_name} as {name}'
@@ -304,7 +301,7 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
-    def recompile(self) -> None:
+    def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
@@ -330,6 +327,8 @@ class {module_name}(torch.nn.Module):
                 sys.excepthook = old_excepthook
         cls.__call__ = wrapped_call
 
+        return python_code
+
     def __reduce__(self):
         """
         Serialization of GraphModule. We serialize only the generated code, not
@@ -339,7 +338,8 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
-        import_block = _format_import_block(self._graph._globals.globals, ModuleEnv())
+        python_code = self.recompile()
+        import_block = _format_import_block(python_code.globals, ModuleEnv())
         del dict_without_graph['_graph']
         return (deserialize_graphmodule, (dict_without_graph, import_block))
 

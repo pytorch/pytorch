@@ -279,9 +279,6 @@ class Node:
         for new_use in self._input_nodes.keys():
             new_use.users.setdefault(self)
 
-    def __repr__(self) -> str:
-        return self.name
-
     def _pretty_print_target(self, target):
         """
         Make target printouts more user-friendly.

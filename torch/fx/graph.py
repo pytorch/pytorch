@@ -1,11 +1,11 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 
-from typing import Callable, Any, List, Dict, Optional, Tuple, Set, FrozenSet
+from typing import Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
+from contextlib import contextmanager
 import torch
 import keyword
 import re
-import io
 import builtins
 import math
 
@@ -16,6 +16,28 @@ _origin_type_map = {
     set: Set,
     frozenset: FrozenSet
 }
+
+class _BuiltinName(NamedTuple):
+    import_str: str
+    obj: Any
+
+_builtin_names: Dict[str, _BuiltinName] = {}
+
+
+"""
+The repr() for some standard library objects is not valid Python code without
+an import. For common objects of this sort, we bundle them in the globals of
+every FX graph.
+"""
+def _register_builtin_name(name: str, import_str: str, obj: Any):
+    _builtin_names[name] = _BuiltinName(import_str, obj)
+
+
+_register_builtin_name('inf', 'from math import inf', math.inf)
+_register_builtin_name('nan', 'from math import nan', math.nan)
+_register_builtin_name('NoneType', 'NoneType = type(None)', type(None))
+_register_builtin_name('torch', 'import torch', torch)
+
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
@@ -43,8 +65,7 @@ def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, '__module__', None)
     if module_name is not None:
         base_module = module_name.partition('.')[0]
-        if base_module == 'torch':
-            return True
+        return base_module == 'torch'
 
     name = getattr(obj, '__name__', None)
     # exclude torch because torch.torch.torch.torch works. idk mang
@@ -56,6 +77,52 @@ def _is_from_torch(obj: Any) -> bool:
     return False
 
 
+class _NameContext:
+    def __init__(self):
+        self._obj_to_name: Dict[Any, str] = {}
+        self._used_names: Dict[str, int] = {}
+
+    def create_name(self, candidate: str, obj: Optional[Any] = None) -> str:
+        if obj is not None and obj in self._obj_to_name:
+            return self._obj_to_name[obj]
+
+        # delete all characters that are illegal in a Python identifier
+        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
+        if candidate[0].isdigit():
+            candidate = f'_{candidate}'
+
+        while self._is_used(candidate) or self._is_illegal_name(candidate, obj):
+            match = re.match(r"(.*)_(\d+)$", candidate)
+            if match is None:
+                candidate = candidate + '_1'
+            else:
+                base, num = match.group(1, 2)
+                candidate = f'{base}_{int(num) + 1}'
+
+        self._use_name(candidate)
+
+        if obj is not None:
+            self._obj_to_name[obj] = candidate
+        return candidate
+
+    def _is_illegal_name(self, name: str, obj: Any) -> bool:
+        # 1. keywords are never allowed as names.
+        if name in keyword.kwlist:
+            return True
+
+        # 2. Can't shadow a builtin name, unless you *are* that builtin.
+        if name in builtins.__dict__:
+            return obj is not builtins.__dict__[name]
+
+        return False
+
+    def _is_used(self, name: str) -> bool:
+        return name in self._used_names
+
+    def _use_name(self, name: str):
+        self._used_names.setdefault(name)
+
+
 class _Globals:
     """Tracks all external objects referenced from a Graph.
 
@@ -65,22 +132,20 @@ class _Globals:
     A dictionary of global name -> obj is passed to 'exec' to resolve
     external references to their actual objects.
     """
-    def __init__(self):
+    def __init__(self, graph_namer: _NameContext):
         # The global name -> external object mapping.
         self.globals: Dict[str, Any] = {}
         # Reverse mapping of globals
         self._reverse_globals: Dict[Any, str] = {}
-        self._dedupe_index = 0
+        self._namer = graph_namer
 
         # Preload names into globals. These are objects whose `repr` returns
         # something that actually needs to be imported to execute correctly.
         #
         # If you add to this, you need to add an import string in
-        # '_format_import_statement` as well.
-        self.add_global(math.nan, 'nan')
-        self.add_global(math.inf, 'inf')
-        self.add_global(type(None), 'NoneType')
-        self.add_global(torch, 'torch')
+        # '_format_import_statement` and `_shadows_builtin_name` as well.
+        for name, (_, obj) in _builtin_names.items():
+            self.add_global(obj, name)
 
     def add_global(self, obj: Any, name_hint: str) -> str:
         """Add an external obj to be tracked.
@@ -108,18 +173,8 @@ class _Globals:
             assert self.globals[global_name] is obj
             return global_name
 
-        global_name_buf = io.StringIO()
-        for c in name_hint:
-            c = c if c.isalnum() else '_'
-            global_name_buf.write(c)
-
-        global_name = global_name_buf.getvalue()
-
-        # Resolve any collisions, e.g. between 'foo._bar' and 'foo_.bar'
-        base_name = global_name
-        while global_name in self.globals:
-            global_name = f'{base_name}_{self._dedupe_index}'
-            self._dedupe_index += 1
+        # normalize the name hint to get a proper identifier
+        global_name = self._namer.create_name(name_hint, obj)
 
         # Populate our name tables
         self._reverse_globals[obj] = global_name
@@ -236,7 +291,7 @@ class Graph:
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
-        self._globals = _Globals()
+        self._namer = _NameContext()
 
     @property
     def nodes(self) -> _node_list:
@@ -328,7 +383,7 @@ class Graph:
         kwargs = {} if kwargs is None else kwargs
         assert isinstance(args, tuple), "args must be a tuple"
         assert isinstance(kwargs, dict), "kwargs must be a dict"
-        unique_name = self._create_unique_name(name if name is not None else self._target_to_str(target))
+        unique_name = self._namer.create_name(name if name is not None else self._target_to_str(target))
         n = Node(self, unique_name, op, target, args, kwargs, type_expr)
         self._insert(n)
         self._len += 1
@@ -617,36 +672,6 @@ class Graph:
         op = _snake_case(op)
         return op
 
-    def _shadows_global_name(self, name: str) -> bool:
-        return (
-            name in builtins.__dict__
-            or name in keyword.kwlist
-            or name in self._globals.globals
-        )
-
-    def _create_unique_name(self, candidate : str) -> str:
-        # delete all characters that are illegal in a Python identifier
-        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
-        if candidate[0].isdigit():
-            candidate = f'_{candidate}'
-
-        def illegal_shadowing_name(name : str) -> bool:
-            return hasattr(torch, name) or \
-                hasattr(torch.nn.functional, name) or \
-                hasattr(torch.nn, name) or \
-                self._shadows_global_name(name)
-
-        while candidate in self._used_names or illegal_shadowing_name(candidate):
-            match = re.match(r"(.*)_(\d+)$", candidate)
-            if match is None:
-                candidate = candidate + '_1'
-            else:
-                base, num = match.group(1, 2)
-                candidate = f'{base}_{int(num) + 1}'
-
-        self._used_names.setdefault(candidate)
-        return candidate
-
     def python_code(self, root_module: str) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -660,26 +685,49 @@ class Graph:
 
             The string source code generated from this ``Graph``.
         """
+        # create a new name context
+        name_context = _NameContext()
+
+        # HACK: Override Node's repr to generate a valid name within our name
+        # context. Since repr() is designed to produce a valid Python
+        # expression, it makes sense to re-use it. This way, it's easy to print
+        # something like Tuple[Node, Node] by simply calling repr() on it.
+        def node_repr(self):
+            return name_context.create_name(self.name, self)
+
+        @contextmanager
+        def wrap_node_repr():
+            orig_repr = Node.__repr__
+            Node.__repr__ = node_repr  # type: ignore
+            try:
+                yield None
+            finally:
+                Node.__repr__ = orig_repr  # type: ignore
+
+        with wrap_node_repr():
+            return self._python_code(root_module, name_context)
+
+    def _python_code(self, root_module: str, name_context: _NameContext) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
-        self._globals = _Globals()
+        globals = _Globals(name_context)
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
 
-        def get_global_name(o : Any):
+        def type_repr(o : Any):
             typename = _type_repr(o)
 
             # Common case: this is a regular module name like 'foo.bar.baz'
             if all(x.isidentifier() for x in typename.split('.')):
-                return self._globals.add_global(o, typename)
+                return globals.add_global(o, typename)
 
             # This is a generic type, e.g. typing.List[torch.Tensor]
             origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
-            origin_typename = self._globals.add_global(origin_type, _type_repr(origin_type))
+            origin_typename = globals.add_global(origin_type, _type_repr(origin_type))
 
             # Assign global names for each of the inner type variables.
-            args = [get_global_name(arg) for arg in o.__args__]
+            args = [type_repr(arg) for arg in o.__args__]
             return f'{origin_typename}[{",".join(args)}]'
 
         # Run through reverse nodes and record the first instance of a use
@@ -711,25 +759,26 @@ class Graph:
                 return
             nodes_to_delete = user_to_last_uses.get(user, [])
             if len(nodes_to_delete):
-                to_delete_str = ' = '.join([n.name for n in nodes_to_delete] + ['None'])
+                to_delete_str = ' = '.join([repr(n) for n in nodes_to_delete] + ['None'])
                 body.append(f';  {to_delete_str}\n')
             else:
                 body.append('\n')
 
+
         def emit_node(node : Node):
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                maybe_type_annotation = '' if node.type is None else f' : {get_global_name(node.type)}'
+                maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
-                if raw_name != node.name:
-                    body.append(f'{node.name} = {raw_name}\n')
+                if raw_name != repr(node):
+                    body.append(f'{repr(node)} = {raw_name}\n')
                 return
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
-                    f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
+                    f'{repr(node)} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})')
                 return
             elif node.op == 'call_function':
@@ -737,30 +786,30 @@ class Graph:
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
-                    body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
+                    body.append(f'{repr(node)} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
                 qualified_name = _get_qualified_name(node.target)
-                global_name = self._globals.add_global(node.target, qualified_name)
+                global_name = globals.add_global(node.target, qualified_name)
                 if global_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
                    node.args[1].isidentifier():
                     # pretty print attribute access
-                    body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}')
+                    body.append(f'{repr(node)} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
-                body.append(f'{node.name} = {global_name}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)} = {global_name}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}')
+                body.append(f'{repr(node)} = {_format_target(root_module, node.target)}')
                 return
             elif node.op == 'output':
                 if node.type is not None:
-                    maybe_return_annotation[0] = f" -> {get_global_name(node.type)}"
+                    maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
                 body.append(f'return {repr(node.args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
@@ -787,7 +836,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}"""
 
         return PythonCode(fn_code,
-                          self._globals.globals.copy())
+                          globals.globals)
 
     def __str__(self) -> str:
         """
