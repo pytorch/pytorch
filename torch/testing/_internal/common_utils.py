@@ -1522,17 +1522,20 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 # Used in test_autograd.py and test_torch.py
-def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
-                low, high, requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
-    """Returns a tensor of the specified size on the given device and dtype.
-       The tensors values are between -9 and 9, inclusive, for most dtypes,
-       unless low (high) is not None in which case the values are between
-       max(-9, low) and min(9, high).
-       For unsigned types the values are between 0 and 9, and for complex
-       dtypes the real and imaginary parts are each between -9 and 9,
-       independently.
-       The discontiguous flag is ignored for sizes that result in a tensor
-       with a single element because these cannot be made discontiguous"""
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None, 
+                requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
+    """ Creates a random tensor with the given size, device and dtype.
+
+        By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
+        and/or high are specified then the values will be in the range [max(-9, low), min(9, high)].
+
+        For unsigned types the values are in the range[0, 9] and for complex types the real and imaginary
+        parts are each in the range [-9, 9].
+
+        If discontiguous=True, a discontiguous tensor with the given size will be returned unless the size
+        specifies a tensor with a 1 or 0 elements in which case the discontiguous parameter is ignored because
+        it is not possible to create a discontiguous Tensor with a single element.
+    """
 
     assert low is None or low < 9, "low value too high!"
     assert high is None or high > -9, "high value too low!"
