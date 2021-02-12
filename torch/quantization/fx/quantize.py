@@ -909,7 +909,7 @@ class Quantizer:
     # Trace back from the weight node util we hit getattr, reconstruct the
     # graph module with the traced nodes and run the graph module to pack the
     # weight. then replace the original chain of ops with the packed weight.
-    def _fold_weight(self, quantized: GraphModule) -> GraphModule:
+    def _fold_weight(self, quantized: QuantizedGraphModule) -> QuantizedGraphModule:
         packed_weights = dict()
         # map from folded node name to the prepacked weight name
         folded_nodes = dict()
