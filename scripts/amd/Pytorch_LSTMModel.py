@@ -78,11 +78,11 @@ def train(precision="float"):
         weight_decay=1e-4,
         nesterov=True)
 
-    if args.distributed == True and args.dist_mode == 'horovod':
-        import horovod.torch as hvd
-        optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters(), compression=hvd.Compression.none, op=hvd.Average)
-        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
-        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
+    # if args.distributed == True and args.dist_mode == 'horovod':
+    #     import horovod.torch as hvd
+    #     optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters(), compression=hvd.Compression.none, op=hvd.Average)
+    #     hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+    #     hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
     duration = []
     print('Benchmarking Training LSTM precision type {} '.format(precision))
@@ -170,29 +170,29 @@ def Run(configs={}):
     args.batch_size *= args.num_gpu
 
     world_size = 1
-    if args.distributed == True:
-        if args.dist_mode == 'horovod':
-            import horovod.torch as hvd
-            hvd.init()
-            world_size = int(hvd.size())
-            if torch.cuda.is_available():
-                torch.cuda.set_device(hvd.local_rank())
-        else:
-            dist.init_process_group(backend='nccl')
-            world_size = int(os.environ['WORLD_SIZE'])
-            if torch.cuda.is_available():
-                torch.cuda.set_device(args.local_rank)
+    # if args.distributed == True:
+    #     if args.dist_mode == 'horovod':
+    #         import horovod.torch as hvd
+    #         hvd.init()
+    #         world_size = int(hvd.size())
+    #         if torch.cuda.is_available():
+    #             torch.cuda.set_device(hvd.local_rank())
+    #     else:
+    #         dist.init_process_group(backend='nccl')
+    #         world_size = int(os.environ['WORLD_SIZE'])
+    #         if torch.cuda.is_available():
+    #             torch.cuda.set_device(args.local_rank)
 
     # same data for training and predicting
     global dataloader
     samples_count = args.batch_size * (args.warm_up + args.num_test)
     train_dataset = RandomDataset([samples_count, input_size, seq_len], world_size, dtype=torch.float)
     train_sampler = None
-    if args.distributed == True:
-        if args.dist_mode == 'horovod':
-            train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-        else:
-            train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    # if args.distributed == True:
+    #     if args.dist_mode == 'horovod':
+    #         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
+    #     else:
+    #         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
 
     dataloader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=8, sampler=train_sampler, drop_last=True, pin_memory=False)
 
