@@ -1,3 +1,6 @@
+#include "ATen/core/interned_strings.h"
+#include "jit/frontend/lexer.h"
+#include "jit/ir/ir.h"
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>
@@ -1005,6 +1008,49 @@ RegisterOperators reg2({
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.int(int[] self) -> int",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.float(float[] self) -> float",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          auto sum = 0.0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+
+          // To handle cases where the List only contains int,
+          // For eg., x : List[Float] = [1, 2, 3], the sum is
+          // casted to int.
+          if(std::floor(sum) == sum) {
+            push(stack, int(sum));
+          } else {
+            push(stack, sum);
+          }
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.bool(bool[] self) -> int",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            if(elem) {
+              sum += 1;
+            }
+          }
+          push(stack, sum);
         },
         aliasAnalysisFromSchema()),
     Operator(
