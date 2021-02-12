@@ -54,6 +54,21 @@ Reducer::Reducer(
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
+  // Check whether the module is multi_device_module
+  {
+    std::set<int> unique_devices;
+    for (const auto& v : replicas_[0]) {
+        auto device_idx = int(v.device().index());
+        if (unique_devices.find(device_idx) == unique_devices.end()) {
+          unique_devices.insert(device_idx);
+          if (unique_devices.size() > 1) {
+            is_multi_device_module_ = true;
+            break;
+          }
+        }
+    }
+  }
+
   // If `expect_sparse_gradients` is not specified, initialize it such that
   // we do not expect sparse gradients for any parameter.
   if (expect_sparse_gradients_.empty()) {
@@ -73,23 +88,6 @@ Reducer::Reducer(
   {
     std::lock_guard<std::mutex> lock(mutex_);
     initialize_buckets(std::move(bucket_indices));
-  }
-
-  // Check whether the module is multi_device_module
-  {
-    std::set<int> unique_devices;
-    for (const auto& bucket : buckets_) {
-      if (bucket.replicas.size() >= 1) {
-        auto device_idx = int(bucket.replicas[0].contents.device().index());
-        if (unique_devices.find(device_idx) == unique_devices.end()) {
-          unique_devices.insert(device_idx);
-          if (unique_devices.size() > 1) {
-            is_multi_device_module_ = true;
-            break;
-          }
-        }
-      }
-    }
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
