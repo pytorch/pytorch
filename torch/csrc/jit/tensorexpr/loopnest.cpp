@@ -2181,15 +2181,15 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
 class SwapReduce : public IRMutator {
  public:
-  SwapReduce(const ReduceOp* old_reduce, ReduceOp* new_reduce)
-      : old_reduce_(old_reduce), new_reduce_(new_reduce) {}
+  SwapReduce(const ReduceOp* old_reduce, ReduceOp* new_reduce, const std::vector<const Expr*>& new_indices)
+    : old_reduce_(old_reduce), new_reduce_(new_reduce), new_indices_(new_indices) {}
 
   Stmt* mutate(const Store* v) override {
     if (const ReduceOp* op = dynamic_cast<const ReduceOp*>(v->value())) {
       if (op == old_reduce_) {
         auto buf = new_reduce_->accumulator();
         return new Store(
-            buf, new_reduce_->output_args(), new_reduce_, new IntImm(1));
+            buf, new_indices_, new_reduce_, new IntImm(1));
       }
     }
     return IRMutator::mutate(v);
@@ -2198,6 +2198,7 @@ class SwapReduce : public IRMutator {
  private:
   const ReduceOp* old_reduce_;
   ReduceOp* new_reduce_;
+  const std::vector<const Expr*> new_indices_;
 };
 
 class StoreFinder : public IRVisitor {
@@ -2407,7 +2408,7 @@ void LoopNest::rfactor(
   // variables) with a reduce over only its var by replacing the reduction op
   // buffer input with the temporary output buffer and removing other reductions
   // variables.
-  SwapReduce sr(reduce_op, first_reduce);
+  SwapReduce sr(reduce_op, first_reduce, new_outer);
   Block* parent_block = dynamic_cast<Block*>(root_for->get_parent());
   if (!parent_block) {
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
