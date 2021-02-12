@@ -1,9 +1,9 @@
-import re
-from typing import List
+from typing import List, Dict
+import pathlib
 
 
 def _print_file_structure(
-    filename: str, records: List[str], skip_storage: bool = True, path_includes=".*"
+    filename: str, records: List[str], include: str = "**", exclude: str = ""
 ):
     space = "    "
     branch = "│   "
@@ -14,8 +14,8 @@ def _print_file_structure(
     class Folder:
         def __init__(self, name: str):
             self.name = name
-            self.sub_folders = {}
-            self.sub_files = []
+            self.sub_folders: Dict[str, Folder] = {}
+            self.sub_files: List[str] = []
 
         # builds path of folders if not yet built, returns last folder
         def get_folder(self, folders: List[str]):
@@ -46,15 +46,16 @@ def _print_file_structure(
                 else:
                     self.sub_folders[key].stringify_tree(str_list, extention, tee)
             for index, file in enumerate(self.sub_files):
-                if skip_storage and ".storage" in file:
-                    continue
                 pointer = last if (index == len(self.sub_files) - 1) else tee
                 str_list.append(f"{extention}{pointer}{file}\n")
 
     top_folder = Folder(filename)
     for file in records:
-        if re.search(path_includes, file):
+        if pathlib.PurePath(file).match(include) and (
+            exclude == "" or not pathlib.PurePath(file).match(exclude)
+        ):
             top_folder.add_file(file)
+
     str_list: List[str] = []
     top_folder.stringify_tree(str_list)
-    print("".join(str_list))
+    return "".join(str_list)

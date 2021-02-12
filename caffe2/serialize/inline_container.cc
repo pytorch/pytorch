@@ -220,6 +220,10 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   return out;
 }
 
+const std::vector<std::string>& PyTorchStreamWriter::getAllWrittenRecords() {
+  return files_written;
+}
+
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
@@ -356,6 +360,7 @@ void PyTorchStreamWriter::writeRecord(
       nullptr,
       0);
   valid("writing file ", name.c_str());
+  files_written.push_back(std::move(name));
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
