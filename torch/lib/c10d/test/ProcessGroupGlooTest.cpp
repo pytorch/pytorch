@@ -13,6 +13,7 @@
 #include <thread>
 
 #include <gtest/gtest.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/cuda.h>
 
 #include <c10d/FileStore.hpp>
@@ -20,6 +21,7 @@
 #include <c10d/test/TestUtils.hpp>
 
 using namespace c10d::test;
+using namespace torch::autograd::profiler;
 
 constexpr auto kSendDelay = std::chrono::milliseconds(100);
 constexpr auto kWaitTimeout = std::chrono::milliseconds(1);
@@ -188,27 +190,58 @@ std::vector<std::vector<at::Tensor>> copyTensors(
   return outputs;
 }
 
+void checkProfiledEvents(
+    const thread_event_lists& event_lists,
+    const char* expected_profile_str,
+    int expected_count,
+    std::vector<std::vector<int64_t>> expected_shapes,
+    bool verify_shapes = true) {
+  auto eventCount = 0;
+  if (verify_shapes) {
+    EXPECT_EQ(expected_count, expected_shapes.size());
+  }
+  for (const auto& li : event_lists) {
+    for (const auto& evt : li) {
+      auto match = !strcmp(evt.name(), expected_profile_str);
+      eventCount += (match) ? 1 : 0;
+      if (verify_shapes && match) {
+        auto shapesVec = evt.shapes();
+        EXPECT_EQ(shapesVec[0], expected_shapes[eventCount-1]);
+      }
+    }
+  }
+}
+
 void testAllreduce(const std::string& path, const at::DeviceType b) {
   const auto size = 4;
   auto tests = CollectiveTest::initialize(path, size);
 
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
+  std::vector<std::vector<int64_t>> allShapes;
+  std::vector<int64_t> shapes = {16, 16};
   for (auto i = 0; i < size; i++) {
-    auto tensor = at::ones({16, 16}, b) * i;
+    auto tensor = at::ones(shapes, b) * i;
+    std::vector<int64_t> shapesVec = shapes;
+    allShapes.emplace_back(std::move(shapesVec));
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
   // Kick off work
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
+  const char* GLOO_ALLREDUCE_STR = "gloo:all_reduce";
+  enableProfilerLegacy(ProfilerConfig(
+      ProfilerState::CPU, /* report_input_shapes */ true, false));
   for (auto i = 0; i < size; i++) {
     work[i] = tests[i].getProcessGroup().allreduce(inputs[i]);
   }
-
   // Wait for work to complete
   for (auto i = 0; i < size; i++) {
     work[i]->wait();
   }
+  auto event_lists = disableProfilerLegacy();
+  checkProfiledEvents(
+      std::move(event_lists), GLOO_ALLREDUCE_STR, size, allShapes);
 
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
@@ -228,12 +261,15 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
   auto tests = CollectiveTest::initialize(path, size);
 
   std::vector<std::vector<at::Tensor>> inputs(size);
-
+  std::vector<int64_t> shapes = {16, 16};
   // Try every permutation of root rank and root tensor
   for (auto i = 0; i < size; i++) {
     for (auto j = 0; j < stride; j++) {
+      std::vector<std::vector<int64_t>> allShapes;
       // Initialize inputs
       for (auto k = 0; k < size; k++) {
+        std::vector<int64_t> shapesVec = shapes;
+        allShapes.emplace_back(std::move(shapesVec));
         inputs[k].resize(stride);
         // This won't work if we ever support sparse CUDA
         at::OptionalDeviceGuard deviceGuard;
@@ -241,7 +277,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
           if (b == at::DeviceType::CUDA) {
             deviceGuard.reset_device(at::Device(at::kCUDA, l));
           }
-          inputs[k][l] = at::ones({16, 16}, b) * (k * stride + l);
+          inputs[k][l] = at::ones(shapes, b) * (k * stride + l);
         }
       }
 
@@ -250,6 +286,9 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       options.rootTensor = j;
 
       // Kick off work
+      const char* GLOO_BROADCAST_STR = "gloo:broadcast";
+      enableProfilerLegacy(ProfilerConfig(
+          ProfilerState::CPU, /* report_input_shapes */ true, false));
       std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
       for (auto i = 0; i < size; i++) {
         work[i] = tests[i].getProcessGroup().broadcast(inputs[i], options);
@@ -259,6 +298,9 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       for (auto i = 0; i < size; i++) {
         work[i]->wait();
       }
+      auto event_lists = disableProfilerLegacy();
+      checkProfiledEvents(
+          std::move(event_lists), GLOO_BROADCAST_STR, size, allShapes);
 
       // Verify outputs
       const auto expected = (i * stride + j);
@@ -317,6 +359,18 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
 
   // Kick off work
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
+  const char * GLOO_A2A_STR = "gloo:all_to_all";
+  std::vector<std::vector<int64_t>> allShapes;
+  for (const auto & vec : inputSplits) {
+    // Due to concatenation of tensors, shape will actually be the sum
+    int64_t sum = 0;
+    for (const auto & s : vec) {
+      sum += s;
+    }
+    allShapes.push_back({sum});
+  }
+  enableProfilerLegacy(ProfilerConfig(
+          ProfilerState::CPU, /* report_input_shapes */ true, false));
   for (auto rank = 0; rank < size; rank++) {
     work[rank] = tests[rank].getProcessGroup().alltoall_base(
         outputs[rank], inputs[rank], outputSplits[rank], inputSplits[rank]);
@@ -327,6 +381,9 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
     work[i]->wait();
   }
 
+  auto event_lists = disableProfilerLegacy();
+      checkProfiledEvents(
+          std::move(event_lists), GLOO_A2A_STR, size, allShapes);
   // Verify outputs
   std::vector<std::vector<int32_t>> expected = {
       {0, 1, 10, 11, 12, 20, 21, 30, 31},
@@ -349,6 +406,8 @@ void testBarrier(const std::string& path) {
   auto tests = CollectiveTest::initialize(path, size);
 
   // Kick off work
+  enableProfilerLegacy(ProfilerConfig(
+          ProfilerState::CPU, /* report_input_shapes */ true, false));
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
   for (auto i = 0; i < size; i++) {
     work[i] = tests[i].getProcessGroup().barrier();
@@ -358,6 +417,13 @@ void testBarrier(const std::string& path) {
   for (auto i = 0; i < size; i++) {
     work[i]->wait();
   }
+
+  auto event_lists = disableProfilerLegacy();
+  const char * GLOO_STR = "gloo:barrier";
+  std::vector<std::vector<int64_t>> allShapes;
+  // Barrier does not use tensors, so skip shape checking.
+      checkProfiledEvents(
+          std::move(event_lists), GLOO_STR, size, allShapes, /* verify_shapes */ false);
 }
 
 void testWaitDelay(const std::string& path) {
@@ -585,7 +651,8 @@ TEST(ProcessGroupGlooTest, testBackendName) {
 
     for (auto i = 0; i < size; i++) {
       EXPECT_EQ(
-        tests[i].getProcessGroup().getBackendName(), std::string(c10d::GLOO_BACKEND_NAME));
+          tests[i].getProcessGroup().getBackendName(),
+          std::string(c10d::GLOO_BACKEND_NAME));
     }
   }
 }
