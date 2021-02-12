@@ -755,7 +755,7 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
 
     # Helper to determine if promotion is needed
     def is_integral(dtype):
-        return dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
+        return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
 
     # NOTE: Promotion in PyTorch is from integer types to the default dtype
     np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]

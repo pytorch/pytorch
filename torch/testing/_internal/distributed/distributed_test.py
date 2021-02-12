@@ -1105,7 +1105,7 @@ class DistributedTest:
                 tensor = _build_tensor(src + 1).fill_(master_value if rank == src else worker_value)
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":reduce", False, dist.reduce, tensor, src, op, group_id)
+                self.call_dist_op(":reduce", False, dist.reduce, tensor, src, op, group_id, tensor_shapes=[tensor.shape])
                 if rank == src:
                     self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
 
@@ -1258,8 +1258,17 @@ class DistributedTest:
                 if cuda:
                     for i in range(2):
                         tensors[i] = tensors[i].cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":reduce", False, dist.reduce, tensors[0], src, op, group_id,
-                                  secondary_op_call=lambda: dist.reduce(tensors[1], src, op, group_id))
+                self.call_dist_op(
+                    ":reduce",
+                    False,
+                    dist.reduce,
+                    tensors[0],
+                    src,
+                    op,
+                    group_id,
+                    secondary_op_call=lambda: dist.reduce(tensors[1], src, op, group_id),
+                    tensor_shapes=[tensors[0].shape]
+                )
                 if rank == src:
                     for tensor in tensors:
                         self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
@@ -1352,13 +1361,16 @@ class DistributedTest:
             expect_event=True,
             secondary_op_call=None,
             profile_cuda=False,
+            tensor_shapes=None,
             **kwargs,
         ):
             op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
-            with torch.autograd.profiler.profile(use_cuda=profile_cuda) as prof:
+            with torch.autograd.profiler.profile(
+                use_cuda=profile_cuda, record_shapes=True
+            ) as prof:
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
@@ -1373,6 +1385,9 @@ class DistributedTest:
                 for e in events:
                     self.assertEqual(e.count, 1)
                     self.assertGreaterEqual(e.cpu_time, 0)
+                    # Verify tensor shapes if given
+                    if tensor_shapes is not None:
+                        self.assertEqual(e.input_shapes, tensor_shapes, f"event shape: {e.input_shapes} vs tensor {tensor_shapes}")
 
         # ALL REDUCE
         def _test_all_reduce_helper(
@@ -1395,7 +1410,20 @@ class DistributedTest:
                 tensor = _build_tensor(src + 1, dtype=dtype).fill_(curr_value)
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":all_reduce", async_op, dist.all_reduce, tensor, op, group_id, async_op=async_op)
+                if tensor.dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(tensor).shape]
+                else:
+                    tensor_shapes = [tensor.shape]
+                self.call_dist_op(
+                    ":all_reduce",
+                    async_op,
+                    dist.all_reduce,
+                    tensor,
+                    op,
+                    group_id,
+                    async_op=async_op,
+                    tensor_shapes=tensor_shapes
+                )
                 # Currently, only Gloo backend has profiling tested with CUDA enabled.
                 # Only run cuda profiling test for one rank to speed up since
                 # running with different src_rank does not affect the correctness.
@@ -1413,6 +1441,7 @@ class DistributedTest:
                         group_id,
                         async_op=async_op,
                         profile_cuda=True,
+                        tensor_shapes=tensor_shapes,
                     )
 
             self._barrier()
@@ -1731,7 +1760,21 @@ class DistributedTest:
                 ]
                 if cuda:
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
-                self.call_dist_op(":all_reduce", False, dist.all_reduce_coalesced, tensors, op, group_id)
+                tensor_shapes = []
+                for tensor in tensors:
+                    if tensor.dtype == torch.complex64:
+                        tensor_shapes.append(torch.view_as_real(tensor).shape)
+                    else:
+                        tensor_shapes.append(tensor.shape)
+                self.call_dist_op(
+                    ":all_reduce",
+                    False,
+                    dist.all_reduce_coalesced,
+                    tensors,
+                    op,
+                    group_id,
+                    tensor_shapes=tensor_shapes
+                )
                 expected_tensors = [
                     _build_tensor(src + 1, expected_value, dtype=dtype)
                     for dtype, expected_value in zip(dtypes, expected_values)
@@ -1899,7 +1942,16 @@ class DistributedTest:
                 tensors = (
                     [_build_tensor(dest + 1, i) for i in group] if rank == dest else []
                 )
-                self.call_dist_op(":scatter", False, dist.scatter, tensor, src=dest, scatter_list=tensors, group=group_id)
+                self.call_dist_op(
+                    ":scatter",
+                    False,
+                    dist.scatter,
+                    tensor,
+                    src=dest,
+                    scatter_list=tensors,
+                    group=group_id,
+                    tensor_shapes=[t.shape for t in tensors]
+                )
                 self.assertEqual(tensor, expected_tensor)
 
             self._barrier()
@@ -1950,7 +2002,16 @@ class DistributedTest:
                 tensors = (
                     [_build_tensor(dest + 1, -1) for i in group] if rank == dest else []
                 )
-                self.call_dist_op(":gather", False, dist.gather, tensor, dst=dest, gather_list=tensors, group=group_id)
+                self.call_dist_op(
+                    ":gather",
+                    False,
+                    dist.gather,
+                    tensor,
+                    dst=dest,
+                    gather_list=tensors,
+                    group=group_id,
+                    tensor_shapes=[tensors[0].shape] if len(tensors) > 0 else None
+                )
                 if rank == dest:
                     expected_tensors = [_build_tensor(dest + 1, i) for i in group]
                     for t1, t2 in zip(tensors, expected_tensors):
@@ -2001,14 +2062,17 @@ class DistributedTest:
         def _test_all_gather_helper(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
         ):
-
             for dest in group:
                 tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
-                self.call_dist_op(":all_gather", False, dist.all_gather, tensors, tensor, group_id)
+                if tensors[0].dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(tensors[0]).shape]
+                else:
+                    tensor_shapes = [tensors[0].shape]
+                self.call_dist_op(":all_gather", False, dist.all_gather, tensors, tensor, group_id, tensor_shapes=tensor_shapes)
 
                 expected_tensors = [_build_tensor(dest + 1, i, dtype=dtype) for i in group]
                 for t1, t2 in zip(tensors, expected_tensors):
@@ -2060,8 +2124,14 @@ class DistributedTest:
             Helper that runs all_gather_coalesced and returns true if output
             matches expectations.
             """
+            tensor_shapes = []
+            for input_tensor in input_tensors:
+                if input_tensor.dtype == torch.complex64:
+                    tensor_shapes.append(torch.view_as_real(input_tensor).shape)
+                else:
+                    tensor_shapes.append(input_tensor.shape)
             self.call_dist_op(":all_gather", False, dist.all_gather_coalesced,
-                              output_tensor_lists, input_tensors, group_id)
+                              output_tensor_lists, input_tensors, group_id, tensor_shapes=tensor_shapes)
 
             for l1, l2 in zip(output_tensor_lists, expected_tensors):
                 for t1, t2 in zip(l1, l2):
@@ -2186,7 +2256,15 @@ class DistributedTest:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":all_to_all", False, dist.all_to_all_single, out_tensor, in_tensor, group=group_id)
+                self.call_dist_op(
+                    ":all_to_all",
+                    False,
+                    dist.all_to_all_single,
+                    out_tensor,
+                    in_tensor,
+                    group=group_id,
+                    tensor_shapes=[in_tensor.shape]
+                )
                 self.assertEqual(out_tensor, expected_tensor)
             self._barrier()
 
@@ -2590,7 +2668,7 @@ class DistributedTest:
                 ]
                 self.call_dist_op(
                     "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                    expect_event=len(tensors) == 1)
+                    expect_event=len(tensors) == 1, tensor_shapes=[tensors[0].shape])
                 if rank == src:
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)

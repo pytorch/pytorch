@@ -478,7 +478,7 @@ c10::IValue StaticRuntime::run(
     std::vector<c10::IValue> s = args;
     module_->schema->checkAndNormalizeInputs(s, kwargs);
     for (size_t i = 0; i < s.size(); i++) {
-      Input(i) = s[i];
+      Input(i) = std::move(s[i]);
     }
   } else {
     for (size_t i = 0; i < args.size(); i++) {
@@ -499,6 +499,10 @@ c10::IValue StaticRuntime::run(
       planner_ = std::make_unique<MemoryPlanner>(this, shared);
     }
     planner_->deallocate();
+    // clean up owning refs of input tensors
+    for (IValue& ival : inputs_) {
+      ival = IValue();
+    }
   }
 
   // no need to keep references of outputs in static runtime anymore
@@ -617,6 +621,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // main runs
+  for (size_t i = 0; i < stack.size(); i++) {
+    Input(i) = stack[i];
+  }
   for (int i = 0; i < main_runs; i++) {
     if (planner_) {
       planner_->allocate();

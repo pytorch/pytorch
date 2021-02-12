@@ -1049,7 +1049,7 @@ class TestJit(JitTestCase):
         def fn(x):
             return torch.sum(x)
 
-        def fn1(x, dim:int):
+        def fn1(x, dim: int):
             return torch.sum(x, dim)
 
         x = torch.randn(3, 4)
@@ -1069,7 +1069,6 @@ class TestJit(JitTestCase):
 
         self.checkScript(fn, ([1, 2, 3], ))
         self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
-        self.checkScript(fn1, ([1, 2, 3], ))
         self.checkScript(fn1, ([1, 2.8, 3], ))
         self.checkScript(fn2, ([True, False, False], ))
         self.checkScript(fn2, ([False, False, False], ))
