@@ -292,6 +292,8 @@ static void upsample_trilinear3d_backward_out_cuda_template(
   int input_height = input_size[3];
   int input_width = input_size[4];
 
+  Tensor grad_output = grad_output_.contiguous();
+
   // A contiguous tensor is required for the kernel launch config
   grad_input.contiguous();
   // Numbers are added atomically to grad_input tensor from multiple threads,
