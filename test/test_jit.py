@@ -1623,7 +1623,7 @@ graph(%Ra, %Rb):
     def test_sparse_csr_tensors(self):
         @torch.jit.ignore
         def get_sparse_csr():
-            return torch.randn(3,3).to_sparse_csr()
+            return torch.randn(3, 3).to_sparse_csr()
 
         @torch.jit.script
         def test_is_sparse_csr(input):
@@ -1631,7 +1631,7 @@ graph(%Ra, %Rb):
             return input.is_sparse_csr
 
         script_out_is_sparse_csr = test_is_sparse_csr(get_sparse_csr())
-        script_out_is_dense_csr = test_is_sparse_csr(torch.randn(3,3))
+        script_out_is_dense_csr = test_is_sparse_csr(torch.randn(3, 3))
 
         self.assertEqual(script_out_is_sparse_csr, True)
         self.assertEqual(script_out_is_dense_csr, False)
