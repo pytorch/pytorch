@@ -239,7 +239,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::__ior__
   depends:
@@ -258,7 +257,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::__ixor__
   depends:
@@ -277,7 +275,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::__or__
   depends:
@@ -296,7 +293,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::__xor__
   depends:
@@ -369,7 +365,6 @@
   - name: aten::empty_strided
   - name: aten::eq
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -467,7 +462,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
@@ -860,7 +854,6 @@
   depends:
   - name: aten::as_strided_
   - name: aten::clamp
-  - name: aten::copy_
   - name: aten::empty
   - name: aten::empty_like
   - name: aten::empty_meta
@@ -874,7 +867,6 @@
   - name: aten::min
   - name: aten::reshape
   - name: aten::resize_
-  - name: aten::resize_as_
   - name: aten::select
   - name: aten::sum
   - name: aten::to
@@ -1316,7 +1308,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
@@ -2053,7 +2044,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::real
   - name: aten::resize_
@@ -2063,7 +2053,6 @@
   depends:
   - name: aten::abs
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
 - name: aten::absolute
   depends:
@@ -2196,7 +2185,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::add_
@@ -2209,7 +2197,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::addbmm
   depends:
@@ -2320,7 +2307,6 @@
   - name: aten::eq
   - name: aten::expand
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
@@ -2347,7 +2333,6 @@
   - name: aten::eq
   - name: aten::expand
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::mul
   - name: aten::ones
@@ -2525,7 +2510,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::real
   - name: aten::resize_
@@ -3067,7 +3051,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::bitwise_and_
   depends:
@@ -3106,7 +3089,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::bitwise_or_
   depends:
@@ -3126,7 +3108,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::bitwise_xor_
   depends:
@@ -3275,7 +3256,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::to
@@ -3461,7 +3441,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::permute
   - name: aten::q_per_channel_axis
@@ -3537,7 +3516,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -3672,7 +3650,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
@@ -3696,7 +3673,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::copysign_
   depends:
@@ -3710,7 +3686,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::cos
   depends:
@@ -3976,10 +3951,8 @@
   - name: aten::deg2rad
   - name: aten::empty
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::mul
-  - name: aten::scalar_tensor
 - name: aten::deg2rad_
   depends:
   - name: aten::deg2rad
@@ -4123,7 +4096,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::div_
@@ -4139,7 +4111,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::divide
   depends:
@@ -4201,7 +4172,6 @@
   - name: aten::empty
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::isfinite
   - name: aten::item
@@ -4369,14 +4339,12 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::eq_
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
-  - name: aten::scalar_tensor
 - name: aten::equal
   depends:
   - name: aten::as_strided_
@@ -4670,7 +4638,6 @@
   - name: aten::conj
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4679,7 +4646,6 @@
   - name: aten::_fft_c2c
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4697,7 +4663,6 @@
   - name: aten::_fft_c2c
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4723,7 +4688,6 @@
   - name: aten::conj
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4732,7 +4696,6 @@
   - name: aten::_fft_c2c
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4741,7 +4704,6 @@
   - name: aten::_fft_c2c
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4756,7 +4718,6 @@
   - name: aten::conj
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4794,7 +4755,6 @@
   - name: aten::conj
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4803,7 +4763,6 @@
   - name: aten::_fft_r2c
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4820,7 +4779,6 @@
   - name: aten::_fft_r2c
   - name: aten::constant_pad_nd
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::slice
   - name: aten::to
@@ -4908,7 +4866,6 @@
   - name: aten::empty_strided
   - name: aten::eq
   - name: aten::floor
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::to
@@ -4930,7 +4887,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::floor_divide_
   depends:
@@ -4945,7 +4901,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::fmax
   depends:
@@ -4956,7 +4911,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -4970,7 +4924,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -4987,7 +4940,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::fmod_
   depends:
@@ -5001,7 +4953,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::frac
   depends:
@@ -5059,7 +5010,6 @@
   - name: aten::empty
   - name: aten::eq
   - name: aten::frobenius_norm
-  - name: aten::is_complex
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
@@ -5142,7 +5092,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::ge_
@@ -5150,7 +5099,6 @@
   - name: aten::eq
   - name: aten::ge
   - name: aten::is_nonzero
-  - name: aten::scalar_tensor
 - name: aten::gelu
   depends:
   - name: aten::_empty_affine_quantized
@@ -5228,7 +5176,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
@@ -5398,7 +5345,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::gt_
@@ -5406,7 +5352,6 @@
   - name: aten::eq
   - name: aten::gt
   - name: aten::is_nonzero
-  - name: aten::scalar_tensor
 - name: aten::hamming_window
   depends:
   - name: aten::add_
@@ -5597,7 +5542,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -5736,7 +5680,6 @@
   depends:
   - name: aten::eq
   - name: aten::imag
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::select
   - name: aten::view_as_real
@@ -5812,7 +5755,6 @@
   - name: aten::empty_strided
   - name: aten::eq
   - name: aten::index_fill_
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::item
   - name: aten::resize_
@@ -5960,7 +5902,6 @@
   - name: aten::abs
   - name: aten::add
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_floating_point
   - name: aten::is_nonzero
   - name: aten::isfinite
@@ -5973,7 +5914,6 @@
   depends:
   - name: aten::abs
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::isfinite
   - name: aten::mul
@@ -5989,7 +5929,6 @@
   - name: aten::abs
   - name: aten::eq
   - name: aten::imag
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::isinf
   - name: aten::real
@@ -6013,7 +5952,6 @@
   - name: aten::empty_strided
   - name: aten::eq
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::isneginf
   - name: aten::resize_
@@ -6029,7 +5967,6 @@
   - name: aten::empty_strided
   - name: aten::eq
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::isposinf
   - name: aten::resize_
@@ -6055,7 +5992,6 @@
   - name: aten::constant_pad_nd
   - name: aten::div
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::item
   - name: aten::min
@@ -6173,7 +6109,6 @@
   - name: aten::abs_
   - name: aten::empty
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
@@ -6247,7 +6182,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::le_
@@ -6255,7 +6189,6 @@
   - name: aten::eq
   - name: aten::is_nonzero
   - name: aten::le
-  - name: aten::scalar_tensor
 - name: aten::leaky_relu
   depends:
   - name: aten::_empty_affine_quantized
@@ -6986,7 +6919,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
@@ -7012,7 +6944,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::lt_
@@ -7020,7 +6951,6 @@
   - name: aten::eq
   - name: aten::is_nonzero
   - name: aten::lt
-  - name: aten::scalar_tensor
 - name: aten::lu_solve
   depends:
   - name: aten::_lu_solve_helper
@@ -7239,7 +7169,6 @@
   - name: aten::eq
   - name: aten::fill_
   - name: aten::int_repr
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::max
   - name: aten::maximum
@@ -7412,7 +7341,6 @@
   - name: aten::eq
   - name: aten::fill_
   - name: aten::int_repr
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::min
   - name: aten::minimum
@@ -7649,7 +7577,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::mul_
@@ -7664,7 +7591,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::multi_margin_loss
   depends:
@@ -7759,7 +7685,6 @@
   - name: aten::eq
   - name: aten::expand
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
@@ -8043,7 +7968,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::ne_
@@ -8051,7 +7975,6 @@
   - name: aten::eq
   - name: aten::is_nonzero
   - name: aten::ne
-  - name: aten::scalar_tensor
 - name: aten::neg
   depends:
   - name: aten::as_strided_
@@ -8223,7 +8146,6 @@
   - name: aten::empty_strided
   - name: aten::eq
   - name: aten::full
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::mul_
   - name: aten::normal
@@ -8242,7 +8164,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -8329,7 +8250,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
@@ -8555,7 +8475,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
@@ -8753,11 +8672,9 @@
   depends:
   - name: aten::empty
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::mul
   - name: aten::rad2deg
-  - name: aten::scalar_tensor
 - name: aten::rad2deg_
   depends:
   - name: aten::eq
@@ -8843,7 +8760,6 @@
 - name: aten::real
   depends:
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::real
   - name: aten::select
@@ -8962,7 +8878,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::remainder_
   depends:
@@ -8976,7 +8891,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::rename
   depends:
@@ -8998,7 +8912,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
@@ -9021,7 +8934,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
@@ -9352,7 +9264,6 @@
   - name: aten::resize_
   - name: aten::resize_as_
   - name: aten::rsub
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::view
 - name: aten::scalar_tensor
@@ -9470,7 +9381,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -9529,7 +9439,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -9550,7 +9459,6 @@
   - name: aten::empty_strided
   - name: aten::eq
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -9825,7 +9733,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
@@ -10140,7 +10047,6 @@
   - name: aten::copy_
   - name: aten::eq
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::mul
   - name: aten::narrow
@@ -10170,7 +10076,6 @@
   - name: aten::permute
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::sub
   - name: aten::to
   - name: aten::view
@@ -10186,7 +10091,6 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
 - name: aten::subtract
   depends:
@@ -10674,7 +10578,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::to
@@ -10733,7 +10636,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
@@ -11035,7 +10937,6 @@
   - name: aten::empty
   - name: aten::eq
   - name: aten::fill_
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::vdot
@@ -11059,7 +10960,6 @@
 - name: aten::view_as_real
   depends:
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::view_as_real
 - name: aten::vstack
@@ -11089,14 +10989,12 @@
   - name: aten::is_nonzero
   - name: aten::resize_
   - name: aten::resize_as_
-  - name: aten::scalar_tensor
   - name: aten::to
   - name: aten::xlogy
 - name: aten::xlogy_
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
-  - name: aten::scalar_tensor
   - name: aten::xlogy
 - name: aten::zero_
   depends:
@@ -11424,7 +11322,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
@@ -11467,7 +11364,6 @@
   - name: aten::empty_meta
   - name: aten::empty_strided
   - name: aten::eq
-  - name: aten::is_complex
   - name: aten::is_nonzero
   - name: aten::q_scale
   - name: aten::q_zero_point
