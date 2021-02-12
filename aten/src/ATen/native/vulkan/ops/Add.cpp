@@ -45,6 +45,7 @@ Tensor add_scalar(
           },
           VK_KERNEL(add_scalar),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -101,6 +102,7 @@ Tensor& add_scalar_(
           },
           VK_KERNEL(add_scalar_),
           v_self.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
@@ -160,6 +162,7 @@ Tensor add_tensor(
           },
           VK_KERNEL(add),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -225,6 +228,7 @@ Tensor& add_tensor_(
           },
           VK_KERNEL(add_),
           v_self.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(

@@ -527,6 +527,7 @@ if __name__ == '__main__':
 
 import torch
 from torch.testing._internal.common_utils import (run_tests, slowTest)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 
 class TestThatContainsCUDAAssertFailure(MultiProcessTestCase):
@@ -1061,6 +1062,62 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
                 on_master=False,
                 ancestry_path=0,
                 other_ancestors=0,
+            )
+        )
+
+    def test_regression_info_new_job(self):
+        self.assertEqual(
+            '''\
+----- Historic stats comparison result ------
+
+    job: foo_job
+    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+
++ class Foo:
++     # now    3.02s
++
++     def test_baz: ...
++         # now   3.000s
++
++     def test_foo: ...
++         # now   0.020s           (skipped)
+
+
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time     3.02s
+    | |
+    | : (3 commits)
+    |/|
+    | : (2 commits)
+    |
+    * bbbbbbbbbb          0 reports
+    * cccccccccc          0 reports
+    |
+    :
+
+Removed  (across    0 suites)     0 tests, totaling     0.00s
+Modified (across    0 suites)     0 tests, totaling     0.00s
+Added    (across    1 suite)      2 tests, totaling +   3.02s
+''',
+            print_test_stats.regression_info(
+                head_sha=fakehash('a'),
+                head_report=makereport({
+                    'Foo': [
+                        makecase('test_foo', 0.02, skipped=True),
+                        makecase('test_baz', 3),
+                    ]}),
+                base_reports={
+                    fakehash('b'): [],
+                    fakehash('c'): [],
+                },
+                job_name='foo_job',
+                on_master=False,
+                ancestry_path=3,
+                other_ancestors=2,
             )
         )
 

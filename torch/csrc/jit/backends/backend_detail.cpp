@@ -135,6 +135,12 @@ Module codegen_backend_module(
 
   // This is a pointer to a backend instance that is used to access
   // compile and execute functions.
+  auto custom_classes = customClasses();
+  std::cout << "registered classes: " << std::endl;
+  for (const auto& item : custom_classes) {
+    std::cout << item.first << std::endl;
+  }
+  std::cout << "qn: " << qual_backend_name.qualifiedName() << std::endl;
   auto cls = getCustomClass(qual_backend_name.qualifiedName());
   TORCH_INTERNAL_ASSERT(cls);
   c10::intrusive_ptr<torch::CustomClassHolder> backend;
