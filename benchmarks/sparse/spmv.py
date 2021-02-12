@@ -101,4 +101,3 @@ if __name__ == "__main__":
               " time=", time_coo, file=outfile)
         print("format=csr", " nnz_ratio=", nnz_ratio, " m=", m,
               " time=", time_csr, file=outfile)
-

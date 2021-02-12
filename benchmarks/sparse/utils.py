@@ -1,5 +1,4 @@
 import torch
-import itertools
 import functools
 import random
 import operator
@@ -53,4 +52,3 @@ def gen_sparse_coo_and_csr(shape, nnz):
 
     dense = torch.from_numpy(dense.reshape(shape))
     return dense.to_sparse(), dense.to_sparse_csr()
-

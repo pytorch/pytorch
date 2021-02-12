@@ -4718,4 +4718,3 @@ Example::
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)
 
 """)
-
