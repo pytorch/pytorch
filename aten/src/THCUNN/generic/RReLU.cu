@@ -41,6 +41,8 @@ void THNN_(RReLU_updateOutput)(
     {
       rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
         n, rng_engine_inputs, input_data, noise_data, input_data, lower, upper);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
       THCTensor_(set)(state, output, input);
     }
     else
@@ -49,8 +51,8 @@ void THNN_(RReLU_updateOutput)(
       scalar_t *output_data = THCTensor_(data)(state, output);
       rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
         n, rng_engine_inputs, input_data, noise_data, output_data, lower, upper);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
-    THCudaCheck(cudaGetLastError());
   }
   else
   {
