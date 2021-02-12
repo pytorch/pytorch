@@ -6,19 +6,18 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/core/Storage.h>
-#include <c10/core/TensorOptions.h>
+#include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/SizesAndStrides.h>
-#include <c10/core/CopyBytes.h>
-
-
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Optional.h>
 #include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -1111,11 +1110,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       Resize(newDims);
       return;
     }
-    auto newNumel = std::accumulate(
-        newDims.begin(),
-        newDims.end(),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>());
+    const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       sizes_and_strides_.set_sizes(newDims);
       numel_ = newNumel;
@@ -1172,11 +1167,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // TODO: eliminate newCapacity.
     SmallVector<int64_t, 5> newCapacity(sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
     newCapacity[0] = outer_dim;
-    auto newNumel = std::accumulate(
-        newCapacity.begin(),
-        newCapacity.end(),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>());
+    auto newNumel = c10::multiply_integers(newCapacity);
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       return;
     }
