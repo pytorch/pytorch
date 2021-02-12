@@ -35,7 +35,7 @@ def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
 
 # Borrowed from CPython typing module
 # https://github.com/python/cpython/blob/f90dc36c15d7fee0efaf6d39e97be0bdf2683e93/Lib/typing.py#L156
-def _type_repr(obj):
+def _type_repr(obj) -> str:
     """Return the repr() of an object, special-casing types (internal helper).
     If obj is a type, we return a shorter version than the default
     type.__repr__, based on the module and qualified name, which is

@@ -558,7 +558,14 @@ class Graph:
                 modules_used.add(module_name)
 
         def type_repr(o : Any):
-            typename = _type_repr(o)
+            # Preprocessing for if we have a forward-declared string. 
+            # We want to make sure that 'torch.Tensor', "torch.Tensor",
+            # and torch.Tensor are all treated the same. We need to run
+            # `strip("'")` before and after `strip("\"")` to get rid of
+            # the additional quotes that `from __future__ import 
+            # annotations` adds
+            typename: str = _type_repr(o).strip("'").strip("\"").strip("'")
+
             if all(x.isidentifier() for x in typename.split('.')):
                 register_modules_used(typename)
             else:
@@ -567,6 +574,7 @@ class Graph:
                 for sub_type in o.__args__:
                     # make sure we have torch.Tensor
                     type_repr(sub_type)
+
             return typename
 
 

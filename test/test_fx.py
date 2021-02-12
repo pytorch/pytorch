@@ -1680,6 +1680,13 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
         self.assertEqual(mod_true(3), 6)
         self.assertEqual(mod_false(3), 3)
+    
+    def test_forward_declared_annotations(self):
+        class M(torch.nn.Module):
+            def forward(self, x: 'torch.Tensor') -> 'torch.Tensor':
+                return torch.relu(x)
+
+        self.checkGraphModule(M(), (torch.rand(2, 3),), kwargs=None)
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
