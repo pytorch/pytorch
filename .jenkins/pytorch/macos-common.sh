@@ -12,10 +12,16 @@ export PATH="/usr/local/bin:$PATH"
 export WORKSPACE_DIR="${HOME}/workspace"
 mkdir -p ${WORKSPACE_DIR}
 
+if [[ "${COMPACT_JOB_NAME}" == *arm64* ]]; then
+  MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py38_4.9.2-MacOSX-x86_64.sh"
+else
+  MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py37_4.8.3-MacOSX-x86_64.sh"
+fi
+
 # If a local installation of conda doesn't exist, we download and install conda
 if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
   mkdir -p ${WORKSPACE_DIR}
-  curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-py38_4.9.2-MacOSX-x86_64.sh -o ${WORKSPACE_DIR}/miniconda3.sh
+  curl --retry 3 ${MINICONDA_URL} -o ${WORKSPACE_DIR}/miniconda3.sh
   retry bash ${WORKSPACE_DIR}/miniconda3.sh -b -p ${WORKSPACE_DIR}/miniconda3
 fi
 export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
