@@ -684,7 +684,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(4, 1))
+                self.w1 = nn.Parameter(torch.Tensor(4, 4))
                 self.b1 = nn.Parameter(torch.Tensor(4))
                 self.w2 = nn.Parameter(torch.Tensor(4, 4))
                 self.b2 = nn.Parameter(torch.Tensor(4))
@@ -699,7 +699,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(2, 1))
+        mp(torch.randn(4, 4))
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
@@ -721,7 +721,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq_ns = torch.jit.script(mq_ns)
 
         # calibrate
-        input_fp32 = torch.randn(2, 1)
+        input_fp32 = torch.randn(4, 4)
         mp_ns(input_fp32)
         mq_ns(input_fp32)
 
@@ -763,7 +763,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(4, 1))
+                self.w1 = nn.Parameter(torch.Tensor(4, 4))
                 self.b1 = nn.Parameter(torch.Tensor(4))
                 self.w2 = nn.Parameter(torch.Tensor(4, 4))
                 self.b2 = nn.Parameter(torch.Tensor(4))
@@ -778,7 +778,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(2, 1))
+        mp(torch.randn(4, 4))
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
@@ -790,7 +790,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_shadows_mq = torch.jit.script(mp_shadows_mq)
 
         # calibrate
-        input_fp32 = torch.randn(2, 1)
+        input_fp32 = torch.randn(4, 4)
         mp_shadows_mq(input_fp32)
 
         # check activation result correctness
