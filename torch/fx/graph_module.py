@@ -6,7 +6,7 @@ from torch.package.module_environment import ModuleEnv
 from torch.package import PackageImporter, PackageExporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
-from .graph import Graph, _is_from_torch
+from .graph import Graph, _is_from_torch, _builtin_names, PythonCode
 import copy
 import sys
 import traceback
@@ -38,20 +38,26 @@ linecache.getlines = patched_getline
 
 
 def _forward_from_src(src: str, globals: Dict[str, Any]):
+    # avoid mutating the passed in dict
+    globals = globals.copy()
     exec_with_source(src, globals)
     return globals['forward']
 
 
+def reduce_graph_module(body: dict) -> torch.nn.Module:
+    # BC: attribute name was changed from `code` to `_code` to facilitate
+    # making `code` into a property and adding a docstring to it
+    import_block = body.get('_import_block', '')
+    fn_src = body.get('_code') or body['code']
+    forward = import_block + fn_src
+    return _deserialize_graph_module(forward, body, None)
+
+
 def _format_import_statement(name: str, obj: Any, module_env: ModuleEnv) -> str:
-    # Special globals that we hard code
-    if name == 'torch' or _is_from_torch(obj):
+    if name in _builtin_names:
+        return _builtin_names[name].import_str
+    if _is_from_torch(name):
         return 'import torch'
-    if name == 'NoneType':
-        return 'NoneType = type(None)'
-    if name == 'inf':
-        return 'from math import inf'
-    if name == 'nan':
-        return 'from math import nan'
 
     module_name, attr_name = module_env.get_name(obj)
     return f'from {module_name} import {attr_name} as {name}'
@@ -324,7 +330,7 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
-    def recompile(self) -> None:
+    def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
@@ -350,9 +356,12 @@ class {module_name}(torch.nn.Module):
                 sys.excepthook = old_excepthook
         cls.__call__ = wrapped_call
 
+        return python_code
+
     def __reduce_package__(self, exporter: PackageExporter):
         generated_module_name = f'fx-generated._{exporter.get_unique_id()}'
-        import_block = _format_import_block(self._graph._globals.globals, exporter.module_env)
+        python_code = self.recompile()
+        import_block = _format_import_block(python_code.globals, exporter.module_env)
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
 
@@ -369,7 +378,8 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
-        import_block = _format_import_block(self._graph._globals.globals, ModuleEnv())
+        python_code = self.recompile()
+        import_block = _format_import_block(python_code.globals, ModuleEnv())
         del dict_without_graph['_graph']
         return (reduce_graph_module, (dict_without_graph, import_block))
 
