@@ -496,8 +496,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(1, 1))
-                self.b = nn.Parameter(torch.Tensor(1))
+                self.w = nn.Parameter(torch.Tensor(4, 1))
+                self.b = nn.Parameter(torch.Tensor(4))
+                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
                 x = F.linear(x, self.w, self.b)
