@@ -352,17 +352,6 @@ void IRPrinter::visit(const ReduceOp* v) {
   os() << *v->body() << ", ";
 
   bool first = true;
-  os() << "out_args={";
-  for (auto* d : v->output_args()) {
-    if (!first) {
-      os() << ", ";
-    }
-    os() << *d;
-    first = false;
-  }
-  os() << "}, ";
-
-  first = true;
   os() << "reduce_args={";
   for (auto* d : v->reduce_args()) {
     if (!first) {

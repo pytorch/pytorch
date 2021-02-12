@@ -14,7 +14,6 @@ ReduceOp* Reducer::operator()(
   return new ReduceOp(
       result_buf,
       complete(result_buf, interaction_, body, output, inner),
-      output,
       inner,
       *this);
 }
@@ -27,7 +26,6 @@ ReduceOp* Reducer::operator()(
   return new ReduceOp(
       result_buf,
       complete(result_buf, interaction_, ExprHandle(body), output, inner),
-      output,
       inner,
       *this);
 }

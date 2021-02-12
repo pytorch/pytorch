@@ -67,18 +67,6 @@ class IndexFlattener : public IRMutator {
         v->mask());
   }
 
-  const Expr* mutate(const ReduceOp* v) override {
-    const Expr* new_body = v->body()->accept_mutator(this);
-
-    auto* out = new ReduceOp(
-        v->accumulator(),
-        new_body,
-        {flatten_index(v->accumulator()->dims(), v->output_args())},
-        v->reduce_args(),
-        v->reducer());
-    return out;
-  }
-
   Stmt* mutate(const Store* v) override {
     const Expr* value = v->value();
     const Expr* new_value = value->accept_mutator(this);
@@ -272,17 +260,12 @@ class Vectorizer : public IRMutator {
   const Expr* mutate(const ReduceOp* v) override {
     Dtype dtype(v->dtype().scalar_type(), lanes_);
 
-    auto inputs = v->output_args();
-    // should already be flattened.
-    TORCH_INTERNAL_ASSERT(inputs.size() == 1);
-
-    inputs.push_back(v->body());
+    std::vector<const Expr*> inputs = {v->body()};
 
     auto* out = try_vectorize(v, inputs, [&]() {
       return ExprHandle(new ReduceOp(
           v->accumulator(),
-          inputs[1],
-          {inputs[0]},
+          inputs[0],
           v->reduce_args(),
           v->reducer()));
     });
@@ -1799,28 +1782,6 @@ class CacheReplacer : public IRMutator {
     return new Store(cache_, newIndices, newValue, v->mask());
   }
 
-  const Expr* mutate(const ReduceOp* v) override {
-    const Buf* buf = v->accumulator();
-    if (buf != buf_) {
-      return IRMutator::mutate(v);
-    }
-
-    const Expr* newBody = v->body()->accept_mutator(this);
-
-    // Map indices to call-parameters.
-    std::vector<const Expr*> newIndices;
-    TORCH_INTERNAL_ASSERT(offsets_.size() == v->output_args().size());
-    for (size_t i = 0; i < v->output_args().size(); ++i) {
-      const Expr* index = v->output_args()[i]->accept_mutator(this);
-      const Expr* offset = offsets_[i];
-      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
-      newIndices.push_back(sub);
-    }
-
-    return new ReduceOp(
-        cache_, newBody, newIndices, v->reduce_args(), v->reducer());
-  }
-
   const Buf* buf_;
   const Buf* cache_;
   std::vector<const Expr*>& offsets_;
@@ -2391,7 +2352,7 @@ void LoopNest::rfactor(
   const Expr* new_body = reduce_op->body()->accept_mutator(&bufReplacer);
 
   auto first_reduce = new ReduceOp(
-      tmp_buf, new_body, new_outer, new_inner, reduce_op->reducer());
+      tmp_buf, new_body, new_inner, reduce_op->reducer());
 
   auto second_reduce_load_indices = old_outer;
   second_reduce_load_indices.emplace_back(reduction_var);
