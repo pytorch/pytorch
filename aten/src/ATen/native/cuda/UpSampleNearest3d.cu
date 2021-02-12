@@ -286,7 +286,7 @@ Tensor upsample_nearest3d_cuda(
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  return upsample_nearest3d_out_cuda_template(input, osize, scale_d, scale_h, scale_w);
+  return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w);
 }
 
 // when structured kernels can handle QuantizedCPU, update these overloads to be DefaultBackend
