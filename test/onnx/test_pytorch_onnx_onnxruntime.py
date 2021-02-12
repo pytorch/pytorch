@@ -12,8 +12,8 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
-                                 skipIfNoLapack, disableScriptTest, disableOldJitPassesTest,
-                                 skipIfUnsupportedMaxOpsetVersion, skipIfONNXShapeInference)
+                                 skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
+                                 skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional
@@ -40,8 +40,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                     do_constant_folding=True, keep_initializers_as_inputs=True,
                     dynamic_axes=None, input_names=None, output_names=None,
                     fixed_batch_size=False, training=None,
-                    onnx_shape_inference=False,
-                    use_new_jit_passes=True):
+                    onnx_shape_inference=False):
     # export the model to ONNX
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
@@ -53,8 +52,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                        dynamic_axes=dynamic_axes,
                        input_names=input_names, output_names=output_names,
                        fixed_batch_size=fixed_batch_size, training=training,
-                       onnx_shape_inference=onnx_shape_inference,
-                       use_new_jit_passes=use_new_jit_passes)
+                       onnx_shape_inference=onnx_shape_inference)
 
     # compute onnxruntime output prediction
     ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -125,8 +123,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                    dynamic_axes=dynamic_axes, input_names=input_names,
                                    output_names=output_names, fixed_batch_size=fixed_batch_size, training=None,
-                                   onnx_shape_inference=self.onnx_shape_inference,
-                                   use_new_jit_passes=self.use_new_jit_passes)
+                                   onnx_shape_inference=self.onnx_shape_inference)
         # compute onnxruntime output prediction
         ort_outs = run_ort(ort_sess, input)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
@@ -215,7 +212,6 @@ class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
-    use_new_jit_passes = True  # For testing main code-path
     onnx_shape_inference = True
 
     def setUp(self):
@@ -237,7 +233,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size, dict_check=dict_check)
-        if self.is_script_test_enabled and self.use_new_jit_passes:
+        if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
             _run_test(script_model)
 
@@ -6042,7 +6038,7 @@ class TestONNXRuntime(unittest.TestCase):
         ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
                                    example_outputs=out,
                                    training=torch.onnx.TrainingMode.TRAINING,
-                                   use_new_jit_passes=True, onnx_shape_inference=True)
+                                   onnx_shape_inference=True)
         ort_outs = run_ort(ort_sess, input=(x,))
         [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in
          zip(pytorch_out, ort_outs)]
@@ -6071,7 +6067,7 @@ class TestONNXRuntime(unittest.TestCase):
         script_model = torch.jit.script(model)
         output = model(x)
         ort_sess = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
-                                   example_outputs=output, use_new_jit_passes=True,
+                                   example_outputs=output,
                                    training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
@@ -6116,7 +6112,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = model(input)
         output = y.cpu().numpy()
         ort_sess = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
-                                   example_outputs=y, use_new_jit_passes=True,
+                                   example_outputs=y,
                                    training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
         ort_mask = np.where(ort_outs[0] != 0, 1, 0)
@@ -6153,11 +6149,11 @@ class TestONNXRuntime(unittest.TestCase):
         script_model = torch.jit.script(model)
         outputs = model(x)
         ort_sess1 = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
-                                    example_outputs=outputs, use_new_jit_passes=True,
+                                    example_outputs=outputs,
                                     training=torch.onnx.TrainingMode.TRAINING)
         ort_outs1 = run_ort(ort_sess1, input=(x,))
         ort_sess2 = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
-                                    example_outputs=outputs, use_new_jit_passes=True,
+                                    example_outputs=outputs,
                                     training=torch.onnx.TrainingMode.EVAL)
         ort_outs2 = run_ort(ort_sess2, input=(x,))
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
@@ -6230,7 +6226,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         with self.assertRaises(RuntimeError) as cm:
             convert_to_onnx(model, input=(box_regression, proposal),
-                            example_outputs=outputs, use_new_jit_passes=True)
+                            example_outputs=outputs)
 
     def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
@@ -6517,7 +6513,6 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
-    @disableOldJitPassesTest()
     def test_set_attr(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -6535,7 +6530,6 @@ class TestONNXRuntime(unittest.TestCase):
         box_regression = torch.randn(3, 2)
         self.run_test(model, (box_regression, weight))
 
-    @disableOldJitPassesTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_2(self):
         class MyModule(torch.nn.Module):
@@ -6561,7 +6555,6 @@ class TestONNXRuntime(unittest.TestCase):
         anchors = torch.ones(3, 10, 3)
         self.run_test(model, (anchors))
 
-    @disableOldJitPassesTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_3(self):
         class MyModule(torch.nn.Module):
@@ -6589,7 +6582,6 @@ class TestONNXRuntime(unittest.TestCase):
         anchors = torch.rand(3, 10)
         self.run_test(model, (anchors))
 
-    @disableOldJitPassesTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_4(self):
         class MyModule(torch.nn.Module):
@@ -6621,6 +6613,34 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(5, 11, 30)
         anchors = torch.ones(3, 10, 3)
         self.run_test(model, (x, anchors))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_set_attr_in_loop(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv1d(10, 3, 3)
+                self.conv.weight = torch.nn.Parameter(torch.zeros(3, 10))
+                self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
+
+            def set_cell_anchors(self, anchors, boxes):
+                self.conv.weight = torch.randn(3, 10)
+                for i in range(self.conv.weight.size(0)):
+                    for j in range(10):
+                        self.conv.bias = torch.randn(3, 10, 3)
+                        self.conv.weight = anchors * i
+                        boxes[j] += torch.ones(3, 3)
+
+            def forward(self, anchors) -> Tuple[torch.Tensor, torch.Tensor]:
+                boxes = torch.ones(10, 3, 3)
+                self.set_cell_anchors(anchors, boxes)
+                if self.conv.bias is not None:
+                    return self.conv.weight, boxes
+                return anchors, boxes
+
+        model = torch.jit.script(MyModule())
+        anchors = torch.rand(10)
+        self.run_test(model, anchors)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if(self):
@@ -7016,23 +7036,6 @@ TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
                                dict(TestONNXRuntime.__dict__, opset_version=13,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
-
-# opset 9 tests, with use_new_jit_passes=True for using new jit API,
-# and with keep_initializers_as_inputs=False for IR version 4 style export.
-TestONNXRuntime_IRv4_old_jit_API = type(str("TestONNXRuntime_IRv4_old_jit_API"),
-                                        (unittest.TestCase,),
-                                        dict(TestONNXRuntime.__dict__,
-                                             keep_initializers_as_inputs=False,
-                                             use_new_jit_passes=False))
-
-
-# opset 12 tests, with use_new_jit_passes=True for using new jit API,
-# and keep_initializers_as_inputs=False for IR version 4 style export.
-TestONNXRuntime_opset12_IRv4_old_jit_API = type(str("TestONNXRuntime_opset12_IRv4_old_jit_API"),
-                                                (unittest.TestCase,),
-                                                dict(TestONNXRuntime.__dict__, opset_version=12,
-                                                     keep_initializers_as_inputs=False,
-                                                     use_new_jit_passes=False))
 
 if __name__ == '__main__':
     unittest.main()
