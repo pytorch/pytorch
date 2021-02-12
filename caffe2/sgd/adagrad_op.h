@@ -231,14 +231,14 @@ class SparseAdagradOp final : public Operator<CPUContext> {
     if (block_size != last_block_size_) {
       last_block_size_ = block_size;
       if (std::is_same<SIndex, std::int32_t>::value) {
-        kernel_i32_ = fbgemm::GenerateSparseAdaGradNew<std::int32_t>(
+        kernel_i32_ = fbgemm::GenerateSparseAdaGrad<std::int32_t>(
             block_size,
             /*rowwise=*/false,
             /*prefetch=*/16,
             weight_decay_ != 0.0f);
       } else {
         CAFFE_ENFORCE((std::is_same<SIndex, std::int64_t>::value));
-        kernel_i64_ = fbgemm::GenerateSparseAdaGradNew<std::int64_t>(
+        kernel_i64_ = fbgemm::GenerateSparseAdaGrad<std::int64_t>(
             block_size,
             /*rowwise=*/false,
             /*prefetch=*/16,
@@ -354,8 +354,8 @@ class SparseAdagradOp final : public Operator<CPUContext> {
   float epsilon_;
   const float weight_decay_;
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
-  fbgemm::SparseAdaGradSignatureNew<std::int32_t>::Type kernel_i32_;
-  fbgemm::SparseAdaGradSignatureNew<std::int64_t>::Type kernel_i64_;
+  fbgemm::SparseAdaGradSignature<std::int32_t>::Type kernel_i32_;
+  fbgemm::SparseAdaGradSignature<std::int64_t>::Type kernel_i64_;
   std::int64_t last_block_size_{-1};
 #endif
 
@@ -432,14 +432,14 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
     if (block_size != last_block_size_) {
       last_block_size_ = block_size;
       if (std::is_same<SIndex, std::int32_t>::value) {
-        kernel_i32_ = fbgemm::GenerateSparseAdaGradNew<std::int32_t>(
+        kernel_i32_ = fbgemm::GenerateSparseAdaGrad<std::int32_t>(
             block_size,
             /*rowwise=*/true,
             /*prefetch=*/16,
             weight_decay_ != 0.0f);
       } else {
         CAFFE_ENFORCE((std::is_same<SIndex, std::int64_t>::value));
-        kernel_i64_ = fbgemm::GenerateSparseAdaGradNew<std::int64_t>(
+        kernel_i64_ = fbgemm::GenerateSparseAdaGrad<std::int64_t>(
             block_size,
             /*rowwise=*/true,
             /*prefetch=*/16,
@@ -553,8 +553,8 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   float epsilon_;
   const float weight_decay_;
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
-  fbgemm::SparseAdaGradSignatureNew<std::int32_t>::Type kernel_i32_;
-  fbgemm::SparseAdaGradSignatureNew<std::int64_t>::Type kernel_i64_;
+  fbgemm::SparseAdaGradSignature<std::int32_t>::Type kernel_i32_;
+  fbgemm::SparseAdaGradSignature<std::int64_t>::Type kernel_i64_;
   std::int64_t last_block_size_{-1};
 #endif
 
