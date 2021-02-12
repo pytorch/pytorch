@@ -296,14 +296,16 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
     ::c10::detail::torchCheckFail(                              \
         __func__, __FILE__, static_cast<uint32_t>(__LINE__),    \
-        ::c10::str(                                             \
-            #cond " INTERNAL ASSERT FAILED at "                 \
-            C10_STRINGIZE(__FILE__)                             \
-            ":"                                                 \
-            C10_STRINGIZE(__LINE__)                             \
-            ", please report a bug to PyTorch. ",               \
-            ::c10::str(__VA_ARGS__)                             \
-        ));                                                     \
+        ([&]() C10_NOINLINE {                                   \
+          return ::c10::str(                                    \
+              #cond " INTERNAL ASSERT FAILED at "               \
+              C10_STRINGIZE(__FILE__)                           \
+              ":"                                               \
+              C10_STRINGIZE(__LINE__)                           \
+              ", please report a bug to PyTorch. ",             \
+              ::c10::str(__VA_ARGS__)                           \
+          );                                                    \
+        })());                                                  \
   }
 #endif
 
@@ -365,12 +367,23 @@ namespace detail {
 } // namespace detail
 } // namespace 10
 
+#ifdef STRIP_ERROR_MESSAGES
+// No need to outline TORCH_CHECK_MSG call when STRIP_ERROR_MESSAGES
+// is defined because it's just a string constant.
 #define TORCH_CHECK(cond, ...)                                          \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
     ::c10::detail::torchCheckFail(                                      \
         __func__, __FILE__, static_cast<uint32_t>(__LINE__),            \
         TORCH_CHECK_MSG(cond, "", __VA_ARGS__));                        \
   }
+#else
+#define TORCH_CHECK(cond, ...)                                          \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
+    ::c10::detail::torchCheckFail(                                      \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__),            \
+        ([&]() C10_NOINLINE { return TORCH_CHECK_MSG(cond, "", __VA_ARGS__); })()); \
+  }
+#endif
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
 // otherwise does nothing. Supposed to be used in the code shared between host and
