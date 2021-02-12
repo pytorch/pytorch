@@ -164,8 +164,8 @@ void Logger::set_runtime_stats_and_log() {
   if (reducer_->replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
     // Cuda time stats are only collected for single process single
-    // device program.
-    if (reducer_->replicas_.size() > 1) {
+    // device and single device module.
+    if (reducer_->replicas_.size() > 1 || reducer_->is_multi_device_module_) {
       return;
     }
     // Check events on the replicas_[0][0].device().

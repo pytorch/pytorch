@@ -3279,8 +3279,8 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.rebuilt_bucket_sizes, [param_size])
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
-            self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 10)
-            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 10)
+            self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 1)
             self.assertGreaterEqual(
                 ddp_logging_data.avg_backward_compute_time,
                 ddp_logging_data.avg_backward_compute_comm_overlap_time)
