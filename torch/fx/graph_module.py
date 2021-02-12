@@ -192,8 +192,6 @@ class GraphModule(torch.nn.Module):
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
 
-        self.no_tb = False
-
         self.graph = graph
 
     # TorchScript breaks trying to compile the graph setter because of the
@@ -332,24 +330,16 @@ class {module_name}(torch.nn.Module):
             return "\n".join([tb_repr, custom_msg, before_err, marker, err_and_after_err])
 
         def wrapped_call(self, *args, **kwargs):
-            old_excepthook = sys.excepthook
             try:
-                sys.excepthook = print_full_traceback
                 return torch.nn.Module.__call__(self, *args, **kwargs)
             except Exception as e:
                 assert e.__traceback__
                 topmost_framesummary: traceback.FrameSummary = \
                     traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
                 if "eval_with_key" in topmost_framesummary.filename:
-                    self.no_tb = True
                     print(generate_error_message(topmost_framesummary),
                           file=sys.stderr)
-                raise e
-            finally:
-                if self.no_tb:
-                    sys.excepthook = lambda x, y, z : None
-                else:
-                    sys.excepthook = old_excepthook
+                raise e.with_traceback(None)
 
         cls.__call__ = wrapped_call
 
