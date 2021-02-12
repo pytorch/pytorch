@@ -140,156 +140,489 @@ void initJITBindings(PyObject* module) {
   py::class_<python::IODescriptor> iodescriptor(
       m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
+  // Register pass and profiler functions on both torch._C and torch.C._jit
+  // modules for backward compatibility. Prefix them with "_jit_" in torch._C.
+  std::vector<py::module> modules({top, m});
+  const std::vector<std::string> prefixes({"_jit_", ""});
+  for (size_t i = 0; i < modules.size(); ++i) {
+    auto mod = modules[i];
+    auto prefix = prefixes[i];
+
+    // Passes.
+    mod.def((prefix + "pass_onnx_remove_print").c_str(), RemovePrintOps)
+        .def(
+            (prefix + "pass_onnx_preprocess_caffe2").c_str(),
+            PreprocessCaffe2Ops)
+        .def((prefix + "pass_onnx").c_str(), ToONNX)
+        .def(
+            (prefix + "pass_onnx_assign_output_shape").c_str(),
+            [](std::shared_ptr<Graph>& graph,
+               const std::vector<at::Tensor>& tensors,
+               const python::IODescriptor& desc,
+               bool onnx_shape_inference = false) {
+              ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
+            })
+        .def((prefix + "pass_lower_all_tuples").c_str(), LowerAllTuples)
+        .def(
+            (prefix + "pass_onnx_function_substitution").c_str(),
+            ONNXFunctionCallSubstitution)
+        .def(
+            (prefix + "pass_onnx_fold_if").c_str(),
+            [](std::shared_ptr<Graph>& graph) {
+              return FoldIfNodeONNX(graph->block());
+            })
+        .def(
+            (prefix + "pass_onnx_peephole").c_str(),
+            [](std::shared_ptr<Graph>& graph,
+               int opset_version,
+               bool fixed_batch_size) {
+              return PeepholeOptimizeONNX(
+                  graph, opset_version, fixed_batch_size);
+            })
+        .def((prefix + "pass_onnx_preprocess").c_str(), PreprocessForONNX)
+        .def(
+            (prefix + "pass_onnx_eval_peephole").c_str(),
+            [](std::shared_ptr<Graph>& graph,
+               std::map<std::string, IValue>& paramsDict) {
+              EvalPeepholeONNX(graph->block(), paramsDict);
+              return paramsDict;
+            },
+            pybind11::return_value_policy::move)
+        .def(
+            (prefix + "pass_onnx_cast_all_constant_to_floating").c_str(),
+            CastAllConstantToFloating)
+        .def(
+            (prefix + "pass_onnx_constant_fold").c_str(),
+            [](std::shared_ptr<Graph>& graph,
+               std::map<std::string, IValue>& paramsDict,
+               int opset_version) {
+              ConstantFoldONNX(
+                  graph->block(),
+                  paramsDict,
+                  opset_version); // overload resolution
+              return paramsDict;
+            },
+            pybind11::return_value_policy::move)
+        .def(
+            (prefix + "pass_onnx_eliminate_unused_items").c_str(),
+            [](std::shared_ptr<Graph>& graph,
+               std::map<std::string, IValue>& paramsDict) {
+              EliminateUnusedItemsONNX(
+                  graph->block(),
+                  paramsDict); // overload resolution
+              return paramsDict;
+            },
+            pybind11::return_value_policy::move)
+        .def(
+            (prefix + "pass_onnx_scalar_type_analysis").c_str(),
+            ScalarTypeAnalysisForONNX)
+        .def(
+            (prefix + "pass_onnx_remove_inplace_ops_for_onnx").c_str(),
+            RemoveInplaceOpsForONNX)
+        .def(
+            (prefix + "pass_onnx_prepare_inplace_ops_for_onnx").c_str(),
+            PrepareInplaceOpsForONNX)
+        .def(
+            (prefix + "pass_onnx_node_shape_type_inference").c_str(),
+            [](Node* n,
+               std::map<std::string, IValue>& params_dict,
+               int opset_version) {
+              ONNXShapeTypeInference(n, params_dict, opset_version);
+            })
+        .def(
+            (prefix + "pass_onnx_graph_shape_type_inference").c_str(),
+            [](std::shared_ptr<Graph>& graph,
+               std::map<std::string, IValue>& params_dict,
+               int opset_version) {
+              ONNXShapeTypeInference(graph, params_dict, opset_version);
+            })
+        .def(
+            (prefix + "pass_onnx_set_dynamic_input_shape").c_str(),
+            ONNXSetDynamicInputShape)
+        .def((prefix + "pass_fuse").c_str(), FuseGraph)
+        .def(
+            (prefix + "pass_dce").c_str(),
+            [](std::shared_ptr<Graph>& g) {
+              return EliminateDeadCode(g->block()); // overload resolution
+            })
+        .def(
+            (prefix + "pass_dce_allow_deleting_nodes_with_side_effects")
+                .c_str(),
+            [](std::shared_ptr<Graph>& g) {
+              return EliminateDeadCode(
+                  g->block(),
+                  true,
+                  DCESideEffectPolicy::
+                      ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload
+                                                               // resolution
+            })
+        .def(
+            (prefix + "pass_cse").c_str(),
+            [](std::shared_ptr<Graph>& g) {
+              return EliminateCommonSubexpression(g); // overload resolution
+            })
+        .def(
+            (prefix + "pass_fuse_quantized_add_relu").c_str(),
+            [](std::shared_ptr<Graph>& g) {
+              return FuseQuantizedAddRelu(g); // overload resolution
+            })
+        .def(
+            (prefix + "pass_insert_observers").c_str(),
+            [](Module& module,
+               const std::string& method_name,
+               const py::dict& qconfig_dict,
+               bool inplace,
+               int quant_type_int) {
+              auto dict = py::cast<std::unordered_map<
+                  std::string,
+                  c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+              auto quant_type = static_cast<QuantType>(quant_type_int);
+              return InsertObservers(
+                  module, method_name, dict, inplace, quant_type);
+            },
+            py::arg("module"),
+            py::arg("method_name"),
+            py::arg("qconfig_dict"),
+            py::arg("inplace"),
+            py::arg("quant_type_int") = 1)
+        .def(
+            (prefix + "pass_insert_quant_dequant").c_str(),
+            [](Module& module,
+               const std::string& method_name,
+               bool inplace,
+               bool debug,
+               int quant_type_int) {
+              auto quant_type = static_cast<QuantType>(quant_type_int);
+              return InsertQuantDeQuant(
+                  module, method_name, inplace, debug, quant_type);
+            },
+            py::arg("module"),
+            py::arg("method_name"),
+            py::arg("inplace"),
+            py::arg("debug"),
+            py::arg("quant_type_int") = 1)
+        .def(
+            (prefix + "pass_insert_prepack_unpack").c_str(),
+            [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
+        .def(
+            (prefix + "pass_insert_prepack_unpack").c_str(),
+            [](Module& module) { return InsertPrepackUnpack(module); })
+        .def(
+            (prefix + "pass_quant_fusion").c_str(),
+            [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
+        .def((prefix + "pass_fold_convbn").c_str(), &FoldConvBatchNorm)
+        .def(
+            (prefix + "pass_fold_frozen_conv_bn").c_str(),
+            &FoldFrozenConvBatchnorm)
+        .def(
+            (prefix + "pass_fold_frozen_conv_add_or_sub").c_str(),
+            &FoldFrozenConvAddOrSub)
+        .def(
+            (prefix + "pass_fold_frozen_conv_mul_or_div").c_str(),
+            &FoldFrozenConvMulOrDiv)
+        .def(
+            (prefix + "pass_optimize_frozen_graph").c_str(),
+            &OptimizeFrozenGraph)
+        .def((prefix + "pass_fuse_linear").c_str(), &FuseLinear)
+        .def(
+            (prefix + "pass_fuse_add_relu").c_str(),
+            [](std::shared_ptr<Graph>& graph) { FuseAddRelu(graph); })
+        .def((prefix + "pass_dedup_module_uses").c_str(), &DedupModuleUses)
+        .def((prefix + "pass_replicate_dequantize").c_str(), &ReplicateDeQuant)
+        .def(
+            (prefix + "pass_swap_functional_linear").c_str(),
+            [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
+        .def(
+            (prefix + "pass_swap_functional_linear").c_str(),
+            [](Module& module) { SwapFunctionalLinear(module); })
+        .def(
+            (prefix + "pass_quant_finalize").c_str(),
+            [](Module& module,
+               int quant_type_int,
+               const std::vector<std::string>& preserved_attrs) {
+              auto quant_type = static_cast<QuantType>(quant_type_int);
+              return Finalize(module, quant_type, preserved_attrs);
+            },
+            py::arg("module"),
+            py::arg("quant_type_int") = 1,
+            py::arg("preserved_attrs") = std::vector<std::string>())
+        .def(
+            (prefix + "pass_pattern_based_rewrite").c_str(),
+            [](const Module& m) { return PatternBasedRewrite(m); })
+        .def(
+            (prefix + "pass_custom_pattern_based_rewrite").c_str(),
+            [](const std::string& pattern,
+               const std::string& fused_node_name,
+               const Module& m) {
+              SubgraphRewriter subgraph_rewriter;
+              subgraph_rewriter.RegisterRewritePattern(
+                  pattern, fused_node_name);
+              subgraph_rewriter.runOnModule(m);
+            })
+        .def(
+            (prefix + "pass_custom_pattern_based_rewrite_graph").c_str(),
+            [](const std::string& pattern,
+               const std::string& fused_node_name,
+               std::shared_ptr<Graph> g) {
+              SubgraphRewriter subgraph_rewriter;
+              subgraph_rewriter.RegisterRewritePattern(
+                  pattern, fused_node_name);
+              subgraph_rewriter.runOnGraph(g);
+            })
+        .def(
+            (prefix + "pass_remove_inplace_ops").c_str(),
+            [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
+        .def((prefix + "pass_constant_pooling").c_str(), ConstantPooling)
+        .def(
+            (prefix + "pass_create_functional_graphs").c_str(),
+            [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
+        .def(
+            (prefix + "pass_remove_mutation").c_str(),
+            [](std::shared_ptr<Graph>& g) {
+              RemoveListMutation(g);
+              return RemoveTensorMutation(g);
+            })
+        .def(
+            (prefix + "pass_inline_functional_graphs").c_str(),
+            [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
+        .def(
+            (prefix + "pass_peephole").c_str(),
+            [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
+              return PeepholeOptimize(g, addmm_fusion_enabled);
+            },
+            py::arg("graph"),
+            py::arg("addmm_fusion_enabled") = false)
+        .def(
+            (prefix + "pass_fuse_addmm").c_str(),
+            [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
+        .def(
+            (prefix + "pass_canonicalize").c_str(),
+            [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
+        .def((prefix + "pass_lint").c_str(), LintGraph)
+        .def(
+            (prefix + "pass_complete_shape_analysis").c_str(),
+            [](const std::shared_ptr<Graph>& graph,
+               const py::tuple& inputs,
+               bool with_grad) {
+              ArgumentSpecCreator arg_spec_creator(*graph);
+              Stack stack;
+              stack.reserve(inputs.size()); // captures?
+              for (auto& obj : inputs) {
+                stack.push_back(toTypeInferredIValue(obj));
+              }
+              ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
+              arg_spec_creator.specializeTypes(*graph, spec);
+              // We only get partial specialization from the arg_spec_creator,
+              // but we want full shape specialization. The alternative would be
+              // to have a "complete type inference" function in
+              // ArguemntSpecCreator.
+              auto g_inputs = graph->inputs();
+              for (size_t i = 0; i < inputs.size(); ++i) {
+                if (stack[i].isTensor()) {
+                  g_inputs[i]->setType(stack[i].type());
+                }
+              }
+              PropagateInputShapes(graph);
+            })
+        .def((prefix + "pass_remove_expands").c_str(), RemoveExpands)
+        .def((prefix + "pass_erase_number_types").c_str(), EraseNumberTypes)
+        .def((prefix + "pass_inline_fork_wait").c_str(), InlineForkWait)
+        .def((prefix + "pass_inline").c_str(), Inline)
+        .def(
+            (prefix + "pass_prepare_division_for_onnx").c_str(),
+            PrepareDivisionForONNX)
+        .def(
+            (prefix + "pass_lower_graph").c_str(),
+            [](std::shared_ptr<Graph>& graph, const Module& self) {
+              return LowerGraph(*graph, self._ivalue());
+            })
+        .def((prefix + "pass_loop_unrolling").c_str(), UnrollLoops)
+        .def(
+            (prefix + "pass_constant_propagation_immutable_types").c_str(),
+            [](std::shared_ptr<Graph>& g) {
+              return ConstantPropagationImmutableTypes(g);
+            })
+        .def(
+            (prefix + "pass_constant_propagation").c_str(),
+            [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); },
+            py::arg("graph"))
+        .def(
+            (prefix + "pass_erase_shape_information").c_str(),
+            EraseShapeInformation)
+        .def(
+            (prefix + "pass_create_autodiff_subgraphs").c_str(),
+            [](const std::shared_ptr<Graph>& graph) {
+              CreateAutodiffSubgraphs(graph);
+            })
+        .def((prefix + "pass_onnx_block").c_str(), BlockToONNX)
+        .def(
+            (prefix + "pass_fixup_onnx_controlflow_node").c_str(),
+            FixupONNXControlflowNode)
+        .def(
+            (prefix + "pass_canonicalize_graph_fuser_ops").c_str(),
+            CanonicalizeOps)
+        .def((prefix + "pass_decompose_ops").c_str(), DecomposeOps)
+        .def(
+            (prefix + "pass_specialize_autogradzero").c_str(),
+            specializeAutogradZero)
+        .def(
+            (prefix + "pass_fuse_tensorexprs").c_str(),
+            [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
+        .def(
+            "fuser_get_fused_kernel_code",
+            [](Graph& g, const std::vector<at::Tensor>& inps) {
+              return debugGetFusedKernelCode(g, inps);
+            })
+        .def(
+            (prefix + "pass_remove_dropout").c_str(),
+            [](script::Module& module) { return removeDropout(module); })
+        .def(
+            (prefix + "pass_transform_conv1d_to_conv2d").c_str(),
+            [](std::shared_ptr<Graph>& graph) {
+              return transformConv1dToConv2d(graph);
+            })
+        .def(
+            (prefix + "pass_transform_conv1d_to_conv2d").c_str(),
+            [](script::Module& module) {
+              return transformConv1dToConv2d(module);
+            })
+        .def(
+            (prefix + "pass_insert_prepacked_ops").c_str(),
+            [](std::shared_ptr<Graph>& graph) {
+              return insertPrePackedOps(graph);
+            })
+        .def(
+            (prefix + "pass_insert_prepacked_ops").c_str(),
+            [](script::Module& module) { return insertPrePackedOps(module); })
+        .def(
+            (prefix + "pass_fuse_clamp_w_prepacked_linear_conv").c_str(),
+            [](script::Module& module) {
+              return fusePrePackedLinearConvWithClamp(module);
+            })
+        .def(
+            (prefix + "pass_fold_prepacking_ops").c_str(),
+            [](script::Module& module) { return FoldPrePackingOps(module); })
+        .def(
+            (prefix + "pass_optimize_for_mobile").c_str(),
+            [](script::Module& module,
+               std::set<MobileOptimizerType>& optimization_blocklist,
+               std::vector<std::string>& preserved_methods) {
+              return optimizeForMobile(
+                  module, optimization_blocklist, preserved_methods);
+            })
+        .def(
+            (prefix + "pass_vulkan_insert_prepacked_ops").c_str(),
+            [](std::shared_ptr<Graph>& graph) {
+              return vulkanInsertPrePackedOps(graph);
+            })
+        .def(
+            (prefix + "pass_vulkan_insert_prepacked_ops").c_str(),
+            [](script::Module& module) {
+              return vulkanInsertPrePackedOps(module);
+            })
+        .def(
+            (prefix + "pass_vulkan_fuse_clamp_w_prepacked_conv").c_str(),
+            [](script::Module& module) {
+              return vulkanFusePrePackedConvWithClamp(module);
+            })
+        .def(
+            (prefix + "pass_vulkan_fold_prepacking_ops").c_str(),
+            [](script::Module& module) {
+              return vulkanFoldPrePackingOps(module);
+            })
+        .def(
+            (prefix + "pass_vulkan_optimize_for_mobile").c_str(),
+            [](script::Module& module,
+               std::vector<std::string>& preserved_methods) {
+              return vulkanOptimizeForMobile(module, preserved_methods);
+            })
+        .def(
+            (prefix + "pass_metal_insert_prepacked_ops").c_str(),
+            [](std::shared_ptr<Graph>& graph) {
+              return metalInsertPrePackedOps(graph);
+            })
+        .def(
+            (prefix + "pass_metal_insert_prepacked_ops").c_str(),
+            [](script::Module& module) {
+              return metalInsertPrePackedOps(module);
+            })
+        .def(
+            (prefix + "pass_metal_fuse_clamp_w_prepacked_conv").c_str(),
+            [](script::Module& module) {
+              return metalFusePrePackedConvWithClamp(module);
+            })
+        .def(
+            (prefix + "pass_metal_fold_prepacking_ops").c_str(),
+            [](script::Module& module) {
+              return metalFoldPrePackingOps(module);
+            })
+        .def(
+            (prefix + "pass_metal_optimize_for_mobile").c_str(),
+            [](script::Module& module,
+               std::vector<std::string>& preserved_methods) {
+              return metalOptimizeForMobile(module, preserved_methods);
+            })
+        .def(
+            (prefix + "pass_onnx_unpack_quantized_weights").c_str(),
+            [](std::shared_ptr<Graph>& graph,
+               std::map<std::string, IValue>& paramsDict) {
+              UnpackQuantizedWeights(graph, paramsDict);
+              return paramsDict;
+            },
+            pybind11::return_value_policy::move)
+        .def(
+            (prefix + "pass_onnx_quantization_insert_permutes").c_str(),
+            [](std::shared_ptr<Graph>& graph,
+               std::map<std::string, IValue>& paramsDict) {
+              insertPermutes(graph, paramsDict);
+              return paramsDict;
+            },
+            pybind11::return_value_policy::move)
+        .def(
+            (prefix + "pass_filter_non_tensor_arguments").c_str(),
+            [](std::map<std::string, IValue> params) {
+              std::map<std::string, at::Tensor> retval;
+              for (auto& kv : params) {
+                if (kv.second.isTensor()) {
+                  retval[kv.first] = std::move(kv.second).toTensor();
+                }
+              }
+              return retval;
+            });
+
+    // Profiler APIs.
+    mod.def(
+           (prefix + "set_profiling_mode").c_str(),
+           [](bool profiling_flag) {
+             bool oldState = getProfilingMode();
+             getProfilingMode() = profiling_flag;
+             return oldState;
+           })
+        .def(
+            (prefix + "set_profiling_executor").c_str(),
+            [](bool profiling_flag) {
+              bool oldState = getExecutorMode();
+              getExecutorMode() = profiling_flag;
+              return oldState;
+            })
+        .def(
+            (prefix + "set_num_profiled_runs").c_str(),
+            [](size_t num) {
+              size_t old_num = getNumProfiledRuns();
+              getNumProfiledRuns() = num;
+              return old_num;
+            })
+        .def((prefix + "get_num_profiled_runs").c_str(), [] {
+          // pybind can't automatically bind to atomic size_t
+          size_t num_runs = getNumProfiledRuns();
+          return num_runs;
+        });
+  }
+
   m.def("init", loadPythonClasses)
       .def(
           "debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)
-      .def("pass_onnx_remove_print", RemovePrintOps)
-      .def("pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
-      .def("pass_onnx", ToONNX)
-      .def(
-          "pass_onnx_assign_output_shape",
-          [](std::shared_ptr<Graph>& graph,
-             const std::vector<at::Tensor>& tensors,
-             const python::IODescriptor& desc,
-             bool onnx_shape_inference = false) {
-            ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
-          })
-      .def("pass_lower_all_tuples", LowerAllTuples)
-      .def("pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
-      .def(
-          "pass_onnx_fold_if",
-          [](std::shared_ptr<Graph>& graph) {
-            return FoldIfNodeONNX(graph->block());
-          })
-      .def(
-          "pass_onnx_peephole",
-          [](std::shared_ptr<Graph>& graph,
-             int opset_version,
-             bool fixed_batch_size) {
-            return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
-          })
-      .def("pass_onnx_preprocess", PreprocessForONNX)
-      .def(
-          "pass_onnx_eval_peephole",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph->block(), paramsDict);
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def("pass_onnx_cast_all_constant_to_floating", CastAllConstantToFloating)
-      .def(
-          "pass_onnx_constant_fold",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict,
-             int opset_version) {
-            ConstantFoldONNX(
-                graph->block(),
-                paramsDict,
-                opset_version); // overload resolution
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def(
-          "pass_onnx_eliminate_unused_items",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EliminateUnusedItemsONNX(
-                graph->block(),
-                paramsDict); // overload resolution
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def("pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
-      .def("pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
-      .def("pass_onnx_prepare_inplace_ops_for_onnx", PrepareInplaceOpsForONNX)
-      .def(
-          "pass_onnx_node_shape_type_inference",
-          [](Node* n,
-             std::map<std::string, IValue>& params_dict,
-             int opset_version) {
-            ONNXShapeTypeInference(n, params_dict, opset_version);
-          })
-      .def(
-          "pass_onnx_graph_shape_type_inference",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& params_dict,
-             int opset_version) {
-            ONNXShapeTypeInference(graph, params_dict, opset_version);
-          })
-      .def("pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
-      .def("pass_fuse", FuseGraph)
-      .def(
-          "pass_dce",
-          [](std::shared_ptr<Graph>& g) {
-            return EliminateDeadCode(g->block()); // overload resolution
-          })
-      .def(
-          "pass_dce_allow_deleting_nodes_with_side_effects",
-          [](std::shared_ptr<Graph>& g) {
-            return EliminateDeadCode(
-                g->block(),
-                true,
-                DCESideEffectPolicy::
-                    ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload
-                                                             // resolution
-          })
-      .def(
-          "pass_cse",
-          [](std::shared_ptr<Graph>& g) {
-            return EliminateCommonSubexpression(g); // overload resolution
-          })
-      .def(
-          "pass_fuse_quantized_add_relu",
-          [](std::shared_ptr<Graph>& g) {
-            return FuseQuantizedAddRelu(g); // overload resolution
-          })
-      .def(
-          "pass_insert_observers",
-          [](Module& module,
-             const std::string& method_name,
-             const py::dict& qconfig_dict,
-             bool inplace,
-             int quant_type_int) {
-            auto dict = py::cast<std::unordered_map<
-                std::string,
-                c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertObservers(
-                module, method_name, dict, inplace, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("qconfig_dict"),
-          py::arg("inplace"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "pass_insert_quant_dequant",
-          [](Module& module,
-             const std::string& method_name,
-             bool inplace,
-             bool debug,
-             int quant_type_int) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuant(
-                module, method_name, inplace, debug, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("inplace"),
-          py::arg("debug"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "pass_insert_prepack_unpack",
-          [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
-      .def(
-          "pass_insert_prepack_unpack",
-          [](Module& module) { return InsertPrepackUnpack(module); })
-      .def(
-          "pass_quant_fusion",
-          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
-      .def("pass_fold_convbn", &FoldConvBatchNorm)
       .def(
           "onnx_list_model_parameters",
           [](Module& module) { return list_module_parameters(module); })
@@ -306,108 +639,6 @@ void initJITBindings(PyObject* module) {
           py::arg("preservedAttrs") = std::vector<std::string>(),
           py::arg("freezeInterfaces") = true,
           py::arg("preserveParameters") = false)
-      .def("pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
-      .def("pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
-      .def("pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
-      .def("pass_optimize_frozen_graph", &OptimizeFrozenGraph)
-      .def("pass_fuse_linear", &FuseLinear)
-      .def(
-          "pass_fuse_add_relu",
-          [](std::shared_ptr<Graph>& graph) { FuseAddRelu(graph); })
-      .def("pass_dedup_module_uses", &DedupModuleUses)
-      .def("pass_replicate_dequantize", &ReplicateDeQuant)
-      .def(
-          "pass_swap_functional_linear",
-          [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
-      .def(
-          "pass_swap_functional_linear",
-          [](Module& module) { SwapFunctionalLinear(module); })
-      .def(
-          "pass_quant_finalize",
-          [](Module& module,
-             int quant_type_int,
-             const std::vector<std::string>& preserved_attrs) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return Finalize(module, quant_type, preserved_attrs);
-          },
-          py::arg("module"),
-          py::arg("quant_type_int") = 1,
-          py::arg("preserved_attrs") = std::vector<std::string>())
-      .def(
-          "pass_pattern_based_rewrite",
-          [](const Module& m) { return PatternBasedRewrite(m); })
-      .def(
-          "pass_custom_pattern_based_rewrite",
-          [](const std::string& pattern,
-             const std::string& fused_node_name,
-             const Module& m) {
-            SubgraphRewriter subgraph_rewriter;
-            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
-            subgraph_rewriter.runOnModule(m);
-          })
-      .def(
-          "pass_custom_pattern_based_rewrite_graph",
-          [](const std::string& pattern,
-             const std::string& fused_node_name,
-             std::shared_ptr<Graph> g) {
-            SubgraphRewriter subgraph_rewriter;
-            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
-            subgraph_rewriter.runOnGraph(g);
-          })
-      .def(
-          "pass_remove_inplace_ops",
-          [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
-      .def("pass_constant_pooling", ConstantPooling)
-      .def(
-          "pass_create_functional_graphs",
-          [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
-      .def(
-          "pass_remove_mutation",
-          [](std::shared_ptr<Graph>& g) {
-            RemoveListMutation(g);
-            return RemoveTensorMutation(g);
-          })
-      .def(
-          "pass_inline_functional_graphs",
-          [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
-      .def(
-          "pass_peephole",
-          [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
-            return PeepholeOptimize(g, addmm_fusion_enabled);
-          },
-          py::arg("graph"),
-          py::arg("addmm_fusion_enabled") = false)
-      .def(
-          "pass_fuse_addmm",
-          [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
-      .def(
-          "pass_canonicalize",
-          [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
-      .def("pass_lint", LintGraph)
-      .def(
-          "pass_complete_shape_analysis",
-          [](const std::shared_ptr<Graph>& graph,
-             const py::tuple& inputs,
-             bool with_grad) {
-            ArgumentSpecCreator arg_spec_creator(*graph);
-            Stack stack;
-            stack.reserve(inputs.size()); // captures?
-            for (auto& obj : inputs) {
-              stack.push_back(toTypeInferredIValue(obj));
-            }
-            ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
-            arg_spec_creator.specializeTypes(*graph, spec);
-            // We only get partial specialization from the arg_spec_creator, but
-            // we want full shape specialization. The alternative would be to
-            // have a "complete type inference" function in ArguemntSpecCreator.
-            auto g_inputs = graph->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
-              if (stack[i].isTensor()) {
-                g_inputs[i]->setType(stack[i].type());
-              }
-            }
-            PropagateInputShapes(graph);
-          })
       .def(
           "interpret_graph",
           [](std::shared_ptr<Graph>& graph, const py::tuple& inputs) {
@@ -428,32 +659,6 @@ void initJITBindings(PyObject* module) {
           },
           py::doc(
               "Interpret a JIT graph with given inputs without running any optimization passes on it"))
-      .def("pass_remove_expands", RemoveExpands)
-      .def("pass_erase_number_types", EraseNumberTypes)
-      .def("pass_inline_fork_wait", InlineForkWait)
-      .def("pass_inline", Inline)
-      .def("pass_prepare_division_for_onnx", PrepareDivisionForONNX)
-      .def(
-          "pass_lower_graph",
-          [](std::shared_ptr<Graph>& graph, const Module& self) {
-            return LowerGraph(*graph, self._ivalue());
-          })
-      .def("pass_loop_unrolling", UnrollLoops)
-      .def(
-          "pass_constant_propagation_immutable_types",
-          [](std::shared_ptr<Graph>& g) {
-            return ConstantPropagationImmutableTypes(g);
-          })
-      .def(
-          "pass_constant_propagation",
-          [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); },
-          py::arg("graph"))
-      .def("pass_erase_shape_information", EraseShapeInformation)
-      .def(
-          "pass_create_autodiff_subgraphs",
-          [](const std::shared_ptr<Graph>& graph) {
-            CreateAutodiffSubgraphs(graph);
-          })
 #if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "run_cpp_tests",
@@ -485,11 +690,6 @@ void initJITBindings(PyObject* module) {
             return py::reinterpret_steal<py::object>(
                 python::unflatten(vars, desc));
           })
-      .def("pass_onnx_block", BlockToONNX)
-      .def("pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
-      .def("pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
-      .def("pass_decompose_ops", DecomposeOps)
-      .def("pass_specialize_autogradzero", specializeAutogradZero)
       .def("override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("can_fuse_on_cpu", &canFuseOnCPU)
@@ -520,34 +720,6 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def("nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
-      .def(
-          "set_profiling_mode",
-          [](bool profiling_flag) {
-            bool oldState = getProfilingMode();
-            getProfilingMode() = profiling_flag;
-            return oldState;
-          })
-      .def(
-          "set_profiling_executor",
-          [](bool profiling_flag) {
-            bool oldState = getExecutorMode();
-            getExecutorMode() = profiling_flag;
-            return oldState;
-          })
-      .def(
-          "set_num_profiled_runs",
-          [](size_t num) {
-            size_t old_num = getNumProfiledRuns();
-            getNumProfiledRuns() = num;
-            return old_num;
-          })
-      .def(
-          "get_num_profiled_runs",
-          [] {
-            // pybind can't automatically bind to atomic size_t
-            size_t num_runs = getNumProfiledRuns();
-            return num_runs;
-          })
       .def(
           "set_bailout_depth",
           [](size_t depth) {
@@ -648,128 +820,6 @@ void initJITBindings(PyObject* module) {
 #else
         return false;
 #endif
-          })
-      .def(
-          "pass_fuse_tensorexprs",
-          [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
-      .def(
-          "fuser_get_fused_kernel_code",
-          [](Graph& g, const std::vector<at::Tensor>& inps) {
-            return debugGetFusedKernelCode(g, inps);
-          })
-      .def(
-          "pass_remove_dropout",
-          [](script::Module& module) { return removeDropout(module); })
-      .def(
-          "pass_transform_conv1d_to_conv2d",
-          [](std::shared_ptr<Graph>& graph) {
-            return transformConv1dToConv2d(graph);
-          })
-      .def(
-          "pass_transform_conv1d_to_conv2d",
-          [](script::Module& module) {
-            return transformConv1dToConv2d(module);
-          })
-      .def(
-          "pass_insert_prepacked_ops",
-          [](std::shared_ptr<Graph>& graph) {
-            return insertPrePackedOps(graph);
-          })
-      .def(
-          "pass_insert_prepacked_ops",
-          [](script::Module& module) { return insertPrePackedOps(module); })
-      .def(
-          "pass_fuse_clamp_w_prepacked_linear_conv",
-          [](script::Module& module) {
-            return fusePrePackedLinearConvWithClamp(module);
-          })
-      .def(
-          "pass_fold_prepacking_ops",
-          [](script::Module& module) { return FoldPrePackingOps(module); })
-      .def(
-          "pass_optimize_for_mobile",
-          [](script::Module& module,
-             std::set<MobileOptimizerType>& optimization_blocklist,
-             std::vector<std::string>& preserved_methods) {
-            return optimizeForMobile(
-                module, optimization_blocklist, preserved_methods);
-          })
-      .def(
-          "pass_vulkan_insert_prepacked_ops",
-          [](std::shared_ptr<Graph>& graph) {
-            return vulkanInsertPrePackedOps(graph);
-          })
-      .def(
-          "pass_vulkan_insert_prepacked_ops",
-          [](script::Module& module) {
-            return vulkanInsertPrePackedOps(module);
-          })
-      .def(
-          "pass_vulkan_fuse_clamp_w_prepacked_conv",
-          [](script::Module& module) {
-            return vulkanFusePrePackedConvWithClamp(module);
-          })
-      .def(
-          "pass_vulkan_fold_prepacking_ops",
-          [](script::Module& module) {
-            return vulkanFoldPrePackingOps(module);
-          })
-      .def(
-          "pass_vulkan_optimize_for_mobile",
-          [](script::Module& module,
-             std::vector<std::string>& preserved_methods) {
-            return vulkanOptimizeForMobile(module, preserved_methods);
-          })
-      .def(
-          "pass_metal_insert_prepacked_ops",
-          [](std::shared_ptr<Graph>& graph) {
-            return metalInsertPrePackedOps(graph);
-          })
-      .def(
-          "pass_metal_insert_prepacked_ops",
-          [](script::Module& module) {
-            return metalInsertPrePackedOps(module);
-          })
-      .def(
-          "pass_metal_fuse_clamp_w_prepacked_conv",
-          [](script::Module& module) {
-            return metalFusePrePackedConvWithClamp(module);
-          })
-      .def(
-          "pass_metal_fold_prepacking_ops",
-          [](script::Module& module) { return metalFoldPrePackingOps(module); })
-      .def(
-          "pass_metal_optimize_for_mobile",
-          [](script::Module& module,
-             std::vector<std::string>& preserved_methods) {
-            return metalOptimizeForMobile(module, preserved_methods);
-          })
-      .def(
-          "pass_onnx_unpack_quantized_weights",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            UnpackQuantizedWeights(graph, paramsDict);
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def(
-          "pass_onnx_quantization_insert_permutes",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            insertPermutes(graph, paramsDict);
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def(
-          "pass_filter_non_tensor_arguments",
-          [](std::map<std::string, IValue> params) {
-            std::map<std::string, at::Tensor> retval;
-            for (auto& kv : params) {
-              if (kv.second.isTensor()) {
-                retval[kv.first] = std::move(kv.second).toTensor();
-              }
-            }
-            return retval;
           })
       .def("decay_packed_param_input_types", [](Graph& g) {
         for (Value* i : g.inputs()) {

@@ -2,7 +2,7 @@ from typing import Tuple, Dict, Optional, List, Any, overload
 from datetime import timedelta
 import enum
 import torch
-from . import Future
+from ._jit import Future
 from ._autograd import ProfilerConfig, ProfilerState, ProfilerEvent
 from ._distributed_c10d import ProcessGroup, Store
 

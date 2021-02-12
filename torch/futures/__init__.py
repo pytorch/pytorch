@@ -211,7 +211,7 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
         >>> # fut0 result = 0
         >>> # fut1 result = 1
     """
-    return cast(Future[List[Future]], torch._C._collect_all(cast(List[torch._C._jit.Future], futures)))
+    return cast(Future[List[Future]], torch._C._jit._collect_all(cast(List[torch._C._jit.Future], futures)))
 
 
 def wait_all(futures: List[Future]) -> List:
@@ -227,4 +227,4 @@ def wait_all(futures: List[Future]) -> List:
         method will throw an error if ``wait`` on any
         :class:`~torch.futures.Future` throws.
     """
-    return [fut.wait() for fut in torch._C._collect_all(cast(List[torch._C._jit.Future], futures)).wait()]
+    return [fut.wait() for fut in torch._C._jit._collect_all(cast(List[torch._C._jit.Future], futures)).wait()]

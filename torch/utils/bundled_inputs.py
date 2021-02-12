@@ -2,7 +2,7 @@
 from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
 import textwrap
 import torch
-from torch._C import TupleType, OptionalType, ListType
+from torch._C._jit import TupleType, OptionalType, ListType
 
 
 T = TypeVar("T")

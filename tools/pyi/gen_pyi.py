@@ -584,6 +584,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'generated_comment': '@' + 'generated from torch/_C/__init__.pyi.in',
         **env,
     })
+    fm.write_with_template('torch/_C/_jit/__init__.pyi', 'torch/_C/_jit/__init__.pyi.in', lambda: {
+        'generated_comment': '@' + 'generated from torch/_C/_jit/__init__.pyi.in',
+        **env,
+    })
     fm.write_with_template('torch/_C/_VariableFunctions.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
         'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
         **env,

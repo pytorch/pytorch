@@ -423,7 +423,7 @@ if _enabled:
             self.__init__(cpp_module)  # type: ignore
 
             # Copy the concrete type from the C++ module to this ScriptModule.
-            self._concrete_type = torch._C.ConcreteModuleType.from_jit_type(
+            self._concrete_type = torch._C._jit.ConcreteModuleType.from_jit_type(
                 self._c._type()
             )
 

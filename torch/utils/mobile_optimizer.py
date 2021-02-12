@@ -4,7 +4,7 @@ This module contains utility method for mobile model optimization and lint.
 
 import torch
 from enum import Enum
-from torch._C import MobileOptimizerType
+from torch._C._jit import MobileOptimizerType
 from typing import Set, List, AnyStr
 
 class LintCode(Enum):
