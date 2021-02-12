@@ -162,7 +162,7 @@ std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
   return allWorkerInfo_;
 }
 
-void ProcessGroupAgent::join() {
+void ProcessGroupAgent::join(bool /* unused */) {
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(

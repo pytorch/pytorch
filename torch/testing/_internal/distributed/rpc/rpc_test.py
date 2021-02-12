@@ -675,6 +675,7 @@ class RpcTest(RpcAgentTestFixture):
     def _test_rref_proxy_class(self, dst):
         rref = rpc.remote(dst, MyClass, args=(7,))
         expected = MyClass(7)
+        self.assertEqual(expected.get_value(), rref.rpc_sync().get_value())
         self.assertEqual(expected.get_value(), rref.rpc_async().get_value().wait())
         self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
 
