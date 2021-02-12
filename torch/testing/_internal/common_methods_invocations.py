@@ -17,7 +17,7 @@ from torch.testing import \
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
+    (dtypesIfCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
@@ -770,7 +770,7 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
 
     # Helper to determine if promotion is needed
     def is_integral(dtype):
-        return dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
+        return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
 
     # NOTE: Promotion in PyTorch is from integer types to the default dtype
     np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
@@ -1540,6 +1540,19 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    UnaryUfuncInfo('deg2rad',
+                   ref=np.radians,
+                   decorators=(precisionOverride({torch.bfloat16: 7e-1,
+                                                  torch.float16: 7e-1}),),
+                   dtypes=floating_types_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/pull/51283#issuecomment-770614273
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.bfloat16]),
+                   ),
+                   safe_casts_outputs=True),
     OpInfo('diff',
            op=torch.diff,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -1707,14 +1720,23 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            ),
     OpInfo('linalg.multi_dot',
-           aten_name='linalg_multi_dot',
            # gradcheck expects the input arguments as a flat list (see https://github.com/pytorch/pytorch/issues/51996)
-           op=lambda *args, out=None: torch.linalg.multi_dot([*args], out=out),
-           dtypes=floating_and_complex_types(),
+           op=lambda *args, out=None: torch.linalg.multi_dot(args, out=out),
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
            test_inplace_grad=False,
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_multi_dot,
-           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float32]),)),
+           aten_name='linalg_multi_dot',
+           skips=(
+               # These call into check_alias_annotation which does not support TensorList inputs
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', 
+                        dtypes=[torch.float32, torch.int32]),
+               # TODO: this is failing with AssertionError: False is not true
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cuda',
+                        dtypes=[torch.float16]),
+            )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -1835,6 +1857,19 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
+    UnaryUfuncInfo('rad2deg',
+                   ref=np.degrees,
+                   decorators=(precisionOverride({torch.bfloat16: 7e-1,
+                                                  torch.float16: 7e-1}),),
+                   dtypes=floating_types_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/pull/51283#issuecomment-770614273
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.bfloat16]),
+                   ),
+                   safe_casts_outputs=True),
     UnaryUfuncInfo('round',
                    ref=np.round,
                    dtypes=floating_types_and(torch.half),
@@ -2668,8 +2703,6 @@ def method_tests():
         ('sign', (), NO_ARGS, 'scalar'),
         ('sgn', (S, S, S), NO_ARGS),
         ('sgn', (), NO_ARGS, 'scalar'),
-        ('rad2deg', (S, S, S), NO_ARGS),
-        ('deg2rad', (S, S, S), NO_ARGS),
         # Removing the 'rsqrt' entries leads to failure in
         # test_index_fill_variable_dim_*
         # TODO: Remove when fixed.
