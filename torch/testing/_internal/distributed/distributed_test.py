@@ -4614,26 +4614,3 @@ class DistributedTest:
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
-
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(2)
-        def test_ddp_cpu_copy(self):
-            # Test only for profiling purposes. Will be removed.
-            torch.cuda.set_device(self.rank)
-            dim = 10000
-            model = nn.Linear(dim, 1).to(self.rank)
-            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[self.rank], output_device=self.rank)
-            inp = torch.randn(1000, dim)
-            with torch.autograd.profiler.profile(use_cuda=True) as p:
-                for i in range(6):
-                    with torch.autograd.profiler.record_function(f"##forward_{i}##"):
-
-                        out = model(inp)
-
-                    out.sum().backward()
-
-            if self.rank == 0:
-                p.export_chrome_trace("/tmp/trace_cuda_blocking.txt")
-
-            print("done")
