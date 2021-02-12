@@ -135,7 +135,6 @@ inline void checkValidIdent(const std::string& str, const char *type) {
 }
 
 } // namespace detail
-TORCH_API std::unordered_map<std::string, at::ClassTypePtr>& customClasses();
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
 TORCH_API void registerCustomClassMethod(std::unique_ptr<jit::Function> method);
 

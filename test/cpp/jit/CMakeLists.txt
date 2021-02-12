@@ -16,7 +16,6 @@ if(INSTALL_TEST)
   install(TARGETS jitbackend_test DESTINATION lib)
 endif()
 
-
 # Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
@@ -83,6 +82,11 @@ endif(MSVC)
 
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
+
+if(LINUX)
+  #Update to target_link_options when CMake version can be upgraded
+  target_link_libraries(test_jit PRIVATE "-Wl,--no-as-needed,$<TARGET_FILE:jitbackend_test>")
+endif()
 
 if(USE_CUDA)
   target_link_libraries(test_jit PRIVATE
