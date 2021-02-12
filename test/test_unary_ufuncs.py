@@ -204,18 +204,34 @@ class TestUnaryUfuncs(TestCase):
     # TODO: should this jitting the method and inplace variants, too?
     @ops(unary_ufuncs)
     def test_variant_consistency(self, device, dtype, op):
-        def _fn(t):
-            return op(t)
-
         t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
         torch_kwargs, numpy_kwargs = op.sample_kwargs(device, dtype, t)
         expected = op(t, **torch_kwargs)
 
-        if len(torch_kwargs) == 0:
-            variants = ((op.get_method(), False), (op.get_inplace(), True),
-                        (torch.jit.script(_fn), False))
-        else:
-            variants = ((op.get_method(), False), (op.get_inplace(), True))
+        # Refer: [Scipting Data Preparation] in test_ops.py
+        args = [f"t{i}" for i in range(len([t]))]
+        args_annot_kw = args + \
+            [f"{k}: {type(v).__name__}" for k, v in torch_kwargs.items()]
+        args_kw = args + \
+            [f"{k}={k}" for k, v in torch_kwargs.items()]
+
+        # JIT is unable to resolve op directly,
+        # so bind the actual op to `torch_op`.
+        torch_op = op.op
+        fn_template = '''
+                        def _fn({args_annot_kw}):
+                            return torch_op({args_kw})
+                      '''
+
+        script = fn_template.format(
+            args_annot_kw=", ".join(args_annot_kw),
+            args_kw=", ".join(args_kw),
+        )
+        scripted = torch.jit.CompilationUnit(script)._fn
+
+        variants = ((op.get_method(), False), (op.get_inplace(), True),
+                    (scripted, False))
+
         for alt, inplace in variants:
             if alt is None:
                 continue
