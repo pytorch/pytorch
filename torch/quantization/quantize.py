@@ -343,12 +343,12 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     if qconfig_spec is None:
         if dtype == torch.qint8:
             qconfig_spec = {
-                nn.Linear : per_channel_dynamic_qconfig,
-                nn.LSTM : per_channel_dynamic_qconfig,
-                nn.GRU : per_channel_dynamic_qconfig,
-                nn.LSTMCell : per_channel_dynamic_qconfig,
-                nn.RNNCell : per_channel_dynamic_qconfig,
-                nn.GRUCell : per_channel_dynamic_qconfig,
+                nn.Linear : default_dynamic_qconfig,
+                nn.LSTM : default_dynamic_qconfig,
+                nn.GRU : default_dynamic_qconfig,
+                nn.LSTMCell : default_dynamic_qconfig,
+                nn.RNNCell : default_dynamic_qconfig,
+                nn.GRUCell : default_dynamic_qconfig,
             }
         elif dtype == torch.float16:
             qconfig_spec = {
@@ -368,7 +368,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
                 "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
     elif isinstance(qconfig_spec, set):
         if dtype is torch.qint8:
-            default_qconfig = per_channel_dynamic_qconfig
+            default_qconfig = default_dynamic_qconfig
         elif dtype is torch.float16:
             default_qconfig = float16_dynamic_qconfig
         elif dtype is torch.quint8:

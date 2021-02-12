@@ -62,13 +62,11 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         return super(QConfigDynamic, cls).__new__(cls, activation, weight)
 
-default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                         weight=default_weight_observer)
 float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
                                          weight=PlaceholderObserver.with_args(dtype=torch.float16))
 per_channel_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                              weight=default_per_channel_weight_observer)
-
+default_dynamic_qconfig = per_channel_dynamic_qconfig
 # TODO: this is weight only quant, change this to QConfigWeightOnly
 # or remove the QConfigDynamic later
 float_qparams_weight_only_qconfig = QConfigDynamic(
