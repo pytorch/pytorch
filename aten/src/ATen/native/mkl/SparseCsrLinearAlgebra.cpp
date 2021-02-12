@@ -1,26 +1,5 @@
-#include <ATen/SparseTensorUtils.h>
-
-#include <ATen/SparseTensorImpl.h>
 #include <ATen/ATen.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/CPUBlas.h>
-#include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/Resize.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Parallel.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/NamedTensorUtils.h>
-
-#include <functional>
-#include <limits>
-#include <algorithm>
-#include <vector>
-#include <numeric>
-#include <cmath>
-#include <iostream>
+#include <ATen/SparseCsrTensorUtils.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -39,6 +18,18 @@ namespace at { namespace native {
 #include <ATen/mkl/Exceptions.h>
 #include <ATen/mkl/Descriptors.h>
 #include <ATen/mkl/Limits.h>
+
+#include <ATen/SparseCsrTensorImpl.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+
+#include <functional>
+#include <limits>
+#include <algorithm>
+#include <vector>
+#include <numeric>
+#include <cmath>
+#include <iostream>
 
 #ifdef MKL_ILP64
   #define TORCH_INT_TYPE at::kLong
@@ -126,4 +117,5 @@ namespace at { namespace native {
     return self;
   }
 }}
-#endif
+
+#endif  // AT_MKL_ENABLED
