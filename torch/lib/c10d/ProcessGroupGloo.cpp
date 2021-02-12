@@ -3,9 +3,9 @@
 #include <c10d/GlooDeviceFactory.hpp>
 
 #ifdef _WIN32
+#include <gloo/common/win.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <gloo/common/win.h>
 #else
 #include <netdb.h>
 #include <sys/socket.h>
@@ -678,7 +678,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
       int rootRank,
       int rootTensor,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:broadcast"),
+      : ProcessGroupGloo::AsyncWork("gloo:broadcast", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -825,8 +825,11 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_reduce"),
-      context(context), inputs(inputs), reduceOp(reduceOp), tag(tag) {}
+      : ProcessGroupGloo::AsyncWork("gloo:all_reduce", inputs),
+        context(context),
+        inputs(inputs),
+        reduceOp(reduceOp),
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs;
@@ -859,7 +862,6 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
-
 
   std::vector<at::Tensor> result() override {
     TORCH_CHECK(
@@ -911,7 +913,10 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : context(context), inputs(inputs), tag(tag) {}
+      : ProcessGroupGloo::AsyncWork("gloo:sparse_all_reduce", inputs),
+        context(context),
+        inputs(inputs),
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs;
@@ -1434,7 +1439,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
       int rootTensor,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:reduce"),
+      : ProcessGroupGloo::AsyncWork("gloo:reduce", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -1599,8 +1604,11 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_gather"),
-        context(context), outputs(outputs), inputs(inputs), tag(tag) {}
+      : ProcessGroupGloo::AsyncWork("gloo:all_gather", inputs),
+        context(context),
+        outputs(outputs),
+        inputs(inputs),
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<std::vector<at::Tensor>> outputs;
@@ -1797,7 +1805,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_gather"),
+      : ProcessGroupGloo::AsyncWork("gloo:all_gather", input_list),
         context(context),
         output_lists(output_lists),
         input_list(input_list),
@@ -1927,7 +1935,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:gather"),
+      : ProcessGroupGloo::AsyncWork("gloo:gather", inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2132,7 +2140,11 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& inputs,
       int root,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:scatter"),
+      : ProcessGroupGloo::AsyncWork(
+            "gloo:scatter",
+            inputs.size() > 0
+                ? c10::optional<std::vector<at::Tensor>>(inputs[0])
+                : c10::nullopt),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2327,7 +2339,9 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       std::vector<int64_t>& outputCounts,
       std::vector<int64_t>& inputCounts,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_to_all"),
+      : ProcessGroupGloo::AsyncWork(
+            "gloo:all_to_all",
+            c10::optional<std::vector<at::Tensor>>({inputTensor})),
         context(context),
         outputTensor(outputTensor),
         inputTensor(inputTensor),
@@ -2583,8 +2597,10 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:barrier"),
-        context(context), priorWork(std::move(priorWork)), tag(tag) {}
+      : ProcessGroupGloo::AsyncWork("gloo:barrier", c10::nullopt),
+        context(context),
+        priorWork(std::move(priorWork)),
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork;
