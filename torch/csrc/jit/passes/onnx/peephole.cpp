@@ -773,7 +773,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       // NegativeLogLikelihoodLoss node, place a cast node in the beginning
       // of the pattern instead
       if (castNode != nullptr) {
-        auto onnx_type =  castNode->i(attr::to);
+        auto onnx_type = castNode->i(attr::to);
         Node* cast_node = b->owningGraph()->create(onnx::Cast, 1);
         cast_node->addInput(origLogSoftmaxNode->inputs().at(0));
         cast_node->i_(attr::to, onnx_type);
