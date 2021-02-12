@@ -360,7 +360,7 @@ void PyTorchStreamWriter::writeRecord(
       nullptr,
       0);
   valid("writing file ", name.c_str());
-  files_written.push_back(std::move(name));
+  files_written.push_back(name);
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
