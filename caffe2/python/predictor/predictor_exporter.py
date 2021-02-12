@@ -33,10 +33,11 @@ def get_predictor_exporter_helper(submodelNetName):
     return pred_meta
 
 
+# pyre-fixme[13]: Pyre can't detect the attribute initialization via cls.super() here
 class PredictorExportMeta(collections.namedtuple(
     'PredictorExportMeta',
-        'predict_net, parameters, inputs, outputs, shapes, name, \
-        extra_init_net, global_init_net, net_type, num_workers, trainer_prefix')):
+        'predict_net, parameters, inputs, outputs, shapes, name, '
+        'extra_init_net, global_init_net, net_type, num_workers, trainer_prefix')):
     """
     Metadata to be used for serializaing a net.
 
