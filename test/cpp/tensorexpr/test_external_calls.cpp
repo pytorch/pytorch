@@ -237,7 +237,9 @@ TEST(ExternalCall, Matmul) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-TEST(ExternalCall, SeveralCallsUsedInEachOther) {
+TEST(ExternalCall, ComputeInterop) {
+  // This test verifies that Tensors using external calls can be used by and can
+  // use Tensors built with Compute API.
   KernelScope kernel_scope;
 
   BufHandle ConvResultBuf("ConvResult", {1, 16, 112, 112}, kFloat);
