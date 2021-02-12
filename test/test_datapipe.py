@@ -418,21 +418,18 @@ class TestFunctionalIterDataPipe(TestCase):
             temp = list(d for d in filter_dp)
 
     def test_sampler_datapipe(self):
-        arrs = range(10)
-        input_dp = IDP(arrs)
+        input_dp = IDP(range(10))
         # Default SequentialSampler
         sampled_dp = dp.iter.Sampler(input_dp)  # type: ignore
         self.assertEqual(len(sampled_dp), 10)
-        i = 0
-        for x in sampled_dp:
+        for i, x in enumerate(sampled_dp):
             self.assertEqual(x, i)
-            i += 1
 
         # RandomSampler
-        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, replacement=True)  # type: ignore
+        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, sampler_kwargs={'replacement': True})  # type: ignore
 
-        # Requires `__len__` to build SamplerDataset
-        input_dp_nolen = IDP_NoLen(arrs)
+        # Requires `__len__` to build SamplerDataPipe
+        input_dp_nolen = IDP_NoLen(range(10))
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
 

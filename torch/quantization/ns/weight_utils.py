@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 toq = torch.ops.quantized
 from torch.fx import GraphModule
-from torch.fx.graph import Graph, Node
+from torch.fx.graph import Node
 
 from .utils import getattr_from_fqn
 
