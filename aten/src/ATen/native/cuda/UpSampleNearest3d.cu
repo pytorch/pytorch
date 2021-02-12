@@ -282,13 +282,11 @@ Tensor upsample_nearest3d_cuda(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
-  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  upsample_nearest3d_out_cuda_template(output, input, osize, scale_d, scale_h, scale_w);
-  return output;
+  return upsample_nearest3d_out_cuda_template(input, osize, scale_d, scale_h, scale_w);
 }
 
 // when structured kernels can handle QuantizedCPU, update these overloads to be DefaultBackend
@@ -301,10 +299,7 @@ Tensor upsample_nearest3d_backward_cuda(
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return at::upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, osize, input_size, scale_d, scale_h, scale_w);
-  return grad_input;
+  return at::upsample_nearest3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w);
 }
 
 } // namespace native
