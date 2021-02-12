@@ -297,13 +297,8 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         cls.forward = _forward_from_src(self._code)
 
-        def print_full_traceback(exctype, value, tb):
-            if self.foo:
-                return
-            traceback.print_exception(exctype, value, tb)
-
         # Previously, if an error occurred when valid
-        # symbolically-traced code was run with an invalid input, pytes the
+        # symbolically-traced code was run with an invalid input, the
         # user would see the source of the error as coming from
         # `File "<eval_with_key_N">`, where N is some number. We use
         # this function to generate a more informative error message. We
