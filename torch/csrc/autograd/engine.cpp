@@ -824,9 +824,25 @@ void Engine::evaluate_function(
   }
 }
 
-/* Computes the number of dependencies for each function which requires grad */
-auto Engine::compute_dependencies(Node* root, GraphTask& task) -> void {
-  // Just to make sure that they will never be added to the queue again
+inline static uint64_t compute_min_sequence_nr(const edge_list& outputs) {
+  // Computes the mininum sequence number among all the outputs and applies
+  // a small constant discount to take into account the lazy creation of AccumulateGrad
+  if (outputs.empty()) {
+    return 0;
+  }
+  auto min_seq_nr = std::numeric_limits<uint64_t>::max();
+  for (auto & output_edge : outputs) {
+    Node *output = output_edge.function.get();
+    auto seq_nr = output->actual_sequence_nr();
+    min_seq_nr = (min_seq_nr < seq_nr) ? min_seq_nr : seq_nr;
+  }
+  // AccumulateGrad may have an actual_sequence_nr greater than its parent
+  const size_t discount = 10;
+  return min_seq_nr > discount ? min_seq_nr - discount : 0;
+}
+
+auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_seq_nr) -> void {
+  // Computes the number of dependencies for each function which requires grad
   std::unordered_set<Node*> seen;
   std::vector<Node*> queue { root };
 
@@ -835,6 +851,9 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task) -> void {
   auto& dependencies = task.dependencies_;
   while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
+    if (fn->actual_sequence_nr() < min_seq_nr) {
+      continue;
+    }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
@@ -856,7 +875,7 @@ auto Engine::execute(const edge_list& roots,
     return msg;
   });
 
-  // A frech first time Engine::execute call should start on the CPU device, initialize
+  // A fresh first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
   // allocated already, i.e. consecutive backward calls, re-entrant backward calls),
   // then memoize the local_ready_queue in GraphTask
@@ -875,13 +894,15 @@ auto Engine::execute(const edge_list& roots,
     roots.at(0).function :
     std::make_shared<GraphRoot>(roots, inputs);
 
-  // Now compute the dependencies for all executable functions and queue the root
-  compute_dependencies(graph_root.get(), *graph_task);
+  auto min_seq_nr = compute_min_sequence_nr(outputs);
+  // Now compute the dependencies for all executable functions
+  compute_dependencies(graph_root.get(), *graph_task, min_seq_nr);
 
   if (!outputs.empty()) {
-    graph_task->init_to_execute(*graph_root, outputs, accumulate_grad);
+    graph_task->init_to_execute(*graph_root, outputs, accumulate_grad, min_seq_nr);
   }
 
+  // Queue the root
   if (skip_dummy_node) {
     InputBuffer input_buffer(roots.at(0).function->num_inputs());
     auto input = inputs.at(0);
@@ -1116,7 +1137,7 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad) {
+void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_seq_nr) {
   // Populates exec_info so nodes that should be executed have `exec_info[node].needed_ = true`
   // Only nodes that have a path to any edge in `outputs` should be executed.
   // The code below populates exec_info using recursion, but the actual code does this
@@ -1144,7 +1165,6 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
   // because in the case where two outputs lie on the same path, we still need to explore past
   // the first output or we would miss the nodes that are required to compute the second output.
   int output_idx = 0;
-  auto min_seq_nr = std::numeric_limits<uint64_t>::max();
   for (auto & output_edge : outputs) {
     // (0) `is_needed` above corresponds to `exec_info_[fn].needed_`
     Node *output = output_edge.function.get();
@@ -1161,14 +1181,8 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
       }
       info.captures_->emplace_back(output_edge.input_nr, output_idx++);
     }
-    auto seq_nr = output->actual_sequence_nr();
-    min_seq_nr = (min_seq_nr < seq_nr) ? min_seq_nr : seq_nr;
   }
   captured_vars_.resize(output_idx);
-
-  // AccumulateGrad may have an actual_sequence_nr greater than its parent
-  const size_t discount = 10;
-  auto seq_nr_threshold = min_seq_nr > discount ? min_seq_nr - discount : 0;
 
   struct Frame {
     Frame (Node *fn) : fn_(fn), next_next_fn_(0) {}
@@ -1210,11 +1224,12 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
 
     if (child_fn) {
       // (2) next child exists but has not been seen
-      if (child_fn->actual_sequence_nr() >= seq_nr_threshold) {
-        // we only recurse if this child_fn was created later than the earliest created
-        // output nodes
-        stack.emplace_back(child_fn);
+      if (child_fn->actual_sequence_nr() < min_seq_nr) {
+        // child created before the first output means this child cannot have
+        // an edge to output
+        continue;
       }
+      stack.emplace_back(child_fn);
     } else {
       // (3) no next child exists for `fn` means its `needed` has already been
       // finalized. pop stack and update parent
