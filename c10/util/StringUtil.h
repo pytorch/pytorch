@@ -76,7 +76,7 @@ struct _str_wrapper<const char*> final {
 template<>
 struct _str_wrapper<> final {
   static const std::string& call() {
-    thread_local const std::string empty_string_literal;
+    static const std::string empty_string_literal;
     return empty_string_literal;
   }
 };
