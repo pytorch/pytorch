@@ -977,3 +977,46 @@ class TestSaveLoad(JitTestCase):
         m_loaded = self.getExportImportCopy(torch.jit.script(MyModule()))
         output = m_loaded()
         self.assertEqual(output, None)
+
+    def test_save_load_params_buffers_submodules(self):
+        """
+        Check that parameters, buffers, and submodules are the same after loading.
+        """
+
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.add_module("submodule_a", Submodule())
+                self.register_parameter("parameter_a", torch.nn.Parameter(torch.randn(4)))
+                self.register_buffer("buffer", torch.randn(4))
+                self.t = torch.rand(4)  # not buffer
+
+                self.parameter_b = torch.nn.Parameter(torch.randn(4))
+                self.submodule_b = Submodule()
+
+        m = TestModule()
+        m_loaded = self.getExportImportCopy(torch.jit.script(m))
+
+        # Check submodules.
+        self.assertEqual(len(list(m.named_modules())), len(list(m_loaded.named_modules())))
+        for m_s, loaded_s in zip(m.named_modules(), m_loaded.named_modules()):
+            m_name, _ = m_s
+            loaded_name, _ = loaded_s
+            self.assertEqual(m_name, loaded_name)
+
+        # Check parameters.
+        self.assertEqual(len(list(m.parameters())), len(list(m_loaded.parameters())))
+        for m_p, loaded_p in zip(m.parameters(), m_loaded.parameters()):
+            self.assertEqual(m_p, loaded_p)
+
+        # Check buffers.
+        self.assertEqual(len(list(m.named_buffers())), len(list(m_loaded.named_buffers())))
+        for m_b, loaded_b in zip(m.named_buffers(), m_loaded.named_buffers()):
+            m_name, m_buffer = m_b
+            loaded_name, loaded_buffer = loaded_b
+            self.assertEqual(m_name, loaded_name)
+            self.assertEqual(m_buffer, loaded_buffer)
