@@ -245,7 +245,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Wrong type for "
                                     "attribute assignment"):
-            with self.assertWarnsRegex("doesn't support instance-level "
-                                       "annotations on empty non-base "
-                                       "types"):
+            with self.assertWarnsRegex(UserWarning, "doesn't support "
+                                       "instance-level annotations on "
+                                       "empty non-base types"):
                 torch.jit.script(M())
