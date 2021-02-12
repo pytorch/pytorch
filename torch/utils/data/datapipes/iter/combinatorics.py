@@ -1,7 +1,7 @@
 import random
 
 from torch.utils.data import IterDataPipe, Sampler, SequentialSampler
-from typing import TypeVar, Type, Iterator, Sized, Optional, Tuple, Dict
+from typing import TypeVar, Type, Iterator, Sized, Optional, Tuple, Dict, List
 
 T_co = TypeVar('T_co', covariant=True)
 

@@ -4,7 +4,7 @@ from .dataset import (Dataset, IterableDataset, TensorDataset, ConcatDataset, Ch
 from .dataset import IterableDataset as IterDataPipe
 from .distributed import DistributedSampler
 from .dataloader import DataLoader, _DatasetKind, get_worker_info
-from .datapipes import *
+from . import datapipes
 
 __all__ = ['Sampler', 'SequentialSampler', 'RandomSampler',
            'SubsetRandomSampler', 'WeightedRandomSampler', 'BatchSampler',
