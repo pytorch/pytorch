@@ -16,5 +16,5 @@ from torch.utils.data.datapipes.iter.selecting import \
     (FilterIterDataPipe as Filter)
 
 
-__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFormTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
+__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
            'Batch', 'BucketBatch', 'Collate', 'Filter', 'Map', 'Sampler']
