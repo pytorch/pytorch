@@ -27,6 +27,8 @@
 
 namespace c10d {
 
+constexpr const char* GLOO_BACKEND_NAME = "gloo";
+
 // ProcessGroupGloo implements Gloo bindings for c10d.
 //
 // All functions on this class are expected to be called in the same
@@ -68,7 +70,11 @@ class ProcessGroupGloo : public ProcessGroup {
   //
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(const char* profilingTitle = nullptr):  ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle) {}
+    AsyncWork(
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors) {
+    }
 
     static void execute(c10::intrusive_ptr<AsyncWork> work) {
       std::exception_ptr eptr;
@@ -132,6 +138,10 @@ class ProcessGroupGloo : public ProcessGroup {
     std::chrono::milliseconds timeout;
     int threads;
   };
+
+  const std::string getBackendName() const override {
+    return std::string(GLOO_BACKEND_NAME);
+  }
 
   // Helper functions to create a new device object.
   // They are static functions on this class to keep them logically

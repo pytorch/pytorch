@@ -23,9 +23,10 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from torch._six import StringIO
+from io import StringIO
 from collections import defaultdict
 
+import importlib.util
 import inspect
 import io
 import math
@@ -34,6 +35,7 @@ import pickle
 import sys
 import tempfile
 import textwrap
+from importlib.abc import Loader
 from typing import Any, Dict, List
 
 RUN_CUDA = torch.cuda.is_available()
@@ -691,3 +693,18 @@ def warmup_backward(f, *args):
 def make_global(*args):
     for arg in args:
         setattr(sys.modules[arg.__module__], arg.__name__, arg)
+
+# Helper function to eval Python3 code without causing a syntax error for
+# this file under py2
+def _get_py3_code(code, fn_name):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        script_path = os.path.join(tmp_dir, 'script.py')
+        with open(script_path, 'w') as f:
+            f.write(code)
+        spec = importlib.util.spec_from_file_location(fn_name, script_path)
+        module = importlib.util.module_from_spec(spec)
+        loader = spec.loader
+        assert isinstance(loader, Loader)  # Assert type to meet MyPy requriement
+        loader.exec_module(module)
+        fn = getattr(module, fn_name)
+        return fn

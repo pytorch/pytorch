@@ -7,6 +7,8 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 #include <ATen/ATen.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
 
 #include <stdlib.h>
@@ -65,7 +67,7 @@ bool almostEqualVec(
 }
 
 typedef bool (^Func)(void);
-bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) { 
+bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) {
   std::stringstream ss;
   std::copy(sizes.begin(), sizes.end(), std::ostream_iterator<int>(ss, " "));
   __block std::string str1 = ss.str();
@@ -103,11 +105,7 @@ bool test_nchw_to_nc4_cpu() {
     __block std::vector<int64_t> size{N, C, H, W};
     bool b = TEST(size, __PRETTY_FUNCTION__, ^bool {
       auto t = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      int len = std::accumulate(
-          std::begin(size),
-          std::end(size),
-          (int64_t)1,
-          std::multiplies<int64_t>());
+      const auto len = c10::multiply_integers(std::begin(size), std::end(size));
       auto buf =
           std::vector<float>{t.data_ptr<float>(), t.data_ptr<float>() + len};
       auto c4 = NCHW_to_NC4((float*)t.data_ptr<float>(), t.sizes().vec());
@@ -237,6 +235,28 @@ bool test_sigmoid() {
   });
 }
 
+bool test_hardsigmoid() {
+  __block std::vector<int64_t> size{3, 3, 44, 44};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat))*12 - 6;
+    auto X2 = X.metal();
+    auto Y1 = at::native::hardsigmoid_(X);
+    auto Y2 = mpscnn::hardsigmoid_(X2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_hardswish() {
+  __block std::vector<int64_t> size{3, 3, 44, 44};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat))*12 - 6;
+    auto X2 = X.metal();
+    auto Y1 = at::native::hardswish_(X);
+    auto Y2 = mpscnn::hardswish_(X2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
 bool test_addmm() {
   bool result = true;
   for (int i = 0; i < ITER_COUNT; ++i) {
@@ -304,8 +324,8 @@ bool test_sub() {
 }
 
 bool test_sub_broadcast() {
-  __block std::vector<int64_t> x1{3, 3, 192, 192};
-  __block std::vector<int64_t> x2{3, 3, 1, 1};
+  __block std::vector<int64_t> x1{3, 3, 1, 1};
+  __block std::vector<int64_t> x2{3, 3, 192, 192};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -359,8 +379,8 @@ bool test_mul_broadcast() {
 }
 
 bool test_mul_broadcast2() {
-  __block std::vector<int64_t> x1{4, 3, 192, 192};
-  __block std::vector<int64_t> x2{4, 3, 192, 1};
+  __block std::vector<int64_t> x1{4, 3, 192, 1};
+  __block std::vector<int64_t> x2{4, 3, 192, 192};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));

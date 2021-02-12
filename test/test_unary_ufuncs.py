@@ -11,7 +11,8 @@ import unittest
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, IS_MACOS, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy)
+    suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
+    gradcheck)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
 from torch.testing._internal.common_device_type import (
@@ -463,14 +464,13 @@ class TestUnaryUfuncs(TestCase):
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
 
-    @unittest.skipIf(IS_MACOS, "Skip Reference: https://github.com/pytorch/pytorch/issues/47500")
     @dtypes(torch.cfloat, torch.cdouble)
     def test_sqrt_complex_edge_values(self, device, dtype):
         # Test Reference: https://github.com/pytorch/pytorch/pull/47424
         x = torch.tensor(0. - 1.0000e+20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
-        x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
+        x = torch.tensor((-1.0e+60 if dtype == torch.cdouble else -1.0e+20) - 4988429.2j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
     @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
@@ -854,6 +854,18 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
                          torch.tensor(expectedOutput, dtype=dtype, device=device))
 
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.float, torch.double)
+    def test_hardsigmoid_backward(self, device, dtype):
+        inputValues = [-3.0, 3.0, -2.0, 2.0, -6.0, 6.0]
+        expectedValues = [0.0, 0.0, 1.0 / 6.0, 1.0 / 6.0, 0.0, 0.0]
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device).requires_grad_()
+        expetedTensor = torch.tensor(expectedValues, dtype=dtype, device=device)
+        out = torch.nn.functional.hardsigmoid(inputTensor)
+        out.backward(torch.ones_like(inputTensor))
+        self.assertEqual(inputTensor.grad, expetedTensor)
+
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_silu(self, device, dtype):
@@ -1113,8 +1125,7 @@ class TestUnaryUfuncs(TestCase):
 
         cpu_tensor.requires_grad = True
         for n in [0, 1, 2, 3, 4, 5]:
-            torch.autograd.gradcheck(lambda x: x.polygamma(n), cpu_tensor,
-                                     check_batched_grad=True)
+            gradcheck(lambda x: x.polygamma(n), cpu_tensor)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
@@ -1677,13 +1688,7 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('floor'),
-    _TorchMathTestMeta('ceil'),
-    _TorchMathTestMeta('rad2deg'),
-    _TorchMathTestMeta('deg2rad'),
     _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
-    _TorchMathTestMeta('trunc'),
-    _TorchMathTestMeta('round'),
     _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                        refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                        ref_backend='scipy'),
@@ -1692,10 +1697,7 @@ torch_op_tests = [
                        ref_backend='scipy', rtol=0.0008, atol=1e-5),
     _TorchMathTestMeta('polygamma', args=[2], substr='_2', reffn='polygamma',
                        refargs=lambda x: (2, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
-                       ref_backend='scipy', rtol=0.0008, atol=1e-5),
-    _TorchMathTestMeta('abs', input_fn=_medium_2d, dtypes=_types_no_half, rtol=0., atol=0.),
-    _TorchMathTestMeta('logit', ref_backend='scipy')]
-
+                       ref_backend='scipy', rtol=0.0008, atol=1e-5)]
 
 def generate_torch_test_functions(cls, testmeta, inplace):
     opstr = testmeta.opstr if not inplace else testmeta.opstr + "_"

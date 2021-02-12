@@ -478,7 +478,7 @@ c10::IValue StaticRuntime::run(
     std::vector<c10::IValue> s = args;
     module_->schema->checkAndNormalizeInputs(s, kwargs);
     for (size_t i = 0; i < s.size(); i++) {
-      Input(i) = s[i];
+      Input(i) = std::move(s[i]);
     }
   } else {
     for (size_t i = 0; i < args.size(); i++) {
@@ -499,6 +499,10 @@ c10::IValue StaticRuntime::run(
       planner_ = std::make_unique<MemoryPlanner>(this, shared);
     }
     planner_->deallocate();
+    // clean up owning refs of input tensors
+    for (IValue& ival : inputs_) {
+      ival = IValue();
+    }
   }
 
   // no need to keep references of outputs in static runtime anymore
@@ -617,6 +621,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // main runs
+  for (size_t i = 0; i < stack.size(); i++) {
+    Input(i) = stack[i];
+  }
   for (int i = 0; i < main_runs; i++) {
     if (planner_) {
       planner_->allocate();
@@ -655,11 +662,28 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 MemoryPlanner::MemoryPlanner(
     StaticRuntime* runtime,
     std::unordered_map<Value*, std::vector<Value*>> should_share) {
+  // get input Value*
+  at::ArrayRef<Value*> inputs =
+      runtime->get_inference_module()->graph->inputs();
+  std::unordered_set<Value*> graph_input_values(inputs.begin(), inputs.end());
+
   // collect register indices of outputs of ops with out variant
   std::unordered_set<Value*> managed_values;
   std::unordered_set<IValue*> unmanaged_value_set;
   for (ProcessedNode& pnode : runtime->get_nodes()) {
-    if (pnode.has_out_variant()) {
+    bool should_manage = pnode.has_out_variant();
+    if (should_manage && isViewOp(pnode.get_node())) {
+      // outputs of view ops with inputs as the graph inputs shouldn't be
+      // managed by the MemoryPlanner. It may release the storage of the graph
+      // inputs.
+      for (Value* in : pnode.get_node()->inputs()) {
+        if (graph_input_values.count(in) > 0) {
+          should_manage = false;
+          break;
+        }
+      }
+    }
+    if (should_manage) {
       // Types are stored in the underlying TorchScript IR
       for (Value* out : pnode.get_node()->outputs()) {
         if (out->type()->cast<TensorType>()) {

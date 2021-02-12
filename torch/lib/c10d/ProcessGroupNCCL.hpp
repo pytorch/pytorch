@@ -32,6 +32,8 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // Handling with NCCL.
 constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 
+constexpr const char* NCCL_BACKEND_NAME = "nccl";
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -73,7 +75,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profilingTitle = nullptr);
+    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profilingTitle = nullptr, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -227,6 +229,10 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   virtual ~ProcessGroupNCCL();
 
+  const std::string getBackendName() const override {
+      return std::string(NCCL_BACKEND_NAME);
+  }
+
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
@@ -335,7 +341,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Device> devices,
       int rank,
       OpType opType,
-      const char* profilingTitle=nullptr);
+      const char* profilingTitle=nullptr,
+      const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
 
  private:
   // Helper that encapsulates work shared across all collective communication

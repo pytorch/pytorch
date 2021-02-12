@@ -165,7 +165,9 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
 
   int batchsize = cuda_int_cast(batchCount(self), "batch size");
   int m = cuda_int_cast(self.size(-2), "m");
-  int n = cuda_int_cast(self.size(-1), "n");   
+  int n = cuda_int_cast(self.size(-1), "n");
+  int lda = std::max<int>(1, m);
+  int ldvt = std::max<int>(1, n);
 
   for(int i = 0; i < batchsize; i++){
     // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
@@ -179,12 +181,12 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
     at::cuda::solver::gesvdj<scalar_t>(
       handle, jobz, /*econ=*/ some ? 1 : 0, m, n,
       self_data + i * self_stride,
-      m,
+      lda,
       S_data + i * S_stride,
       U_data + i * U_stride,
-      m,
+      lda,
       VT_data + i * VT_stride,
-      n,
+      ldvt,
       infos.data_ptr<int>() + i,
       gesvdj_params
     );
@@ -221,7 +223,9 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
 
   int batchsize = cuda_int_cast(batchCount(self), "batch size");
   int m = cuda_int_cast(self.size(-2), "m");
-  int n = cuda_int_cast(self.size(-1), "n");   
+  int n = cuda_int_cast(self.size(-1), "n");
+  int lda = std::max<int>(1, m);
+  int ldvt = std::max<int>(1, n);
 
   TORCH_INTERNAL_ASSERT(m <= 32 && n <= 32, "gesvdjBatched requires both matrix dimensions not greater than 32, but got "
                         "m = ", m, " n = ", n);
@@ -236,7 +240,7 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   auto jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
   at::cuda::solver::gesvdjBatched<scalar_t>(
-    handle, jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n,
+    handle, jobz, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt,
     infos.data_ptr<int>(), gesvdj_params, batchsize
   );
 
@@ -269,25 +273,23 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     _create_U_S_VT(self, some, compute_uv, /* svd_use_cusolver = */ true);
   // U, S, V working copies are already column majored now
 
-  if (self.numel() > 0) {
-    // heuristic for using `gesvdjBatched` over `gesvdj`
-    if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
-      apply_svd_lib_gesvdjBatched(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
-    } else {
-      apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
-    }
+  // heuristic for using `gesvdjBatched` over `gesvdj`
+  if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
+    apply_svd_lib_gesvdjBatched(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
+  } else {
+    apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
+  }
 
-    // A device-host sync will be performed.
-    batchCheckErrors(infos, "svd_cuda");
+  // A device-host sync will be performed.
+  batchCheckErrors(infos, "svd_cuda");
 
-    if (compute_uv) {
-      if (some) {
-        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
-      }
-    } else {
-      VT_working_copy.zero_();
-      U_working_copy.zero_();
-    }
+  if (!compute_uv) {
+    VT_working_copy.zero_();
+    U_working_copy.zero_();
+  }
+
+  if (some) {
+    VT_working_copy = VT_working_copy.narrow(-2, 0, k);
   }
 
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.

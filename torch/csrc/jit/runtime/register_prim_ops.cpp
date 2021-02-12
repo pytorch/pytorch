@@ -640,6 +640,22 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.bool(bool a, bool b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack);
+           auto b = pop(stack);
+           push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ne.bool(bool a, bool b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack);
+           auto b = pop(stack);
+           push(stack, a != b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
          [](Stack* stack) { push(stack, IValue::uninitialized()); },
          aliasAnalysisSpecialCase()),
@@ -853,6 +869,14 @@ RegisterOperators reg(
            auto string = pop(stack).toStringRef();
            push(stack, static_cast<int64_t>(string.size()));
            return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::dict() -> Dict(str, Tensor)",
+         [](Stack* stack) {
+           auto dict =
+               c10::impl::GenericDict(StringType::get(), TensorType::get());
+           push(stack, dict);
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -1356,6 +1380,7 @@ RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("bool"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("complex"),
     CREATE_DICT_OPS("Tensor"),
 });
 
