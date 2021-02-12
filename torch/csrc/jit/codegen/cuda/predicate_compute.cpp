@@ -65,15 +65,16 @@ std::vector<kir::Bool*> PredicateCompute::computePredicates(
     }
   }
 
-  if (no_pred_needed) {
-    return {};
-  }
-
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   auto true_bool = ir_builder.create<kir::Bool>(true);
   std::vector<kir::Bool*> preds(root.size(), true_bool);
+
+  if (no_pred_needed) {
+    return preds;
+  }
+
   kir::Val* extent = nullptr;
 
   for (size_t i = 0; i < indices.size(); i++) {
