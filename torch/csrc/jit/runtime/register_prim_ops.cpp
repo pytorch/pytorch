@@ -1,6 +1,8 @@
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -29,23 +31,22 @@ namespace {
 
 std::string stringSlice(
     std::string string,
-    int64_t start,
-    int64_t end,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
     int64_t step) {
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
+  int64_t start_val = start.has_value() ? start.value() : INT64_MAX;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
-  const int64_t size = string.size();
+  const int64_t num_vals =
+      slice_indices_adjust(string.size(), &start_val, &end_val, step);
 
-  // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
-
-  if (end <= start) {
-    // Slice is empty
-    return std::string("");
+  int64_t i = start_val;
+  std::string result = "";
+  for (int64_t j = 0; j < num_vals; j++) {
+    result += string[i];
+    i += step;
   }
 
-  std::string result(string.begin() + start, string.begin() + end);
   return result;
 }
 
@@ -112,7 +113,7 @@ RegisterOperators reg(
          // depends on the type hint and input. The implementation of this
          // operator below is intended to be as close to the Python
          // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node * /*node*/) -> Operation {
+         [](const Node* /*node*/) -> Operation {
            return [](Stack* stack) {
              int elem_ty_val;
              int dim_val;
@@ -603,7 +604,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::slice.t(t[] l, int start, int end=9223372036854775807, int step=1) -> t[]"),
+             "aten::slice.t(t[] l, int? start=0, int? end=9223372036854775807, int step=1) -> t[]"),
          listSlice,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -636,6 +637,22 @@ RegisterOperators reg(
            auto a = pop(stack).toDevice();
            auto b = pop(stack).toDevice();
            push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.bool(bool a, bool b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack);
+           auto b = pop(stack);
+           push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ne.bool(bool a, bool b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack);
+           auto b = pop(stack);
+           push(stack, a != b);
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -854,6 +871,14 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     Operator(
+         "aten::dict() -> Dict(str, Tensor)",
+         [](Stack* stack) {
+           auto dict =
+               c10::impl::GenericDict(StringType::get(), TensorType::get());
+           push(stack, dict);
+         },
+         aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__getitem__.str(str s, int index) -> str"),
@@ -992,6 +1017,14 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_cuda());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_xpu());
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -1347,6 +1380,7 @@ RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("bool"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("complex"),
     CREATE_DICT_OPS("Tensor"),
 });
 

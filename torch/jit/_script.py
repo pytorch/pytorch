@@ -8,6 +8,7 @@ functionalities in `torch.jit`.
 """
 import functools
 import collections
+import enum
 import inspect
 import copy
 import pickle
@@ -22,7 +23,7 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_method
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass, get_function_from_type
+from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
 from torch.jit._fuser import _graph_for
@@ -32,6 +33,8 @@ from torch.jit._state import (
     _set_jit_function_cache,
     _set_jit_overload_cache,
 )
+from torch.overrides import (
+    has_torch_function, has_torch_function_unary, has_torch_function_variadic)
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
@@ -49,6 +52,11 @@ else:
 
     def Attribute(value, type):  # type: ignore
         return value
+
+
+# Gets a function from the name of a method on a type
+def _get_function_from_type(cls, name):
+    return getattr(cls, name, None)
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -271,8 +279,8 @@ if _enabled:
     # which always throws an exception.
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore
-        """
-        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
+        r"""
+        A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
@@ -627,7 +635,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__dir__"
             ):
                 return super(RecursiveScriptModule, self).__dir__()
@@ -638,7 +646,7 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__bool__"
             ):
                 return True
@@ -927,7 +935,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
+
+    # No-op for modules and functions that are already scripted
     if isinstance(obj, ScriptModule):
+        return obj
+    if isinstance(obj, ScriptFunction):
         return obj
 
     if isinstance(obj, torch.nn.Module):
@@ -946,6 +958,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                 " from nn.Module,"
                 " pass an instance instead".format(obj)
             )
+
+        # Enums are automatically usable in TorchScript, explicitly scripting
+        # is not necessary, but not harmful either.
+        if issubclass(obj, enum.Enum):
+            return obj
 
         if not _is_new_style_class(obj):
             raise RuntimeError(
@@ -1093,24 +1110,8 @@ def _recursive_compile_class(obj, loc):
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     _compile_and_register_class(obj, rcb, _qual_name)
 
-
-class CompilationUnit(object):
-    def __init__(self, lang=None, _frames_up=0):
-        self._c = torch._C.CompilationUnit()
-        if lang is not None:
-            self.define(lang, _frames_up=_frames_up + 1)
-
-    def define(self, lang, rcb=None, _frames_up=0):
-        if not rcb:
-            rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
-        self._c.define(lang, rcb)
-
-    def __getattr__(self, attr):
-        r = self._c.find_function(attr)
-        if r is None:
-            raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
-        return r
-
+CompilationUnit = torch._C.CompilationUnit
+set_module(CompilationUnit, "torch.jit")
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
@@ -1119,3 +1120,6 @@ def _unwrap_optional(x):
 
 _register_builtin(_unwrap_optional, "aten::_unwrap_optional")
 _register_builtin(_jit_internal.is_scripting, "aten::is_scripting")
+_register_builtin(has_torch_function, "aten::has_torch_function")
+_register_builtin(has_torch_function_unary, "aten::has_torch_function")
+_register_builtin(has_torch_function_variadic, "aten::has_torch_function")

@@ -1990,13 +1990,13 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
     MemDependencyChecker analyzer({a}, {c});
     Store* initStore = Store::make(c, {x}, Load::make(a, {x}, 1), 1);
     ExprHandle conditionalLoad = Load::make(c, {0}, 1);
-    Stmt* stmt =
-        Block::make({For::make(x, 0, 10, initStore),
-                     Cond::make(
-                         CompareSelect::make(
-                             conditionalLoad, 5, CompareSelectOperation::kLT),
-                         Store::make(c, {0}, 5, 1),
-                         nullptr)});
+    Stmt* stmt = Block::make(
+        {For::make(x, 0, 10, initStore),
+         Cond::make(
+             CompareSelect::make(
+                 conditionalLoad, 5, CompareSelectOperation::kLT),
+             Store::make(c, {0}, 5, 1),
+             nullptr)});
 
     stmt->accept(&analyzer);
 
@@ -2177,11 +2177,12 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
         Store::make(b, {x}, Add::make(Load::make(b, {x}, 1), 1), 3);
     For* secondLoop = For::make(x, 4, 7, secondStore);
 
-    Stmt* stmt = Block::make({firstLoop,
-                              secondLoop,
-                              Store::make(b, {4}, 100, 1),
-                              Store::make(b, {5}, 101, 1),
-                              Store::make(b, {6}, 102, 1)});
+    Stmt* stmt = Block::make(
+        {firstLoop,
+         secondLoop,
+         Store::make(b, {4}, 100, 1),
+         Store::make(b, {5}, 101, 1),
+         Store::make(b, {6}, 102, 1)});
 
     stmt->accept(&analyzer);
 

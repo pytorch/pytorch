@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend_init.h>
+
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
@@ -130,11 +131,12 @@ void initJitBackendBindings(PyObject* module) {
   auto codegen_lambda = [=](const std::string& backend_name,
                             const Module& orig_module,
                             const py::dict& method_compile_spec) {
-    const c10::QualifiedName qual_backend_name({"__torch__",
-                                                "torch",
-                                                "classes",
-                                                detail::kBackendsNamespace,
-                                                backend_name});
+    const c10::QualifiedName qual_backend_name(
+        {"__torch__",
+         "torch",
+         "classes",
+         detail::kBackendsNamespace,
+         backend_name});
     // TODO: Validate method_compile_spec.
 
     // Clone orig_module to make sure backend transformation is
@@ -151,11 +153,18 @@ void initJitBackendBindings(PyObject* module) {
         /*shouldMangle=*/true);
 
     // Generate attributes.
-    // This is the original cloned and preprocessed module.
+    // This is the preprocessed module.
+    // For backwards compatibility, for backends that implement preprocessing in
+    // the backend interface rather than as a separate function, we just pass
+    // the cloned original Module.
     loweredModule.register_attribute(
         "__processed_module",
         AnyType::get(),
-        cloned_module._ivalue(),
+        detail::hasBackendPreprocessFunction(backend_name)
+            ? detail::getBackendPreprocessFunction(backend_name)(
+                  cloned_module,
+                  toIValue(method_compile_spec, any_dict_ty).toGenericDict())
+            : cloned_module._ivalue(),
         /*is_param=*/false);
 
     // This is for the method_compile_spec passed in to to_<backend> or
@@ -215,17 +224,30 @@ void initJitBackendBindings(PyObject* module) {
             )",
         loweredModuleResolver());
 
-    // This is never called during compilation or execution, but is
-    // needed to generate the LoweredModule because we don't have access
-    // to an instance of the backend as a C++ object with which to call
-    // preprocess.
-    loweredModule.define(
-        R"(
-            def __preprocess(self, mod: Any, method_compile_spec: Dict[str, Any]):
-                self.__create_backend()
-                self.__processed_module = self.__backend.preprocess(mod, method_compile_spec)
-          )",
-        loweredModuleResolver());
+    // Only add preprocess method to the LoweredModule if there is no
+    // standalone BackendPreprocessFunction for this backend.
+    // Kept for backwards compatibility for backends that implement
+    // preprocessing in the backend interface rather than as a separate
+    // function.
+    if (!detail::hasBackendPreprocessFunction(backend_name)) {
+      // This is never called during compilation or execution, but is
+      // needed to generate the LoweredModule because we don't have access
+      // to an instance of the backend as a C++ object with which to call
+      // preprocess.
+      loweredModule.define(
+          R"(
+                def __preprocess(self, mod: Any, method_compile_spec: Dict[str, Any]):
+                    self.__create_backend()
+                    self.__processed_module = self.__backend.preprocess(mod, method_compile_spec)
+              )",
+          loweredModuleResolver());
+      // Run preprocess so that __processed_module is set correctly before
+      // compilation.
+      loweredModule.run_method(
+          "__preprocess",
+          cloned_module._ivalue(),
+          toIValue(method_compile_spec, any_dict_ty).toGenericDict());
+    }
 
     // This loop generates one method on the LoweredModule for every key
     // in method_compile_spec.
@@ -326,13 +348,6 @@ void initJitBackendBindings(PyObject* module) {
       loweredModule.define(
           method_ct.format(method_te), loweredModuleResolver());
     }
-
-    // Run preprocess so that __processed_module is set correctly before
-    // compilation.
-    loweredModule.run_method(
-        "__preprocess",
-        cloned_module._ivalue(),
-        toIValue(method_compile_spec, any_dict_ty).toGenericDict());
 
     // Call __setstate__ to ensure that the returned Module is ready to
     // run.

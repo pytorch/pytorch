@@ -51,7 +51,8 @@ using tensor_type_converter_t =
 // expectation that the guarded_node's subgraph will then be optimized.
 TORCH_API void insertTypeGuard(
     Node* guarded_node,
-    tensor_type_converter_t type_converter);
+    tensor_type_converter_t type_converter,
+    c10::Symbol kind);
 
 TORCH_API bool usedOnlyInSize(Value* v);
 TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);

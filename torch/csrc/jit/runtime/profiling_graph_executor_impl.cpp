@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
+
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
@@ -156,10 +157,13 @@ bool guardDifferentiableGraph(Node* dnode) {
     // will give us trouble when we get "alternating patterns" of gradients
     // of two inputs, but so it is. An alternative could be to look into
     // the individual requires_grad seen in the profiling record.
-    insertTypeGuard(dnode, [](const TensorTypePtr& t) {
-      return TensorType::get()->withRequiresGrad(
-          t->requiresGrad().value_or(true));
-    });
+    insertTypeGuard(
+        dnode,
+        [](const TensorTypePtr& t) {
+          return TensorType::get()->withRequiresGrad(
+              t->requiresGrad().value_or(true));
+        },
+        prim::RequiresGradCheck);
     return true;
   } else {
     // we inline the differentiable graph as a fallback
@@ -583,6 +587,12 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     pr_ = ProfilingRecord::instrumentGraph(copy);
+    // `InsertProfileNodesForSpecializeAutogradZero` profiles a definition vs a
+    // use and it doesn't expect any profile nodes between a graph input and its
+    // consumer, `aten::_grad_sum_to_size`. This means we need to run it first,
+    // before any other pass that could insert `prim::iprofile_value` node on
+    // `aten::_grad_sum_to_size` input.
+    InsertProfileNodesForSpecializeAutogradZero(pr_.get());
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through

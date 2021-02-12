@@ -226,7 +226,7 @@ void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_sca
   });
 }
 
-void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
+void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
     using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
@@ -238,15 +238,23 @@ void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar 
     const Vec zero_vec(static_cast<scalar_t>(0));
     cpu_kernel_vec(
         it,
-        [negcoef, negiptcoef, poscoef](scalar_t a, scalar_t b) -> scalar_t {
-          return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
-        },
-        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vec a, Vec b) -> Vec {
-          auto cmp = (b > zero_vec);
-          if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
-            return a * poscoef_vec;
+        [negcoef, negiptcoef, poscoef, is_result](scalar_t a, scalar_t b) -> scalar_t {
+          if (is_result) {
+            return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
           } else {
-            return Vec::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
+            return b <= scalar_t(0) ? a * negiptcoef * negcoef * std::exp(b * negiptcoef): a * poscoef;
+          }
+        },
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec, is_result](Vec a, Vec b) -> Vec {
+          auto cmp = (b > zero_vec);
+          if (is_result) {
+            if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+              return a * poscoef_vec;
+            } else {
+              return Vec::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
+            }
+          } else {
+            return Vec::blendv(a * negiptcoef_vec * negcoef_vec * (b * negiptcoef_vec).exp(), a * poscoef_vec, cmp);
           }
         }
     );
@@ -350,7 +358,7 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t grad_val, scalar_t self_val) {
-          return (self_val >= neg_three && self_val <= three)
+          return (self_val > neg_three && self_val < three)
             ? grad_val * one_sixth
             : zero;
         },

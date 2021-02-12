@@ -1,10 +1,10 @@
-#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <ATen/record_function.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -14,13 +14,13 @@ namespace {
 std::string getTypeStr(const c10::TypePtr& type) {
   switch (type->kind()) {
     case c10::TypeKind::FunctionType:
-      return type->cast<c10::FunctionType>()->name()->qualifiedName();
+      return type->castRaw<c10::FunctionType>()->name()->qualifiedName();
     case c10::TypeKind::TupleType:
-      return type->cast<c10::TupleType>()->name()->qualifiedName();
+      return type->castRaw<c10::TupleType>()->name()->qualifiedName();
     case c10::TypeKind::ClassType:
-      return type->cast<c10::ClassType>()->name()->qualifiedName();
+      return type->castRaw<c10::ClassType>()->name()->qualifiedName();
     case c10::TypeKind::InterfaceType:
-      return type->cast<c10::InterfaceType>()->name()->qualifiedName();
+      return type->castRaw<c10::InterfaceType>()->name()->qualifiedName();
     default:
       return type->annotation_str();
   }

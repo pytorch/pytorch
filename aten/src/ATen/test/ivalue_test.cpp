@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/core/Dict.h>
 
 namespace c10 {
 
@@ -49,8 +50,46 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(ten2.toTensor().equal(ten.toTensor()));
   std::move(ten2).toTensor();
   ASSERT_EQ(tv.use_count(), 2);
+
+  auto elem1 = c10::complex<double>(3, 4);
+  auto elem2 = c10::complex<double>(3, -4);
+  auto elem3 = c10::complex<double>(5, 0);
+  c10::List<c10::complex<double>> foo1({elem1, elem2, elem3});
+  ASSERT_EQ(foo1.use_count(), 1);
+  IValue bar1{foo1};
+  ASSERT_EQ(foo1.use_count(), 2);
+  auto baz1 = bar1;
+  ASSERT_EQ(foo1.use_count(), 3);
+  auto foo12 = std::move(bar1);
+  ASSERT_EQ(foo1.use_count(), 3);
+  ASSERT_TRUE(foo12.isComplexDoubleList());
+  ASSERT_EQ(foo12.toComplexDoubleList(), foo1);
+
+  ASSERT_TRUE(bar1.isNone());
+  auto foo3 = IValue(c10::complex<double>(3, 4));
+  ASSERT_TRUE(foo3.isComplexDouble());
+  ASSERT_EQ(foo3.toComplexDouble(), c10::complex<double>(3,4));
+
+  ASSERT_TRUE(baz1.toComplexDoubleVector() == std::vector<c10::complex<double>>({elem1, elem2, elem3}));
+  IValue complex_tuple(
+      at::ivalue::Tuple::create({IValue(c10::complex<double>(3.4, 4.7)), IValue(foo1)}));
+  ASSERT_TRUE(complex_tuple.isTuple());
+  ASSERT_EQ(complex_tuple.toTuple()->elements()[0].toComplexDouble(), c10::complex<double>(3.4, 4.7));
+  ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
 }
 
+TEST(IValueTest, ComplexDict) {
+  typedef c10::complex<double> c_type;
+  c10::Dict<c_type, c_type> m;
+  auto num1 = c_type(2.3, -3.5);
+  auto num2 = c_type(0, 5);
+  m.insert(num1, 2 * num1);
+  m.insert(num2, 2 * num2);
+  IValue dict(std::move(m));
+  auto m_ = dict.toGenericDict();
+  ASSERT_EQ(m_.at(num1), 2 * num1);
+  ASSERT_EQ(m_.at(num2), 2 * num2);
+}
 static std::array<IValue, 5> makeSampleIValues() {
   return { at::rand({3, 4}), "hello", 42, true, 1.5 };
 }
@@ -174,6 +213,45 @@ TEST(IValueTest, TuplePrint) {
     ss << tp;
     ASSERT_EQ(ss.str(), "(3, 3)");
   }
+}
+
+TEST(IValueTest, ComplexIValuePrint) {
+  {
+    IValue complex(c10::complex<double>(2, -3));
+    std::stringstream ss;
+    ss << complex;
+    ASSERT_EQ(ss.str(), "2.-3.j");
+  }
+
+  {
+    IValue complex(c10::complex<double>(2, 0));
+    std::stringstream ss;
+    ss << complex;
+    ASSERT_EQ(ss.str(), "2.+0.j");
+  }
+
+  {
+    IValue complex(c10::complex<double>(0, 3));
+    std::stringstream ss;
+    ss << complex;
+    ASSERT_EQ(ss.str(), "0.+3.j");
+  }
+}
+
+TEST(IValueTest, Complex) {
+  auto c = c10::complex<double>(2, 3);
+  auto c_ = c10::complex<double>(2, -3);
+  IValue c1(c), c2(c_), c3{at::Scalar(c)};
+
+  ASSERT_TRUE(c1.isComplexDouble());
+  ASSERT_TRUE(c3.isComplexDouble());
+
+  ASSERT_EQ(c, c1.toComplexDouble());
+  ASSERT_FALSE(c1 == c2);
+  ASSERT_TRUE(c1 == c3);
+
+  ASSERT_TRUE(c1.isScalar());
+  ASSERT_TRUE(c2.toScalar().equal(c_));
 }
 
 TEST(IValueTest, BasicFuture) {
@@ -484,7 +562,7 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
 
 TEST(IValueTest, getSubValues) {
   // Scalars have no subvalues.
-  IValue integer(42), float_(1.5);
+  IValue integer(42), float_(1.5), complex(c10::complex<double>(2, 3));
 
   IValue::HashAliasedIValues subvalues;
 
@@ -494,6 +572,11 @@ TEST(IValueTest, getSubValues) {
   subvalues.clear();
 
   float_.getSubValues(subvalues);
+  EXPECT_TRUE(subvalues.empty());
+
+  subvalues.clear();
+
+  complex.getSubValues(subvalues);
   EXPECT_TRUE(subvalues.empty());
 
   subvalues.clear();

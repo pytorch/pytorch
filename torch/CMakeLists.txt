@@ -81,7 +81,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    torch_library
     shm
     fmt::fmt-header-only)
 
@@ -156,38 +155,6 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
-if(USE_NUMPY)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
-endif()
-
-if(USE_DISTRIBUTED)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if(WIN32)
-      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
-    else()
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
-      append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
-    endif()
-    # Disable certain warnings for GCC-9.X
-    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-    endif()
-    if(USE_TENSORPIPE)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
-      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
-    endif()
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
-endif()
-
-if(USE_NCCL AND NOT WIN32)
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
-endif()
 
 if(USE_VALGRIND AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
@@ -245,6 +212,79 @@ add_custom_command(
     "${TORCH_ROOT}"
 )
 
+# WARNING- any TORCH_PYTHON_COMPILE_DEFINITIONS above this line
+#          affect both torch_python and DEPLOY interpreter.
+if(USE_DEPLOY)
+  add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
+  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB")
+
+  target_compile_definitions(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
+
+  target_compile_definitions(torch_python_obj PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
+
+  target_compile_options(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+
+  target_include_directories(torch_python_obj PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
+  target_include_directories(torch_python_obj PRIVATE ../third_party/fmt/include)
+
+  # need to specify the dependency so the generated headers exist,
+  # missing dependency since torch_python_obj doesn't link onnx, the interpreter lib does.
+  add_dependencies(torch_python_obj onnx)
+
+  if(HAVE_SOVERSION)
+    set_target_properties(torch_python_obj PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
+  add_dependencies(torch_python_obj torch_python_stubs)
+
+  # Required workaround for generated sources
+  # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
+  add_dependencies(torch_python_obj generate-torch-sources)
+  set_source_files_properties(
+      ${GENERATED_THNN_SOURCES}
+      ${GENERATED_CXX_PYTHON}
+      PROPERTIES GENERATED TRUE
+      )
+
+  add_dependencies(torch_python_obj gen_torch_version)
+
+endif()
+
+
+# Avoid numpy for the DEPLOY build
+if(USE_NUMPY)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
+endif()
+
+if(USE_DISTRIBUTED)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
+    if(WIN32)
+      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
+    else()
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
+      append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
+    endif()
+    # Disable certain warnings for GCC-9.X
+    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+    endif()
+    if(USE_TENSORPIPE)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+    endif()
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+endif()
+
+if(USE_NCCL AND NOT WIN32)
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
+endif()
+
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
@@ -275,7 +315,7 @@ endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
-target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
+target_link_libraries(torch_python torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
