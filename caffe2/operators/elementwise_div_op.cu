@@ -154,6 +154,7 @@ void ComputeDivAGradientCUDAImpl(
           dC,
           B,
           dA);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename TGrad, typename TIn, typename TOut, int D>
@@ -179,6 +180,7 @@ void ComputeDivBGradientCUDAImpl(
          0,
          context->cuda_stream()>>>(
           outer_size, inner_size, C_strides_arr, B_dims_arr, dC, B, C, dB);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename TGrad, typename TIn>
@@ -289,7 +291,10 @@ bool DivFunctor<CUDAContext>::Backward(
            CAFFE_CUDA_NUM_THREADS,
            0,
            context->cuda_stream()>>>(size, dC, B, C, dB);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     math::Div(size, dC, B, dA, context);
+
     return true;
   }
   const int ndim = std::max(A_dims.size(), B_dims.size());
