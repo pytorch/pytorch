@@ -354,7 +354,7 @@ TORCH_IMPL_FUNC(upsample_trilinear3d_out_cuda) (
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
     const Tensor& output) {
-  upsample_trilinear3d_out_cuda_template(output, input, output_size, align_corners, scales_d, scales_h, scales_w);
+  return at::upsample_trilinear3d(output, input, output_size, align_corners, scales_d, scales_h, scales_w);
 }
 
 TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_cuda) (
@@ -369,7 +369,7 @@ TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_cuda) (
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("upsample_trilinear3d_backward_cuda");
-  upsample_trilinear3d_backward_out_cuda_template(
+  return at::upsample_trilinear3d_backward(
       grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
 }
 
