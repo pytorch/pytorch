@@ -69,6 +69,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         reduction == at::Reduction::Mean,
         margin
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     else if (p == 2)
     {
@@ -81,6 +82,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         reduction == at::Reduction::Mean,
         margin
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     THCudaCheck(cudaGetLastError());
   }
@@ -107,6 +109,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           false,
           margin
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
       else if (p == 2)
       {
@@ -119,6 +122,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           false,
           margin
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
       THCudaCheck(cudaGetLastError());
     }
@@ -137,6 +141,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           reduction == at::Reduction::Mean,
           margin
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
       else if (p == 2)
       {
@@ -149,6 +154,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           reduction == at::Reduction::Mean,
           margin
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
       THCudaCheck(cudaGetLastError());
       auto t = THTensor_wrap(output_);
@@ -211,6 +217,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         margin,
         reduction != at::Reduction::None
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     else if (p == 2)
     {
@@ -225,6 +232,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         margin,
         reduction != at::Reduction::None
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     THCudaCheck(cudaGetLastError());
   }
@@ -249,6 +257,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         margin,
         reduction != at::Reduction::None
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     else if (p == 2)
     {
@@ -263,6 +272,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         margin,
         reduction != at::Reduction::None
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     THCudaCheck(cudaGetLastError());
   }
