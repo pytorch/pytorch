@@ -141,10 +141,10 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Tried to set "
                                     "nonexistent attribute"):
-            with warnings.catch_warnings(record=True) as w:
+            with self.assertWarnsRegex("doesn't support instance-level "
+                                       "annotations on empty non-base "
+                                       "types"):
                 torch.jit.script(M())
-            self.assertIn("doesn't support instance-level annotations "
-                          "on empty non-base types", str(w[0].message))
 
     def test_annotated_empty_dict(self):
         class M(torch.nn.Module):
@@ -158,10 +158,10 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Tried to set "
                                     "nonexistent attribute"):
-            with warnings.catch_warnings(record=True) as w:
+            with self.assertWarnsRegex("doesn't support instance-level "
+                                       "annotations on empty non-base "
+                                       "types"):
                 torch.jit.script(M())
-            self.assertIn("doesn't support instance-level annotations "
-                          "on empty non-base types", str(w[0].message))
 
     def test_annotated_empty_optional(self):
         class M(torch.nn.Module):
@@ -175,10 +175,10 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Wrong type for "
                                     "attribute assignment"):
-            with warnings.catch_warnings(record=True) as w:
+            with self.assertWarnsRegex("doesn't support instance-level "
+                                       "annotations on empty non-base "
+                                       "types"):
                 torch.jit.script(M())
-            self.assertIn("doesn't support instance-level annotations "
-                          "on empty non-base types", str(w[0].message))
 
     def test_annotated_with_jit_empty_list(self):
         class M(torch.nn.Module):
@@ -192,10 +192,10 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Tried to set "
                                     "nonexistent attribute"):
-            with warnings.catch_warnings(record=True) as w:
+            with self.assertWarnsRegex("doesn't support instance-level "
+                                       "annotations on empty non-base "
+                                       "types"):
                 torch.jit.script(M())
-            self.assertIn("doesn't support instance-level annotations "
-                          "on empty non-base types", str(w[0].message))
 
     def test_annotated_with_jit_empty_dict(self):
         class M(torch.nn.Module):
@@ -209,10 +209,10 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Tried to set "
                                     "nonexistent attribute"):
-            with warnings.catch_warnings(record=True) as w:
+            with self.assertWarnsRegex("doesn't support instance-level "
+                                       "annotations on empty non-base "
+                                       "types"):
                 torch.jit.script(M())
-            self.assertIn("doesn't support instance-level annotations "
-                          "on empty non-base types", str(w[0].message))
 
     def test_annotated_with_jit_empty_optional(self):
         class M(torch.nn.Module):
@@ -226,10 +226,10 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Wrong type for "
                                     "attribute assignment"):
-            with warnings.catch_warnings(record=True) as w:
+            with self.assertWarnsRegex("doesn't support instance-level "
+                                       "annotations on empty non-base "
+                                       "types"):
                 torch.jit.script(M())
-            self.assertIn("doesn't support instance-level annotations "
-                          "on empty non-base types", str(w[0].message))
 
     def test_annotated_with_torch_jit_import(self):
         from torch import jit
@@ -245,7 +245,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Wrong type for "
                                     "attribute assignment"):
-            with warnings.catch_warnings(record=True) as w:
+            with self.assertWarnsRegex("doesn't support instance-level "
+                                       "annotations on empty non-base "
+                                       "types"):
                 torch.jit.script(M())
-            self.assertIn("doesn't support instance-level annotations "
-                          "on empty non-base types", str(w[0].message))
