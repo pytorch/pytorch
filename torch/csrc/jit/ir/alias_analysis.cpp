@@ -982,6 +982,10 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
     case aten::dstack:
       return true;
   }
+  auto op = use.user->maybeOperator();
+  if (op && op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
+    return true;
+  }
 
   return false;
 }

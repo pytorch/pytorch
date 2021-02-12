@@ -162,11 +162,11 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-  return at::threshold(self, 0, 0);
+  return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-  return at::threshold_(self, 0, 0);
+  return at::clamp_min_(self, 0);
 }
 
 Tensor selu(const Tensor & self) {
