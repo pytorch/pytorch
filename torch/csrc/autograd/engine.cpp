@@ -1121,6 +1121,9 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
   // Only nodes that have a path to any edge in `outputs` should be executed.
   // The code below populates exec_info using recursion, but the actual code does this
   // iteratively. Refer to the numbering to see how the actual code corresponds.
+  // A difference to note is that in the iterative version, when you are working with
+  // the current Node, you are reponsible to update your parent's is_needed after all your
+  // children have been updated.
   //
   // is_needed = {fn: True for fn in outputs}             # (0)
   // seen = {}
@@ -1137,6 +1140,9 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
   //   return is_needed[fn]
   // compute_is_needed(graph_root)
   //
+  // NB: you might be wondering why we don't populate `seen` with outputs. We cannot
+  // because in the case where two outputs lie on the same path, we still need to explore past
+  // the first output or we would miss the nodes that are required to compute the second output.
   int output_idx = 0;
   for (auto & output_edge : outputs) {
     // (0) `is_needed` above corresponds to `exec_info_[fn].needed_`
