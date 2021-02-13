@@ -27,7 +27,7 @@
 
 #include <stdexcept>
 #include <vector>
-#include <string.h>
+#include <string>
 #include <array>
 #include <utility>
 
@@ -271,7 +271,10 @@ Tensor internal_new_from_data(
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
   }
 
+  bool use_batched_array_extraction = false;
   auto sizes = compute_sizes(data);
+  Tensor tensor;
+  ScalarType inferred_scalar_type;
 
 #ifdef USE_NUMPY
   if (PyObject_HasAttrString(data, "__cuda_array_interface__")) {
@@ -294,25 +297,24 @@ Tensor internal_new_from_data(
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
 
+  // We first check whether the numpy array pointers were extracted. If so, we continue with raw memory
+  // copying part : torch::utils::tensor_from_ndarray_batch.
+  // In case data contains anything other than all numpy arrays, this approach will not be taken and
+  // instead recusrive_store as shown below will be used for copying.
   std::vector<PyArrayObject*> array_ptr_storage;
   if (torch::utils::extract_ndarrays(data, sizes, array_ptr_storage)) {
-    const auto& inferred_scalar_type = infer_scalar_type(data);
-    auto tensor = torch::utils::tensor_from_ndarray_batch(array_ptr_storage, sizes, inferred_scalar_type, pin_memory);
-    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
-    pybind11::gil_scoped_release no_gil;
-    maybe_initialize_cuda(device);
-    return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+    inferred_scalar_type = infer_scalar_type(data);
+    tensor = torch::utils::tensor_from_ndarray_batch(array_ptr_storage, sizes, inferred_scalar_type, pin_memory);
+    use_batched_array_extraction = true;
   }
 
 #endif
 
-  ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
-
   // This exists to prevent us from tracing the call to empty().  The actual
   // autograd code doesn't really matter, because requires_grad is always false
   // here.
-  Tensor tensor;
-  {
+  if (!use_batched_array_extraction) {
+    inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
     at::AutoNonVariableTypeMode guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));

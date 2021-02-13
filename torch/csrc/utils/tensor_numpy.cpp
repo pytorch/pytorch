@@ -35,6 +35,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <iostream>
 
 #include <vector>
 #include <string.h>
@@ -357,30 +358,57 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
 
 template <typename T>
-std::string get_vector_str(std::vector<T> & vec, int64_t start, int64_t end=-1){
-  std::string output = "(";
+std::string get_vector_str(std::vector<T> & vec, int64_t start, int64_t end=-1) {
+  /*
+  A utility function for returning a string representation of a std::vector containing ints/floats.
+  Useful for printing the shape of an N-dimensional tensor. This is used in the error message creation
+  part in the _extract_ndarrays function below.
+  */
+  std::ostringstream output;
+  output << "(";
+
   if (end < 0) {
     end = vec.size();
   }
-  for (int i=start; i<end; ++i) {
-    output += (std::to_string(vec[i]) + ", ");
+  for (int64_t i = start; i < end; ++i) {
+    if (i != end - 1) {
+      output << vec[i] << ", ";        
+    } else {
+      output << vec[i] << ")";
+    }
   }
-  return output + ")";
+  return output.str();
 }  
 
 template <typename T>
-std::string get_buffer_str(void* buffer, int64_t start, int64_t end){
+std::string get_buffer_str(void* buffer, int64_t start, int64_t end) {
+  /*
+  A similar utility function as get_vector_str, except it works on an array buffer instead of vector.
+  */
   T* array = static_cast<T*>(buffer); 
-  std::string output = "(";
-  for (int i=start; i<end; ++i) {
-    output += (std::to_string(array[i]) + ", ");
+  std::ostringstream output;
+  output << "(";
+
+  for (int64_t i = start; i < end; ++i) {
+    if (i != end - 1) {
+      output << array[i] << ", ";        
+    } else {
+      output << array[i] << ")";
+    }
   }
-  return output + ")";
+  return output.str();
 }  
 
 
-bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, size_t (&numels)[], size_t shape_idx, std::vector<PyArrayObject*> & array_ptr_storage) {
+bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<int64_t> & numels, size_t shape_idx, std::vector<PyArrayObject*> & array_ptr_storage) {
+  /*
+  This is a helper function for extracting all the numpy arrays embedded within PySequences (recursively) representd by obj. This is done recursively in a 
+  depth first search style. It puts the numpy array pointers in the array_ptr_storage for later use. In case there is a non numpy array type within obj, 
+  this function immediately returns false. If only all the items inside obj are just numpy arrays, it returns true. It throws a ValueError in case of a dimension
+  mismatch. This function is used in extract_ndarrays() function below.
+  */
   if (PyArray_Check(obj)) {
+    // This only checks for number of elements since the iterator will treat an array of shape (m x b) or any other the same way it would treat its flattened version.
     if (numels[shape_idx] != PyArray_SIZE((PyArrayObject*) obj)) {
       auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS((PyArrayObject*) obj)), 0, PyArray_NDIM((PyArrayObject*) obj)) + std::string(")");
       auto expected_shape_str = get_vector_str(shape, shape_idx);
@@ -389,23 +417,23 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, size_t (&num
     }
     array_ptr_storage.push_back((PyArrayObject*) obj);
     return true;
-  } 
-  else if (PySequence_Check(obj)) {
+  } else if (PySequence_Check(obj)) {
     auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
-    if (!seq) throw python_error();
-    auto seq_len = PySequence_Fast_GET_SIZE(seq.get());
+    if (!seq) {
+      throw python_error();
+    }
+    Py_ssize_t seq_len = PySequence_Fast_GET_SIZE(seq.get());
     if (seq_len != shape[shape_idx]) {
       throw ValueError("expected sequence of length %lld at dim %lld (got %lld)",
         (long long)shape[shape_idx], (long long)shape_idx, (long long)seq_len);
     }
     PyObject** items = PySequence_Fast_ITEMS(seq.get());
-    for (size_t i=0; i<seq_len; ++i) {
+    for (Py_ssize_t i = 0; i < seq_len; ++i) {
       if (!_extract_ndarrays(items[i], shape, numels, shape_idx+1, array_ptr_storage)) {
         return false;
       }
     }
-  } 
-  else {
+  } else {
     return false;
   }
   return true;
@@ -413,12 +441,17 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, size_t (&num
 
 
 bool extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<PyArrayObject*> & array_ptr_storage) {
+  /*
+  A function for extracting all numpy arrays embedded (recursively) within PySequences in obj. Failure to do so will return
+  false, else true. The extracted numpy array pointers are stored in array_ptr_storage. It uses _extract_ndarrays() function 
+  for the extraction. See the comments there. This function is used in internal_new_from_data() in "torch/csr/utils/tensor_new.cpp"
+  */
 
-  auto ndims = shape.size();
-  size_t numels[ndims];
+  int64_t ndims = shape.size();
+  std::vector<int64_t> numels(ndims);
   numels[ndims-1] = shape[ndims-1];
 
-  for (int i=ndims-2; i>=0; --i) {
+  for (int64_t i = ndims-2; i >= 0; --i) {
     numels[i] = shape[i] * numels[i+1];
   }
 
@@ -427,7 +460,12 @@ bool extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<P
 
 
 template <typename T>
-void memcpy_cpu(void* dst, const void* src, size_t num_items, bool isaligned, int itemsize=1) {
+inline void memcpy_cpu(void* dst, const void* src, size_t num_items, bool isaligned, int itemsize=1) {
+  /*
+  A utility function for copying an array buffer of type T from src to dst using parallel loops.
+  This is used in the function tensor_from_ndarray_batch below for copying raw memory from 
+  (contiguous) numpy arrays to an output pytorch tensor.
+  */
   if (isaligned) {
     at::parallel_for(
       0,
@@ -466,6 +504,9 @@ void memcpy_cpu(void* dst, const void* src, size_t num_items, bool isaligned, in
 
 
 inline void* store_ndarray(void* tensor_ptr, void* ndarray_ptr, at::ScalarType scalarType, size_t num_items, int itemsize, bool isaligned) {
+  /* 
+  This utility function is used for copying elements from a raw numpy array memory to a tensor memory location by using memcpy_cpu and proper type matching.
+  */
   switch (scalarType) {
     case at::kByte: memcpy_cpu<uint8_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((uint8_t *)tensor_ptr) + num_items);
     case at::kChar: memcpy_cpu<char> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((char *)tensor_ptr) + num_items);
@@ -487,11 +528,16 @@ inline void* store_ndarray(void* tensor_ptr, void* ndarray_ptr, at::ScalarType s
 
 
 Tensor reverse_strides(Tensor & tensor) {
+  /*
+  Utility function for reversing the strides of a tensor excluding the outermost dimension.
+  So, a tensor with strides [3200, 1200, 720, 80] will return a tensor with strides reversed: [3200, 80, 720, 1200]
+  This is used when copying F-contiguous numpy arrays to the output tensor in tensor_from_ndarray_batch().
+  */
   auto strides = tensor.strides();
   auto size = strides.size();
-  std::vector<long int> new_strides(size);
+  std::vector<int64_t> new_strides(size);
   new_strides[0] = strides[0];
-  for (int i=0; i<size-1; ++i) {
+  for (int64_t i = 0; i < size - 1; ++i) {
     new_strides[i+1] = strides[size-i-1];
   }
   return at::native::set_storage_cpu_(tensor, tensor.storage(), tensor.storage_offset(), tensor.sizes(), new_strides);
@@ -499,37 +545,45 @@ Tensor reverse_strides(Tensor & tensor) {
 
 
 at::Tensor tensor_from_ndarray_batch(std::vector<PyArrayObject*> & array_ptr_storage, std::vector<int64_t> & sizes, ScalarType scalarType, bool pin_memory) {
-  
+  /*
+  Returns a newly generated tensor by first allocating an empty one and then filling up with numpy array elements using raw memory copy. This function is kept
+  simple enough by delegating the responsibility of ensuring contiguous, aligned arrays whenever a non-contiguous, unaligned arrays are given.
+  See extract_ndarrays and _extract_ndarrays for more information on extracting all the numpy array pointers. This is used in internal_new_from_data from
+  torch/csrc/utils/tensor_new.cpp
+  */
   size_t C_contiguous_count = 0;
   bool C_contiguous_majority = true;
 
   for (auto array:array_ptr_storage) {
-    if (PyArray_IS_C_CONTIGUOUS(array))
+    if (PyArray_IS_C_CONTIGUOUS(array)) {
       C_contiguous_count += 1;
+    }
   }
 
-  if (2*C_contiguous_count < array_ptr_storage.size())
+  if (2*C_contiguous_count < array_ptr_storage.size()) {
     C_contiguous_majority = false;
+  }
 
   auto tensor = at::empty(sizes, at::initialTensorOptions().dtype(scalarType).pinned_memory(pin_memory));
   int np_type = aten_to_numpy_dtype(scalarType);
   auto tensor_ptr = tensor.data_ptr();
 
-  double time = 0;
-
   for (auto array:array_ptr_storage) {
     auto flags = PyArray_FLAGS(array);
     if (C_contiguous_majority) {
         auto array_tmp = (PyArrayObject*) PyArray_FromArray(array, PyArray_DescrFromType(np_type), NPY_ARRAY_CARRAY);        
-        if (!array_tmp) throw python_error();
+        if (!array_tmp) {
+          throw python_error();
+        }
         tensor_ptr = store_ndarray(tensor_ptr, PyArray_DATA(array_tmp), scalarType, PyArray_SIZE(array_tmp), tensor.dtype().itemsize(), true);
         if (array_tmp != array) { 
           Py_DECREF((PyObject*) array_tmp);
         }
-    }
-    else {
+    } else {
         auto array_tmp = (PyArrayObject*) PyArray_FromArray(array, PyArray_DescrFromType(np_type), NPY_ARRAY_FARRAY);
-        if (!array_tmp) throw python_error();
+        if (!array_tmp) {
+          throw python_error();
+        }
         tensor_ptr = store_ndarray(tensor_ptr, PyArray_DATA(array_tmp), scalarType, PyArray_SIZE(array_tmp), tensor.dtype().itemsize(), true);
         if (array_tmp != array) {
           Py_DECREF((PyObject*) array_tmp);
