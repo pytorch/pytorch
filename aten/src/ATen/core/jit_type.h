@@ -712,6 +712,7 @@ struct TORCH_API ListType
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
+  static ListTypePtr ofComplexDoubles();
   static ListTypePtr ofBools();
   static ListTypePtr ofStrings();
 
@@ -737,6 +738,7 @@ struct TORCH_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
@@ -744,7 +746,7 @@ struct TORCH_API DictType : public Type {
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, Tensor and string keys are supported");
+            "', only int, float, complex, Tensor and string keys are supported");
     }
   }
 
@@ -973,7 +975,7 @@ struct TORCH_API TupleType : public NamedType {
     }
 
     const auto& l_elements = elements();
-    const auto& r_elements = rhs.cast<TupleType>()->elements();
+    const auto& r_elements = rhs.castRaw<TupleType>()->elements();
     if (l_elements.size() != r_elements.size())
       return false;
     for (size_t i = 0; i < l_elements.size(); ++i) {
@@ -1105,7 +1107,7 @@ using NumberTypePtr = std::shared_ptr<NumberType>;
 // Subtype hierarchy for Number Types (NumberType as the base type):
 // IntType <: NumberType
 // FloatType <: NumberType
-// ComplexDoubleType <:NumberType
+// ComplexType <:NumberType
 struct TORCH_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
@@ -1157,12 +1159,12 @@ struct TORCH_API FloatType : public NumberType {
   }
 };
 
-struct ComplexDoubleType;
-using ComplexDoubleTypePtr = std::shared_ptr<ComplexDoubleType>;
+struct ComplexType;
+using ComplexTypePtr = std::shared_ptr<ComplexType>;
 // This type represents a Python float number
-struct TORCH_API ComplexDoubleType : public NumberType {
-  static ComplexDoubleTypePtr create() {
-    return ComplexDoubleTypePtr(new ComplexDoubleType()); // NOLINT(modernize-make-shared)
+struct TORCH_API ComplexType : public NumberType {
+  static ComplexTypePtr create() {
+    return ComplexTypePtr(new ComplexType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -1173,12 +1175,12 @@ struct TORCH_API ComplexDoubleType : public NumberType {
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
     return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
-  static const TypeKind Kind = TypeKind::ComplexDoubleType;
+  static const TypeKind Kind = TypeKind::ComplexType;
   // global singleton
-  static ComplexDoubleTypePtr get();
+  static ComplexTypePtr get();
 
  private:
-  ComplexDoubleType() : NumberType(TypeKind::ComplexDoubleType) {}
+  ComplexType() : NumberType(TypeKind::ComplexType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "complex";
   }
@@ -1573,7 +1575,7 @@ inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePt
 
 inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   auto result = tryScalarTypeFromJitType(type);
-  AT_ASSERTM(
+  TORCH_CHECK(
       result,
       "Add new condition, expected Float, Complex, Int, or Bool but got",
       type->str());
@@ -1645,6 +1647,12 @@ template <>
 struct getTypePtr_<double> final {
   static TypePtr call() {
     return FloatType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::complex<double>> final {
+  static TypePtr call() {
+    return ComplexType::get();
   }
 };
 template <>
@@ -2428,6 +2436,11 @@ private:
 inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
   return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+}
+
+inline bool IValue::isComplexDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
 }
 
 inline bool IValue::isTensorList() const {

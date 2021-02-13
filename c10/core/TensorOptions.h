@@ -708,7 +708,7 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
   } else if (tid == DispatchKey::QuantizedXPU) {
     return DeviceType::XPU;
   } else {
-    AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
+    TORCH_INTERNAL_ASSERT(false, "Unknown DispatchKey: ", tid);
   }
 }
 

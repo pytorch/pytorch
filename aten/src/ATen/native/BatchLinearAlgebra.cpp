@@ -49,6 +49,12 @@ extern "C" void cpotrf_(char *uplo, int *n, std::complex<float> *a, int *lda, in
 extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
 extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
 
+// potri
+extern "C" void zpotri_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info);
+extern "C" void cpotri_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info);
+extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
+extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
+
 // trtrs
 extern "C" void ztrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
 extern "C" void ctrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
@@ -237,6 +243,22 @@ template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *
   spotrf_(&uplo, &n, a, &lda, info);
 }
 
+template<> void lapackCholeskyInverse<c10::complex<double>>(char uplo, int n, c10::complex<double> *a, int lda, int *info) {
+  zpotri_(&uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, info);
+}
+
+template<> void lapackCholeskyInverse<c10::complex<float>>(char uplo, int n, c10::complex<float> *a, int lda, int *info) {
+  cpotri_(&uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, info);
+}
+
+template<> void lapackCholeskyInverse<double>(char uplo, int n, double *a, int lda, int *info) {
+  dpotri_(&uplo, &n, a, &lda, info);
+}
+
+template<> void lapackCholeskyInverse<float>(char uplo, int n, float *a, int lda, int *info) {
+  spotri_(&uplo, &n, a, &lda, info);
+}
+
 template<> void lapackTriangularSolve<c10::complex<double>>(char uplo, char trans, char diag, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb, int *info) {
   ztrtrs_(&uplo, &trans, &diag, &n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
 }
@@ -411,7 +433,7 @@ Computes the solution to a system of linear equations
 where A is an n-by-n matrix and X and B are n-by-nrhs matrices.
 Note that B is required to be a matrix, the usual, vector case, is obtained with nrhs = 1.
 Above description is for non-batched input, the batched input is also supported.
-This is an in-place routine, content of both A and b are overriden.
+This is an in-place routine, content of both A and b are overwritten.
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see LAPACK's documentation for GESV routine.
 */
@@ -480,7 +502,7 @@ std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor
 // This is a type dispatching helper function for 'apply_solve'
 Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& infos) {
   // 'result' and 'input' should be in column major order (it should be checked before calling this function)
-  // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
+  // the content of 'result', 'input' and 'infos' is overwritten by 'apply_solve'
   // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
   // 'input' should contain data of original 'input' tensor (left-hand-side of the linear system of equations)
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
@@ -861,6 +883,78 @@ Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
   return result;
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+DEFINE_DISPATCH(cholesky_inverse_stub);
+
+Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
+  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
+
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
+  TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
+  }
+
+  // result tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
+
+  // cholesky_inverse_stub (apply_cholesky_inverse) performs calculations in-place and result must be a copy of input
+  result.copy_(input);
+
+  // infos must be contiguous
+  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
+  infos.fill_(0);
+
+  result = cholesky_inverse_stub(result.device().type(), result, infos, upper);
+  return result;
+}
+
+Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
+  squareCheckInputs(input);
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(result.device() == input.device(),
+    "result device ", result.device(), " does not match input device ", input.device());
+
+  // MAGMA requires 'infos' to reside in CPU memory, therefore we create 'infos' only on CPU for now.
+  auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
+
+  // if result is not empty and not in batched column major format we have to allocate a temporary tensor
+  if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
+    Tensor result_tmp = at::empty({0}, input.options());
+    result_tmp = cholesky_inverse_out_info(result_tmp, infos, input, upper);
+    at::native::resize_output(result, result_tmp.sizes());
+    result.copy_(result_tmp);
+  } else {
+    // use result's memory directly
+    result = cholesky_inverse_out_info(result, infos, input, upper);
+  }
+
+  // Now check LAPACK/MAGMA error codes
+  if (result.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_inverse");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "cholesky_inverse");
+  }
+  return result;
+}
+
+Tensor cholesky_inverse(const Tensor &input, bool upper) {
+  Tensor result = at::empty({0}, input.options());
+  result = at::cholesky_inverse_out(result, input, upper);
+  return result;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
@@ -937,13 +1031,14 @@ static void apply_triangular_solve(Tensor& b, Tensor& A, Tensor& infos, bool upp
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
+  auto lda = std::max<int64_t>(1, n);
   auto infos_data = infos.data_ptr<int>();
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     int* infos_working_ptr = &infos_data[i];
-    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, infos_working_ptr);
+    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, lda, b_working_ptr, lda, infos_working_ptr);
   }
 #endif
 }
@@ -1230,7 +1325,7 @@ Tensor orgqr(const Tensor& input, const Tensor& tau) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // This function computes eigenvalues 'w' and eigenvectors 'v' of the input that is stored initially in 'v'
-// The computation is done in-place: 'v' stores the input and will be overriden, 'w' should be an allocated empty array
+// The computation is done in-place: 'v' stores the input and will be overwritten, 'w' should be an allocated empty array
 // compute_v controls whether eigenvectors should be computed
 // uplo_str controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
 // infos is used to store information for possible checks for error
@@ -1540,6 +1635,8 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   int info;
   auto m = self.size(-2);
   auto n = self.size(-1);
+  auto lda = std::max<int64_t>(1, m);
+  auto ldvt = std::max<int64_t>(1, n);
   auto mn = std::min(m, n);
   Tensor iwork = at::empty({8 * mn}, at::kInt);
   auto iwork_data = iwork.data_ptr<int>();
@@ -1558,7 +1655,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  lapackSvd<scalar_t, value_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, rwork_data, iwork_data, &info);
+  lapackSvd<scalar_t, value_t>(jobz, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &wkopt, lwork, rwork_data, iwork_data, &info);
   lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
@@ -1570,8 +1667,8 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
 
     // Compute S, U (optionally) and VT (optionally)
-    lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, m,
-                        S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, rwork_data, iwork_data, &info);
+    lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, lda,
+                        S_working_ptr, U_working_ptr, lda, VT_working_ptr, ldvt, work_data, lwork, rwork_data, iwork_data, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -1590,31 +1687,27 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
   Tensor U_working_copy, S_working_copy, VT_working_copy;
   std::tie(U_working_copy, S_working_copy, VT_working_copy) = _create_U_S_VT(self, some, compute_uv);
 
-  if (self.numel() > 0) {
-    auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto self_working_copy = cloneBatchedColumnMajor(self);
 
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cpu", [&]{
-      apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobz, infos);
-    });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cpu", [&]{
+    apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobz, infos);
+  });
 
-    if (self.dim() > 2) {
-      batchCheckErrors(infos, "svd_cpu");
-    } else {
-      singleCheckErrors(infos[0], "svd_cpu");
-    }
-
-    if (compute_uv) {
-      if (some) {
-        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
-      }
-    } else {
-      VT_working_copy.zero_();
-      U_working_copy.zero_();
-    }
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "svd_cpu");
   } else {
-    U_working_copy.zero_();
-    VT_working_copy.zero_();
+    singleCheckErrors(infos[0], "svd_cpu");
   }
+
+  if (!compute_uv) {
+    VT_working_copy.zero_();
+    U_working_copy.zero_();
+  }
+
+  if (some) {
+    VT_working_copy = VT_working_copy.narrow(-2, 0, k);
+  }
+
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
   // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
   VT_working_copy = VT_working_copy.conj();

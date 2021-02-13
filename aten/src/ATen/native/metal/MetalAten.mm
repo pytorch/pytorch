@@ -173,6 +173,16 @@ Tensor sigmoid(const Tensor& input) {
   return mpscnn::sigmoid(input);
 }
 
+Tensor& hardsigmoid_(Tensor& input) {
+  TORCH_CHECK(input.is_metal());
+  return mpscnn::hardsigmoid_(input);
+}
+
+Tensor& hardswish_(Tensor& input) {
+  TORCH_CHECK(input.is_metal());
+  return mpscnn::hardswish_(input);
+}
+
 Tensor t(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(input.dim() == 2);
@@ -260,6 +270,8 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("relu", TORCH_FN(relu));
   m.impl("relu_", TORCH_FN(relu_));
   m.impl("sigmoid", TORCH_FN(sigmoid));
+  m.impl("hardsigmoid_", TORCH_FN(hardsigmoid_));
+  m.impl("hardswish_", TORCH_FN(hardswish_));
   m.impl("sub.Tensor", TORCH_FN(sub_Tensor));
   m.impl("upsample_nearest2d.vec", TORCH_FN(upsample_nearest2d_vec));
   m.impl("view", TORCH_FN(view));

@@ -259,4 +259,12 @@ bool NoTF32Guard::should_disable_tf32() {
   return override_allow_tf32_flag;
 }
 
+bool Context::areVmapFallbackWarningsEnabled() const {
+  return display_vmap_fallback_warnings_;
+}
+
+void Context::setDisplayVmapFallbackWarnings(bool enabled) {
+  display_vmap_fallback_warnings_ = enabled;
+}
+
 } // namespace at

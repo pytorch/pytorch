@@ -22,7 +22,6 @@ void THTensor_(preserveReduceDimSemantics)(THTensor *r_, int in_dims, int reduce
 TH_API void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(take)(THTensor *tensor, THTensor *src, THLongTensor *index);
 TH_API void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate);
-TH_API void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val);
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 

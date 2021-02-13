@@ -136,14 +136,14 @@ static inline void baddbmm_mkl_template(const Tensor& res, const Tensor& mat1, c
   const bool canAvoidTensorAccessor = mat1_strides[0] == mat1_sizes[1] * mat1_sizes[2] &&
     mat2_strides[0] == mat2_sizes[1] * mat2_sizes[2];
 
-  scalar_t* const res_data = static_cast<scalar_t*>(res.data_ptr());
+  scalar_t* const res_data = res.data_ptr<scalar_t>();
 
   if (batch_size == 1) {
     const scalar_t* A;
     const scalar_t* B;
     if (canAvoidTensorAccessor) {
-      scalar_t* mat1_data = static_cast<scalar_t*>(mat1.data_ptr());
-      scalar_t* mat2_data = static_cast<scalar_t*>(mat2.data_ptr());
+      scalar_t* mat1_data = mat1.data_ptr<scalar_t>();
+      scalar_t* mat2_data = mat2.data_ptr<scalar_t>();
       A = mat1_data;
       B = mat2_data;
     } else {
@@ -167,8 +167,8 @@ static inline void baddbmm_mkl_template(const Tensor& res, const Tensor& mat1, c
   // or only transposed in the last two axis
   const auto res_sizes = res.sizes();
   if (canAvoidTensorAccessor) {
-    scalar_t* mat1_data = static_cast<scalar_t*>(mat1.data_ptr());
-    scalar_t* mat2_data = static_cast<scalar_t*>(mat2.data_ptr());
+    scalar_t* mat1_data = mat1.data_ptr<scalar_t>();
+    scalar_t* mat2_data = mat2.data_ptr<scalar_t>();
     for (int64_t batch = 0; batch < batch_size; batch++) {
       A.emplace_back(mat1_data + batch * mat1_sizes[1] * mat1_sizes[2]);
       B.emplace_back(mat2_data + batch * mat2_sizes[1] * mat2_sizes[2]);

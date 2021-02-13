@@ -1,28 +1,8 @@
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.jit_utils import JitTestCase
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
-
-class TestComplex(JitTestCase):
-    def test_script(self):
-        def fn(a: complex):
-            return a
-
-        self.checkScript(fn, (3 + 5j,))
-
-    def test_pickle(self):
-        class ComplexModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super().__init__()
-                self.a = 3 + 5j
-
-            def forward(self, b: int):
-                return b
-
-        loaded = self.getExportImportCopy(ComplexModule())
-        self.assertEqual(loaded.a, 3 + 5j)
 
 class TestComplexTensor(TestCase):
     @dtypes(*torch.testing.get_all_complex_dtypes())

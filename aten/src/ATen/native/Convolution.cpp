@@ -1,13 +1,15 @@
-#include <limits>
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
+
+#include <limits>
 
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
@@ -177,10 +179,10 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
   int64_t outsize = 1;
   if (transposed) {
     std::vector<int64_t> o = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
-    outsize = prod_intlist(o.begin() + 1, o.end());
+    outsize = c10::multiply_integers(o.begin() + 1, o.end());
   } else {
     std::vector<int64_t> o = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
-    outsize = prod_intlist(o.begin() + 1, o.end());
+    outsize = c10::multiply_integers(o.begin() + 1, o.end());
   }
   return outsize > int_max;
 }

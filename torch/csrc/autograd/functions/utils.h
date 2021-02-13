@@ -32,6 +32,7 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
   using IterArgs<ComputeRequiresGrad>::operator();
   void operator()(const at::Tensor& tensor) {
     const auto& var = static_cast<const Variable&>(tensor);
+    TORCH_CHECK(var.unsafeGetTensorImpl()->track_view(), "Using inference tensor in autograd!!!");
     if (var.defined() && var.requires_grad()) {
       out = true;
     }

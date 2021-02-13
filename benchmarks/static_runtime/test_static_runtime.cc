@@ -59,6 +59,15 @@ void testStaticRuntime(
   script::Module module("module");
   module.define(jit_script);
 
+  std::vector<IValue> args_tensors, args_copy;
+  for (const auto& ival : args) {
+    if (ival.isTensor()) {
+      args_tensors.emplace_back(ival);
+      const at::Tensor& t = ival.toTensor();
+      args_copy.emplace_back(t.clone());
+    }
+  }
+
   auto expect = module.forward(args);
 
   StaticRuntime runtime(module);
@@ -68,11 +77,12 @@ void testStaticRuntime(
     compareTensorLists(
         expect.toTuple()->elements(), actual.toTuple()->elements());
   } else if (expect.isList()) {
-    compareTensorLists(
-        expect.toTensorVector(), actual.toTensorVector());
+    compareTensorLists(expect.toTensorVector(), actual.toTensorVector());
   } else {
     EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
   }
+  // make sure inputs were not modified
+  compareTensorLists(args_tensors, args_copy);
 }
 } // namespace
 
@@ -86,6 +96,33 @@ TEST(StaticRuntime, IndividualOps_Binary) {
   testStaticRuntime(list_construct_script, args);
   testStaticRuntime(list_unpack_script, args);
   testStaticRuntime(tuple_construct_script, args);
+}
+
+TEST(StaticRuntime, IndividualOps_Reshape) {
+  auto a = at::randn({2, 3});
+  auto b = std::vector<int64_t>({3, 2});
+  std::vector<IValue> args{a, b};
+
+  testStaticRuntime(reshape_script_1, args);
+  testStaticRuntime(reshape_script_2, args);
+}
+
+TEST(StaticRuntime, IndividualOps_flatten) {
+  auto test_flatten =
+      [](std::vector<int64_t> shape, int64_t start_dim, int64_t end_dim) {
+        auto a = at::randn(shape);
+        std::vector<IValue> args{a, start_dim, end_dim};
+        testStaticRuntime(flatten_script_1, args);
+        if (shape.size() > 2) {
+          testStaticRuntime(flatten_script_2, args);
+        }
+      };
+
+  test_flatten({2, 3}, 0, 1);
+  test_flatten({2, 1, 3}, 1, 2);
+  test_flatten({0, 1, 3, 0}, 1, 2);
+  test_flatten({2, 3}, 1, 1);
+  test_flatten({}, 0, 0);
 }
 
 TEST(StaticRuntime, LongModel) {
@@ -176,14 +213,22 @@ TEST(StaticRuntime, KWargsAPI_1) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
+      {
+        std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
 
-      // run jit graph executor
-      std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
-      at::Tensor output_1 = getTensor(module.forward(inputs));
+        // run jit graph executor
+        at::Tensor output_1 = getTensor(module.forward(inputs));
 
-      // run static runtime
-      at::Tensor output_2 = getTensor(runtime.run(inputs, {}));
-      EXPECT_TRUE(output_1.equal(output_2));
+        // run static runtime
+        at::Tensor output_2 = getTensor(runtime.run(inputs, {}));
+        EXPECT_TRUE(output_1.equal(output_2));
+      }
+
+      // check for input aliasing (deep & wide does not have ops
+      // that create aliases of input tensors)
+      EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(user_emb.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
 }
@@ -200,19 +245,24 @@ TEST(StaticRuntime, KWargsAPI_2) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
+      {
+        // run jit graph executor
+        std::vector<at::IValue> args({ad_emb_packed, user_emb, wide});
+        at::Tensor output_1 = getTensor(module.forward(args));
 
-      // run jit graph executor
-      std::vector<at::IValue> args({ad_emb_packed, user_emb, wide});
-      at::Tensor output_1 = getTensor(module.forward(args));
+        std::unordered_map<std::string, c10::IValue> kwargs(
+            {{"ad_emb_packed", ad_emb_packed},
+             {"user_emb", user_emb},
+             {"wide", wide}});
 
-      std::unordered_map<std::string, c10::IValue> kwargs(
-          {{"ad_emb_packed", ad_emb_packed},
-           {"user_emb", user_emb},
-           {"wide", wide}});
+        // run static runtime
+        at::Tensor output_2 = getTensor(runtime.run({}, kwargs));
+        EXPECT_TRUE(output_1.equal(output_2));
+      }
 
-      // run static runtime
-      at::Tensor output_2 = getTensor(runtime.run({}, kwargs));
-      EXPECT_TRUE(output_1.equal(output_2));
+      EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(user_emb.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
 }
@@ -271,7 +321,7 @@ TEST(StaticRuntime, FusionPass) {
       bool hit = false;
       for (const auto& n : module.get_method("forward").graph()->nodes()) {
         if (n->kind() == torch::jit::prim::StaticSubgraph) {
-        hit = true;
+          hit = true;
         }
       }
       EXPECT_TRUE(hit);
@@ -280,4 +330,3 @@ TEST(StaticRuntime, FusionPass) {
     }
   }
 }
-

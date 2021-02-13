@@ -83,9 +83,6 @@ bool BatchedTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 const Storage& BatchedTensorImpl::storage() const {
   TORCH_CHECK(false, "Due to limitations, we cannot access the storage() of a tensor from inside of vmap.");
 }
-int64_t BatchedTensorImpl::storage_offset() const {
-  TORCH_CHECK(false, "Due to limitations, we cannot access the storage_offset() of a tensor from inside of vmap.");
-}
 
 // The following are some internal inherited methods that we do not support.
 // They should never get called.
@@ -98,9 +95,12 @@ void BatchedTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void BatchedTensorImpl::set_storage_offset(int64_t storage_offset) {
   TORCH_INTERNAL_ASSERT(false, "Can't set_storage_offset for BatchedTensorImpl");
 }
+#ifdef DEBUG
 bool BatchedTensorImpl::has_storage() const {
-  TORCH_INTERNAL_ASSERT(false, "Can't query has_storage for BatchedTensorImpl");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "BatchedTensorImpl assumes that storage_ is never set");
+  return false;
 }
+#endif
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));

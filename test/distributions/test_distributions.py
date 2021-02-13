@@ -36,9 +36,10 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, \
+    gradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.autograd import grad, gradcheck
+from torch.autograd import grad
 from torch.autograd.functional import jacobian
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
@@ -3924,6 +3925,11 @@ class TestConstraints(TestCase):
                         constraint = dist.arg_constraints[name]
                     except KeyError:
                         continue  # ignore optional parameters
+
+                    # Check param shape is compatible with distribution shape.
+                    self.assertGreaterEqual(value.dim(), constraint.event_dim)
+                    value_batch_shape = value.shape[:value.dim() - constraint.event_dim]
+                    torch.broadcast_shapes(dist.batch_shape, value_batch_shape)
 
                     if is_dependent(constraint):
                         continue

@@ -233,6 +233,33 @@ kernel void clamp_half4_nonarray(texture2d<half, access::read> in[[texture(0)]],
     out.write(clamped, gid);
 }
 
+kernel void hardswish(texture2d_array<half, access::read> in[[texture(0)]],
+                      texture2d_array<half, access::write> out[[texture(1)]],
+                      ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+    half4 value = in.read(gid_, gid.z);
+    half4 mask1 = half4(value < 3.0);
+    half4 mask2 = half4(value > -3.0);
+    half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
+    out.write(outval, gid_, gid.z);
+}
+
+kernel void hardswish_nonarray(texture2d<half, access::read> in[[texture(0)]],
+                               texture2d<half, access::write> out[[texture(1)]],
+                               ushort2 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    half4 value = in.read(gid);
+    half4 mask1 = half4(value < 3);
+    half4 mask2 = half4(value > -3.0);
+    half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
+    out.write(outval, gid);
+}
+
 kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]],
                            texture2d_array<half, access::write> out[[texture(1)]],
                            ushort3 gid[[thread_position_in_grid]]) {

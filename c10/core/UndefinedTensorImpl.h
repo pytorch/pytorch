@@ -20,9 +20,11 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
   IntArrayRef strides() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
+#ifdef DEBUG
   bool has_storage() const override;
+#endif
   const Storage& storage() const override;
-  int64_t storage_offset() const override;
+  void set_storage_offset(int64_t offset) override;
 private:
   UndefinedTensorImpl();
   static UndefinedTensorImpl _singleton;

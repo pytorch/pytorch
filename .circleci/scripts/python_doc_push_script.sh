@@ -42,6 +42,7 @@ fi
 
 echo "install_path: $install_path  version: $version"
 
+
 build_docs () {
   set +e
   set -o pipefail
@@ -62,7 +63,7 @@ build_docs () {
 }
 
 
-git clone https://github.com/pytorch/pytorch.github.io -b $branch
+git clone https://github.com/pytorch/pytorch.github.io -b $branch --depth 1
 pushd pytorch.github.io
 
 export LC_ALL=C

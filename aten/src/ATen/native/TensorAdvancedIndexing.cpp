@@ -68,6 +68,7 @@
 namespace at { namespace native {
 
 DEFINE_DISPATCH(index_stub);
+DEFINE_DISPATCH(index_fill_stub);
 DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
 DEFINE_DISPATCH(masked_fill_stub);
@@ -714,6 +715,81 @@ Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index)
 
 Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+}
+
+Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  at::NoNamesGuard guard;
+
+  TORCH_CHECK_INDEX(
+    index.scalar_type() == ScalarType::Long,
+    "index_fill_(): Expected dtype int64 for index.");
+
+  at::assert_no_overlap(self, index);
+  if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
+
+  if (!self.is_complex() && source.isComplex()) {
+    TORCH_CHECK(false, "index_fill_(): Converting complex Scalar to non-complex type is forbidden");
+  }
+
+  // Handle the case when `self` is 0-dim
+  if (0 == self.dim()) {
+    self.unsqueeze_(-1);
+  }
+
+  dim = at::maybe_wrap_dim(dim, self);
+  TORCH_CHECK(index.dim() <= 1, "Index has to be a vector/scalar");
+
+  // Prepare `index` for TensorIterator.
+  // It is restrided to be broadcastable over `self` in TensorIterator.
+  auto index_sizes = std::vector<int64_t>(self.dim(), 1);
+  auto index_strides = std::vector<int64_t>(self.dim(), 0);
+  index_sizes[dim] = index.numel();
+  index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
+  auto index_restrided = index.as_strided(
+    index_sizes, index_strides);
+
+  // Prepare `self` for TensorIterator.
+  // Restride `self` to not advance in dimension `dim`.
+  // We do not use squash_dim here because `index` will
+  // need to advance in this dimension.
+  // Note that self_sizes[dim] is set to index.numel().
+  // This is done so that self_sizes[dim] and index_sizes[dim]
+  // match as required by TensorIterator (input shape should
+  // strictly broadcast over output shape, i.e.
+  // output.shape[i] >= input.shape[i] for i in range(dims)).
+  auto self_sizes = self.sizes().vec();
+  auto self_strides = self.strides().vec();
+  self_sizes[dim] = index.numel();
+  self_strides[dim] = 0;
+  auto self_restrided = self.as_strided(self_sizes, self_strides);
+
+  auto iter = TensorIteratorConfig()
+    // We do not check for overlap because `self` is restrided
+    // with zero stride. Zero strides trigger memory overlap assert
+    // within TensorIterator.
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_output(self_restrided)
+    .add_input(index_restrided)
+    .build();
+
+  auto self_dim_size = (self.sizes())[dim];
+  auto self_dim_stride = (self.strides())[dim];
+  index_fill_stub(
+    iter.device_type(),
+    iter,
+    dim,
+    self_dim_size,
+    self_dim_stride,
+    source);
+
+  return self;
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {

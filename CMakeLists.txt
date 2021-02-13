@@ -161,6 +161,13 @@ option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
+# BUILD_SPLIT_CUDA must also be exported as an environment variable before building, with
+# `export BUILD_SPLIT_CUDA=1` because cpp_extension.py can only work properly if this variable
+# also exists in the environment.
+# This option is incompatible with CUDA_SEPARABLE_COMPILATION.
+cmake_dependent_option(
+    BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
+    "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -219,7 +226,13 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
-option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+
+if(NOT DEFINED USE_VULKAN)
+  cmake_dependent_option(
+      USE_VULKAN "Use Vulkan GPU backend" ON
+      "ANDROID" OFF)
+endif()
+
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
@@ -249,8 +262,9 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
-option(USE_DEPLOY "Enable torch::deploy embedded python interpreter" OFF)
-
+cmake_dependent_option(
+    USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
+    "BUILD_PYTHON" OFF)
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
@@ -525,9 +539,15 @@ endif()
 if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
   set(CROSS_COMPILING_MACOSX TRUE)
   # We need to compile a universal protoc to not fail protobuf build
-  execute_process(COMMAND ./scripts/build_host_protoc.sh --other-flags "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
+  # We set CMAKE_TRY_COMPILE_TARGET_TYPE to STATIC_LIBRARY (vs executable) to succeed the cmake compiler check for cross-compiling
+  set(protoc_build_command "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1")
+  # We write to a temp scriptfile because CMake COMMAND dislikes double quotes in commands
+  file(WRITE ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh "#!/bin/bash\n${protoc_build_command}")
+  file(COPY ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh DESTINATION ${PROJECT_SOURCE_DIR}/scripts/ FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ)
+  execute_process(COMMAND ./scripts/tmp_protoc_script.sh
                   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
                   RESULT_VARIABLE BUILD_HOST_PROTOC_RESULT)
+  file(REMOVE ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh ${PROJECT_SOURCE_DIR}/scripts/tmp_protoc_script.sh)
   if(NOT BUILD_HOST_PROTOC_RESULT EQUAL "0")
     message(FATAL_ERROR "Could not compile universal protoc.")
   endif()
@@ -600,8 +620,6 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 14)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-narrowing")
