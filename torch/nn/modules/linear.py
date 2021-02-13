@@ -184,8 +184,9 @@ class LazyLinear(LazyModuleMixin, Linear):
     r"""A :class:`torch.nn.Linear` module with lazy initialization.
 
     In this module, the `weight` and `bias` are of :class:`torch.nn.UninitializedParameter`
-    class. They will be initialized  after the first call to ``forward`` is done and the 
-    module will become a regular :class:`torch.nn.Linear` module.
+    class. They will be initialized after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.Linear` module. The ``in_features`` argument
+    of the :class:`Linear` is inferred from the ``input.shape[-1]``.
 
     Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
     on lazy modules and their limitations.
@@ -212,6 +213,8 @@ class LazyLinear(LazyModuleMixin, Linear):
     weight: UninitializedParameter
 
     def __init__(self, out_features: int, bias: bool = True) -> None:
+        # bias is hardcoded to False to avoid creating tensor
+        # that will soon be overwritten.
         super().__init__(0, 0, False)
         self.weight = UninitializedParameter()
         self.out_features = out_features
@@ -227,6 +230,7 @@ class LazyLinear(LazyModuleMixin, Linear):
             with torch.no_grad():
                 self.in_features = input.shape[-1]
                 self.weight.materialize((self.out_features, self.in_features))  # type: ignore
-                self.bias.materialize((self.out_features,))  # type: ignore
+                if self.bias is not None:
+                    self.bias.materialize((self.out_features,))  # type: ignore
                 self.reset_parameters()
 # TODO: PartialLinear - maybe in sparse?

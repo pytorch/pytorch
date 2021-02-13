@@ -1042,8 +1042,8 @@ class _LazyConvXdMixin(LazyModuleMixin):
             else:
                 self.weight.materialize((
                     self.out_channels, self.in_channels // self.groups, *self.kernel_size))
-            assert isinstance(self.bias, UninitializedParameter)
             if self.bias is not None:
+                assert isinstance(self.bias, UninitializedParameter)
                 self.bias.materialize((self.out_channels,))
             self.reset_parameters()
 
@@ -1053,6 +1053,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv1d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv1d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1095,6 +1096,8 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
             padding,
             dilation,
             groups,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
             False,
             padding_mode
         )
@@ -1109,6 +1112,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv2d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv2d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1151,6 +1155,8 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
             padding,
             dilation,
             groups,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
             False,
             padding_mode
         )
@@ -1165,6 +1171,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv3d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv3d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1207,6 +1214,8 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
             padding,
             dilation,
             groups,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
             False,
             padding_mode
         )
@@ -1221,6 +1230,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
     r"""A :class:`torch.nn.ConvTranspose1d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose1d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1261,6 +1271,8 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
             padding,
             output_padding,
             groups,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
             False,
             dilation,
             padding_mode
@@ -1276,6 +1288,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
     r"""A :class:`torch.nn.ConvTranspose2d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose2d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1316,6 +1329,8 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
             padding,
             output_padding,
             groups,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
             False,
             dilation,
             padding_mode
@@ -1331,6 +1346,7 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
     r"""A :class:`torch.nn.ConvTranspose3d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose3d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1371,6 +1387,8 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
             padding,
             output_padding,
             groups,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
             False,
             dilation,
             padding_mode
