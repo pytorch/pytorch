@@ -156,7 +156,7 @@ class TestNumPyInterop(TestCase):
     def test_from_numpy(self, device) -> None:
         dtypes = [
             np.double,
-            np.float_,
+            np.float64,
             np.float16,
             np.complex64,
             np.complex128,
@@ -229,7 +229,7 @@ class TestNumPyInterop(TestCase):
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
         dtypes = [
             np.double,
-            np.float_,
+            np.float64,
             np.float16,
             np.int64,
             np.int32,
