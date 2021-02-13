@@ -17,26 +17,29 @@ _origin_type_map = {
     frozenset: FrozenSet
 }
 
-class _BuiltinName(NamedTuple):
+class _CustomBuiltin(NamedTuple):
+    """Additional objs that we add to every graph's globals.
+
+    The repr() for some standard library objects is not valid Python code without
+    an import. For common objects of this sort, we bundle them in the globals of
+    every FX graph.
+    """
+    # How to import this object from the standard library.
     import_str: str
+    # The actual object, produced from that import string.
     obj: Any
 
-_builtin_names: Dict[str, _BuiltinName] = {}
+_custom_builtins: Dict[str, _CustomBuiltin] = {}
 
 
-"""
-The repr() for some standard library objects is not valid Python code without
-an import. For common objects of this sort, we bundle them in the globals of
-every FX graph.
-"""
-def _register_builtin_name(name: str, import_str: str, obj: Any):
-    _builtin_names[name] = _BuiltinName(import_str, obj)
+def _register_custom_builtin(name: str, import_str: str, obj: Any):
+    _custom_builtins[name] = _CustomBuiltin(import_str, obj)
 
 
-_register_builtin_name('inf', 'from math import inf', math.inf)
-_register_builtin_name('nan', 'from math import nan', math.nan)
-_register_builtin_name('NoneType', 'NoneType = type(None)', type(None))
-_register_builtin_name('torch', 'import torch', torch)
+_register_custom_builtin('inf', 'from math import inf', math.inf)
+_register_custom_builtin('nan', 'from math import nan', math.nan)
+_register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
+_register_custom_builtin('torch', 'import torch', torch)
 
 
 def _is_magic(x: str) -> bool:
@@ -77,13 +80,20 @@ def _is_from_torch(obj: Any) -> bool:
     return False
 
 
-class _NameContext:
+class _Namespace:
+    """A context for associating names uniquely with objects.
+
+    The following invariants are enforced:
+    - Each object gets a single name.
+    - Each name is unique within a given namespace.
+    - Names generated do not shadow builtins, unless the object is indeed that builtin.
+    """
     def __init__(self):
         self._obj_to_name: Dict[Any, str] = {}
         self._used_names: Dict[str, int] = {}
 
-    def create_name(self, candidate: str, obj: Optional[Any] = None) -> str:
-        if obj is not None and obj in self._obj_to_name:
+    def create_name(self, candidate: str, obj: Any) -> str:
+        if obj in self._obj_to_name:
             return self._obj_to_name[obj]
 
         # delete all characters that are illegal in a Python identifier
@@ -91,7 +101,7 @@ class _NameContext:
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
-        while self._is_used(candidate) or self._is_illegal_name(candidate, obj):
+        while candidate in self._used_names or self._is_illegal_name(candidate, obj):
             match = re.match(r"(.*)_(\d+)$", candidate)
             if match is None:
                 candidate = candidate + '_1'
@@ -99,10 +109,8 @@ class _NameContext:
                 base, num = match.group(1, 2)
                 candidate = f'{base}_{int(num) + 1}'
 
-        self._use_name(candidate)
-
-        if obj is not None:
-            self._obj_to_name[obj] = candidate
+        self._used_names.setdefault(candidate)
+        self._obj_to_name[obj] = candidate
         return candidate
 
     def _is_illegal_name(self, name: str, obj: Any) -> bool:
@@ -114,73 +122,11 @@ class _NameContext:
         if name in builtins.__dict__:
             return obj is not builtins.__dict__[name]
 
+        # 3. Can't shadow our custom builtins either
+        if name in _custom_builtins:
+            return obj is not _custom_builtins[name].obj
+
         return False
-
-    def _is_used(self, name: str) -> bool:
-        return name in self._used_names
-
-    def _use_name(self, name: str):
-        self._used_names.setdefault(name)
-
-
-class _Globals:
-    """Tracks all external objects referenced from a Graph.
-
-    We assign each external object a unique global name, which is how it's
-    referenced in the Graph's generated Python code.
-
-    A dictionary of global name -> obj is passed to 'exec' to resolve
-    external references to their actual objects.
-    """
-    def __init__(self, graph_namer: _NameContext):
-        # The global name -> external object mapping.
-        self.globals: Dict[str, Any] = {}
-        # Reverse mapping of globals
-        self._reverse_globals: Dict[Any, str] = {}
-        self._namer = graph_namer
-
-        # Preload names into globals. These are objects whose `repr` returns
-        # something that actually needs to be imported to execute correctly.
-        #
-        # If you add to this, you need to add an import string in
-        # '_format_import_statement` and `_shadows_builtin_name` as well.
-        for name, (_, obj) in _builtin_names.items():
-            self.add_global(obj, name)
-
-    def add_global(self, obj: Any, name_hint: str) -> str:
-        """Add an external obj to be tracked.
-
-        Arguments:
-            obj: The external obj.
-            name_hint: A suggestion that will help us assign a descriptive global name.
-
-        Returns:
-            The global name that should be used to reference 'obj' in Python
-            source code.
-                Example: 'foo.bar.baz' becomes 'foo_bar_baz'
-        """
-        if _is_from_torch(obj):
-            # HACK: workaround for how torch custom ops are registered. We
-            # can't import them like normal modules so they must retain their
-            # fully qualified name.
-            qualname = _get_qualified_name(obj)
-            self._reverse_globals[obj] = qualname
-            return qualname
-
-        # Check if we already added this global.
-        if obj in self._reverse_globals:
-            global_name = self._reverse_globals[obj]
-            assert self.globals[global_name] is obj
-            return global_name
-
-        # normalize the name hint to get a proper identifier
-        global_name = self._namer.create_name(name_hint, obj)
-
-        # Populate our name tables
-        self._reverse_globals[obj] = global_name
-        self.globals[global_name] = obj
-
-        return global_name
 
 
 @dataclass
@@ -287,11 +233,11 @@ class Graph:
         """
         Construct an empty Graph.
         """
-        self._root : Node = Node(self, '', 'root', '', (), {})
+        self._root : Node = Node(self, lambda _: '', 'root', '', (), {})
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
-        self._namer = _NameContext()
+        self._graph_namespace = _Namespace()
 
     @property
     def nodes(self) -> _node_list:
@@ -383,8 +329,12 @@ class Graph:
         kwargs = {} if kwargs is None else kwargs
         assert isinstance(args, tuple), "args must be a tuple"
         assert isinstance(kwargs, dict), "kwargs must be a dict"
-        unique_name = self._namer.create_name(name if name is not None else self._target_to_str(target))
-        n = Node(self, unique_name, op, target, args, kwargs, type_expr)
+
+        def node_name_fn(node):
+            candidate = name if name is not None else self._target_to_str(target)
+            return self._graph_namespace.create_name(candidate, node)
+
+        n = Node(self, node_name_fn, op, target, args, kwargs, type_expr)
         self._insert(n)
         self._len += 1
         return n
@@ -685,15 +635,20 @@ class Graph:
 
             The string source code generated from this ``Graph``.
         """
-        # create a new name context
-        name_context = _NameContext()
+        # Create a new nameespace for this Python source.
+        namespace = _Namespace()
 
-        # HACK: Override Node's repr to generate a valid name within our name
-        # context. Since repr() is designed to produce a valid Python
+        # HACK: Override Node's repr to generate a valid name within our
+        # namespace. Since repr() is designed to produce a valid Python
         # expression, it makes sense to re-use it. This way, it's easy to print
         # something like Tuple[Node, Node] by simply calling repr() on it.
+        #
+        # Why can't we re-use node.name? Because it was generated within the
+        # namespace `self._graph_namespace`. In order to provide uniqueness
+        # guarantees within the Python code, we create a wholly new namespace
+        # to put all identifiers in.
         def node_repr(self):
-            return name_context.create_name(self.name, self)
+            return namespace.create_name(self.name, self)
 
         @contextmanager
         def wrap_node_repr():
@@ -705,26 +660,53 @@ class Graph:
                 Node.__repr__ = orig_repr  # type: ignore
 
         with wrap_node_repr():
-            return self._python_code(root_module, name_context)
+            return self._python_code(root_module, namespace)
 
-    def _python_code(self, root_module: str, name_context: _NameContext) -> PythonCode:
+    def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
-        globals = _Globals(name_context)
+        globals: Dict[str, Any] = {}
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
+
+        def add_global(name_hint: str, obj: Any):
+            """Add an obj to be tracked as a global.
+
+            We call this for names that reference objects external to the
+            Graph, like functions or types.
+
+            Returns: the global name that should be used to reference 'obj' in generated source.
+            """
+            if _is_from_torch(obj):
+                # HACK: workaround for how torch custom ops are registered. We
+                # can't import them like normal modules so they must retain their
+                # fully qualified name.
+                return _get_qualified_name(obj)
+
+            # normalize the name hint to get a proper identifier
+            global_name = namespace.create_name(name_hint, obj)
+            if global_name in globals:
+                assert globals[global_name] is obj
+                return global_name
+
+            globals[global_name] = obj
+            return global_name
+
+        # Pre-fill the globals table with registered builtins.
+        for name, (_, obj) in _custom_builtins.items():
+            add_global(name, obj)
 
         def type_repr(o : Any):
             typename = _type_repr(o)
 
             # Common case: this is a regular module name like 'foo.bar.baz'
             if all(x.isidentifier() for x in typename.split('.')):
-                return globals.add_global(o, typename)
+                return add_global(typename, o)
 
             # This is a generic type, e.g. typing.List[torch.Tensor]
             origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
-            origin_typename = globals.add_global(origin_type, _type_repr(origin_type))
+            origin_typename = add_global(_type_repr(origin_type), origin_type)
 
             # Assign global names for each of the inner type variables.
             args = [type_repr(arg) for arg in o.__args__]
@@ -789,7 +771,7 @@ class Graph:
                     body.append(f'{repr(node)} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
                 qualified_name = _get_qualified_name(node.target)
-                global_name = globals.add_global(node.target, qualified_name)
+                global_name = add_global(qualified_name, node.target)
                 if global_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
@@ -833,7 +815,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}"""
 
         return PythonCode(fn_code,
-                          globals.globals)
+                          globals)
 
     def __str__(self) -> str:
         """

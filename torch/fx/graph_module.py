@@ -6,7 +6,7 @@ from torch.package.module_environment import ModuleEnv
 from torch.package import PackageImporter, PackageExporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
-from .graph import Graph, _is_from_torch, _builtin_names, PythonCode
+from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
 import copy
 import sys
 import traceback
@@ -54,8 +54,8 @@ def reduce_graph_module(body: dict) -> torch.nn.Module:
 
 
 def _format_import_statement(name: str, obj: Any, module_env: ModuleEnv) -> str:
-    if name in _builtin_names:
-        return _builtin_names[name].import_str
+    if name in _custom_builtins:
+        return _custom_builtins[name].import_str
     if _is_from_torch(name):
         return 'import torch'
 
