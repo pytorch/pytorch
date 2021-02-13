@@ -1021,13 +1021,14 @@ class DistributedDataParallel(Module):
         parameter syncs while running Distributed DataParallel training.
 
         Args:
-            state (object): state is passed to the hook and can be used to maintain
-                            and update any state information that users would like to
-                            maintain as part of the training process. Examples: error
-                            feedback in gradient compression, peers to communicate with
-                            next in GossipGrad etc.
-            hook (callable): is defined as:
-                             hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+            state (object): Passed to the hook to maintain any state information during the training process.
+                            Examples include error feedback in gradient compression,
+                            peers to communicate with next in GossipGrad, etc.
+
+                            It is locally stored by each worker
+                            and shared by all the gradient tensors on the worker.
+            hook (callable): Averages gradient tensors across workers and defined as:
+                             ``hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
@@ -1067,7 +1068,7 @@ class DistributedDataParallel(Module):
             DDP communication hook is experimental and subject to change.
 
         Example::
-            Below is an example of a noop hook that returns back the same tensors:
+            Below is an example of a noop hook that returns the same tensors.
 
             >>> def noop(state: object, bucket: dist._GradBucket): -> torch.futures.Future
             >>>     fut = torch.futures.Future()
@@ -1091,7 +1092,6 @@ class DistributedDataParallel(Module):
             >>>     return fut.then(decode)
 
             >>> ddp.register_comm_hook(state = None, hook = encode_and_decode)
-
         """
         self._check_comm_hook(hook)
         dist._register_comm_hook(self.reducer, state, hook)
