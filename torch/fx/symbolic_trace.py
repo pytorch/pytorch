@@ -606,3 +606,57 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
     graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)
+
+class IfStmt(torch.nn.Module):
+    def __init__(self, true_block, false_block):
+        super().__init__()
+        self.true_block, self.false_block = true_block, false_block
+
+    def forward(self, cond, *args):
+        if cond:
+            return self.true_block(*args)
+        else:
+            return self.false_block(*args)
+
+def if_stmt(cond : Union[bool, Proxy], true_block : Callable, false_block : Callable, *args):
+    if isinstance(cond, Proxy):
+        true_block_traced = symbolic_trace(true_block)
+        false_block_traced = symbolic_trace(false_block)
+        true_placeholders = [n for n in true_block_traced.graph.nodes if n.op == 'placeholder']
+        false_placeholders = [n for n in false_block_traced.graph.nodes if n.op == 'placeholder']
+        if len(true_placeholders) != len(false_placeholders):
+            raise RuntimeError('True and false block must have the same number of inputs')
+        i = 0
+        while hasattr(cond.tracer.root, f'_if_stmt_{i}'):
+            i += 1
+        setattr(cond.tracer.root, f'_if_stmt_{i}', IfStmt(true_block_traced, false_block_traced))
+        return cond.tracer.create_proxy('call_module', f'_if_stmt_{i}', (cond,) + args, {})
+
+    if cond:
+        return true_block(*args)
+    else:
+        return false_block(*args)
+
+class ForLoop(torch.nn.Module):
+    def __init__(self, body_block):
+        super().__init__()
+        self.body_block = body_block
+
+    def forward(self, trip_count, *args):
+        for i in range(trip_count):
+            args = self.body_block(i, *args)
+        return args
+
+def for_loop(trip_count : Union[int, Proxy], body : Callable, *args):
+    if isinstance(trip_count, Proxy):
+        body_block_traced = torch.fx.symbolic_trace(body)
+        i = 0
+        while hasattr(trip_count.tracer.root, f'_for_loop_{i}'):
+            i += 1
+        setattr(trip_count.tracer.root, f'_for_loop_{i}', ForLoop(body_block_traced))
+        return trip_count.tracer.create_proxy('call_module', f'_for_loop_{i}', (trip_count,) + args, {})
+
+    for i in range(trip_count):
+        args = body(i, *args)
+
+    return args

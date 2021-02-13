@@ -944,6 +944,46 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'does not belong to this Graph'):
             copied.lint()
 
+    def test_if_stmt(self):
+        def foo(x):
+            def true_block(x):
+                return torch.relu(x)
+            def false_block(x):
+                return torch.neg(x)
+            return torch.fx.if_stmt(x.sum() > 0, true_block, false_block, x)
+
+        ones = torch.ones(3, 4)
+        self.assertEqual(foo(ones), torch.relu(ones))
+        neg_ones = ones * -1.0
+        self.assertEqual(foo(neg_ones), torch.neg(neg_ones))
+
+        traced = torch.fx.symbolic_trace(foo)
+        ones = torch.ones(3, 4)
+        self.assertEqual(traced(ones), torch.relu(ones))
+        neg_ones = ones * -1.0
+        self.assertEqual(traced(neg_ones), torch.neg(neg_ones))
+
+    def test_for_loop(self):
+        def foo(x, y, niter : int):
+            def body_block(i, x, y):
+                return x + i, y - i
+            return torch.fx.for_loop(niter, body_block, x, y)
+
+        x, y = torch.randn(3, 4), torch.randn(3, 4)
+        ref_x, ref_y = x.clone(), y.clone()
+        niter = 100
+        for i in range(niter):
+            ref_x += i
+            ref_y -= i
+        test_x, test_y = foo(x, y, niter)
+        torch.testing.assert_allclose(test_x, ref_x)
+        torch.testing.assert_allclose(test_y, ref_y)
+
+        traced = torch.fx.symbolic_trace(foo)
+        test_x, test_y = traced(x, y, niter)
+        torch.testing.assert_allclose(test_x, ref_x)
+        torch.testing.assert_allclose(test_y, ref_y)
+
     def test_wrong_topo(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
