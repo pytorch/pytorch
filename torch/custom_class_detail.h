@@ -135,6 +135,7 @@ inline void checkValidIdent(const std::string& str, const char *type) {
 }
 
 } // namespace detail
+
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
 TORCH_API void registerCustomClassMethod(std::unique_ptr<jit::Function> method);
 
