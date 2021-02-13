@@ -17,7 +17,7 @@ import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
-from torch._six import inf, nan, container_abcs
+from torch._six import inf, nan
 
 from test_torch import AbstractTestCases
 
@@ -2527,7 +2527,7 @@ t2.start()
         def cast(val, to_type):
             if isinstance(val, torch.Tensor):
                 return val.to(to_type) if val.is_floating_point() else val
-            elif isinstance(val, container_abcs.Iterable):
+            elif isinstance(val, collections.abc.Iterable):
                 return type(val)(cast(v, to_type) for v in val)
             else:
                 return val
@@ -2567,7 +2567,7 @@ t2.start()
             def compare(first, second):
                 if isinstance(first, torch.Tensor):
                     return torch.equal(first, second)
-                elif isinstance(first, container_abcs.Iterable):
+                elif isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
                 else:
                     return first == second

@@ -112,13 +112,14 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
 
 def _get_bundled_inputs_preserved_attributes(script_module: torch.jit.ScriptModule, preserved_methods: List[str]) -> List[str]:
 
-    # Technically it is possible that if a function only bundles inputs for functions besides forward that these wont exist.
-    # Haven't seen a reason for that to be a valid usecase yet so not going to account for it
-    bundled_inputs_attributes = [
-        'get_all_bundled_inputs',
-        'get_num_bundled_inputs',
-        'run_on_bundled_input',
-    ]
+    bundled_inputs_attributes = []
+    # Has bundled inputs for forward
+    if hasattr(script_module, 'get_all_bundled_inputs'):
+        bundled_inputs_attributes.append('get_all_bundled_inputs')
+        bundled_inputs_attributes.append('get_num_bundled_inputs')
+        bundled_inputs_attributes.append('run_on_bundled_input')
+
+    # Bundled inputs in module after the change that introduced bundled inputs for multiple functions
     if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):
         bundled_inputs_attributes.append('get_bundled_inputs_functions_and_info')
         all_info = script_module.get_bundled_inputs_functions_and_info()

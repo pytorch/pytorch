@@ -213,7 +213,8 @@ class Vectorizer : public IRMutator {
           ExprHandle(inputs[1]),
           ExprHandle(inputs[2]),
           ExprHandle(inputs[3]),
-          v->compare_select_op());
+          v->compare_select_op(),
+          v->bias());
     });
   }
 

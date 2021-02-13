@@ -168,6 +168,15 @@ int NodeTask::getReentrantDepth() const {
   }
 }
 
+CheckpointValidGuard::CheckpointValidGuard(const std::shared_ptr<const GraphTask>& graph_task) {
+  prev_checkpoint_valid_state = checkpoint_valid;
+  checkpoint_valid = graph_task->can_checkpoint() && prev_checkpoint_valid_state;
+}
+
+CheckpointValidGuard::~CheckpointValidGuard() {
+  checkpoint_valid = prev_checkpoint_valid_state;
+}
+
 auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
   {
     // Lock mutex for writing to heap_
@@ -636,9 +645,7 @@ static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputBuffer) {
-  bool prev_checkpoint_valid_state = checkpoint_valid;
-  checkpoint_valid =
-      graph_task->can_checkpoint() && prev_checkpoint_valid_state;
+  CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
       call_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
@@ -680,7 +687,6 @@ static variable_list call_function(
     ss << "Function "  << fn.name() << " returned an " << msg;
     return ss.str();
   });
-  checkpoint_valid = prev_checkpoint_valid_state;
 
   if(has_post_hooks){
     // NOLINTNEXTLINE(bugprone-use-after-move)

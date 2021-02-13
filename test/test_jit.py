@@ -45,7 +45,7 @@ from jit.test_complex import TestComplex  # noqa: F401
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch._six import PY37, StringIO
+from torch._six import PY37
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
@@ -1274,6 +1274,15 @@ graph(%Ra, %Rb):
         graph = parse_ir(input_str)
         torch._C._jit_pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
         FileCheck().run(input_str, graph)
+
+    def test_script_tensor_type(self):
+        def foo(x, t: torch.dtype):
+            return x.type(t)
+        scr = torch.jit.script(foo)
+        x = torch.rand(3, 4)
+        for t in [torch.int8, torch.float64, torch.float32,
+                  torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
+            self.assertEqual(scr(x, t), foo(x, t))
 
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
@@ -5510,7 +5519,7 @@ a")
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
-            return a // a
+            return a * a
         ''')
         inputs = [torch.ones(10, 10, dtype=torch.long)]
         outputs = torch.ones(10, 10)
@@ -7007,6 +7016,26 @@ a")
 
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
+
+    def test_compare_two_bool_inputs(self):
+        def compare_eq(a: bool, b: bool):
+            return a == b
+
+        def compare_ne(a: bool, b: bool):
+            return a != b
+
+        scripted_fn_eq = torch.jit.script(compare_eq)
+        scripted_fn_ne = torch.jit.script(compare_ne)
+        self.assertEqual(scripted_fn_eq(True, False), compare_eq(True, False))
+        self.assertEqual(scripted_fn_eq(False, True), compare_eq(False, True))
+        self.assertEqual(scripted_fn_eq(True, True), compare_eq(True, True))
+        self.assertEqual(scripted_fn_eq(False, False), compare_eq(False, False))
+
+        self.assertEqual(scripted_fn_ne(True, False), compare_ne(True, False))
+        self.assertEqual(scripted_fn_ne(False, True), compare_ne(False, True))
+        self.assertEqual(scripted_fn_ne(True, True), compare_ne(True, True))
+        self.assertEqual(scripted_fn_ne(False, False), compare_ne(False, False))
+
 
     def _test_tensor_number_math(self, device='cpu'):
         template = dedent('''
@@ -11946,7 +11975,8 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                self.assertEqual(f_script(), f())
+                with self.maybeWarnsRegex(UserWarning, "floor_divide"):
+                    self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
         @torch.jit.ignore
@@ -14998,7 +15028,7 @@ dedent """
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
 
-            out = StringIO()
+            out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
 
