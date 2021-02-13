@@ -198,6 +198,7 @@ find_library(CUDA_NVRTC_LIB nvrtc
     message(WARNING "Failed to compute shorthash for libnvrtc.so")
     set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
   else()
+    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
     message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
   endif()
 endif()
