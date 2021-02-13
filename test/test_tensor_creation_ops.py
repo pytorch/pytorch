@@ -1964,7 +1964,8 @@ class TestTensorCreation(TestCase):
     @onlyCPU
     def test_tensor_factory_ndarrays(self, device):
         """
-        This tests the case when the input to torch.tensor are multiple numpy arrays that are embedded (recursively) within list(s). 
+        This tests the case when the input to torch.tensor are multiple numpy arrays that are embedded (recursively) 
+        within list(s). 
         """
 
         repeats = 10
@@ -1976,12 +1977,13 @@ class TestTensorCreation(TestCase):
                 stack = []
                 stack.append([np.random.randn(1).astype(dtype)])
                 stack.append([np.random.randn(100).astype(dtype) for _ in range(repeats)])
-                stack.append([np.random.randn(10,10).astype(dtype) for _ in range(repeats)])
-                stack.append([np.random.randn(100,1).astype(dtype) for _ in range(repeats)])
-                stack.append([np.random.randn(10,8,7).astype(dtype) for _ in range(repeats)])
+                stack.append([np.random.randn(10, 10).astype(dtype) for _ in range(repeats)])
+                stack.append([np.random.randn(100, 1).astype(dtype) for _ in range(repeats)])
+                stack.append([np.random.randn(10, 8, 7).astype(dtype) for _ in range(repeats)])
 
                 for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)), exact_dtype=True, rtol=1e-05, atol=1e-08)
+                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                        exact_dtype=True, rtol=1e-05, atol=1e-08)
 
 
         # Extended tests
@@ -2001,7 +2003,8 @@ class TestTensorCreation(TestCase):
                 stack.append([[[[A]]]])
 
                 for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)), exact_dtype=True, rtol=1e-05, atol=1e-08)
+                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)), 
+                        exact_dtype=True, rtol=1e-05, atol=1e-08)
 
         return
 
