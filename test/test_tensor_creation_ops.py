@@ -1981,8 +1981,8 @@ class TestTensorCreation(TestCase):
                 stack.append([np.random.randn(10, 8, 7).astype(dtype) for _ in range(repeats)])
 
                 for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)), \
-                        exact_dtype=True, rtol=1e-05, atol=1e-08)
+                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                                     exact_dtype=True, rtol=1e-05, atol=1e-08)
 
 
         # Extended tests
@@ -2002,8 +2002,8 @@ class TestTensorCreation(TestCase):
                 stack.append([[[[A]]]])
 
                 for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)), \
-                        exact_dtype=True, rtol=1e-05, atol=1e-08)
+                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                                     exact_dtype=True, rtol=1e-05, atol=1e-08)
 
         return
 
