@@ -1964,8 +1964,7 @@ class TestTensorCreation(TestCase):
     @onlyCPU
     def test_tensor_factory_ndarrays(self, device):
         """
-        This tests the case when the input to torch.tensor are multiple numpy arrays that are embedded (recursively) 
-        within list(s). 
+        Tests torch.tensor for multiple numpy arrays that are embedded (recursively) within list(s). 
         """
 
         repeats = 10
@@ -1982,7 +1981,7 @@ class TestTensorCreation(TestCase):
                 stack.append([np.random.randn(10, 8, 7).astype(dtype) for _ in range(repeats)])
 
                 for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)), \
                         exact_dtype=True, rtol=1e-05, atol=1e-08)
 
 
@@ -1991,19 +1990,19 @@ class TestTensorCreation(TestCase):
             for _ in range(repeats):
                 stack = []
                 A = np.random.randn(100).astype(dtype)
-                stack.append([[A, 2*A], [A, A]])
+                stack.append([[A, 2 * A], [A, A]])
                 A = np.random.randn(10, 5).astype(dtype)
-                stack.append([[A, 2*A], [A, A]])
+                stack.append([[A, 2 * A], [A, A]])
                 A = np.random.randn(10, 10).astype(dtype)
                 stack.append([[A.T, A], [A, A.T]])
                 A = np.random.randn(20, 20).astype(dtype)
-                stack.append([[A[5:10,:], A.T[11:16,:]], [A[:5,:], A[15:20,:]]])
+                stack.append([[A[5:10, :], A.T[11:16, :]], [A[:5, :], A[15:20, :]]])
                 A = np.random.randn(20, 20, 20).astype(dtype)
-                stack.append([[A[5:10,:,:], A.T[11:16,:,:]], [A[:5,:,:], A[15:20,:,:]]])
+                stack.append([[A[5:10, :, :], A.T[11:16, :, :]], [A[:5, :, :], A[15:20, :, :]]])
                 stack.append([[[[A]]]])
 
                 for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)), 
+                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)), \
                         exact_dtype=True, rtol=1e-05, atol=1e-08)
 
         return
