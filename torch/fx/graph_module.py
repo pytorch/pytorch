@@ -5,7 +5,7 @@ from torch.nn.modules.module import _addindent
 from torch.package.module_environment import ModuleEnv
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
-from .graph import Graph, _is_from_torch, _builtin_names, PythonCode
+from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
 import copy
 import sys
 import traceback
@@ -44,8 +44,8 @@ def _forward_from_src(src: str, globals: Dict[str, Any]):
 
 
 def _format_import_statement(name: str, obj: Any, module_env: ModuleEnv) -> str:
-    if name in _builtin_names:
-        return _builtin_names[name].import_str
+    if name in _custom_builtins:
+        return _custom_builtins[name].import_str
     if _is_from_torch(name):
         return 'import torch'
 
