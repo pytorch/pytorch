@@ -297,6 +297,8 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         cls.forward = _forward_from_src(self._code)
 
+        cls_call = cls.__call__
+
         # Previously, if an error occurred when valid
         # symbolically-traced code was run with an invalid input, the
         # user would see the source of the error as coming from
@@ -326,7 +328,7 @@ class {module_name}(torch.nn.Module):
 
         def wrapped_call(self, *args, **kwargs):
             try:
-                return torch.nn.Module.__call__(self, *args, **kwargs)
+                return cls_call(self, *args, **kwargs)
             except Exception as e:
                 assert e.__traceback__
                 topmost_framesummary: traceback.FrameSummary = \
