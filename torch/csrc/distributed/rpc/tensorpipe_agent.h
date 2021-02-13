@@ -223,13 +223,12 @@ class TensorPipeAgent : public RpcAgent {
   // For testing purposes.
   size_t timeoutMapSize();
   size_t numPendingResponses();
+  size_t messageIdToTimeoutMapSize();
 
  private:
   // Removes the given messageId with the given expirationTime from the
   // timeoutMap_.
-  void removeFromTimeoutMap(
-      uint64_t messageId,
-      steady_clock_time_point expirationTime);
+  void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
@@ -385,6 +384,9 @@ class TensorPipeAgent : public RpcAgent {
   // Map to store the expiration times for each message.
   std::map<steady_clock_time_point, std::vector<TimeoutMessageMetadata>>
       timeoutMap_;
+
+  // Map to store the messageId to expiry time.
+  std::unordered_map<uint64_t, steady_clock_time_point> messageIdToTimeout_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
   // with an error accordingly

@@ -35,7 +35,7 @@ def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
 
 def _dequantize(qx, scale, zero_point):
     """Dequantizes a numpy array."""
-    x = (qx.astype(np.float_) - zero_point) * scale
+    x = (qx.astype(float) - zero_point) * scale
     return x
 
 
