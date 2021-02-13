@@ -82,7 +82,7 @@ def gpus_for_rank(world_size):
         )
     return gpus_for_rank
 
-def create_client(i, addr, port, world_size = -1, timeout=timedelta(seconds=10)):
+def create_client(i, addr, port, world_size=-1, timeout=timedelta(seconds=10)):
     if world_size < 0:
         client_store = dist.TCPStore(addr, port, timeout=timeout)
     else:
