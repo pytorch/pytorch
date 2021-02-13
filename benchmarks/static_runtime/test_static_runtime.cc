@@ -86,6 +86,18 @@ void testStaticRuntime(
 }
 } // namespace
 
+TEST(StaticRuntime, UnaryOps) {
+  auto a = at::ones({2, 3});
+
+  std::vector<IValue> args{a};
+
+  testStaticRuntime(aten_sum, args);
+  testStaticRuntime(aten_sum_0, args);
+  testStaticRuntime(aten_sum_1, args);
+  testStaticRuntime(aten_sum_0_true, args);
+  testStaticRuntime(aten_sum_1_true, args);
+}
+
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
   auto b = at::ones({2, 3});

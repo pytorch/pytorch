@@ -511,6 +511,31 @@ REGISTER_VIEW_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const at::Tensor& self = p_node->Input(0).toTensor();
+    std::vector<int64_t> dim = {};
+    if ((p_node->inputs().size() > 1) && (!p_node->Input(1).isNone())) {
+      dim = p_node->Input(1).toIntList().vec();
+    }
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(self);
+    }
+    auto& output = p_node->Output(0).toTensor();
+    fastResizeToZero(output);
+    if (p_node->inputs().size() > 2) {
+      at::native::sum_out(
+          output,
+          self,
+          dim,
+          p_node->Input(2).toBool(),
+          p_node->Input(3).toOptional<at::ScalarType>());
+      return;
+    }
+    at::native::sum_out(output, self, dim);
+  };
+});
+
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SROperatorRegistry()->Has(op_name)) {
