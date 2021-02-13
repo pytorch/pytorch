@@ -262,7 +262,7 @@ class TestAutocast(JitTestCase):
         result = fn(self.a_fp32, self.b_fp32)
         self.assertEqual(result.dtype, torch.float16)
 
-    def test_callees_with_autocast(self):
+    def test_callees_with_autocast_on(self):
         def helper(a, b):
             with autocast(enabled=True):
                 return torch.mm(a, b)
@@ -274,6 +274,19 @@ class TestAutocast(JitTestCase):
 
         result = fn(self.a_fp32, self.b_fp32)
         self.assertEqual(result.dtype, torch.float16)
+
+    def test_callees_with_autocast_off(self):
+        def helper(a, b):
+            with autocast(enabled=False):
+                return torch.mm(a, b)
+
+        @torch.jit.script
+        def fn(a, b):
+            with autocast(enabled=True):
+                return helper(a, b)
+
+        result = fn(self.a_fp32, self.b_fp32)
+        self.assertEqual(result.dtype, torch.float32)
 
     # scripting inside eager autocast
     def test_eager_and_script(self):
@@ -383,6 +396,19 @@ class TestAutocast(JitTestCase):
             return torch.mm(a, b)
         result = fn(self.a_fp32, self.b_fp32)
         self.assertEqual(result.dtype, torch.float16)
+
+    def test_inplace(self):
+        @torch.jit.script
+        def fn(a, b, c):
+            with autocast(enabled=True):
+                x = torch.addmm(a, b, c)
+                y = torch.addmm(a, b, c, out=a)
+                z = a.addmm_(b, c)
+                return x, y, z
+        x, y, z = fn(self.a_fp32, self.b_fp32, self.c_fp32)
+        self.assertEqual(x.dtype, torch.float16)
+        self.assertEqual(y.dtype, torch.float32)
+        self.assertEqual(z.dtype, torch.float32)
 
 
 if __name__ == '__main__':
