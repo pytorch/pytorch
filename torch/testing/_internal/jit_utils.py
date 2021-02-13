@@ -465,6 +465,8 @@ class JitTestCase(JitCommonTestCase):
                     script_outputs = scripted_fn(*recording_inputs)
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
+                    if inputs_requires_grad:
+                        opt_script_outputs = scripted_fn(*recording_inputs)
                     if TEST_BAILOUTS:
                         self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
                     python_outputs = python_fn(*inputs)
@@ -678,7 +680,7 @@ def attrs_with_prefix(module, prefix):
             if x.startswith(prefix)]
 
 def warmup_backward(f, *args):
-    profiling_count = 2
+    profiling_count = 3
     results = []
     for i in range(profiling_count):
         if len(args) > 0:

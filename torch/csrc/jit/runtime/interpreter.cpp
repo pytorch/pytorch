@@ -471,6 +471,7 @@ struct CodeImpl {
   // keep this around.
   std::shared_ptr<Graph> graph_;
   c10::optional<std::vector<GraphExecutor*>> grad_executors_;
+  c10::optional<std::vector<GraphExecutor*>> forward_executors_;
   PreprocessGraph preprocess_;
 
   // map from unique of nodes to register in register table
@@ -1018,15 +1019,15 @@ struct CodeImpl {
   }
 
   const std::vector<GraphExecutor*>& diff_graph_op_executors() {
-    if (!grad_executors_) {
-      grad_executors_.emplace();
+    if (!forward_executors_) {
+      forward_executors_.emplace();
       for (Operation& op : operator_table_) {
         if (auto executor = detail::getDifferentiableGraphOpExecutor(op)) {
-          grad_executors_->push_back(executor);
+          forward_executors_->push_back(executor);
         }
       }
     }
-    return *grad_executors_;
+    return *forward_executors_;
   }
 
   void dump(std::ostream& out, size_t i) const {

@@ -37,8 +37,7 @@ def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
-def warmup_forward(f, *args):
-    profiling_count = 2
+def warmup_forward(f, *args, profiling_count=2):
     for i in range(profiling_count):
         results = f(*args)
 
@@ -175,7 +174,7 @@ class TestTEFuser(JitTestCase):
 
         inputs = (torch.rand(20, 28, device='cuda', requires_grad=True), torch.rand(20, device='cuda'))
 
-        scripted = self.checkScript(foo, inputs)
+        scripted = self.checkScript(foo, inputs, inputs_requires_grad=True)
         self.assertAllFused(scripted.graph_for(*inputs))
 
     def _test_zero_element_tensors(self, device="cpu"):
@@ -427,7 +426,7 @@ class TestTEFuser(JitTestCase):
             funcs = (func2, funcInf, funcNegInf, funcOptMin, funcOptMax)
             for f, inputs in product(funcs, [[a, b], [a, nan]]):
                 inp1, inp2 = inputs
-                s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
+                s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING, inputs_requires_grad=True)
                 self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
                 c = s(inp1, inp2)
                 with enable_profiling_mode_for_profiling_tests():
@@ -690,8 +689,8 @@ class TestTEFuser(JitTestCase):
         scripted_f = torch.jit.script(test_fuse)
         x = torch.ones(1, requires_grad=True, device='cuda')
         y = torch.ones(1, requires_grad=True, device='cuda')
-        warmup_forward(scripted_f, x, y)
-        g = torch.jit.last_executed_optimized_graph()
+        warmup_forward(scripted_f, x, y, profiling_count=3)
+        g = scripted_f.graph_for(x, y)
         diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
@@ -815,6 +814,8 @@ class TestTEFuser(JitTestCase):
 
             scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
             out = scripted(x, p)
+            out = scripted(x, p)
+            out = scripted(x, p)
             self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                       "aten::_size_if_not_equal"))
 
@@ -827,7 +828,7 @@ class TestTEFuser(JitTestCase):
 
         b = torch.randn(5, 5, requires_grad=True)
         a = torch.randn(5, 5, requires_grad=True)
-        s = self.checkScript(f, (a, b))
+        s = self.checkScript(f, (a, b), inputs_requires_grad=True)
         self.assertAllFused(s.graph_for(a, b), except_for={
                             'aten::size', 'aten::_size_if_not_equal', 'prim::BroadcastSizes'})
 
@@ -946,8 +947,8 @@ class TestTEFuser(JitTestCase):
     def test_lstm(self):
         for device in self.devices:
             inputs = get_lstm_inputs(device, training=True)
-            module = self.checkScript(LSTMCellS, inputs)
-            self.assertLastGraphAllFused()
+            module = self.checkScript(LSTMCellS, inputs, inputs_requires_grad=True)
+            self.assertAllFused(module.graph_for(inputs))
 
     def test_lstm_concat(self):
         # single fusion node causes error
@@ -995,7 +996,7 @@ class TestTEFuser(JitTestCase):
     def test_milstm(self):
         for device in self.devices:
             inputs = get_milstm_inputs(device, training=True)
-            module = self.checkScript(MiLSTMCell, inputs)
+            module = self.checkScript(MiLSTMCell, inputs, inputs_requires_grad=True)
             forward_graph = module.graph_for(*inputs)
             self.assertGraphContainsExactly(
                 forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
@@ -1049,10 +1050,10 @@ class TestTEFuser(JitTestCase):
                 return F.relu(torch.erf(x) - torch.erfc(x))
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
-            ge = self.checkTrace(fn_test_erf, (x,))
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x))
             x.requires_grad_(True)
-            ge = self.checkTrace(fn_test_erf, (x,))
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING, inputs_requires_grad=True)
             self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
                                                              "aten::_size_if_not_equal"))
 
@@ -1190,7 +1191,7 @@ class TestTEFuser(JitTestCase):
         s1 = torch.randn(5, 1, requires_grad=True, device='cuda')
         s2 = torch.randn(5, 5, requires_grad=True, device='cuda')
 
-        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1), profiling=ProfilingMode.PROFILING)
+        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1), profiling=ProfilingMode.PROFILING, inputs_requires_grad=True)
         forward_graph = module.graph_for(s1, s1, s1)
         self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
                                                        "aten::_size_if_not_equal"))
@@ -1202,7 +1203,7 @@ class TestTEFuser(JitTestCase):
             args = s2 if i < 1 else s1, s2 if i < 2 else s1, s2
             args = [a.detach_().requires_grad_() for a in args]
             # recompile, so we don't trigger bailouts
-            module = self.checkScript(my_broadcasted_cell, args, profiling=ProfilingMode.PROFILING)
+            module = self.checkScript(my_broadcasted_cell, args, profiling=ProfilingMode.PROFILING, inputs_requires_grad=True)
             res = module(s2 if i < 1 else s1, s2 if i < 2 else s1, s2)
             warmup_backward(res.sum(), args)
             grads = torch.autograd.grad(res.sum(), args)
