@@ -7,6 +7,7 @@ bool test_copy_nchw_to_metal();
 bool test_conv2d();
 bool test_depthwiseConv();
 bool test_max_pool2d();
+bool test_max_pool2d_ceil();
 bool test_relu();
 bool test_addmm();
 bool test_add();
