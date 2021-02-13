@@ -110,6 +110,11 @@ INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
+def get_profiling_event(postfix, profiler):
+    return [
+        event for event in profiler.function_events if event.name.endswith(postfix)
+    ]
+
 
 class _FC2(nn.Module):
     def __init__(self):
@@ -862,23 +867,42 @@ class DistributedTest:
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
         def test_send_recv(self):
             rank = dist.get_rank()
-            tensor = _build_tensor(rank + 1)
+            send_size = rank + 1
+            tensor = _build_tensor(send_size)
+            with torch.autograd.profiler.profile(record_shapes=True) as prof:
+                for src in range(0, dist.get_world_size()):
+                    if src == rank:
+                        # Send mode
+                        for dst in range(0, dist.get_world_size()):
+                            if dst == rank:
+                                continue
+                            dist.send(tensor, dst)
+                    else:
+                        # Recv mode
+                        recv_size = src + 1
+                        expected_tensor = _build_tensor(recv_size)
+                        output_tensor = _build_tensor(recv_size, value=-1)
+                        dist.recv(output_tensor, src)
+                        self.assertEqual(output_tensor, expected_tensor)
 
-            for src in range(0, dist.get_world_size()):
-                if src == rank:
-                    # Send mode
-                    for dst in range(0, dist.get_world_size()):
-                        if dst == rank:
-                            continue
-                        dist.send(tensor, dst)
-                else:
-                    # Recv mode
-                    expected_tensor = _build_tensor(src + 1)
-                    output_tensor = _build_tensor(src + 1, value=-1)
-                    dist.recv(output_tensor, src)
-                    self.assertEqual(output_tensor, expected_tensor)
+                self._barrier()
 
-            self._barrier()
+            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
+            backend = dist.get_backend()
+            if backend == "gloo":
+                for event_name in [f"{backend}:send", f"{backend}:recv"]:
+                    events = get_profiling_event(event_name, prof)
+                    # Each rank sends/recvs from all other ranks.
+                    event_count = sum(e.count for e in events)
+                    expected_event_count = dist.get_world_size() - 1
+                    self.assertEqual(event_count, expected_event_count)
+                    # Event order is not deterministic, so simply assert their shape
+                    # is found in the following list.
+                    expected_shapes = [
+                        [[rank + 1] * 3] for rank in range(dist.get_world_size())
+                    ]
+                    for event in events:
+                        self.assertTrue(event.input_shapes in expected_shapes)
 
         # SEND RECV ANY SOURCE
         @unittest.skipIf(
@@ -886,37 +910,49 @@ class DistributedTest:
         )
         def test_send_recv_any_source(self):
             rank = dist.get_rank()
-            tensor = _build_tensor(10, value=rank)
+            send_recv_size = 10
+            tensor = _build_tensor(send_recv_size, value=rank)
             recv_ranks = list()
             irecv_ranks = list()
 
-            for dst in range(0, dist.get_world_size()):
-                if dst == rank:
-                    # Recv mode
-                    for dst in range(0, dist.get_world_size()):
-                        if dst == rank:
-                            continue
+            with torch.autograd.profiler.profile(record_shapes=True) as prof:
+                for dst in range(0, dist.get_world_size()):
+                    if dst == rank:
+                        # Recv mode
+                        for dst in range(0, dist.get_world_size()):
+                            if dst == rank:
+                                continue
 
-                        for recv in ["recv", "irecv"]:
-                            output_tensor = _build_tensor(10, value=-1)
+                            for recv in ["recv", "irecv"]:
+                                output_tensor = _build_tensor(send_recv_size, value=-1)
 
-                            if recv == "recv":
-                                sender = dist.recv(output_tensor)
-                                recv_ranks.append(sender)
-                            elif recv == "irecv":
-                                work = dist.irecv(output_tensor)
-                                work.wait()
-                                sender = work._source_rank()
-                                irecv_ranks.append(sender)
+                                if recv == "recv":
+                                    sender = dist.recv(output_tensor)
+                                    recv_ranks.append(sender)
+                                elif recv == "irecv":
+                                    work = dist.irecv(output_tensor)
+                                    work.wait()
+                                    sender = work._source_rank()
+                                    irecv_ranks.append(sender)
 
-                            # Assert the scalar value "sender" that should be
-                            # equal to the rank of the sender is equal to all
-                            # values in the received tensor.
-                            self.assertTrue(output_tensor.eq(sender).all())
-                else:
-                    # Send mode
-                    dist.send(tensor, dst)  # recv
-                    dist.send(tensor, dst)  # irecv
+                                # Assert the scalar value "sender" that should be
+                                # equal to the rank of the sender is equal to all
+                                # values in the received tensor.
+                                self.assertTrue(output_tensor.eq(sender).all())
+                    else:
+                        # Send mode
+                        dist.send(tensor, dst)  # recv
+                        dist.send(tensor, dst)  # irecv
+
+            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
+            backend = dist.get_backend()
+            if backend == "gloo":
+                for event_name in [f"{backend}:send", f"{backend}:recvAnySource"]:
+                    events = get_profiling_event(event_name, prof)
+                    # Each rank sends/recvs from other rank twice.
+                    self.assertEqual(sum(event.count for event in events), 2 * (dist.get_world_size() - 1))
+                    for event in events:
+                        self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
             # Each rank would have 2 * (world_size - 1) sends, verify that
             # globally we receive the same amount on the other end.
@@ -939,41 +975,75 @@ class DistributedTest:
         def test_send_recv_with_tag(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            tensor = _build_tensor(10, value=rank)
+            send_recv_size = 10
+            tensor = _build_tensor(send_recv_size, value=rank)
+            with torch.autograd.profiler.profile(record_shapes=True) as prof:
+                for dst in range(0, world_size):
+                    if dst == rank:
+                        # Recv mode
+                        for src in range(0, world_size):
+                            if src == rank:
+                                continue
+                            output_tensor = _build_tensor(send_recv_size, value=-1)
+                            dist.recv(output_tensor, src, tag=src)
+                            self.assertTrue(output_tensor.eq(src).all())
+                    else:
+                        # Send mode
+                        dist.send(tensor, dst, tag=rank)
 
-            for dst in range(0, world_size):
-                if dst == rank:
-                    # Recv mode
-                    for src in range(0, world_size):
-                        if src == rank:
-                            continue
-                        output_tensor = _build_tensor(10, value=-1)
-                        dist.recv(output_tensor, src, tag=src)
-                        self.assertTrue(output_tensor.eq(src).all())
-                else:
-                    # Send mode
-                    dist.send(tensor, dst, tag=rank)
+            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
+            backend = dist.get_backend()
+            if backend == "gloo":
+                for event_name in [f"{backend}:send", f"{backend}:recv"]:
+                    events = get_profiling_event(event_name, prof)
+                    # Each rank sends/recvs from all other ranks
+                    event_count = sum(e.count for e in events)
+                    expected_event_count = dist.get_world_size() - 1
+                    self.assertEqual(event_count, expected_event_count)
+                    for event in events:
+                        self.assertEqual(event.name, event_name)
+                        self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
         # ISEND
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
         def test_isend(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
+            with torch.autograd.profiler.profile(record_shapes=True) as prof:
+                if rank == 0:
+                    requests = [
+                        dist.isend(_build_tensor(dest, 10), dest)
+                        for dest in range(1, world_size)
+                    ]
+                    for request in requests:
+                        request.wait()
+                        self.assertTrue(request.is_completed())
+                else:
+                    tensor = _build_tensor(rank, -1)
+                    dist.recv(tensor, 0)
+                    self.assertEqual(tensor, _build_tensor(rank, 10))
 
-            if rank == 0:
-                requests = [
-                    dist.isend(_build_tensor(dest, 10), dest)
-                    for dest in range(1, world_size)
-                ]
-                for request in requests:
-                    request.wait()
-                    self.assertTrue(request.is_completed())
-            else:
-                tensor = _build_tensor(rank, -1)
-                dist.recv(tensor, 0)
-                self.assertEqual(tensor, _build_tensor(rank, 10))
+                self._barrier()
 
-            self._barrier()
+            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
+            backend = dist.get_backend()
+            if backend == "gloo":
+                expected_event_name = f"{backend}:send" if rank == 0 else f"{backend}:recv"
+                events = get_profiling_event(expected_event_name, prof)
+                event_count = sum(e.count for e in events)
+                expected_count = dist.get_world_size() - 1 if rank == 0 else 1
+                self.assertEqual(expected_count, event_count)
+                # Event ordering is not guaranteed, so simply ensure the shapes are
+                # found in the following map.
+                expected_shapes = {
+                    r: [[r] * 3] for r in range(1, dist.get_world_size())
+                }
+                for event in events:
+                    self.assertEqual(event.name, expected_event_name)
+                    if rank == 0:
+                        self.assertTrue(event.input_shapes in expected_shapes.values())
+                    else:
+                        self.assertEqual(event.input_shapes, expected_shapes[rank])
 
         # IRECV
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support irecv")
