@@ -368,6 +368,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
       : f(grad.f, "<foward op>"),
+        legacy_f(grad.f, "<foward op>"),
         grad(std::move(grad)),
         grad_executor(this->grad.df, "<backward op>"),
         num_inputs(this->grad.f->inputs().size()),
@@ -392,9 +393,13 @@ struct DifferentiableGraphOp {
     }
 
     detachVariables(*stack);
-    ExecutionPlan plan =
-        f.getPlanFor(*stack, GraphExecutor::getDefaultNumBailOuts());
-    InterpreterState(plan.code).run(*stack);
+    if (IsNewExecutorEnabled()) {
+      ExecutionPlan plan =
+          f.getPlanFor(*stack, GraphExecutor::getDefaultNumBailOuts());
+      InterpreterState(plan.code).run(*stack);
+    } else {
+      InterpreterState(legacy_f).run(*stack);
+    }
 
     {
       auto outputs = last(stack, num_outputs);
@@ -466,6 +471,7 @@ struct DifferentiableGraphOp {
   }
 
   GraphExecutor f;
+  Code legacy_f;
   Gradient grad;
   GraphExecutor grad_executor;
 
