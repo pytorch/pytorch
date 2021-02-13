@@ -367,9 +367,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
 // to the output Variables if present.
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
-      : f(grad.f, "<foward op>"),
-        legacy_f(grad.f, "<foward op>"),
+      : legacy_f(grad.f, "<foward op>"),
         grad(std::move(grad)),
+        f(this->grad.f, "<foward op>"),
         grad_executor(this->grad.df, "<backward op>"),
         num_inputs(this->grad.f->inputs().size()),
         num_outputs(this->grad.f->outputs().size()) {}
@@ -470,9 +470,9 @@ struct DifferentiableGraphOp {
     }
   }
 
-  GraphExecutor f;
   Code legacy_f;
   Gradient grad;
+  GraphExecutor f;
   GraphExecutor grad_executor;
 
   const size_t num_inputs;

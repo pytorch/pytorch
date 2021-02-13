@@ -429,6 +429,7 @@ class TestTEFuser(JitTestCase):
                 s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING, inputs_requires_grad=True)
                 self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
                 c = s(inp1, inp2)
+                c = s(inp1, inp2)
                 with enable_profiling_mode_for_profiling_tests():
                     warmup_backward(c.sum())
                 graph = backward_graph(s)
