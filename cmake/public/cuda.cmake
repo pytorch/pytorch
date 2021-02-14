@@ -188,6 +188,20 @@ find_library(CUDA_CUDA_LIB cuda
 find_library(CUDA_NVRTC_LIB nvrtc
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 lib/x64)
+  if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
+ execute_process(
+    COMMAND "${PYTHON_EXECUTABLE}" -c
+    "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
+    RESULT_VARIABLE _retval
+    OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
+  if(NOT _retval EQUAL 0)
+    message(WARNING "Failed to compute shorthash for libnvrtc.so")
+    set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
+  else()
+    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
+    message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
+  endif()
+endif()
 
 # Create new style imported libraries.
 # Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
