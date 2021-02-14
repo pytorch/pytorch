@@ -80,7 +80,6 @@ try:
     from quantization.test_numeric_suite_fx import TestGraphModeNumericSuite  # noqa: F401
     from quantization.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
     from quantization.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
-    from quantization.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
 except ImportError:
     pass
 
