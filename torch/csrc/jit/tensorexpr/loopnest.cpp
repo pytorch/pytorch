@@ -574,6 +574,30 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   }
 }
 
+LoopNest::LoopNest(
+    const std::vector<Tensor*>& all_tensors,
+    const std::vector<Placeholder>& input_tensors,
+    const std::vector<Tensor*>& output_tensors) {
+  std::vector<Stmt*> bodies;
+  for (Tensor* t : all_tensors) {
+    bodies.push_back(t->stmt());
+  }
+  root_stmt_ = new Block(bodies);
+
+  for (auto t : output_tensors) {
+    output_bufs_.insert(t->buf());
+  }
+  for (auto t : input_tensors) {
+    input_bufs_.insert(t.data());
+  }
+  auto all_bufs = NodeFinder<Buf>::find(root_stmt_);
+  for (auto b : all_bufs) {
+    if (!output_bufs_.count(b) && !input_bufs_.count(b)) {
+      intermediate_bufs_.insert(b);
+    }
+  }
+}
+
 class FunctionInliner : public IRMutator {
  public:
   FunctionInliner(Store* producer, std::unordered_set<const Buf*> outputs)

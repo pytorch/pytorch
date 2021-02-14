@@ -807,25 +807,25 @@ TEST(LoopNest, ScheduleInlineSimple) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
-  Placeholder c_buf("c", kFloat, {M, N});
-  Placeholder d_buf("d", kFloat, {M, K});
+  Placeholder a("a", kFloat, {M, N});
+  Placeholder b("b", kFloat, {N, K});
+  Placeholder c("c", kFloat, {M, N});
+  Placeholder d("d", kFloat, {M, K});
 
   Tensor* x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf.load(m, n) * b_buf.load(n, k);
+        return a.load(m, n) * b.load(n, k);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
+        return c.load(m, n) * d.load(m, k) + x->call(m, n, k);
       });
 
-  LoopNest l1({y});
+  LoopNest l1({x, y}, {a, b, c, d}, {y});
   LoopNest l2(l1);
   l2.computeInline(x->buf());
 
@@ -835,8 +835,8 @@ TEST(LoopNest, ScheduleInlineSimple) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, c_buf, d_buf, y});
-  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, c_buf, d_buf, y});
+  SimpleIREvaluator eval1(stmt1, {a, b, c, d, y});
+  SimpleIREvaluator eval2(stmt2, {a, b, c, d, y});
 
   PaddedBuffer<float> a_v(M, N);
   PaddedBuffer<float> b_v(N, K);

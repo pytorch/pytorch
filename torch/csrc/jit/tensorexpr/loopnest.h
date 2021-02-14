@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
@@ -26,6 +27,11 @@ class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
   LoopNest(const std::vector<Tensor*>& output_tensors);
+
+  LoopNest(
+      const std::vector<Tensor*>& all_tensors,
+      const std::vector<Placeholder>& input_tensors,
+      const std::vector<Tensor*>& output_tensors);
 
   // A constructor for building a LoopNest from a pre-baked Stmt and meta-info
   // TODO: Nuke intermediate_bufs_ from here if they can be deduced.
