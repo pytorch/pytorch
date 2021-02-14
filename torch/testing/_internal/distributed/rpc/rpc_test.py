@@ -3899,14 +3899,14 @@ class RpcTest(RpcAgentTestFixture):
         slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
         timeout = 0.01
         rref_api = getattr(slow_rref, rref_proxy_api)
-        expect_raise_inline = rref_api in [rref.rpc_sync, rref.remote]
+        expect_raise_inline = rref_proxy_api in ["rpc_sync", "remote"]
         with self.assertRaisesRegex(RuntimeError, expected_error) if expect_raise_inline else contextlib.suppress():
             result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
 
         if not expect_raise_inline:
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 result.wait()
-        if rref_api in [rref.rpc_sync, rref.remote]:
+        if rref_proxy_api in ["rpc_sync", "remote"]:
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
         else:
