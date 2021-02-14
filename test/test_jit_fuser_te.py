@@ -423,10 +423,8 @@ class TestTEFuser(JitTestCase):
             b = torch.randn(4, 4, dtype=torch.float, device=device)
             nan = torch.tensor(float('nan'), dtype=torch.float, device=device)
 
-            #funcs = (func2, funcInf, funcNegInf, funcOptMin, funcOptMax)
-            funcs = (func2,)
-            #for f, inputs in product(funcs, [[a, b], [a, nan]]):
-            for f, inputs in product(funcs, [[a, b]]):
+            funcs = (func2, funcInf, funcNegInf, funcOptMin, funcOptMax)
+            for f, inputs in product(funcs, [[a, b], [a, nan]]):
                 inp1, inp2 = inputs
                 s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING, extra_profile_runs=True)
                 self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})

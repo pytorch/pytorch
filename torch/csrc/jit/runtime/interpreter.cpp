@@ -1011,7 +1011,6 @@ struct CodeImpl {
       grad_executors_.emplace();
       for (Operation& op : operator_table_) {
         if (auto executor = detail::getGradExecutor(op)) {
-          GRAPH_DEBUG("returned GE: ", executor, " with pImpl ", executor->pImpl.get());
           grad_executors_->push_back(executor);
         }
       }

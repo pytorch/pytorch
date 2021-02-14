@@ -629,7 +629,6 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
 }
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
-  GRAPH_DEBUG("checking optimized_plan for profiling ge impl", this);
   GraphExecutorState state;
   TORCH_INTERNAL_ASSERT(optimized_plan_);
   auto opt_plan = *optimized_plan_;

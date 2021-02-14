@@ -464,10 +464,10 @@ class JitTestCase(JitCommonTestCase):
                 else:
                     # profiling run
                     script_outputs = scripted_fn(*recording_inputs)
-                    # optimized run
-                    opt_script_outputs = scripted_fn(*recording_inputs)
                     if inputs_requires_grad or extra_profile_runs:
                         opt_script_outputs = scripted_fn(*recording_inputs)
+                    # optimized run
+                    opt_script_outputs = scripted_fn(*recording_inputs)
                     if TEST_BAILOUTS:
                         self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
                     python_outputs = python_fn(*inputs)
@@ -684,7 +684,6 @@ def warmup_backward(f, *args):
     profiling_count = 3
     results = []
     for i in range(profiling_count):
-        print("aj running once")
         if len(args) > 0:
             r = torch.autograd.grad(f, *args)
             results.append(r)

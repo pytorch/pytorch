@@ -241,9 +241,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
       size_t capture_size)
       : executor(std::move(executor)),
         captures_(capture_size),
-        input_instructions_(input_size) {
-    GRAPH_DEBUG("creating DifferentiableGraphBackward with executor: ", &(this->executor), " and pImpl: ", this->executor.pImpl.get());
-  }
+        input_instructions_(input_size) {}
 
   variable_list apply(variable_list&& inputs) override {
     Stack stack;
@@ -251,7 +249,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
     input_instructions_.unpack(std::move(inputs), stack);
     captures_.unpack(stack, shared_from_this());
-    GRAPH_DEBUG("Running DifferentiableGraphBackward for ", &executor, " and pImpl: ", executor.pImpl.get());
+    GRAPH_DEBUG("Running DifferentiableGraphBackward for ", &executor);
     executor.run(stack);
     unpackReturnTuple(stack);
 
@@ -369,14 +367,12 @@ struct DifferentiableGraphBackward : public autograd::Node {
 // to the output Variables if present.
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
-      : legacy_f(grad.f, "<foward op>"),
+      : f(grad.f, "<foward op>"),
+        legacy_f(grad.f, "<foward op>"),
         grad(std::move(grad)),
-        f(this->grad.f, "<foward op>"),
         grad_executor(this->grad.df, "<backward op>"),
         num_inputs(this->grad.f->inputs().size()),
-        num_outputs(this->grad.f->outputs().size()) {
-    GRAPH_DEBUG("creating differentiable graph op: forward pimpl ", f.pImpl.get(), " grad_executor ", &grad_executor, " with pImpl: ", grad_executor.pImpl.get());
-  }
+        num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   void operator()(Stack* stack) {
@@ -385,8 +381,6 @@ struct DifferentiableGraphOp {
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
             grad.df_input_captured_outputs.size());
-    GRAPH_DEBUG("running differentiable graph op with bwd grad_fn: grad_executor ", &grad_executor, " with pImpl: ", grad_executor.pImpl.get());
-    GRAPH_DEBUG("backward differentiable graph op with bwd grad_fn: grad_executor ", &grad_executor, " with pImpl: ", grad_executor.pImpl.get());
 
     {
       auto inputs = last(stack, num_inputs);
@@ -476,9 +470,9 @@ struct DifferentiableGraphOp {
     }
   }
 
+  GraphExecutor f;
   Code legacy_f;
   Gradient grad;
-  GraphExecutor f;
   GraphExecutor grad_executor;
 
   const size_t num_inputs;
@@ -512,7 +506,6 @@ namespace detail {
 
 GraphExecutor* getGradExecutor(Operation& op) {
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
-    GRAPH_DEBUG("found diff_op: grad_executor ", &diff_op->grad_executor, "with pimpl: ", diff_op->grad_executor.pImpl.get());
     return &diff_op->grad_executor;
   }
   return nullptr;
@@ -520,7 +513,6 @@ GraphExecutor* getGradExecutor(Operation& op) {
 
 GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op) {
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
-    GRAPH_DEBUG("found diff_op: f executor ", &diff_op->f);
     return &diff_op->f;
   }
   return nullptr;
@@ -629,7 +621,6 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     ArgumentSpec spec =
         arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
     {
-      GRAPH_DEBUG("GEpimpl start running ", this, "input argumentspec: ", spec.hashCode());
       std::lock_guard<std::mutex> lock(compile_mutex);
       auto it = plan_cache.find(spec);
       if (it != plan_cache.end()) {
@@ -761,7 +752,6 @@ GraphExecutor::GraphExecutor(
                     new GraphExecutorImpl(graph, std::move(function_name)))) {}
 
 void GraphExecutor::run(Stack& inputs) {
-  GRAPH_DEBUG("This executor : ", this, " running through ", pImpl.get());
   return pImpl->run(inputs);
 }
 
