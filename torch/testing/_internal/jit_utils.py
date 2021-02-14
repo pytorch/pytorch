@@ -409,7 +409,8 @@ class JitTestCase(JitCommonTestCase):
                     frames_up=1,
                     profiling=ProfilingMode.PROFILING,
                     atol=None,
-                    rtol=None):
+                    rtol=None,
+                    extra_profile_runs=False):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
                 if isinstance(script, str):
@@ -465,7 +466,7 @@ class JitTestCase(JitCommonTestCase):
                     script_outputs = scripted_fn(*recording_inputs)
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
-                    if inputs_requires_grad:
+                    if inputs_requires_grad or extra_profile_runs:
                         opt_script_outputs = scripted_fn(*recording_inputs)
                     if TEST_BAILOUTS:
                         self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
@@ -683,6 +684,7 @@ def warmup_backward(f, *args):
     profiling_count = 3
     results = []
     for i in range(profiling_count):
+        print("aj running once")
         if len(args) > 0:
             r = torch.autograd.grad(f, *args)
             results.append(r)

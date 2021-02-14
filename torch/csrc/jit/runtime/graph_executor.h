@@ -85,7 +85,8 @@ struct TORCH_API GraphExecutor {
 
   static size_t getDefaultNumBailOuts();
 
- private:
+ //private:
+ public:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
 };
 

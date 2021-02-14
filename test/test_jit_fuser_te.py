@@ -423,12 +423,13 @@ class TestTEFuser(JitTestCase):
             b = torch.randn(4, 4, dtype=torch.float, device=device)
             nan = torch.tensor(float('nan'), dtype=torch.float, device=device)
 
-            funcs = (func2, funcInf, funcNegInf, funcOptMin, funcOptMax)
-            for f, inputs in product(funcs, [[a, b], [a, nan]]):
+            #funcs = (func2, funcInf, funcNegInf, funcOptMin, funcOptMax)
+            funcs = (func2,)
+            #for f, inputs in product(funcs, [[a, b], [a, nan]]):
+            for f, inputs in product(funcs, [[a, b]]):
                 inp1, inp2 = inputs
-                s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING, inputs_requires_grad=True)
+                s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING, extra_profile_runs=True)
                 self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
-                c = s(inp1, inp2)
                 c = s(inp1, inp2)
                 with enable_profiling_mode_for_profiling_tests():
                     warmup_backward(c.sum())
