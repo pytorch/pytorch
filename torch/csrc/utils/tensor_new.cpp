@@ -280,7 +280,7 @@ Tensor internal_new_from_data(
   bool use_batched_array_extraction = false;
   auto sizes = compute_sizes(data);
   Tensor tensor;
-  ScalarType inferred_scalar_type;
+  ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
 
 #ifdef USE_NUMPY
   if (PyObject_HasAttrString(data, "__cuda_array_interface__")) {
@@ -309,7 +309,6 @@ Tensor internal_new_from_data(
   // instead recusrive_store as shown below will be used for copying.
   std::vector<PyArrayObject*> array_ptr_storage;
   if (torch::utils::extract_ndarrays(data, sizes, array_ptr_storage)) {
-    inferred_scalar_type = infer_scalar_type(data);
     tensor = torch::utils::tensor_from_ndarray_batch(array_ptr_storage, sizes, inferred_scalar_type, pin_memory);
     use_batched_array_extraction = true;
   }
@@ -320,7 +319,6 @@ Tensor internal_new_from_data(
   // autograd code doesn't really matter, because requires_grad is always false
   // here.
   if (!use_batched_array_extraction) {
-    inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
     at::AutoNonVariableTypeMode guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
