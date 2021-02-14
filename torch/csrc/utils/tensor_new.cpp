@@ -139,6 +139,12 @@ std::vector<int64_t> compute_sizes(PyObject* seq) {
   std::vector<int64_t> sizes;
   THPObjectPtr handle;
   while (PySequence_Check(seq)) {
+    if (PyArray_Check(seq) && PyArray_NDIM((PyArrayObject*) seq) == 0) { 
+      // A zero dimensional numpy array is also a PySequence but
+      // you can't access its length which is why it will throw
+      // the python error below if we skip this.
+      break;
+    }
     auto length = PySequence_Length(seq);
     if (length < 0) throw python_error();
     sizes.push_back(length);
@@ -335,7 +341,6 @@ Tensor internal_new_from_data(
   // in this case.
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
 }
-
 
 
 Tensor new_from_data_copy(

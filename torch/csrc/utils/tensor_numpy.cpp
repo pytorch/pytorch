@@ -408,6 +408,9 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<
   mismatch. This function is used in extract_ndarrays() function below.
   */
   if (PyArray_Check(obj)) {
+    if (PyArray_NDIM((PyArrayObject*) obj) == 0) {
+      return false;
+    }
     // This only checks for number of elements since the iterator will treat an array of shape (m x b) or any other the same way it would treat its flattened version.
     if (numels[shape_idx] != PyArray_SIZE((PyArrayObject*) obj)) {
       auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS((PyArrayObject*) obj)), 0, PyArray_NDIM((PyArrayObject*) obj)) + std::string(")");
@@ -448,6 +451,12 @@ bool extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<P
   */
 
   int64_t ndims = shape.size();
+  if (ndims == 0) {
+    return false;
+  } else if (shape[0] == 0) {
+    return false;
+  }
+
   std::vector<int64_t> numels(ndims);
   numels[ndims-1] = shape[ndims-1];
 

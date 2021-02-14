@@ -1974,6 +1974,7 @@ class TestTensorCreation(TestCase):
         for dtype in np_types:
             for _ in range(repeats):
                 stack = []
+                stack.append([np.array(1).astype(dtype)])
                 stack.append([np.random.randn(1).astype(dtype)])
                 stack.append([np.random.randn(100).astype(dtype) for _ in range(repeats)])
                 stack.append([np.random.randn(10, 10).astype(dtype) for _ in range(repeats)])
