@@ -43,15 +43,6 @@ def _forward_from_src(src: str, globals: Dict[str, Any]):
     return globals['forward']
 
 
-def reduce_graph_module(body: dict) -> torch.nn.Module:
-    # BC: attribute name was changed from `code` to `_code` to facilitate
-    # making `code` into a property and adding a docstring to it
-    import_block = body.get('_import_block', '')
-    fn_src = body.get('_code') or body['code']
-    forward = import_block + fn_src
-    return _deserialize_graph_module(forward, body, None)
-
-
 def _format_import_statement(name: str, obj: Any, module_env: ModuleEnv) -> str:
     if name in _custom_builtins:
         return _custom_builtins[name].import_str
