@@ -5126,6 +5126,23 @@ class TestNN(NNTestCase):
 
                 hx.sum().backward()
 
+    def test_RNN_cell_forward_input_size(self):
+        input = torch.randn(3, 11)
+        hx = torch.randn(3, 20)
+        for module in (nn.RNNCell, nn.GRUCell):
+            cell = module(10, 20)
+            self.assertRaises(Exception, lambda: cell(input, hx))
+    
+    def test_RNN_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 21)
+        cell_shared_param = (10, 20)
+        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
+                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"), 
+                     nn.GRUCell(*cell_shared_param)):
+            self.assertRaises(Exception, lambda: cell(input, hx))
+
+
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
         losses = {
@@ -5539,6 +5556,22 @@ class TestNN(NNTestCase):
                 hx, cx = lstm(input, (hx, cx))
 
             (hx + cx).sum().backward()
+
+    def test_LSTM_cell_forward_input_size(self):
+         input = torch.randn(3, 11)
+         hx = torch.randn(3, 20)
+         cx = torch.randn(3, 20)
+         lstm = nn.LSTMCell(10, 20)
+         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+
+    def test_LSTM_cell_forward_hidden_size(self):
+         input = torch.randn(3, 10)
+         hx = torch.randn(3, 21)
+         cx = torch.randn(3, 20)
+         lstm = nn.LSTMCell(10, 20)
+         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
+
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_pack_sequence_batch_sizes_throw(self):
