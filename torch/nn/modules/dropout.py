@@ -192,8 +192,6 @@ class FeatureDropout(_DropoutNd):
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
-    Internally used by `DropoutXd` making stack traces less confusing.
-
     As described in the paper
     `Efficient Object Localization Using Convolutional Networks`_ ,
     if adjacent pixels within feature maps are strongly correlated

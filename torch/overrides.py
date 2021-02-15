@@ -616,6 +616,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                             scale_grad_by_freq=False, mode='mean', sparse=False, per_sample_weights=None,
                                             include_last_offset=False: -1),
         torch.nn.functional.feature_alpha_dropout: lambda input, p=0.5, training=False, inplace=False: -1,
+        torch.nn.functional.feature_dropout: lambda input, p=0.5, training=False, inplace=False: -1,
         torch.nn.functional.fold: lambda input, output_size, kernel_size, dilation=1, padding=0, stride=1: -1,
         torch.nn.functional.fractional_max_pool2d: (lambda input, kernel_size, output_size=None, output_ratio=None,
                                                     return_indices=False, _random_samples=None: -1),

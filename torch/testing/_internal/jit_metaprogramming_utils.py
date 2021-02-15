@@ -73,6 +73,7 @@ nn_functional_tests = [
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
+    ('feature_dropout', (S, S, S), (0.5,)),
     ('feature_alpha_dropout', (S, S, S), (0.5,)),
     ('threshold', (S, S, S), (0.1, 2.), '', (True,)),
     ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
