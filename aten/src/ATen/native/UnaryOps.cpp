@@ -29,7 +29,7 @@ namespace meta {
 TORCH_META_FUNC(sin) (
   const Tensor& self, IntArrayRef output_size
 ) {
-  unary_float_op(maybe_get_output(), self);
+  build(unary_float_op(maybe_get_output(), self));
 }
 
 } // namespace meta
@@ -357,7 +357,7 @@ Tensor& sgn_out(const Tensor& self, Tensor& result) {
 Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
-TORCH_IMPL_FUNC(sin) (const Tensor& self, const Tensor& result) {
+TORCH_IMPL_FUNC(sin_out) (const Tensor& self, const Tensor& result) {
   sin_stub(device_type(), *this);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
