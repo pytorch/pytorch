@@ -3099,34 +3099,44 @@ t2.start()
         kMinLargeAlloc = 10485760
         kRoundLarge = 2097152
 
+        elem = 4
+
         # this was annoying to write but stresses the expectations pretty rigorously
-        cases = ((512, 1, kSmallBuffer, "small_pool"),)
-                 # (kSmallSize // 2, 2, 2 * kSmallBuffer, "small_pool"),
+        cases = ((512 // elem, 1, kSmallBuffer, "small_pool"),
+                 (kSmallSize // elem, 2, 2 * kSmallBuffer, "small_pool"),)
                  # (kSmallSize + 512, 1, kLargeBuffer, "large_pool"),
                  # (kMinLargeAlloc - 512, 2, 2 * kLargeBuffer, "large_pool"),
                  # ( kMinLargeAlloc + 512, 3,
                  #  kRoundLarge * ((kMinLargeAlloc + 512 + kRoundLarge - 1) // kRoundLarge),
                  #  "large_pool"))
 
-        stats_to_check = ("segment.", "allocated_bytes.", "active.", "active_bytes.")
+        stats_to_check = ("segment.",
+                          "reserved_bytes.",
+                          "active.",
+                          "active_bytes.")
 
-        for (size,
+        for (numel,
              delta_cudaMallocs,
              delta_cudaMalloc_bytes,
              pool_string) in cases:
-            delta_active_blocks = 3
-            delta_active_bytes = 3 * size
+            gc.collect()
+            torch.cuda.empty_cache()
 
-            a = torch.ones((size,), device="cuda")
+            delta_active_blocks = 2  # one from "b" plus a sneaky one from CUDAGraph's one-element rng offset holder
+            delta_active_bytes = numel * elem + 512  # + 512 for CUDAGraph's rng offset holder
+
+            a = torch.ones((numel,), device="cuda")
+
             precapture_stats = torch.cuda.memory_stats()
 
             g = torch.cuda._Graph()
             g.capture_begin()
             b = a.clone()
-            # for _ in range(5):
-            #     # Needed bytes high water mark should be 3 * size of b
-            #     b = b.clone() + 1
+            for _ in range(5):
+                b = b.clone() + 1
             g.capture_end()
+
+            gc.collect()
 
             postcapture_stats = torch.cuda.memory_stats()
 
@@ -3138,25 +3148,29 @@ t2.start()
                 stat = stat + pool_string + ".current"
                 current = postcapture_stats[stat] - precapture_stats[stat]
                 self.assertEqual(current, expected, "Pre to post capture delta of " +
-                                 stat + " = {}, expected = {}, size = {}".format(current, expected, size))
+                                 stat + " = {}, expected = {}, numel = {}".format(current, expected, numel))
 
             g.replay()
-            self.assertEqual(a.sum().item(), 6 * size)
+            self.assertEqual(b.sum().item(), 6 * numel)
 
             del g
             gc.collect()
             torch.cuda.empty_cache()
             postdel_stats = torch.cuda.memory_stats()
 
-            self.assertEqual(a.sum().item(), 6 * size)
+            self.assertEqual(b.sum().item(), 6 * numel)
 
             # b should be the only live reference remaining from the graph's private pool
-            expecteds = (1, size, 1, size)
+            expecteds = (1, kSmallBuffer, 1, numel * elem)
             for stat, expected in zip(stats_to_check, expecteds):
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
-                self.assertEqual(current, expected,
-                                 stat + " = {}, expected = {}, size = {}".format(current, expected, size))
+                self.assertEqual(current, expected, "Pre capture to post graph delete delta of " +
+                                 stat + " = {}, expected = {}, numel = {}".format(current, expected, numel))
+
+            # deleting b before the next test is essential, otherwise b will be overwritten in the next capture,
+            # contributing a spurious -1 to the change in active blocks during the next capture.
+            del b
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or

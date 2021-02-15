@@ -221,8 +221,9 @@ struct AllocParams {
 
 // CUDA graphs helper
 struct PrivatePool {
-  PrivatePool() :
-    use_count(1),
+  PrivatePool(int init_use_count) :
+    use_count(init_use_count),
+    cudaMalloc_count(0),
     large_blocks(BlockComparator, false, this),
     small_blocks(BlockComparator, true, this) {}
   // Number of live graphs using this pool
@@ -616,7 +617,7 @@ class DeviceCachingAllocator {
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool. Make a new pool for this capture.
-      graph_pools.insert({mempool_id, PrivatePool()});
+      graph_pools.emplace(mempool_id, 1);
     } else {
       // mempool_id references an existing pool, which the current capture will share.
       // Check this pool is live (at least one other capture already references it).
@@ -649,7 +650,7 @@ class DeviceCachingAllocator {
     // this graph's pool when it discovers they're unused (unsplit).
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
-    auto uc = it->second.use_count--;
+    auto uc = --it->second.use_count;
     TORCH_INTERNAL_ASSERT(uc >= 0);
     if (uc == 0) {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
@@ -760,7 +761,6 @@ class DeviceCachingAllocator {
         auto it1 = graph_pools.find(it0->second);
         TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
         if (size <= kSmallSize) {
-          std::cout << "desoto" << std::endl;
           return it1->second.small_blocks;
         } else {
           return it1->second.large_blocks;
@@ -872,16 +872,17 @@ class DeviceCachingAllocator {
     free_blocks(large_blocks);
     free_blocks(small_blocks);
 
-    for (const auto& id_and_PrivatePool : graph_pools_freeable) {
+    for (auto it = graph_pools_freeable.begin(); it != graph_pools_freeable.end(); ) {
       // See notifyCaptureDestroy for the strategy here.
-      TORCH_INTERNAL_ASSERT(id_and_PrivatePool.second->use_count == 0);
-      free_blocks(id_and_PrivatePool.second->small_blocks);
-      free_blocks(id_and_PrivatePool.second->large_blocks);
-      if (id_and_PrivatePool.second->cudaMalloc_count == 0) {
-        auto erase_count = graph_pools.erase(id_and_PrivatePool.first);
+      TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
+      free_blocks(it->second->small_blocks);
+      free_blocks(it->second->large_blocks);
+      if (it->second->cudaMalloc_count == 0) {
+        auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
-        erase_count = graph_pools_freeable.erase(id_and_PrivatePool.first);
-        TORCH_INTERNAL_ASSERT(erase_count == 1);
+        it = graph_pools_freeable.erase(it);
+      } else {
+        ++it;
       }
     }
 
