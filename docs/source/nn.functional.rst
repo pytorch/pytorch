@@ -338,6 +338,11 @@ Dropout functions
 
 .. autofunction:: alpha_dropout
 
+:hidden:`feature_dropout`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: feature_dropout
+
 :hidden:`feature_alpha_dropout`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -184,6 +184,46 @@ class AlphaDropout(_DropoutNd):
         return F.alpha_dropout(input, self.p, self.training)
 
 
+class FeatureDropout(_DropoutNd):
+    r"""Randomly masks out entire channels (a channel is a feature map,
+    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
+    is a tensor :math:`\text{input}[i, j]`) of the input tensor).
+
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
+
+    Internally used by `DropoutXd` making stack traces less confusing.
+
+    As described in the paper
+    `Efficient Object Localization Using Convolutional Networks`_ ,
+    if adjacent pixels within feature maps are strongly correlated
+    (as is normally the case in early convolution layers) then i.i.d. dropout
+    will not regularize the activations and will otherwise just result
+    in an effective learning rate decrease.
+
+    Args:
+        p (float, optional): probability of an element to be zeroed. Default: 0.5
+        inplace (bool, optional): If set to ``True``, will do this operation
+            in-place
+
+    Shape:
+        - Input: :math:`(N, C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+
+    Examples::
+
+        >>> m = nn.FeatureDropout(p=0.2)
+        >>> input = torch.randn(20, 16, 4, 32, 32)
+        >>> output = m(input)
+
+    .. _Efficient Object Localization Using Convolutional Networks:
+       https://arxiv.org/abs/1411.4280
+    """
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.feature_dropout(input, self.p, self.training)
+
+
 class FeatureAlphaDropout(_DropoutNd):
     r"""Randomly masks out entire channels (a channel is a feature map, 
     e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input 

@@ -104,6 +104,9 @@ def dropout2d(input: Tensor, p: float = ..., training: bool = ..., inplace: bool
 def dropout3d(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
 
 
+def feature_dropout(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
+
+
 def feature_alpha_dropout(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
 
 

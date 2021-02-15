@@ -242,6 +242,8 @@ Dropout Layers
     nn.Dropout2d
     nn.Dropout3d
     nn.AlphaDropout
+    nn.FeatureDropout
+    nn.FeatureAlphaDropout
 
 Sparse Layers
 -------------
