@@ -18,7 +18,7 @@ namespace {
 
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
-    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) &&
+    bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
                                 (dropout_state == 0.0) &&
