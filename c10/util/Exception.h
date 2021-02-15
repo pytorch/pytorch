@@ -154,6 +154,12 @@ C10_API void set_warning_handler(WarningHandler* handler) noexcept(true);
 /// Gets the global warning handler.
 C10_API WarningHandler* get_warning_handler() noexcept(true);
 
+/// The TORCH_WARN_ONCE macro is difficult to test for. Use
+/// setWarnAlways(true) to turn it into TORCH_WARN, which can be
+/// tested for more easily.
+C10_API void set_warnAlways(bool) noexcept(true);
+C10_API bool get_warnAlways(void) noexcept(true);
+
 } // namespace Warning
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected
@@ -279,24 +285,25 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
 // (unlike assert()).
 //
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_INTERNAL_ASSERT(cond, ...)      \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
-        #cond " INTERNAL ASSERT FAILED at"    \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
+#define TORCH_INTERNAL_ASSERT(cond, ...)                            \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                             \
+    ::c10::detail::torchCheckFail(                                  \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__),        \
+        #cond "INTERNAL ASSERT FAILED at" C10_STRINGIZE(__FILE__)); \
   }
 #else
-#define TORCH_INTERNAL_ASSERT(cond, ...)      \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error, ::c10::str(        \
-        #cond " INTERNAL ASSERT FAILED at "   \
-        C10_STRINGIZE(__FILE__)               \
-        ":"                                   \
-        C10_STRINGIZE(__LINE__)               \
-        ", please report a bug to PyTorch. ", \
-        ::c10::str(__VA_ARGS__)               \
-    ));                                       \
+#define TORCH_INTERNAL_ASSERT(cond, ...)                        \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
+    ::c10::detail::torchCheckFail(                              \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__),    \
+        ::c10::str(                                             \
+            #cond " INTERNAL ASSERT FAILED at "                 \
+            C10_STRINGIZE(__FILE__)                             \
+            ":"                                                 \
+            C10_STRINGIZE(__LINE__)                             \
+            ", please report a bug to PyTorch. ",               \
+            ::c10::str(__VA_ARGS__)                             \
+        ));                                                     \
   }
 #endif
 
@@ -418,18 +425,25 @@ namespace detail {
 // arguments which are concatenated into the warning message using operator<<
 //
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_WARN_ONCE(...) \
+#define _TORCH_WARN_ONCE(...) \
   C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
     ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, {}, false); \
     return true; \
   }()
 #else
-#define TORCH_WARN_ONCE(...) \
+#define _TORCH_WARN_ONCE(...) \
   C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
     ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false); \
     return true; \
   }()
 #endif
+
+#define TORCH_WARN_ONCE(...) \
+  if (::c10::Warning::get_warnAlways()) { \
+    TORCH_WARN(__VA_ARGS__); \
+  } else { \
+    _TORCH_WARN_ONCE(__VA_ARGS__); \
+  }
 
 // ----------------------------------------------------------------------------
 // Deprecated macros

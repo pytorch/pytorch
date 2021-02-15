@@ -72,7 +72,7 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
 
   std::vector<WorkerInfo> getWorkerInfos() const override;
 
-  void join() override;
+  void join(bool shutdown = false) override;
 
   void sync() override;
 

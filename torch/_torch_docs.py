@@ -1672,13 +1672,13 @@ reciprocal(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
+.. math::
+    \text{out}_{i} = \frac{1}{\text{input}_{i}}
+
 .. note::
     Unlike NumPy's reciprocal, torch.reciprocal supports integral inputs. Integral
     inputs to reciprocal are automatically :ref:`promoted <type-promotion-doc>` to
     the default scalar type.
-
-.. math::
-    \text{out}_{i} = \frac{1}{\text{input}_{i}}
 """ + r"""
 Args:
     {input}
@@ -2741,7 +2741,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.div, r"""
-div(input, other, *, rounding_mode='true' out=None) -> Tensor
+div(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -2764,7 +2764,7 @@ Args:
 Keyword args:
     rounding_mode (str, optional): Type of rounding applied to the result:
 
-        * ``"true"`` - default behavior. Performs no rounding and, if both :attr:`input` and
+        * None - default behavior. Performs no rounding and, if both :attr:`input` and
           :attr:`other` are integer types, promotes the inputs to the default scalar type.
           Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
         * ``"trunc"`` - rounds the results of the division towards zero.
@@ -2806,7 +2806,7 @@ Examples::
 """.format(**common_args))
 
 add_docstr(torch.divide, r"""
-divide(input, other, *, rounding_mode='true', out=None) -> Tensor
+divide(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Alias for :func:`torch.div`.
 """)
@@ -3158,9 +3158,12 @@ add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
 .. warning::
-    This function's name is a misnomer. It actually rounds the
-    quotient towards zero instead of taking its floor. This behavior
-    will be deprecated in a future PyTorch release.
+
+    :func:`torch.floor_divide` is deprecated and will be removed in a future PyTorch
+    release. Its name is a misnomer because it actually rounds the quotient
+    towards zero instead of taking its floor. To keep the current behavior use
+    :func:`torch.div` with ``rounding_mode='trunc'``. To actually perform floor
+    division, use :func:`torch.div` with ``rounding_mode='floor'``.
 
 Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
 quotient towards zero. Equivalently, it truncates the quotient(s):
@@ -9207,7 +9210,7 @@ Example::
 add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
-Alias for :func:`torch.div` with ``rounding_mode='true'``.
+Alias for :func:`torch.div` with ``rounding_mode=None``.
 """.format(**common_args))
 
 add_docstr(torch.trunc,
@@ -9231,6 +9234,91 @@ Example::
     >>> torch.trunc(a)
     tensor([ 3.,  0., -0., -0.])
 """.format(**common_args))
+
+add_docstr(torch.fake_quantize_per_tensor_affine,
+           r"""
+fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+
+Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`scale`,
+:attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`.
+
+.. math::
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
+
+Args:
+    input (Tensor): the input value(s), in ``torch.float32``.
+    scale (double): quantization scale
+    zero_point (int64): quantization zero_point
+    quant_min (int64): lower bound of the quantized domain
+    quant_max (int64): upper bound of the quantized domain
+
+Returns:
+    Tensor: A newly fake_quantized tensor
+
+Example::
+
+    >>> x = torch.randn(4)
+    >>> x
+    tensor([ 0.0552,  0.9730,  0.3973, -1.0780])
+    >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
+    tensor([0.1000, 1.0000, 0.4000, 0.0000])
+""")
+
+add_docstr(torch.fake_quantize_per_channel_affine,
+           r"""
+fake_quantize_per_channel_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+
+Returns a new tensor with the data in :attr:`input` fake quantized per channel using :attr:`scale`,
+:attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`, across the channel specified by :attr:`axis`.
+
+.. math::
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
+
+Args:
+    input (Tensor): the input value(s), in ``torch.float32``.
+    scale (Tensor): quantization scale, per channel
+    zero_point (Tensor): quantization zero_point, per channel
+    axis (int32): channel axis
+    quant_min (int64): lower bound of the quantized domain
+    quant_max (int64): upper bound of the quantized domain
+
+Returns:
+    Tensor: A newly fake_quantized per channel tensor
+
+Example::
+
+    >>> x = torch.randn(2, 2, 2)
+    >>> x
+    tensor([[[-0.2525, -0.0466],
+             [ 0.3491, -0.2168]],
+
+            [[-0.5906,  1.6258],
+             [ 0.6444, -0.0542]]])
+    >>> scales = (torch.randn(2) + 1) * 0.05
+    >>> scales
+    tensor([0.0475, 0.0486])
+    >>> zero_points = torch.zeros(2).to(torch.long)
+    >>> zero_points
+    tensor([0, 0])
+    >>> torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
+    tensor([[[0.0000, 0.0000],
+             [0.3405, 0.0000]],
+
+            [[0.0000, 1.6134],
+            [0.6323, 0.0000]]])
+""")
 
 add_docstr(torch.fix,
            r"""
