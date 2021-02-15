@@ -3391,16 +3391,14 @@
     CPU, CUDA: sin_out
 
 - func: sinc(Tensor self) -> Tensor
-  variants: function, method
-  dispatch:
-    DefaultBackend: sinc
+  structured_delegate: sinc.out
 
 - func: sinc_(Tensor(a!) self) -> Tensor(a!)
-  variants: function, method
-  dispatch:
-    DefaultBackend: sinc_
+  structured_delegate: sinc.out
 
 - func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sinc_out
 
@@ -6113,7 +6111,6 @@
   variants: function, method
 
 - func: signbit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: signbit_out
     CUDA: signbit_out
