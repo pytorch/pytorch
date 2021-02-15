@@ -316,18 +316,22 @@ void initPythonIRBindings(PyObject* module_) {
           "inputs",
           [](Graph& g) {
             return py::make_iterator(g.inputs().begin(), g.inputs().end());
-          })
+          },
+          py::keep_alive<0, 1>())
       .def(
           "outputs",
           [](Graph& g) {
             return py::make_iterator(g.outputs().begin(), g.outputs().end());
-          })
-      // TODO: Iterator invalidation might make this hazardous
+          },
+          py::keep_alive<0, 1>())
+      // We keep the graph alive while the iterator lives. Destroying
+      // nodes might still be hazardous.
       .def(
           "nodes",
           [](Graph& g) {
             return py::make_iterator(g.nodes().begin(), g.nodes().end());
-          })
+          },
+          py::keep_alive<0, 1>())
       .def(
           "findNode",
           [](Graph& g, const std::string& kind, bool recurse) {

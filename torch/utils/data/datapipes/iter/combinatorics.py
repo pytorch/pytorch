@@ -1,5 +1,5 @@
 from torch.utils.data import IterDataPipe, Sampler, SequentialSampler
-from typing import TypeVar, Type, Iterator, Sized
+from typing import TypeVar, Type, Iterator, Sized, Optional, Tuple, Dict
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -20,14 +20,17 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
                  datapipe: IterDataPipe,
                  *,
                  sampler: Type[Sampler] = SequentialSampler,
-                 **kwargs
+                 sampler_args: Optional[Tuple] = None,
+                 sampler_kwargs: Optional[Dict] = None
                  ) -> None:
         assert isinstance(datapipe, Sized), \
             "Sampler class requires input datapipe implemented `__len__`"
         super().__init__()
         self.datapipe = datapipe
+        self.sampler_args = () if sampler_args is None else sampler_args
+        self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
         # https://github.com/python/mypy/pull/9629 will solve
-        self.sampler = sampler(data_source=self.datapipe, **kwargs)  # type: ignore
+        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args, **self.sampler_kwargs)  # type: ignore
 
     def __iter__(self) -> Iterator[T_co]:
         return iter(self.sampler)
