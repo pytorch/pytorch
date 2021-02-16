@@ -4,7 +4,7 @@ namespace c10d {
 
 // When training runs at these iterations, log the runtime
 // stats.
-const int LoggingIterations[] = {10, 1000, 10000};
+const int LoggingIterations[] = {10, 100, 1000};
 
 namespace {
 
@@ -238,7 +238,7 @@ void Logger::set_runtime_stats_and_log() {
   if (std::find(
           std::begin(LoggingIterations),
           std::end(LoggingIterations),
-          reducer_->num_iterations_) != std::end(LoggingIterations)) {
+          num_iterations_stats_recorded_) != std::end(LoggingIterations)) {
     LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 }
