@@ -3,13 +3,14 @@ from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
 from types import FunctionType
 from struct import pack
 
-from .module_environment import ModuleEnv, ModuleEnvError
+from .importer import Importer, SysImporter, ObjMismatchError, ObjNotFoundError
+
 
 class CustomImportPickler(_Pickler):
     dispatch = _Pickler.dispatch.copy()
 
-    def __init__(self, module_env: ModuleEnv, *args, **kwargs):
-        self.module_env = module_env
+    def __init__(self, importer: Importer, *args, **kwargs):
+        self.importer = importer
         super().__init__(*args, **kwargs)
 
     def save_global(self, obj, name=None):
@@ -21,11 +22,11 @@ class CustomImportPickler(_Pickler):
 
         # CHANGED: import module from module environment instead of __import__
         try:
-            module_name, name = self.module_env.get_name(obj, name, check_obj=False)
-        except ModuleEnvError as err:
+            module_name, name = self.importer.get_name(obj, name)
+        except (ObjNotFoundError, ObjMismatchError) as err:
             raise PicklingError(f"Can't pickle {obj}: {str(err)}") from None
 
-        module = self.module_env.import_module(module_name)
+        module = self.importer.import_module(module_name)
         _, parent = _getattribute(module, name)
         # END CHANGED
 
@@ -72,10 +73,10 @@ class CustomImportPickler(_Pickler):
         self.memoize(obj)
     dispatch[FunctionType] = save_global
 
-def create_custom_import_pickler(data_buf, module_env):
-    if module_env.is_default():
+def create_custom_import_pickler(data_buf, importer):
+    if importer is SysImporter:
         # if we are using the normal import library system, then
         # we can use the C implementation of pickle which is faster
         return Pickler(data_buf, protocol=3)
     else:
-        return CustomImportPickler(module_env, data_buf, protocol=3)
+        return CustomImportPickler(importer, data_buf, protocol=3)
