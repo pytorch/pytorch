@@ -405,7 +405,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
       // bucket_view. If gradient_as_bucket_view_ is set as true, let grad point
       // to bucket_view. If grad has already been set as views of buckets in
       // previous iterations, no copy is needed.
-      if (!grad.is_alias_of(bucket_view)) {
+      if (!c10d::shareSameStorage(grad, bucket_view)) {
         this->copy_grad_to_bucket(grad, bucket_view);
         if (gradient_as_bucket_view_) {
           // Let grad point to bucket_view buffer.
@@ -931,7 +931,7 @@ void Reducer::initialize_bucket_views(
     if (gradient_as_bucket_view_) {
       auto& bucket_view = replica.bucket_views_in.back();
       runGradCallbackForVariable(v, [&](auto& grad) {
-        if (grad.defined() && !grad.is_alias_of(bucket_view)) {
+        if (grad.defined() && !c10d::shareSameStorage(grad, bucket_view)) {
           bucket_view.copy_(grad);
           grad = bucket_view;
           // The grad is modefied and needs to be written back.
@@ -1136,7 +1136,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         // allreduced results in a newly allocated tensor, copy bucket_view_out
         // back to bucket_view_in that referring to replica.content tensor and
         // grad.
-        if (!bucket_view_in.is_alias_of(bucket_view_out)) {
+        if (!c10d::shareSameStorage(bucket_view_in, bucket_view_out)) {
           bucket_view_in.copy_(bucket_view_out);
         }
         runGradCallbackForVariable(variable, [&](auto& grad) {
@@ -1147,7 +1147,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
             if (!grad.defined()) {
               grad = bucket_view_in;
             } else {
-              if (!grad.is_alias_of(bucket_view_in)) {
+              if (!c10d::shareSameStorage(grad, bucket_view_in)) {
                 grad.copy_(bucket_view_in);
                 TORCH_WARN_ONCE(
                     "Detected at least one parameter gradient is not the "
