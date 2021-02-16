@@ -8785,6 +8785,18 @@
   variants: function
 
 ## Functions related to the fast Fourier transform and the torch.fft namespace
+# Note [special namespace binding]
+# Functions in the special python module should have their names start with
+#   "special_" underscore and be bound to the desired Python name in
+#   torch/special/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/special.h.
+#   The "special_" names should be hidden from the user and not documented.
+#
+
+- func: special_lgamma(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+## Functions related to the fast Fourier transform and the torch.fft namespace
 # Note [FFT namespace binding]
 # Functions in the fft python module should have their names start with
 #   "fft_" underscore and be bound to the desired Python name in

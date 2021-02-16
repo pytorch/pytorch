@@ -629,6 +629,7 @@ import torch.optim
 import torch.optim._multi_tensor
 import torch.multiprocessing
 import torch.sparse
+import torch.special
 import torch.utils.backcompat
 import torch.onnx
 import torch.jit
