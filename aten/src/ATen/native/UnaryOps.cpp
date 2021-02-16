@@ -29,12 +29,65 @@ namespace meta {
 TORCH_META_FUNC(sin) (
   const Tensor& self
 ) {
-  build_unary_op(maybe_get_output(), self);
+  build_unary_float_op(maybe_get_output(), self);
 }
 
 } // namespace meta
 
 namespace native {
+DEFINE_DISPATCH(abs_stub);
+DEFINE_DISPATCH(angle_stub);
+DEFINE_DISPATCH(real_stub);
+DEFINE_DISPATCH(imag_stub);
+DEFINE_DISPATCH(conj_stub);
+DEFINE_DISPATCH(acos_stub);
+DEFINE_DISPATCH(acosh_stub);
+DEFINE_DISPATCH(asinh_stub);
+DEFINE_DISPATCH(atanh_stub);
+DEFINE_DISPATCH(asin_stub);
+DEFINE_DISPATCH(atan_stub);
+DEFINE_DISPATCH(bitwise_not_stub);
+DEFINE_DISPATCH(ceil_stub);
+DEFINE_DISPATCH(clamp_stub);
+DEFINE_DISPATCH(clamp_max_stub);
+DEFINE_DISPATCH(clamp_min_stub);
+DEFINE_DISPATCH(cos_stub);
+DEFINE_DISPATCH(cosh_stub);
+DEFINE_DISPATCH(digamma_stub);
+DEFINE_DISPATCH(erf_stub);
+DEFINE_DISPATCH(erfc_stub);
+DEFINE_DISPATCH(erfinv_stub);
+DEFINE_DISPATCH(exp_stub);
+DEFINE_DISPATCH(exp2_stub);
+DEFINE_DISPATCH(expm1_stub);
+DEFINE_DISPATCH(floor_stub);
+DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(i0_stub);
+DEFINE_DISPATCH(log_stub);
+DEFINE_DISPATCH(log10_stub);
+DEFINE_DISPATCH(log1p_stub);
+DEFINE_DISPATCH(log2_stub);
+DEFINE_DISPATCH(logical_not_stub);
+DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(nan_to_num_stub);
+DEFINE_DISPATCH(polygamma_stub);
+DEFINE_DISPATCH(reciprocal_stub);
+DEFINE_DISPATCH(round_stub);
+DEFINE_DISPATCH(rsqrt_stub);
+DEFINE_DISPATCH(sigmoid_stub);
+DEFINE_DISPATCH(logit_stub);
+DEFINE_DISPATCH(sign_stub);
+DEFINE_DISPATCH(signbit_stub);
+DEFINE_DISPATCH(sgn_stub);
+DEFINE_DISPATCH(sin_stub);
+DEFINE_DISPATCH(sinc_stub);
+DEFINE_DISPATCH(sinh_stub);
+DEFINE_DISPATCH(sqrt_stub);
+DEFINE_DISPATCH(tan_stub);
+DEFINE_DISPATCH(tanh_stub);
+DEFINE_DISPATCH(trigamma_stub);
+DEFINE_DISPATCH(trunc_stub);
+DEFINE_DISPATCH(lgamma_stub);
 
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
@@ -665,60 +718,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, lgamma_stub); }
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
-
-DEFINE_DISPATCH(abs_stub);
-DEFINE_DISPATCH(angle_stub);
-DEFINE_DISPATCH(real_stub);
-DEFINE_DISPATCH(imag_stub);
-DEFINE_DISPATCH(conj_stub);
-DEFINE_DISPATCH(acos_stub);
-DEFINE_DISPATCH(acosh_stub);
-DEFINE_DISPATCH(asinh_stub);
-DEFINE_DISPATCH(atanh_stub);
-DEFINE_DISPATCH(asin_stub);
-DEFINE_DISPATCH(atan_stub);
-DEFINE_DISPATCH(bitwise_not_stub);
-DEFINE_DISPATCH(ceil_stub);
-DEFINE_DISPATCH(clamp_stub);
-DEFINE_DISPATCH(clamp_max_stub);
-DEFINE_DISPATCH(clamp_min_stub);
-DEFINE_DISPATCH(cos_stub);
-DEFINE_DISPATCH(cosh_stub);
-DEFINE_DISPATCH(digamma_stub);
-DEFINE_DISPATCH(erf_stub);
-DEFINE_DISPATCH(erfc_stub);
-DEFINE_DISPATCH(erfinv_stub);
-DEFINE_DISPATCH(exp_stub);
-DEFINE_DISPATCH(exp2_stub);
-DEFINE_DISPATCH(expm1_stub);
-DEFINE_DISPATCH(floor_stub);
-DEFINE_DISPATCH(frac_stub);
-DEFINE_DISPATCH(i0_stub);
-DEFINE_DISPATCH(log_stub);
-DEFINE_DISPATCH(log10_stub);
-DEFINE_DISPATCH(log1p_stub);
-DEFINE_DISPATCH(log2_stub);
-DEFINE_DISPATCH(logical_not_stub);
-DEFINE_DISPATCH(neg_stub);
-DEFINE_DISPATCH(nan_to_num_stub);
-DEFINE_DISPATCH(polygamma_stub);
-DEFINE_DISPATCH(reciprocal_stub);
-DEFINE_DISPATCH(round_stub);
-DEFINE_DISPATCH(rsqrt_stub);
-DEFINE_DISPATCH(sigmoid_stub);
-DEFINE_DISPATCH(logit_stub);
-DEFINE_DISPATCH(sign_stub);
-DEFINE_DISPATCH(signbit_stub);
-DEFINE_DISPATCH(sgn_stub);
-DEFINE_DISPATCH(sin_stub);
-DEFINE_DISPATCH(sinc_stub);
-DEFINE_DISPATCH(sinh_stub);
-DEFINE_DISPATCH(sqrt_stub);
-DEFINE_DISPATCH(tan_stub);
-DEFINE_DISPATCH(tanh_stub);
-DEFINE_DISPATCH(trigamma_stub);
-DEFINE_DISPATCH(trunc_stub);
-DEFINE_DISPATCH(lgamma_stub);
 
 } // namespace native
 } // namespace at
