@@ -89,6 +89,10 @@ struct C10_API Storage {
     return storage_impl_.get()->set_data_ptr(std::move(data_ptr));
   };
 
+  void set_data_ptr_noswap(at::DataPtr&& data_ptr) const {
+    return storage_impl_.get()->set_data_ptr_noswap(std::move(data_ptr));
+  };
+
   DeviceType device_type() const {
     return storage_impl_->device_type();
   }

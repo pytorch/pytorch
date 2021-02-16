@@ -93,7 +93,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     return std::move(data_ptr);
   };
 
-  void set_data_ptr_fast(at::DataPtr&& data_ptr) {
+  void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
     data_ptr_ = std::move(data_ptr);
   }
 

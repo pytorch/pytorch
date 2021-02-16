@@ -1386,12 +1386,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         auto size = numel_;
         auto dtor = data_type_.placementDelete();
         auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
-        storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
+        storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.placementNew()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
-        storage_.set_data_ptr(
+        storage_.set_data_ptr_noswap(
             allocator->allocate(numel_ * data_type_.itemsize()));
       }
       storage_.set_nbytes(numel_ * data_type_.itemsize());
