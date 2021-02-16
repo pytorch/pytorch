@@ -153,7 +153,6 @@ Tensor max_pool2d(
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(
       dilation[0] == dilation[1] == 1, "dilation is not supported on MPSCNN");
-  TORCH_CHECK(ceil_mode == false, "ceil_mode is not supported on MPSCNN");
   return mpscnn::max_pool2d(
       input, kernel_size, stride, padding, dilation, ceil_mode);
 }
@@ -192,6 +191,10 @@ Tensor t(const Tensor& input) {
 Tensor view(const Tensor& input, IntArrayRef size) {
   TORCH_CHECK(input.is_metal());
   return mpscnn::view(input, size);
+}
+
+Tensor cat(const TensorList inputs, int64_t dim) {
+  return mpscnn::cat(inputs, dim);
 }
 
 Tensor upsample_nearest2d_vec(
@@ -275,6 +278,7 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("sub.Tensor", TORCH_FN(sub_Tensor));
   m.impl("upsample_nearest2d.vec", TORCH_FN(upsample_nearest2d_vec));
   m.impl("view", TORCH_FN(view));
+  m.impl("_cat", TORCH_FN(cat));
   m.impl("adaptive_avg_pool2d", TORCH_FN(adaptive_avg_pool2d));
   m.impl("hardtanh_", TORCH_FN(hardtanh_));
   m.impl("reshape", TORCH_FN(reshape));
