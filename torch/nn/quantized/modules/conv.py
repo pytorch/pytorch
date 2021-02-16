@@ -266,11 +266,10 @@ class Conv1d(_ConvNd):
                  groups: int = 1,
                  bias: bool = True,
                  padding_mode: str = 'zeros'):
-        kernel_size = _pair_from_first(kernel_size)
-        stride = _pair_from_first(stride)
-        padding = _pair_from_first(padding)
-        dilation = _pair_from_first(dilation)
-
+        kernel_size = _single(kernel_size)
+        stride = _single(stride)
+        padding = _single(padding)
+        dilation = _single(dilation)
         # Subclasses of _ConvNd needs to call _init rather than __init__. See
         # discussion on PR #49702
         super(Conv1d, self)._init(
@@ -281,12 +280,16 @@ class Conv1d(_ConvNd):
         return 'QuantizedConv1d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+        stride = _pair_from_first(self.stride)
+        padding = _pair_from_first(self.padding)
+        dilation = _pair_from_first(self.dilation)
+
         if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv1d_prepack(
-                w, b, self.stride, self.padding, self.dilation, self.groups)
+                w, b, stride, padding, dilation, self.groups)
         else:
             self._packed_params = torch.ops.quantized.conv1d_prepack(
-                w, b, self.stride, _pair(0), self.dilation,
+                w, b, stride, _pair(0), dilation,
                 self.groups)
 
     def _weight_bias(self):
