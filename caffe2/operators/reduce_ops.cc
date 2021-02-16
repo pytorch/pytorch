@@ -1,10 +1,11 @@
 #include "caffe2/operators/reduce_ops.h"
 
+#include <c10/util/accumulate.h>
+#include "caffe2/utils/math.h"
+
 #include <algorithm>
 #include <functional>
 #include <vector>
-
-#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -18,8 +19,7 @@ void ComputeReduceMinMaxGradient(
     const T* X_data,
     const T* Y_data,
     T* dX_data) {
-  const int dX_size = std::accumulate(
-      dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+  const auto dX_size = c10::multiply_integers(dX_dims.cbegin(), dX_dims.cend());
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
@@ -342,8 +342,7 @@ bool L1Reducer<CPUContext>::Backward(
     T* dX_data,
     CPUContext* /* context */) const {
   const float kEps = 1e-12f;
-  const int dX_size = std::accumulate(
-      dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+  const auto dX_size = c10::multiply_integers(dX_dims.cbegin(), dX_dims.cend());
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
@@ -373,8 +372,7 @@ bool L2Reducer<CPUContext>::Backward(
     T* dX_data,
     CPUContext* /* context */) const {
   const float kEps = 1e-12f;
-  const int dX_size = std::accumulate(
-      dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+  const auto dX_size = c10::multiply_integers(dX_dims.cbegin(), dX_dims.cend());
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
