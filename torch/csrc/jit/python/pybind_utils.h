@@ -346,6 +346,15 @@ inline InferredType tryToInferType(py::handle input) {
     }
   }
 
+  auto is_script_object_wrapper = py::module::import("torch.jit._recursive")
+                                      .attr("is_script_object_wrapper")(input);
+  if (py::cast<bool>(is_script_object_wrapper)) {
+    auto object = py::module::import("torch.jit._recursive")
+                      .attr("unwrap_script_object")(input);
+    auto cpp_instance = py::cast<Object>(object);
+    return InferredType(cpp_instance.type());
+  }
+
   if (py::isinstance<Object>(input)) {
     auto object = py::cast<Object>(input);
     return InferredType(object.type());

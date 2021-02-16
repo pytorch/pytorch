@@ -425,7 +425,10 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         for name, (attr_type, is_param) in concrete_type.get_attributes().items():
             orig_value = getattr(nn_module, name)
             orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
-            cpp_module.setattr(name, orig_value)
+            if isinstance(orig_value, torch.jit._script.ScriptObjectWrapper):
+                cpp_module.setattr(name, orig_value._c)
+            else:
+                cpp_module.setattr(name, orig_value)
 
         # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,
         #    recursively scripting them.
@@ -780,6 +783,15 @@ def wrap_script_object(script_object):
     Wrap this torch._C.Object in a Python ScriptObjectWrapper.
     """
     return torch.jit.ScriptObjectWrapper(script_object)
+
+def is_script_object_wrapper(script_object_wrapper):
+    return isinstance(script_object_wrapper, torch.jit.ScriptObjectWrapper)
+
+def unwrap_script_object(script_object_wrapper):
+    if is_script_object_wrapper(script_object_wrapper):
+        return script_object_wrapper._c
+    else:
+        raise RuntimeError("can only unwrap torch.jit.ScriptObjectWrapper")
 
 def wrap_cpp_module(cpp_module):
     """
