@@ -1117,13 +1117,44 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
 }
 
 void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad) {
+  // Populates exec_info so nodes that should be executed have `exec_info[node].needed_ = true`
+  // Only nodes that have a path to any edge in `outputs` should be executed.
+  // The code below populates exec_info using recursion, but the actual code does this
+  // iteratively. Refer to the numbering to see how the actual code corresponds.
+  // A difference to note is that in the iterative version, when you are working with
+  // the current Node, you are reponsible to update your parent's is_needed after all your
+  // children have been updated.
+  //
+  // is_needed = {fn: True for fn in outputs}             # (0)
+  // seen = {}
+  // def compute_is_needed(fn):
+  //   for next_edge in fn.next_edges:
+  //     child_fn = next_edge.fn
+  //     if child_fn in seen and is_needed[child_fn]:     # (1)
+  //       is_needed[fn] = true
+  //     else:
+  //       seen.add(child_fn)
+  //       if compute_is_needed(child_fn):
+  //         is_needed[fn] = true                         # (2)
+  //                                                      # (3) exit for-loop
+  //   return is_needed[fn]
+  // compute_is_needed(graph_root)
+  //
+  // NB: you might be wondering why we don't populate `seen` with outputs. We cannot
+  // because in the case where two outputs lie on the same path, we still need to explore past
+  // the first output or we would miss the nodes that are required to compute the second output.
   int output_idx = 0;
   for (auto & output_edge : outputs) {
+    // (0) `is_needed` above corresponds to `exec_info_[fn].needed_`
     Node *output = output_edge.function.get();
     auto & info = exec_info_[output];
     if (accumulate_grad) {
+      // if called through `.backward()` we directly set `needed_` for all the outputs to true
       info.needed_ = true;
     } else {
+      // otherwise it is `.grad()` and we set exec_info[fn].captures_ instead
+      // In terms of populating the rest of exec_info though, you can basically
+      // think of this as the same as setting `needed_` is true directly.
       if (!info.captures_) {
         info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
       }
@@ -1132,13 +1163,6 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
   }
   captured_vars_.resize(output_idx);
 
-  // NB: this is an uglier version (recursion replaced with iteration) of the following code:
-  // is_needed = {}
-  // def compute_is_needed(fn):
-  //   if fn not in is_needed:
-  //     is_needed[fn] = any(compute_is_needed(next_edge)
-  //                         for next_edge in fn.next_edges)
-  //   return is_needed[fn]
   struct Frame {
     Frame (Node *fn) : fn_(fn), next_next_fn_(0) {}
     Node *fn_;
@@ -1154,40 +1178,41 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
       return nullptr;
     }
   };
+
+  auto nodeShouldExecute = [this](Node *fn) {
+    auto it = exec_info_.find(fn);
+    return it != exec_info_.end() && it->second.should_execute();
+  };
+
   std::vector<Frame> stack;
   std::unordered_set<Node*> seen;
-  for (const auto & input : graph_root.next_edges()) {
-    if (!input.function.get()) continue;
-    if (seen.count(input.function.get()) > 0) continue;
-    stack.emplace_back(input.function.get());
-    while (!stack.empty()) {
-      auto &frame = stack.back();
-      if (Node *next_fn = frame.get_next_fn()) {
-        if (/* bool unseen = */ seen.emplace(next_fn).second) {
-          stack.emplace_back(next_fn);
-          continue; // recurse
-        }
-      } else {
-        // NB: if we were using real recursion we could have saved some lookups
-        // using a return value from recursive call. It would make this manually unrolled
-        // version a lot more complicated, so I skipped that.
-        const auto & next_edges = frame.fn_->next_edges();
-        const bool needed = std::any_of(
-            next_edges.begin(), next_edges.end(), [&](const Edge& edge) {
-              auto it = exec_info_.find(edge.function.get());
-              return it != exec_info_.end() && it->second.should_execute();
-            });
-        exec_info_[frame.fn_].needed_ |= needed;
-        stack.pop_back();
+  stack.emplace_back(&graph_root);
+  exec_info_.emplace(stack.back().fn_, ExecInfo());
+
+  while (!stack.empty()) {
+    auto &frame = stack.back();
+    const auto fn = frame.fn_;
+
+    Node *child_fn = nullptr;
+    while((child_fn = frame.get_next_fn()) && !seen.emplace(child_fn).second) {
+      // (1) next child exists AND has already been seen
+      if (nodeShouldExecute(child_fn)) {
+        exec_info_[fn].needed_ = true;
+      }
+    }
+
+    if (child_fn) {
+      // (2) next child exists but has not been seen
+      stack.emplace_back(child_fn);
+    } else {
+      // (3) no next child exists for `fn` means its `needed` has already been
+      // finalized. pop stack and update parent
+      stack.pop_back();
+      if (nodeShouldExecute(fn) && !stack.empty()) {
+        exec_info_[stack.back().fn_].needed_ = true;
       }
     }
   }
-
-  exec_info_[&graph_root].needed_ |= std::any_of(
-      graph_root.next_edges().begin(), graph_root.next_edges().end(), [&](const Edge& edge) {
-        auto it = exec_info_.find(edge.function.get());
-        return it != exec_info_.end() && it->second.should_execute();
-      });
 }
 
 }} // namespace torch::autograd
