@@ -28,8 +28,13 @@ struct Foo : torch::CustomClassHolder {
   int64_t combine(c10::intrusive_ptr<Foo> b) {
     return this->info() + b->info();
   }
-  ~Foo() {
-    // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
+  ~Foo(){};
+};
+
+struct _StaticMethod : torch::CustomClassHolder {
+  _StaticMethod() {}
+  static int64_t staticMethod(int64_t input) {
+    return 2 * input;
   }
 };
 
@@ -51,12 +56,17 @@ struct FooGetterSetter : torch::CustomClassHolder {
     return y + 4;
   }
 
-  ~FooGetterSetter() {
-    // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
-  }
+  ~FooGetterSetter(){};
 
  private:
   int64_t x, y;
+};
+
+struct FooGetterSetterLambda : torch::CustomClassHolder {
+  int64_t x;
+  FooGetterSetterLambda() : x(0) {}
+  FooGetterSetterLambda(int64_t x_) : x(x_) {}
+  ~FooGetterSetterLambda(){};
 };
 
 struct FooReadWrite : torch::CustomClassHolder {
@@ -64,9 +74,7 @@ struct FooReadWrite : torch::CustomClassHolder {
   const int64_t y;
   FooReadWrite() : x(0), y(0) {}
   FooReadWrite(int64_t x_, int64_t y_) : x(x_), y(y_) {}
-  ~FooReadWrite() {
-    // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
-  }
+  ~FooReadWrite(){};
 };
 
 struct LambdaInit : torch::CustomClassHolder {
@@ -238,6 +246,10 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 };
 
 TORCH_LIBRARY(_TorchScriptTesting, m) {
+  m.class_<_StaticMethod>("_StaticMethod")
+      .def(torch::init<>())
+      .def_static("staticMethod", &_StaticMethod::staticMethod);
+
   m.class_<Foo>("_Foo")
       .def(torch::init<int64_t, int64_t>())
       // .def(torch::init<>())
@@ -250,6 +262,16 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(torch::init<int64_t, int64_t>())
       .def_property("x", &FooGetterSetter::getX, &FooGetterSetter::setX)
       .def_property("y", &FooGetterSetter::getY);
+
+  m.class_<FooGetterSetterLambda>("_FooGetterSetterLambda")
+      .def(torch::init<int64_t>())
+      .def_property(
+          "x",
+          [](const c10::intrusive_ptr<FooGetterSetterLambda>& self) {
+            return self->x;
+          },
+          [](const c10::intrusive_ptr<FooGetterSetterLambda>& self,
+             int64_t val) { self->x = val; });
 
   m.class_<FooReadWrite>("_FooReadWrite")
       .def(torch::init<int64_t, int64_t>())

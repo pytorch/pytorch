@@ -171,6 +171,18 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(old, 7)
         self.assertEqual(new, 15)
 
+        def foo_getter_setter_lambda():
+            foo = torch.classes._TorchScriptTesting._FooGetterSetterLambda(5)
+            old = foo.x
+            foo.x = old + 4
+            new = foo.x
+            return foo, old, new
+        scripted = torch.jit.script(foo_getter_setter_lambda)
+        out, x, y = scripted()
+        self.assertEqual(x, 5)
+        self.assertEqual(y, 9)
+
+
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
             ss = torch.classes._TorchScriptTesting._StackString(["mom"])
@@ -390,3 +402,9 @@ class TestTorchbind(JitTestCase):
 
         obj_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, True)
         self.assertEqual(obj_swap.diff(), -1)
+
+    def test_staticmethod(self):
+        def fn(inp: int) -> int:
+            return torch.classes._TorchScriptTesting._StaticMethod.staticMethod(inp)
+
+        self.checkScript(fn, (1,))

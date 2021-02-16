@@ -153,6 +153,30 @@ class class_ {
     return *this;
   }
 
+  /// Method registration API for static methods.
+  template <typename Func>
+  class_& def_static(std::string name, Func func, std::string doc_string = "") {
+    auto qualMethodName = qualClassName + "." + name;
+    auto schema =
+        c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
+
+    auto wrapped_func =
+        [func = std::move(func)](jit::Stack& stack) mutable -> void {
+      using RetType =
+          typename c10::guts::infer_function_traits_t<Func>::return_type;
+      detail::BoxedProxy<RetType, Func>()(stack, func);
+    };
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
+        qualMethodName,
+        std::move(schema),
+        std::move(wrapped_func),
+        std::move(doc_string));
+
+    classTypePtr->addStaticMethod(method.get());
+    registerCustomClassMethod(std::move(method));
+    return *this;
+  }
+
   // Due to nullptr_t infer problem, we mark the default type of SetterFunc
   // as GetterFunc and we check to make sure the set function is given.
   template <typename GetterFunc, typename SetterFunc = GetterFunc>
