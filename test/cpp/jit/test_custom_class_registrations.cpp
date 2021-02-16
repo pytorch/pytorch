@@ -33,6 +33,13 @@ struct Foo : torch::CustomClassHolder {
   }
 };
 
+struct _StaticMethod : torch::CustomClassHolder {
+  _StaticMethod() {}
+  static int64_t staticMethod(int64_t input) {
+    return 2 * input;
+  }
+};
+
 struct LambdaInit : torch::CustomClassHolder {
   int x, y;
   LambdaInit(int x_, int y_) : x(x_), y(y_) {}
@@ -202,6 +209,10 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 };
 
 TORCH_LIBRARY(_TorchScriptTesting, m) {
+  m.class_<_StaticMethod>("_StaticMethod")
+      .def(torch::init<>())
+      .def_static("staticMethod", &_StaticMethod::staticMethod);
+
   m.class_<Foo>("_Foo")
       .def(torch::init<int64_t, int64_t>())
       // .def(torch::init<>())
