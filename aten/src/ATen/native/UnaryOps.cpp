@@ -27,9 +27,9 @@ namespace at {
 namespace meta {
 
 TORCH_META_FUNC(sin) (
-  const Tensor& self, IntArrayRef output_size
+  const Tensor& self
 ) {
-  build(unary_float_op(maybe_get_output(), self));
+  build_unary_op(maybe_get_output(), self);
 }
 
 } // namespace meta
