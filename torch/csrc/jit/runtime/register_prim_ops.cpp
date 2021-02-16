@@ -1373,6 +1373,11 @@ void dictConstructFromList(Stack* stack) {
                                  ", tVal)[] inputs) -> Dict(" key_type         \
                                  ", tVal)"),                                   \
           dictConstructFromList,                                               \
+          aliasAnalysisFromSchema()),                                          \
+      OperatorGenerator(                                                       \
+          TORCH_SELECTIVE_SCHEMA("aten::dict.Dict_" key_type "(Dict(" key_type \
+                                 ", t)(a) self) -> Dict(" key_type ", t)"),    \
+          dictCopy,                                                            \
           aliasAnalysisFromSchema())
 
 RegisterOperators reg_dict_ops({
