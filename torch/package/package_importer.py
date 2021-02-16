@@ -9,8 +9,8 @@ import pickle
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 import _compat_pickle  # type: ignore
+import types
 import os.path
-from pathlib import Path
 from types import ModuleType
 
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
@@ -37,7 +37,7 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to `sys.modules` but
     local to this importer.
     """
-    modules : Dict[str, ModuleType]
+    modules : Dict[str, Optional[types.ModuleType]]
 
     def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
                  module_allowed: Callable[[str], bool] = lambda module_name: True):
@@ -257,7 +257,7 @@ class PackageImporter(Importer):
         module = self.import_module(demangle(module_name))
         return self.zip_reader.get_record(demangle(module.__file__)).decode('utf-8')
 
-    def _install_on_parent(self, parent: str, name: str, module: ModuleType):
+    def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
         if not parent:
             return
         # Set the module as an attribute on its parent.
