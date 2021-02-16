@@ -1014,9 +1014,10 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& name,
              const py::function& func,
              const py::tuple& input_tuple,
-             const py::function& var_lookup_fn,
+             const py::function& var_name_lookup_fn,
              bool strict,
-             bool force_outplace) {
+             bool force_outplace,
+             const std::vector<std::string>& argument_names) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
             auto typed_inputs = toTraceableStack(input_tuple);
@@ -1025,16 +1026,24 @@ void initJitScriptBindings(PyObject* module) {
                 std::get<0>(tracer::createGraphByTracing(
                     func,
                     typed_inputs,
-                    var_lookup_fn,
+                    var_name_lookup_fn,
                     strict,
                     force_outplace,
-                    &self));
+                    &self,
+                    argument_names));
             const auto method_name = QualifiedName(*self.type()->name(), name);
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
-          })
+          },
+          py::arg("name"),
+          py::arg("func"),
+          py::arg("input_tuple"),
+          py::arg("var_name_lookup_fn"),
+          py::arg("strict"),
+          py::arg("force_outplace"),
+          py::arg("argument_names") = std::vector<std::string>())
       .def(
           "_get_forward_hooks",
           [](const Module& m) {
@@ -1381,12 +1390,19 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualname,
          const py::function& func,
          const py::tuple& input_tuple,
-         const py::function& var_lookup_fn,
+         const py::function& var_name_lookup_fn,
          bool strict,
-         bool force_outplace) {
+         bool force_outplace,
+         const std::vector<std::string>& argument_names) {
         auto typed_inputs = toTraceableStack(input_tuple);
         std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
-            func, typed_inputs, var_lookup_fn, strict, force_outplace));
+            func,
+            typed_inputs,
+            var_name_lookup_fn,
+            strict,
+            force_outplace,
+            /*self=*/nullptr,
+            argument_names));
 
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
@@ -1395,7 +1411,14 @@ void initJitScriptBindings(PyObject* module) {
         StrongFunctionPtr ret(std::move(cu), result);
         didFinishEmitFunction(ret);
         return ret;
-      });
+      },
+      py::arg("name"),
+      py::arg("func"),
+      py::arg("input_tuple"),
+      py::arg("var_name_lookup_fn"),
+      py::arg("strict"),
+      py::arg("force_outplace"),
+      py::arg("argument_names") = std::vector<std::string>());
 
   m.def(
       "_jit_script_class_compile",

@@ -1406,6 +1406,42 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
 
+    def test_div_rounding_mode(self):
+        class TrueDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x.div(y, rounding_mode='true'),
+                        torch.div(x, y, rounding_mode='true'))
+
+        class TruncDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x.div(y, rounding_mode='trunc'),
+                        torch.div(x, y, rounding_mode='trunc'))
+
+        class FloorDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x.div(y, rounding_mode='floor'),
+                        torch.div(x, y, rounding_mode='floor'))
+
+        modules = [TrueDivModule(), TruncDivModule()]
+        if self.opset_version >= 9:
+            modules.append(FloorDivModule())
+
+        x = (torch.randn(2, 3, 4) * 100).to(torch.int)
+        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
+
+        for module in modules:
+            self.run_test(module, (x, y))
+            self.run_test(torch.jit.trace(module, (x, y)), (x, y))
+            self.run_test(torch.jit.script(module), (x, y))
+
+        x = torch.randn(2, 3, 4)
+        y = torch.rand(2, 3, 4) * 10.0 + 0.1
+
+        for module in modules:
+            self.run_test(module, (x, y))
+            self.run_test(torch.jit.trace(module, (x, y)), (x, y))
+            self.run_test(torch.jit.script(module), (x, y))
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
