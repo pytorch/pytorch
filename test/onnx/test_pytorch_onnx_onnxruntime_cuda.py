@@ -24,6 +24,20 @@ class TestONNXRuntime_cuda(unittest.TestCase):
         x = torch.randn(2, 4, 5, 6, requires_grad=True, dtype=torch.float16, device=torch.device('cuda'))
         self.run_test(GeluModel(), x, rtol=1e-3, atol=1e-5)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfNoCuda
+    def test_layer_norm_fp16(self):
+        class LayerNormModel(torch.nn.Module):
+            def __init__(self):
+                super(LayerNormModel, self).__init__()
+                self.layer_norm = torch.nn.LayerNorm([10, 10])
+
+            def forward(self, x):
+                return self.layer_norm(x)
+
+        x = torch.randn(20, 5, 10, 10, requires_grad=True, dtype=torch.float16, device=torch.device('cuda'))
+        self.run_test(LayerNormModel(), x, rtol=1e-3, atol=1e-5)
+
 TestONNXRuntime_cuda.setUp = TestONNXRuntime.setUp
 TestONNXRuntime_cuda.run_test = TestONNXRuntime.run_test
 
