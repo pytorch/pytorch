@@ -121,7 +121,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self):
+    def __init__(self, type_hints: Optional[Dict[str, Any]] = None):
         """
         Construct an empty Graph.
         """
@@ -129,6 +129,7 @@ class Graph:
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
+        self._globals = type_hints if type_hints else {}
 
     @property
     def nodes(self) -> _node_list:
@@ -558,22 +559,17 @@ class Graph:
                 modules_used.add(module_name)
 
         def type_repr(o : Any):
-            # Preprocessing for if we have a forward-declared string. 
-            # We want to make sure that 'torch.Tensor', "torch.Tensor",
-            # and torch.Tensor are all treated the same. We need to run
-            # `strip("'")` before and after `strip("\"")` to get rid of
-            # the additional quotes that `from __future__ import 
-            # annotations` adds
-            typename: str = _type_repr(o).strip("'").strip("\"").strip("'")
+            typename: str = _type_repr(o)
 
             if all(x.isidentifier() for x in typename.split('.')):
                 register_modules_used(typename)
             else:
                 # this is a constructor type, e.g. typing.List[torch.Tensor]
                 modules_used.add(o.__module__)
-                for sub_type in o.__args__:
-                    # make sure we have torch.Tensor
-                    type_repr(sub_type)
+                if hasattr(o, "__args__"):
+                    for sub_type in o.__args__:
+                        # make sure we have torch.Tensor
+                        type_repr(sub_type)
 
             return typename
 

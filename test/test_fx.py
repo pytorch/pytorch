@@ -1680,13 +1680,56 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
         self.assertEqual(mod_true(3), 6)
         self.assertEqual(mod_false(3), 3)
-    
-    def test_forward_declared_annotations(self):
+
+    def test_annotations_with_no_forward_references(self):
+        class A:
+            def __call__(self, x: torch.Tensor):
+                return torch.add(x, x)
+
         class M(torch.nn.Module):
-            def forward(self, x: 'torch.Tensor') -> 'torch.Tensor':
-                return torch.relu(x)
+            def forward(self, x: torch.Tensor, a: A) -> torch.Tensor:
+                return a(x)
 
         self.checkGraphModule(M(), (torch.rand(2, 3),), kwargs=None)
+
+    def test_annotations_with_forward_references(self):
+        class A:
+            def __call__(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        class M(torch.nn.Module):
+            def forward(self, x: 'torch.Tensor', a: 'A') -> 'torch.Tensor':
+                return a(x)
+
+        self.checkGraphModule(M(), (torch.rand(2, 3),), kwargs=None)
+
+    def test_annotations_with_non_torch_reference_and_no_internal_forward_references(self):
+        class A:
+            def __call__(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        class M(torch.nn.Module):
+            def forward(self, x: typing.List[torch.Tensor], a: A) -> torch.Tensor:
+                return a(x[0])
+
+        self.checkGraphModule(M(), (torch.rand(2, 3),), kwargs=None)
+
+    def test_annotations_with_non_torch_reference_and_internal_forward_references(self):
+        class A:
+            def __call__(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        class M(torch.nn.Module):
+            def forward(self, x: typing.List['torch.Tensor'], a: A) -> 'torch.Tensor':
+                return a(x)[0]
+
+        self.checkGraphModule(M(), (torch.rand(2, 3),), kwargs=None)
+
+    def test_annotation_with_future(self):
+        try:
+            import fx.test_future    # noqa: F401
+        finally:
+            del sys.modules["__future__"]
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch

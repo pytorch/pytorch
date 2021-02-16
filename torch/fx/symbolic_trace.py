@@ -3,8 +3,10 @@ import functools
 import inspect
 import math
 import os
+import sys
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
+from typing import (Any, Callable, Dict, ForwardRef, List, NamedTuple,    # type: ignore[attr-defined]
+                    Optional, Set, Tuple, Type, Union, get_type_hints)
 from itertools import chain
 import torch
 from torch._C import ScriptObject  # type: ignore
@@ -223,7 +225,7 @@ class Tracer(TracerBase):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
-    def create_args_for_root(self, root_fn, is_module, concrete_args=None):
+    def create_args_for_root(self, root_fn, is_module, concrete_args=None, annotations=None):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
@@ -257,7 +259,7 @@ class Tracer(TracerBase):
                 param = sig.parameters[name]
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore
             return self.create_proxy('placeholder', name, default, {},
-                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
+                                     type_expr=annotations.get(name, None))
 
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
@@ -297,7 +299,70 @@ class Tracer(TracerBase):
         else:
             self.root = torch.nn.Module()
             fn = root
-        self.graph = Graph()
+
+        """
+        The values in `__annotations__` used to be a mix of strings,
+        ForwardRef objects, and metaclass objects. (A metaclass is
+        an object of type `Type`. If you have a metaclass, you have
+        the object that represents the class itself; you don't have an
+        instantiation of the class.) PEP 564 proposes standardizing
+        the values in `__annotations__` to only be strings. This is a 
+        problem for us, since we need the `type` objects to exec our
+        code during symbolic tracing. 
+
+        To work around this, we'll first resolve strings and 
+        ForwardRefs, then we'll create a fake global namespace with the 
+        mappings we need.
+
+        For example, if we have:
+
+            def fn(x: typing.List[torch.Tensor], a: A) -> torch.Tensor
+
+        where `A` is some user-defined class, we need to create a dict
+        that looks like this:
+
+            gbls = {'typing.List[torch.Tensor]': typing.List[torch.Tensor], 
+                    'A': <class '__main__.A'>, 
+                    'torch.Tensor': <class 'torch.Tensor'>}
+        """
+
+        def create_key(k: Union[str, Type], v: Type) -> str:
+            ann_val = fn.__annotations__[str(k)]
+            if isinstance(v, ForwardRef):
+                res = v.__forward_arg__
+            elif isinstance(ann_val, str):
+                res = ann_val
+            elif hasattr(ann_val, "__name__"):
+                res = ann_val.__name__
+            else:
+                res = str(fn.__annotations__[str(k)])
+            return res.replace(main_mod_name, "fx_main")
+
+        def create_val(v: Type) -> Type:
+            if isinstance(v, ForwardRef):
+                res = v._evaluate(root_mod.__dict__, locals())
+            else:
+                res = v
+            if res.__module__ == main_mod_name:
+                res.__module__ = "fx_main"
+            return res
+
+        type_hints: Dict[str, Any] = get_type_hints(fn)
+
+        main_mod_name: str = root_mod.__name__
+
+        rm = inspect.getmodule(root)
+        assert rm, "Could not find original module. File a bug with FX!"
+        root_mod: ModuleType = rm
+
+        sys.modules["fx_main"] = root_mod
+
+        annotations = {k: create_val(v) for k, v in type_hints.items()}
+
+        gbls = {create_key(k, v): create_val(v)
+                for k, v in type_hints.items()}
+
+        self.graph = Graph(gbls)
 
         # When we encounter a Tensor value that's not a parameter, we look if it
         # is some other attribute on the model. Construct a dict mapping Tensor
@@ -317,7 +382,7 @@ class Tracer(TracerBase):
         assert isinstance(fn, FunctionType)
 
         fn_globals = fn.__globals__  # run before it gets patched
-        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args)
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args, annotations)
 
         parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
@@ -353,7 +418,7 @@ class Tracer(TracerBase):
                 _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
 
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
-                             type_expr=fn.__annotations__.get('return', None))
+                             type_expr=annotations.get('return', None))
 
         return self.graph
 

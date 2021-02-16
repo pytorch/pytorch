@@ -35,12 +35,13 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def _forward_from_src(src : str):
+def _forward_from_src(src: str, type_hints: Optional[Dict[str, Any]] = None):
     # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
     gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
+    if type_hints:
+        gbls.update(type_hints)
     exec_with_source(src, gbls)
     return gbls['forward']
-
 
 def deserialize_graphmodule(body : dict) -> torch.nn.Module:
     """
@@ -294,7 +295,7 @@ class {module_name}(torch.nn.Module):
         """
         self._code = self._graph.python_code(root_module='self')
         cls = type(self)
-        cls.forward = _forward_from_src(self._code)
+        cls.forward = _forward_from_src(self._code, self._graph._globals)
 
         cls_call = cls.__call__
 
