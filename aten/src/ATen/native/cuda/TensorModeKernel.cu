@@ -3,6 +3,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorCompare.h>
+#include <c10/util/Exception.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
@@ -27,22 +28,21 @@ void calculate_mode(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
-    THCudaLongStorage* sort_buffer,
-    THLongStorage* position,
+    std::vector<int64_t>& position,
+    thrust::device_vector<int64_t>& sort_buffer,
     int dim) {
   auto state = globalContext().getTHCState();
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
   auto stream = at::cuda::getCurrentCUDAStream();
-#endif
-  // THAssert(THCTensor_(isContiguous)(state, input));
+
+  TORCH_INTERNAL_ASSERT(self.is_contiguous());
 
   // Because the input is contiguous, we want to get a reference to the
   // location of the buffer at the innermost dimension that we are going
   // to calculate the mode for --> we do this by manually doing the stride
   // calculations to get an offset
   scalar_t* data = self.data_ptr<scalar_t>();
-  for (int i = 0; i < (position->nbytes() / sizeof(int64_t)); ++i) {
-    data += THLongStorage_data(position)[i] * ensure_nonempty_stride(self, i);
+  for (int64_t i = 0; i < position.size(); i++) {
+    data += position[i] * ensure_nonempty_stride(self, i);
   }
 
   int64_t ndim = ensure_nonempty_dim(self.dim());
@@ -52,122 +52,67 @@ void calculate_mode(
   // Wrap input data, sort_buffer, in Thrust device vectors
   thrust::device_ptr<scalar_t> vec_ptr = thrust::device_pointer_cast(data);
   thrust::device_vector<scalar_t> iter(vec_ptr, vec_ptr + n_element);
-  thrust::device_ptr<int64_t> sort_buffer_ptr =
-      thrust::device_pointer_cast(THCudaLongStorage_data(state, sort_buffer));
-  thrust::device_vector<int64_t> seq(
-      sort_buffer_ptr, sort_buffer_ptr + n_element);
 
   // Fill sort_buffer with [0, 1, 2, ... n_element - 1]
   thrust::sequence(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrust_allocator).on(stream),
-#else
-      thrust::device,
-#endif
-      seq.begin(),
-      seq.end());
+      sort_buffer.begin(),
+      sort_buffer.end());
 
-  // Sort the input data. The original indices of the data are stored in seq
+  // Sort the input data. The original indices of the data are stored in
+  // sort_buffer
   thrust::sort_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrust_allocator).on(stream),
-#else
-      thrust::device,
-#endif
       iter.begin(),
       iter.end(),
-      seq.begin()
-#if defined(THC_REAL_IS_HALF)
-          ,
-      ThrustHalfLess()
-#endif
-  );
+      sort_buffer.begin());
 
   // Count # of unique elements via an inner product between adjacent elements.
   // Add 1 if two neighboring element are not equal.
   int unique = 1 +
       thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
                    thrust::cuda::par(thrust_allocator).on(stream),
-#else
-                   thrust::device,
-#endif
                    iter.begin(),
                    iter.end() - 1,
                    iter.begin() + 1,
                    0,
                    thrust::plus<int>(),
-#if defined(THC_REAL_IS_HALF)
-                   ThrustHalfNotEqualTo()
-#else
-                   thrust::not_equal_to<scalar_t>()
-#endif
-      );
+                   thrust::not_equal_to<scalar_t>());
 
   // Count frequency of each element
   thrust::device_vector<scalar_t> keys(unique);
   thrust::device_vector<int> counts(unique);
   thrust::reduce_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrust_allocator).on(stream),
-#else
-      thrust::device,
-#endif
       iter.begin(),
       iter.end(),
       thrust::constant_iterator<int>(1),
       keys.begin(),
-      counts.begin()
-#if defined(THC_REAL_IS_HALF)
-          ,
-      ThrustHalfEqualTo()
-#endif
-  );
+      counts.begin());
 
   // Find index of maximum count
-  thrust::device_vector<int>::iterator it = thrust::max_element(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+  auto it = thrust::max_element(
       thrust::cuda::par(thrust_allocator).on(stream),
-#else
-      thrust::device,
-#endif
       counts.begin(),
       counts.end());
   scalar_t mode = keys[it - counts.begin()];
 
   // Find first index within which it occurs
-#if defined(THC_REAL_IS_HALF)
-  thrust::device_vector<scalar_t>::iterator position_iter = thrust::find_if(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+  auto position_iter = thrust::find(
       thrust::cuda::par(thrust_allocator).on(stream),
-#else
-      thrust::device,
-#endif
       iter.begin(),
       iter.end(),
-      ThrustHalfEqualToPredicate(mode));
-#else
-  typename thrust::device_vector<scalar_t>::iterator position_iter =
-      thrust::find(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-          thrust::cuda::par(thrust_allocator).on(stream),
-#else
-          thrust::device,
-#endif
-          iter.begin(),
-          iter.end(),
-          mode);
-#endif
+      mode);
 
-  THAssert(position_iter != iter.end());
-  int64_t index = seq[position_iter - iter.begin()];
+  TORCH_INTERNAL_ASSERT(position_iter != iter.end());
+  int64_t index = sort_buffer[position_iter - iter.begin()];
 
   // Place mode, index in output
   scalar_t* values_data = values.data_ptr<scalar_t>();
   int64_t* indices_data = indices.data_ptr<int64_t>();
 
-  for (int i = 0; i < (position->nbytes() / sizeof(int64_t)); ++i) {
-    int64_t pos = THLongStorage_data(position)[i];
+  for (int64_t i = 0; i < position.size(); i++) {
+    int64_t pos = position[i];
     values_data += ensure_nonempty_stride(values, i) * pos;
     indices_data += ensure_nonempty_stride(indices, i) * pos;
   }
@@ -183,18 +128,18 @@ void apply_mode(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
-    THLongStorage* position,
-    THCudaLongStorage* sort_buffer,
+    std::vector<int64_t>& position,
+    thrust::device_vector<int64_t>& sort_buffer,
     int dim,
     int curDim) {
   // Because we have transposed the Tensor, the data for the dimension we are
   // mode'ing along is always in the innermost dimension
   int64_t ndim = ensure_nonempty_dim(self.dim());
   if (curDim == ndim - 1) {
-    calculate_mode<scalar_t>(values, indices, self, sort_buffer, position, dim);
+    calculate_mode<scalar_t>(values, indices, self, position, sort_buffer, dim);
   } else {
     for (int i = 0; i < ensure_nonempty_size(self, curDim); ++i) {
-      THLongStorage_data(position)[curDim] = i;
+      position[curDim] = i;
       apply_mode<scalar_t>(
           values, indices, self, position, sort_buffer, dim, curDim + 1);
     }
@@ -336,14 +281,12 @@ void mode_kernel_impl(
         contiguous = contiguous.clone();
       }
 
-      // Position is a Storage that will store the dimension values we are
-      // processing
-      THLongStorage* position = THLongStorage_newWithSize(ndim - 1);
+      // Position will store the dimension values we are processing
+      std::vector<int64_t> position(ndim - 1, 0);
 
       // Sort Buffer is a Storage that will be used in the internal sort
       // required to calculate the mode efficiently
-      THCudaLongStorage* sort_buffer = THCudaLongStorage_newWithSize(
-          globalContext().lazyInitCUDA(), slice_size);
+      thrust::device_vector<int64_t> sort_buffer(slice_size);
 
       apply_mode<scalar_t>(
           values_transposed,

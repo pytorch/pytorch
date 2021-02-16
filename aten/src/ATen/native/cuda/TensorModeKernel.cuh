@@ -5,39 +5,6 @@
 #include <THC/THCScanUtils.cuh>
 #include <THC/THCSortUtils.cuh>
 
-struct ThrustHalfLess {
-  __host__ __device__ inline bool operator()(
-      const at::Half& lhs,
-      const at::Half& rhs) {
-    return THCNumerics<at::Half>::lt(lhs, rhs);
-  }
-};
-
-struct ThrustHalfNotEqualTo {
-  __host__ __device__ inline bool operator()(
-      const at::Half& lhs,
-      const at::Half& rhs) {
-    return THCNumerics<at::Half>::ne(lhs, rhs);
-  }
-};
-
-struct ThrustHalfEqualTo {
-  __host__ __device__ inline bool operator()(
-      const at::Half& lhs,
-      const at::Half& rhs) {
-    return THCNumerics<at::Half>::eq(lhs, rhs);
-  }
-};
-
-struct ThrustHalfEqualToPredicate {
-  ThrustHalfEqualToPredicate(at::Half val) : val_(val) {}
-  __host__ __device__ inline bool operator()(at::Half x) {
-    return THCNumerics<at::Half>::eq(val_, x);
-  }
-
-  at::Half val_;
-};
-
 template <typename T>
 struct BinaryAddOp {
   __host__ __device__ inline T operator()(const T a, const T b) {
