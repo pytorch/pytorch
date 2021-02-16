@@ -48,3 +48,28 @@ const auto flatten_script_2 = R"JIT(
       b = a.transpose(0, 1)
       return torch.flatten(b, start_dim, end_dim)
 )JIT";
+
+const auto aten_sum = R"JIT(
+  def forward(self, input):
+      return torch.sum(input)
+)JIT";
+
+const auto aten_sum_0 = R"JIT(
+  def forward(self, input):
+      return torch.sum(input, 0)
+)JIT";
+
+const auto aten_sum_1 = R"JIT(
+  def forward(self, input):
+      return torch.sum(input, 1)
+)JIT";
+
+const auto aten_sum_0_true = R"JIT(
+  def forward(self, input):
+      return torch.sum(input, 0, True)
+)JIT";
+
+const auto aten_sum_1_true = R"JIT(
+  def forward(self, input):
+      return torch.sum(input, 1, True)
+)JIT";
