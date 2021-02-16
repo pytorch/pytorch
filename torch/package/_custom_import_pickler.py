@@ -3,7 +3,7 @@ from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
 from types import FunctionType
 from struct import pack
 
-from .importer import Importer, SysImporter, ObjMismatchError, ObjNotFoundError
+from .importer import Importer, sys_importer, ObjMismatchError, ObjNotFoundError
 
 
 class CustomImportPickler(_Pickler):
@@ -74,7 +74,7 @@ class CustomImportPickler(_Pickler):
     dispatch[FunctionType] = save_global
 
 def create_custom_import_pickler(data_buf, importer):
-    if importer is SysImporter:
+    if importer is sys_importer:
         # if we are using the normal import library system, then
         # we can use the C implementation of pickle which is faster
         return Pickler(data_buf, protocol=3)
