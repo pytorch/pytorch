@@ -15,6 +15,7 @@
 #include <llvm/ExecutionEngine/SectionMemoryManager.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Mangler.h>
+#include <llvm/Support/CFGUpdate.h>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/raw_ostream.h>
@@ -261,6 +262,12 @@ TargetMachine& PytorchLLVMJIT::getTargetMachine() {
 
 const DataLayout& PytorchLLVMJIT::getDataLayout() {
   return impl_->getDataLayout();
+}
+
+void dumpCFG(const llvm::cfg::Update<llvm::BasicBlock*>& update) {
+  // XXX: This method is only here to placate gcov builds, which for some
+  // reason become confused over the existence of this template method.
+  update.dump();
 }
 
 } // end namespace orc
