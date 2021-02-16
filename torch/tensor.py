@@ -818,7 +818,7 @@ class Tensor(torch._C._TensorBase):
         Examples:
             >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
             torch.Size([3, 2, 2, 1])
-            >>> torch.randn(3, 4, 1).unflatten(1, (-1, 2)).shape # the size -1 is inferred from other dimensions
+            >>> torch.randn(3, 4, 1).unflatten(1, (-1, 2)).shape # the size -1 is inferred from the size of dimension 1
             torch.Size([3, 2, 2, 1])
             >>> torch.randn(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2)))
             tensor([[[-1.1772,  0.0180],

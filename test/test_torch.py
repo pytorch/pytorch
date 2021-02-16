@@ -1000,6 +1000,12 @@ class AbstractTestCases:
                              torch.tensor([[1, 2], [3, 4]]))
             self.assertEqual(torch.ones(2, 10).unflatten(1, (5, -1)),
                              torch.ones(2, 5, 2))
+            self.assertEqual(torch.ones(2, 10).unflatten(1, (-1,)),
+                             torch.ones(2, 10))
+            self.assertEqual(torch.ones(2, 3 * 4 * 5 * 6).unflatten(1, (3, 4, -1, 6)),
+                             torch.ones(2, 3, 4, 5, 6))
+            self.assertEqual(torch.ones(2, 0, 2).unflatten(1, (3, -1, 4, 5)),
+                             torch.ones(2, 3, 0, 4, 5, 2))
 
             # test invalid args: tensor, str, sizes
             with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
@@ -1021,6 +1027,9 @@ class AbstractTestCases:
             with self.assertRaisesRegex(RuntimeError,
                                         r"Provided sizes \[-1, 4\] don't multiply up to the size of dim 1 \(10\)"):
                 torch.randn(5, 10).unflatten(1, (-1, 4))
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"the unspecified dimension size -1 can be any value and is ambiguous"):
+                torch.randn(2, 0).unflatten(1, (2, -1, 0))
 
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):
