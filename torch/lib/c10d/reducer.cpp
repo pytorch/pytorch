@@ -98,7 +98,6 @@ Reducer::Reducer(
         auto grad_accumulator =
             torch::autograd::impl::grad_accumulator(variable);
 
-
 #ifndef _WIN32
         using torch::distributed::autograd::ThreadLocalDistAutogradContext;
 #endif
@@ -1183,7 +1182,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 void Reducer::save_thread_local_state() {
   std::lock_guard<std::mutex> guard(mutex_);
   // Don't preserve grad_mode across thread boundaries, as we will be passing
-  // from forward pass to autograd engine backward pass callbacks.
+  // from forward pass to autograd engine hooks, and autograd engine takes care
+  // of grad mode.
   thread_local_state_ = at::ThreadLocalState(/* keep_grad_mode */ false);
 }
 
