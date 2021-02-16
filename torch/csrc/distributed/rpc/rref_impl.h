@@ -407,7 +407,7 @@ inline TORCH_API c10::intrusive_ptr<OwnerRRef> fromRRefInterface(
 
 // Helper function that casts from OwnerRRef to c10::RRefInterface
 inline TORCH_API c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
-    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) {
+    const c10::intrusive_ptr<RRef>& ownerRRef) {
   return c10::static_intrusive_pointer_cast<c10::RRefInterface>(ownerRRef);
 }
 
