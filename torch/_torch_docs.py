@@ -8518,9 +8518,9 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 .. note:: Irrespective of the original strides, the returned matrix `V` will
           be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
 
-.. note:: Extra care needs to be taken when backward through outputs. Such
-          operation is really only stable when all eigenvalues are distinct.
-          Otherwise, ``NaN`` can appear as the gradients are not properly defined.
+.. warning:: Extra care needs to be taken when backward through outputs. Such
+             operation is only stable when all eigenvalues are strictly distinct and can
+             be unstable when eigenvalues are close to each other.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
