@@ -5858,7 +5858,7 @@ class TestONNXRuntime(unittest.TestCase):
         model.ir_version = 0
 
         def check_proto():
-            torch._C._check_onnx_proto(model.SerializeToString())
+            torch._C._jit._check_onnx_proto(model.SerializeToString())
 
         self.assertRaises(RuntimeError, check_proto)
 

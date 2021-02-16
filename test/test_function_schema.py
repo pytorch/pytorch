@@ -1,7 +1,7 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch._C import parse_schema
+from torch._C._jit import parse_schema
 
 
 class TestFunctionSchema(TestCase):
