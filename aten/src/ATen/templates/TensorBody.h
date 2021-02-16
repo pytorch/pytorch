@@ -780,8 +780,6 @@ protected:
 
 int64_t get_device(Tensor self);
 
-bool is_complex(const Tensor& self);
-
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
