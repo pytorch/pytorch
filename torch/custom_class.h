@@ -153,28 +153,29 @@ class class_ {
     return *this;
   }
 
-  // TODO this is a hack, but it works
+  // Due to nullptr_t infer problem, we mark the default type of SetterFunc
+  // as GetterFunc and we check to make sure the set function is given.
   template <typename GetterFunc, typename SetterFunc = GetterFunc>
   class_& def_property(
       std::string name,
-      GetterFunc getterFunc,
-      SetterFunc setterFunc = nullptr,
+      GetterFunc getter_func,
+      SetterFunc setter_func = nullptr,
       std::string doc_string = "") {
     torch::jit::Function* getter;
     torch::jit::Function* setter;
 
-    auto getterName = name + "_getter";
+    auto getter_name = name + "_getter";
     auto wrapped_getter =
-        detail::wrap_func<CurClass, GetterFunc>(std::move(getterFunc));
+        detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
     getter = process_and_register_property_method(
-        getterName, wrapped_getter, doc_string);
+        getter_name, wrapped_getter, doc_string);
 
     if (!std::is_same<SetterFunc, GetterFunc>::value) {
-      auto setterName = name + "_setter";
+      auto setter_name = name + "_setter";
       auto wrapped_setter =
-          detail::wrap_func<CurClass, SetterFunc>(std::move(setterFunc));
+          detail::wrap_func<CurClass, SetterFunc>(std::move(setter_func));
       setter = process_and_register_property_method(
-          setterName, wrapped_setter, doc_string);
+          setter_name, wrapped_setter, doc_string);
     }
 
     classTypePtr->addProperty(name, getter, setter);
@@ -193,7 +194,7 @@ class class_ {
     auto property_getter =
         process_and_register_property_method(getterName, wrapped_getter);
 
-    auto setterName = name + "_setter";
+    auto setter_name = name + "_setter";
     auto setter = [field = std::move(field)](
                       const c10::intrusive_ptr<CurClass>& self, T value) {
       self.get()->*field = value;
@@ -201,7 +202,7 @@ class class_ {
 
     auto wrapped_setter = detail::wrap_func<CurClass>(std::move(setter));
     auto property_setter =
-        process_and_register_property_method(setterName, wrapped_setter);
+        process_and_register_property_method(setter_name, wrapped_setter);
 
     classTypePtr->addProperty(name, property_getter, property_setter);
 
@@ -210,7 +211,7 @@ class class_ {
 
   template <typename T>
   class_& def_readonly(std::string name, T CurClass::*field) {
-    auto getterName = name + "_getter";
+    auto getter_name = name + "_getter";
     auto getter =
         [field = std::move(field)](const c10::intrusive_ptr<CurClass>& self) {
           return self.get()->*field;
@@ -218,7 +219,7 @@ class class_ {
 
     auto wrapped_getter = detail::wrap_func<CurClass>(std::move(getter));
     auto property_getter =
-        process_and_register_property_method(getterName, wrapped_getter);
+        process_and_register_property_method(getter_name, wrapped_getter);
 
     torch::jit::Function* property_setter;
 

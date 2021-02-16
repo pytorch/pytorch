@@ -23,7 +23,7 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   Method init_method(instance._ivalue(), init_fn);
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
   return py::module::import("torch.jit._recursive")
-      .attr("wrap_cpp_class")(instance);
+      .attr("wrap_script_object")(instance);
 }
 
 void initPythonCustomClassBindings(PyObject* module) {

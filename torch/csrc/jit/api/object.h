@@ -113,16 +113,6 @@ struct TORCH_API Object {
     });
   }
 
-  const c10::optional<Property> find_property(std::string name) const {
-    auto properties = get_properties();
-    for (auto property : properties) {
-      if (std::get<0>(property) == name) {
-        return property;
-      }
-    }
-    return c10::nullopt;
-  }
-
   c10::optional<Method> find_method(const std::string& basename) const;
 
   /// Run a method from this module.

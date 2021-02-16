@@ -658,7 +658,7 @@ def get_static_fn(cls, fn):
 
 
 def get_torchscript_modifier(fn):
-    if not callable(fn) or isinstance(fn, torch.jit.RecursiveScriptClass):
+    if not callable(fn):
         return None
     if hasattr(fn, '__func__'):
         fn = fn.__func__

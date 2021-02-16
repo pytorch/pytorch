@@ -270,7 +270,7 @@ class ConstMap:
 
 if _enabled:
 
-    class RecursiveScriptClass(object):
+    class ScriptObjectWrapper(object):
         """
         An analogue of RecursiveScriptModule for regular objects that are not modules.
         This class is a wrapper around a torch._C.ScriptObject that represents an instance
@@ -282,35 +282,30 @@ if _enabled:
                 exposed on this wrppaer.
         """
         def __init__(self, cpp_class):
-            super(RecursiveScriptClass, self).__init__()
+            super(ScriptObjectWrapper, self).__init__()
             self.__dict__["_initializing"] = True
             self._c = cpp_class
-
             # Add wrapped object's properties to this class instance.
             self._props = {prop[0]: property(prop[1], prop[2]) for prop in self._c._properties()}
-
             self.__dict__["_initializing"] = False
 
         def __getattr__(self, attr):
             if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
-                return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore
-
+                return super(ScriptObjectWrapper, self).__getattr__(attr)  # type: ignore
             if attr in self._props:
                 return self._props[attr].fget()
-
             return getattr(self._c, attr)
 
         def __setattr__(self, attr, value):
             if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
-                return super(RecursiveScriptClass, self).__setattr__(attr, value)
-
+                return super(ScriptObjectWrapper, self).__setattr__(attr, value)
             if attr in self._props:
-                return self._props[attr].fset(value)
-
+                self._props[attr].fset(value)
+                return
             setattr(self._c, attr, value)
 
         # Delegate calls to magic methods like __len__ to the C++ module backing the
-        # RecursiveScriptClass.
+        # ScriptObjectWrapper.
         def forward_magic_method(self, method_name, *args, **kwargs):
             if not self._c._has_method(method_name):
                 raise TypeError()
@@ -320,6 +315,9 @@ if _enabled:
 
         def __getstate__(self):
             return self.forward_magic_method("__getstate__")
+
+        def __setstate__(self, val):
+            self.forward_magic_method("__setstate__", val)
 
         def __iter__(self):
             return self.forward_magic_method("__iter__")
@@ -410,6 +408,14 @@ if _enabled:
 
         def __exit__(self, type, tb, traceback):
             return self.forward_magic_method("__exit__", type, tb, traceback)
+
+        # TODO: this is a hack to manually call __init__ inside __setstate__ method. Since unpickling
+        # in python3 doesn't call the costructor deliberately, there is no way we can forward the
+        # __setstate__ method to its' cpp class. Therefore, this reduce method manually calls init inside
+        # __setstate__ so that we can avoid infinite recursion. The solution was suggested here:
+        # https://stackoverflow.com/questions/50308214/python-3-alternatives-for-getinitargs
+        def __reduce__(self):
+            return (ScriptObjectWrapper, (self._c,))
 
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
@@ -882,7 +888,7 @@ if _enabled:
 
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
-    class RecursiveScriptClass(object):  # type: ignore
+    class ScriptObjectWrapper(object):  # type: ignore
         def __init__(self):
             super().__init__()
 
@@ -1080,7 +1086,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
-    if isinstance(obj, RecursiveScriptClass):
+    if isinstance(obj, ScriptObjectWrapper):
         return obj
     # No-op for modules and functions that are already scripted
     if isinstance(obj, ScriptModule):

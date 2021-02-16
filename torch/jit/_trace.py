@@ -19,7 +19,7 @@ import re
 from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
-from torch.jit._script import ScriptModule, _CachedForward, script
+from torch.jit._script import ScriptModule, _CachedForward, script, ScriptObjectWrapper
 from torch._jit_internal import _qualified_name, get_callable_argument_names
 from torch.autograd import function
 from torch.nn import Module
@@ -547,7 +547,6 @@ def make_module(mod, _module_class, _compilation_unit):
     if isinstance(mod, ScriptModule):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
-
         infer_methods_stubs_fn = torch.jit._recursive.make_stubs_from_exported_methods
         return torch.jit._recursive.create_script_module(
             mod,
@@ -1038,6 +1037,8 @@ class TracedModule(ScriptModule):
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
         for name, val in orig.__dict__.items():
+            if isinstance(val, ScriptObjectWrapper):
+                val = val._c
             if (
                 torch._C._jit_is_script_object(val)
                 and name not in orig._parameters
