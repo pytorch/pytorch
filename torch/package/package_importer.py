@@ -11,6 +11,7 @@ from torch.serialization import _get_restore_location, _maybe_decode_ascii
 import _compat_pickle  # type: ignore
 import types
 import os.path
+from pathlib import Path
 
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
