@@ -1,7 +1,5 @@
-from torch.utils.data.dataset import IterableDataset as IterDataPipe
-
+from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
-
 from typing import List, Union, Iterator
 
 class ListDirFilesIterDataPipe(IterDataPipe):

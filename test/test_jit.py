@@ -41,11 +41,13 @@ from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
+from jit.test_jit_utils import TestJitUtils  # noqa: F401
+from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch._six import PY37, StringIO
+from torch._six import PY37
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
@@ -789,7 +791,7 @@ class TestJit(JitTestCase):
                 super(Mod, self).__init__()
                 self.model = nn.ModuleList([nn.Linear(10, 10) for _ in range(10)])
                 self.model += (nn.Linear(10, 20),)
-                self.model.append(nn.Linear(20, 30)) 
+                self.model.append(nn.Linear(20, 30))
                 self.model.extend([nn.Linear(30, 40), nn.Linear(40, 50)])
 
             def forward(self, v):
@@ -1274,6 +1276,15 @@ graph(%Ra, %Rb):
         graph = parse_ir(input_str)
         torch._C._jit_pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
         FileCheck().run(input_str, graph)
+
+    def test_script_tensor_type(self):
+        def foo(x, t: torch.dtype):
+            return x.type(t)
+        scr = torch.jit.script(foo)
+        x = torch.rand(3, 4)
+        for t in [torch.int8, torch.float64, torch.float32,
+                  torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
+            self.assertEqual(scr(x, t), foo(x, t))
 
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
@@ -2244,6 +2255,32 @@ graph(%Ra, %Rb):
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
 
+    def test_union_to_optional(self):
+        def test1(u: Union[int, None]) -> int:
+            if u is not None:
+                return u
+            else:
+                return 0
+        scripted = torch.jit.script(test1)
+        self.assertEqual(scripted(10), test1(10))
+
+        def test2(u: Union[None, int]) -> int:
+            if u is not None:
+                return u
+            else:
+                return 0
+        scripted = torch.jit.script(test2)
+        self.assertEqual(scripted(40), test2(40))
+
+        def test3(u: Union[float, int]) -> int:
+            if u is not None:
+                return u
+            else:
+                return 0
+        expected_result = "General Union types are not currently supported"
+        with self.assertRaisesRegex(RuntimeError, expected_result):
+            torch.jit.script(test3)
+
     def test_mutable_default_values(self):
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
             @torch.jit.script
@@ -2489,6 +2526,16 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+
+    # Tests that calling torch.jit.script repeated on function is allowed.
+    def test_repeated_script_on_function(self):
+        @torch.jit.script
+        @torch.jit.script
+        def fn(x):
+            return x
+
+        torch.jit.script(torch.jit.script(fn))
+
     def test_pretty_print_function(self):
         @torch.jit.script
         def foo(x):
@@ -3119,6 +3166,16 @@ def foo(x):
     @unittest.skipIf(not RUN_CUDA, "Requires CUDA")
     def test_device_type_cuda(self):
         self._test_device_type('cuda')
+
+    def test_string_device_implicit_conversion(self):
+        @torch.jit.script
+        def fn(x: torch.device):
+            return x
+
+        self.assertEqual(fn("cpu"), torch.device("cpu"))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected one of"):
+            fn("invalid_device")
 
     def test_eval_python(self):
         def _test(m):
@@ -5464,7 +5521,7 @@ a")
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
-            return a // a
+            return a * a
         ''')
         inputs = [torch.ones(10, 10, dtype=torch.long)]
         outputs = torch.ones(10, 10)
@@ -6457,6 +6514,38 @@ a")
             self.checkModule(module().train(), ())
             self.checkModule(module().eval(), ())
 
+    def test_ternary_static_if(self):
+        # Test for True branch when condition variable
+        # is annotated as Final
+        class M1(torch.nn.Module):
+            flag: torch.jit.Final[bool]
+
+            def __init__(self):
+                super().__init__()
+                self.flag = True
+
+            def forward(self) -> torch.Tensor:
+                return torch.ones(3) if self.flag else {}
+
+        # Test for True branch when condition variable
+        # is annotated as Final
+        class M2(torch.nn.Module):
+            flag: torch.jit.Final[bool]
+
+            def __init__(self):
+                super().__init__()
+                self.flag = False
+
+            def forward(self) -> torch.Tensor:
+                return {} if self.flag else torch.ones(3)
+
+        model1 = M1()
+        model2 = M2()
+        script_model_1 = torch.jit.script(model1)
+        script_model_2 = torch.jit.script(model2)
+        self.assertEqual(model1.forward(), script_model_1.forward())
+        self.assertEqual(model2.forward(), script_model_2.forward())
+
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -6929,6 +7018,26 @@ a")
 
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
+
+    def test_compare_two_bool_inputs(self):
+        def compare_eq(a: bool, b: bool):
+            return a == b
+
+        def compare_ne(a: bool, b: bool):
+            return a != b
+
+        scripted_fn_eq = torch.jit.script(compare_eq)
+        scripted_fn_ne = torch.jit.script(compare_ne)
+        self.assertEqual(scripted_fn_eq(True, False), compare_eq(True, False))
+        self.assertEqual(scripted_fn_eq(False, True), compare_eq(False, True))
+        self.assertEqual(scripted_fn_eq(True, True), compare_eq(True, True))
+        self.assertEqual(scripted_fn_eq(False, False), compare_eq(False, False))
+
+        self.assertEqual(scripted_fn_ne(True, False), compare_ne(True, False))
+        self.assertEqual(scripted_fn_ne(False, True), compare_ne(False, True))
+        self.assertEqual(scripted_fn_ne(True, True), compare_ne(True, True))
+        self.assertEqual(scripted_fn_ne(False, False), compare_ne(False, False))
+
 
     def _test_tensor_number_math(self, device='cpu'):
         template = dedent('''
@@ -10619,6 +10728,59 @@ dedent """
             FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
                        .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
 
+    def test_linear_grad(self):
+        with enable_profiling_mode_for_profiling_tests():
+            def t(x: torch.Tensor, w: torch.Tensor, b: Optional[torch.Tensor]):
+                return torch.nn.functional.linear(x, w, b)
+
+            x_init = torch.randn(4, 2)
+            w_init = torch.randn(3, 2)
+            b_init = torch.randn(3)
+            grad = torch.randn(4, 3)
+
+            with disable_autodiff_subgraph_inlining():
+                # script module
+                jit_t = torch.jit.script(t)
+
+                x = x_init.detach().requires_grad_()
+                w = w_init.detach().requires_grad_()
+                b = b_init.detach().requires_grad_()
+                x_ref = x_init.detach().requires_grad_()
+                w_ref = w_init.detach().requires_grad_()
+                b_ref = b_init.detach().requires_grad_()
+
+                # profiling/optimization runs
+                jit_o = jit_t(x, w, b)
+                jit_o.backward(grad)
+                jit_o = jit_t(x, w, b)
+                jit_o.backward(grad)
+
+                x.grad.zero_()
+                w.grad.zero_()
+                b.grad.zero_()
+                jit_o = jit_t(x, w, b)
+                jit_o.backward(grad)
+                o = t(x_ref, w_ref, b_ref)
+                o.backward(grad)
+
+                self.assertEqual(jit_o, o)
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(w.grad, w_ref.grad)
+                self.assertEqual(b.grad, b_ref.grad)
+
+                x.grad.zero_()
+                w.grad.zero_()
+                x_ref.grad.zero_()
+                w_ref.grad.zero_()
+                jit_o = jit_t(x, w, None)
+                jit_o.backward(grad)
+                o = t(x_ref, w_ref, None)
+                o.backward(grad)
+
+                self.assertEqual(jit_o, o)
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(w.grad, w_ref.grad)
+
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
         def test_rand():
@@ -11815,7 +11977,8 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                self.assertEqual(f_script(), f())
+                with self.maybeWarnsRegex(UserWarning, "floor_divide"):
+                    self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
         @torch.jit.ignore
@@ -12357,20 +12520,6 @@ dedent """
             test_str.append(str(tm.foo.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
-    # Helper function to eval Python3 code without causing a syntax error for
-    # this file under py2
-    def _get_py3_code(self, code, fn_name):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            script_path = os.path.join(tmp_dir, 'script.py')
-            with open(script_path, 'w') as f:
-                f.write(code)
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(fn_name, script_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            fn = getattr(module, fn_name)
-            return fn
-
     #  Python AST Frontend , Python 3-style type annotations , Script function
     def test_annot_ast_py3_fn(self):
         code = dedent('''
@@ -12384,7 +12533,7 @@ dedent """
         ''')
         test_str = []
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'foo')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'foo')
             test_str.append(str(fn.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
@@ -12404,7 +12553,7 @@ dedent """
         test_str = []
 
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'foo')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'foo')
             args = fn.schema.arguments
             returns = fn.schema.returns
             self.assertEqual(str(args[0].type), pair[1])
@@ -12459,7 +12608,7 @@ dedent """
 
         test_str = []
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'instance')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
@@ -12475,7 +12624,7 @@ dedent """
 
         test_str = []
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'foo')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'foo')
             test_str.append(str(fn.schema))
         self.assertExpected("\n".join(test_str))
 
@@ -12493,9 +12642,20 @@ dedent """
 
         test_str = []
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'instance')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
+
+    # Tests that "# type: ignore[*]" is supported in type lines and is
+    # properly ignored.
+    def test_mypy_type_ignore(self):
+        @torch.jit.script
+        def foo(x):  # type: ignore
+            return x
+
+        @torch.jit.script
+        def bar(x):  # type: ignore[no-redef]
+            return x
 
     def test_method_casts_script(self):
         cast_types = [
@@ -12669,6 +12829,15 @@ dedent """
 
         with self.assertRaisesRegex(RuntimeError, "operation failed in the TorchScript interpreter"):
             fn(torch.tensor(4))
+
+    def test_dict_expansion_raises_error(self):
+        def fn(self):
+            d = {"foo": 1, "bar": 2, "baz": 3}
+            return {**d}
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
+                                    "Dict expansion "):
+            torch.jit.script(fn)
 
     def test_module_parameters_and_buffers(self):
         weights = torch.randn(10, 10)
@@ -14847,7 +15016,7 @@ dedent """
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
 
-            out = StringIO()
+            out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
 
@@ -15804,7 +15973,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                 #      so that we don't regress on autodiff support.
                 with disable_autodiff_subgraph_inlining():
                     script_fn = create_script_fn(self, name, 'nn_functional')
-                    check_against_reference(self, script_fn, fn, output_process_fn, 
+                    check_against_reference(self, script_fn, fn, output_process_fn,
                                             f_args_variable, kwargs_variable, no_grad=no_grad)
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
                     if (doAutodiffCheck(test_name)):
@@ -15925,7 +16094,7 @@ def add_nn_module_test(*args, **kwargs):
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         # Check against Python module as reference
-        check_against_reference(self, create_script_module, create_nn_module, 
+        check_against_reference(self, create_script_module, create_nn_module,
                                 lambda x: x, f_args_variable, no_grad=no_grad)
 
     if 'slowTest' in kwargs:

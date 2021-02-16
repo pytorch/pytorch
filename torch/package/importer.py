@@ -1,10 +1,13 @@
 from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
 import builtins
 import importlib
+import inspect
+import io
 import linecache
-from torch.serialization import _load
+from weakref import WeakValueDictionary
 import pickle
 import torch
+from torch.serialization import _get_restore_location, _maybe_decode_ascii
 import _compat_pickle  # type: ignore
 import types
 import os.path
@@ -142,7 +145,42 @@ class PackageImporter:
             Any: the unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
-        return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
+        restore_location = _get_restore_location(map_location)
+        loaded_storages = {}
+
+        def load_tensor(data_type, size, key, location, restore_location):
+            name = f'.data/{key}.storage'
+            dtype = data_type(0).dtype
+
+            storage = self.zip_reader.get_storage_from_record(name, size, dtype).storage()
+            loaded_storages[key] = restore_location(storage, location)
+
+        def persistent_load(saved_id):
+            assert isinstance(saved_id, tuple)
+            typename = _maybe_decode_ascii(saved_id[0])
+            data = saved_id[1:]
+
+            assert typename == 'storage', \
+                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+            data_type, key, location, size = data
+            if key not in loaded_storages:
+                load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+            storage = loaded_storages[key]
+            return storage
+
+        # Load the data (which may in turn use `persistent_load` to load tensors)
+        data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
+        unpickler = self.Unpickler(data_file)
+        unpickler.persistent_load = persistent_load
+        result = unpickler.load()
+
+        # TODO from zdevito:
+        #   This stateful weird function will need to be removed in our efforts
+        #   to unify the format. It has a race condition if multiple python
+        #   threads try to read independent files
+        torch._utils._validate_loaded_sparse_tensors()
+
+        return result
 
     def id(self):
         """
@@ -153,7 +191,7 @@ class PackageImporter:
         return self._mangler.parent_name()
 
     def _read_extern(self):
-        return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
+        return self.zip_reader.get_record('.data/extern_modules').decode('utf-8').splitlines(keepends=False)
 
     def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
         mangled_filename = self._mangler.mangle(filename) if filename else None
@@ -167,6 +205,10 @@ class PackageImporter:
         ns['__file__'] = mangled_filename
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
+
+        # Add this module to our private global registry. It should be unique due to mangling.
+        assert module.__name__ not in _package_imported_modules
+        _package_imported_modules[module.__name__] = module
 
         # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
@@ -429,3 +471,16 @@ class _ModuleNode(_PathNode):
 
 class _ExternNode(_PathNode):
     pass
+
+# A private global registry of all modules that have been package-imported.
+_package_imported_modules: WeakValueDictionary = WeakValueDictionary()
+
+# `inspect` by default only looks in `sys.modules` to find source files for classes.
+# Patch it to check our private registry of package-imported modules as well.
+_orig_getfile = inspect.getfile
+def patched_getfile(object):
+    if inspect.isclass(object):
+        if object.__module__ in _package_imported_modules:
+            return _package_imported_modules[object.__module__].__file__
+    return _orig_getfile(object)
+inspect.getfile = patched_getfile

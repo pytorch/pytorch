@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/UpSample.h>
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace meta {
@@ -48,7 +49,7 @@ TORCH_META_FUNC(upsample_nearest2d) (
 
   // Allow for empty batch size but not other dimensions
   TORCH_CHECK(
-      input.numel() != 0 || prod_intlist(input.sizes().begin() + 1, input.sizes().end()),
+      input.numel() != 0 || c10::multiply_integers(input.sizes().begin() + 1, input.sizes().end()),
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -88,7 +89,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_cpu) (
     IntArrayRef output_size,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
-    Tensor& output
+    const Tensor& output
 ) {
   upsample_nearest2d_kernel(kCPU, output, input, scales_h, scales_w);
 }
@@ -99,7 +100,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_cpu) (
     IntArrayRef input_size,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
-    Tensor& grad_input) {
+    const Tensor& grad_input) {
   grad_input.zero_();
   upsample_nearest2d_backward_kernel(kCPU, grad_input, grad_output, scales_h, scales_w);
 }
