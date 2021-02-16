@@ -1,5 +1,6 @@
 import torch
 from torch.serialization import normalize_storage_type, location_tag
+import collections
 import io
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
@@ -7,9 +8,9 @@ from ._custom_import_pickler import create_custom_import_pickler
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
-from .importer import Importer, SysImporter
+from .importer import Importer, OrderedImporter, sys_importer
 import types
-from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, Optional
+from typing import List, Any, Callable, Dict, Sequence, Tuple, Union, Iterable, BinaryIO, Optional
 from pathlib import Path
 import linecache
 from urllib.parse import quote
@@ -47,20 +48,23 @@ class PackageExporter:
     on each it finds, recursively resolving dependencies.
     """
 
-    """A module environment that will be searched in order to find the module assocated with module names
-    referenced by other modules or by pickled objects. The default module environment just uses DefaultImporter,
-    which searches the Python environment. When pickling code or objects loaded from an imported package,
-    you should create a OrderedImporter that has that `PackageImporter` listed first.
+    """A importer that will be searched in order to find the modules referenced by other modules or by
+    pickled objects. The default module environment just uses sys_importer, which searches the Python environment.
     """
     importer: Importer
 
-    def __init__(self, f: Union[str, Path, BinaryIO], importer: Importer = SysImporter, verbose: bool = True):
+    def __init__(self,
+                 f: Union[str, Path, BinaryIO],
+                 importer: Union[Importer, Sequence[Importer]] = sys_importer,
+                 verbose: bool = True):
         """
         Create an exporter.
 
         Args:
             f: The location to export to. Can be a  string/Path object containing a filename,
                 or a Binary I/O object.
+            importer: If a single Importer is passed, use that to search for modules.
+                If a sequence of importers are passsed, an Orderedporter will be constructed out of them.
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
         """
@@ -76,7 +80,15 @@ class PackageExporter:
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
-        self.importer = importer
+
+        if isinstance(importer, Importer):
+            self.importer = importer
+        else:
+            if not isinstance(importer, collections.abc.Sequence):
+                raise TypeError("importer arg should be an Importer or a sequence of Importers, "
+                                f"got {type(importer)} instead.")
+            self.importer = OrderedImporter(*importer)
+
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
         self._unique_id = 0

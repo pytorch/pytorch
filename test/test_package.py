@@ -3,7 +3,7 @@ from unittest import skipIf
 import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
-from torch.package import PackageExporter, PackageImporter, OrderedImporter, SysImporter
+from torch.package import PackageExporter, PackageImporter, OrderedImporter, sys_importer
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -192,7 +192,7 @@ import module_a
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
 
         f2 = self.temp()
-        pe = PackageExporter(f2, verbose=False, importer=OrderedImporter(importer1, SysImporter))
+        pe = PackageExporter(f2, verbose=False, importer=(importer1, sys_importer))
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
             pe.require_module(loaded1.__module__)
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
@@ -219,7 +219,7 @@ import module_a
         f2 = self.temp()
 
         def make_exporter():
-            pe = PackageExporter(f2, verbose=False, importer=OrderedImporter(importer1, SysImporter))
+            pe = PackageExporter(f2, verbose=False, importer=[importer1, sys_importer])
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
             return pe
 
@@ -356,7 +356,7 @@ import module_a
         # came from imported packages so that it can resolve
         # class names like torchvision.models.resnet.ResNet
         # to their source code.
-        with PackageExporter(f2, verbose=False, importer=OrderedImporter(i, SysImporter)) as e:
+        with PackageExporter(f2, verbose=False, importer=(i, sys_importer)) as e:
             # e.importers is a list of module importing functions
             # that by default contains importlib.import_module.
             # it is searched in order until the first success and
@@ -677,16 +677,16 @@ class ManglingTest(TestCase):
 
 
 class TestImporter(TestCase):
-    def test_default_importer(self):
+    def test_sys_importer(self):
         import package_a
         import package_a.subpackage
-        self.assertIs(SysImporter.import_module('package_a'), package_a)
-        self.assertIs(SysImporter.import_module('package_a.subpackage'), package_a.subpackage)
+        self.assertIs(sys_importer.import_module('package_a'), package_a)
+        self.assertIs(sys_importer.import_module('package_a.subpackage'), package_a.subpackage)
 
-    def test_default_importer_roundtrip(self):
+    def test_sys_importer_roundtrip(self):
         import package_a
         import package_a.subpackage
-        importer = SysImporter
+        importer = sys_importer
         type_ = package_a.subpackage.PackageASubpackageObject
         module_name, type_name = importer.get_name(type_)
 
@@ -725,10 +725,10 @@ class TestImporter(TestCase):
         buffer.seek(0)
         importer = PackageImporter(buffer)
 
-        ordered_importer_default_first = OrderedImporter(SysImporter, importer)
-        self.assertIs(ordered_importer_default_first.import_module('package_a'), package_a)
+        ordered_importer_sys_first = OrderedImporter(sys_importer, importer)
+        self.assertIs(ordered_importer_sys_first.import_module('package_a'), package_a)
 
-        ordered_importer_package_first = OrderedImporter(importer, SysImporter)
+        ordered_importer_package_first = OrderedImporter(importer, sys_importer)
         self.assertIs(ordered_importer_package_first.import_module('package_a'), importer.import_module('package_a'))
 
 

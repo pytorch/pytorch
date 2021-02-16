@@ -3,7 +3,7 @@ from .importer import (
     ObjMismatchError,
     ObjNotFoundError,
     OrderedImporter,
-    SysImporter,
+    sys_importer,
 )
 from .package_importer import PackageImporter
 from .package_exporter import PackageExporter
