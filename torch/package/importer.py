@@ -1,6 +1,7 @@
 import importlib
 from abc import ABC, abstractmethod
-from pickle import _getattribute, whichmodule, _Pickler  # type: ignore
+from pickle import _getattribute, _Pickler  # type: ignore
+from pickle import whichmodule as _pickle_whichmodule  # type: ignore
 from types import ModuleType
 from typing import Any, Optional, Tuple, List
 
@@ -111,7 +112,7 @@ class Importer(ABC):
             importer_name = (
                 f"the importer for {get_mangle_prefix(module_name)}"
                 if is_mangled_
-                else "'DefaultImporter'"
+                else "'sys_importer'"
             )
             return module_name, location, importer_name
 
@@ -130,7 +131,7 @@ class Importer(ABC):
         """Find the module name an object belongs to.
 
         This should be considered internal for end-users, but developers of
-        an importer can override it to customizer the behavior.
+        an importer can override it to customize the behavior.
 
         Taken from pickle.py, but modified to exclude the search into sys.modules
         """
@@ -148,10 +149,10 @@ class _SysImporter(Importer):
         return importlib.import_module(module_name)
 
     def whichmodule(self, obj: Any, name: str) -> str:
-        return whichmodule(obj, name)
+        return _pickle_whichmodule(obj, name)
 
 
-SysImporter = _SysImporter()
+sys_importer = _SysImporter()
 
 
 class OrderedImporter(Importer):
