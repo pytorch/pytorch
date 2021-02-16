@@ -10,11 +10,10 @@ from PIL import Image
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import IterDataPipe, RandomSampler
+from torch.utils.data import IterDataPipe, RandomSampler, DataLoader
 from typing import List, Tuple, Dict, Any, Type
 
 import torch.utils.data.datapipes as dp
-
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler)
@@ -235,11 +234,15 @@ class IDP(IterDataPipe):
         return self.length
 
 
-def _fake_fn(self, data, *args, **kwargs):
+def _fake_fn(data, *args, **kwargs):
     return data
 
-def _fake_filter_fn(self, data, *args, **kwargs):
+def _fake_filter_fn(data, *args, **kwargs):
     return data >= 5
+
+def _worker_init_fn(worker_id):
+    random.seed(123)
+
 
 class TestFunctionalIterDataPipe(TestCase):
 
@@ -261,8 +264,12 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Filter, IDP(arr), {'filter_fn': lambda x: x >= 5}),
         ]
         for dpipe, input_dp, kargs in unpicklable_datapipes:
-            with self.assertRaises(AttributeError):
-                p = pickle.dumps(dpipe(input_dp, **kargs))  # type: ignore
+            with warnings.catch_warnings(record=True) as wa:
+                datapipe = dpipe(input_dp, **kargs)
+                self.assertEqual(len(wa), 1)
+                self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
+                with self.assertRaises(AttributeError):
+                    p = pickle.dumps(datapipe)  # type: ignore
 
     def test_map_datapipe(self):
         arr = range(10)
@@ -440,6 +447,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(AssertionError):
             shuffle_dp = dp.iter.Shuffle(input_ds, buffer_size=0)
 
+
         for bs in (5, 20, 25):
             shuffle_dp = dp.iter.Shuffle(input_ds, buffer_size=bs)
             self.assertEqual(len(shuffle_dp), len(input_ds))
@@ -449,9 +457,11 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(sorted(res), exp)
 
             # Test Deterministic
-            random.seed(123)
-            res2 = list(d for d in shuffle_dp)
-            self.assertEqual(res, res2)
+            for num_workers in (0, 1):
+                random.seed(123)
+                dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn)
+                dl_res = list(d for d in dl)
+                self.assertEqual(res, dl_res)
 
         shuffle_dp_nl = dp.iter.Shuffle(IDP_NoLen(range(20)), buffer_size=5)
         with self.assertRaises(NotImplementedError):

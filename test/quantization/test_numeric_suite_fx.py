@@ -1,9 +1,13 @@
 import copy
+import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 from torch.quantization import get_default_qconfig, default_dynamic_qconfig
+import torch.nn.quantized as nnq
+toq = torch.ops.quantized
 from torch.quantization._numeric_suite_fx import (
     remove_qconfig_observer_fx,
     compare_model_outputs_fx,
@@ -11,7 +15,12 @@ from torch.quantization._numeric_suite_fx import (
     compare_model_stub_fx,
 )
 from torch.quantization.fx.quantize import is_activation_post_process
-from torch.quantization.quantize_fx import convert_fx, fuse_fx, prepare_fx
+from torch.quantization.quantize_fx import (
+    convert_fx,
+    fuse_fx,
+    prepare_fx,
+    prepare_qat_fx,
+)
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
     ConvBnReLUModel,
@@ -20,9 +29,14 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearDynamicModel,
     SingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
+    skip_if_no_torchvision,
     test_only_eval_fn,
 )
 from torch.testing._internal.common_quantized import override_qengines
+from torch.quantization.ns.graph_matcher import (
+    get_matching_node_pairs,
+    GraphMatchingException,
+)
 
 
 class TestGraphModeNumericSuite(QuantizationTestCase):
@@ -429,3 +443,128 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             lstm_input,
             lstm_hidden,
         )
+
+class TestFXGraphMatcher(QuantizationTestCase):
+
+    @override_qengines
+    def test_simple_mod(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        results = get_matching_node_pairs(mp, mq)
+
+        expected_types = {'0': (nn.Conv2d, nnq.Conv2d)}
+        self.assert_types_for_matched_node_pairs(results, expected_types, mp, mq)
+
+    @override_qengines
+    def test_simple_fun(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.Tensor(1, 4))
+                self.b = nn.Parameter(torch.Tensor(1))
+                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        results = get_matching_node_pairs(mp, mq)
+
+        expected_types = {'linear_1': (F.linear, toq.linear)}
+        self.assert_types_for_matched_node_pairs(results, expected_types, mp, mq)
+
+    @override_qengines
+    def test_simple_mod_multi(self):
+        m = nn.Sequential(
+            nn.Sequential(
+                nn.Conv2d(1, 1, 1),
+            ),
+            nn.Conv2d(1, 1, 1),
+        ).eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        # assume success if no exceptions
+        results = get_matching_node_pairs(mp, mq)
+
+    @override_qengines
+    def test_simple_tensor_ops(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x + y
+                return z
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        # assume success if no exceptions
+        results = get_matching_node_pairs(mp, mq)
+
+    @override_qengines
+    def test_matching_failure_node_count(self):
+        # verify that matching graphs with matching node types but
+        # different counts of matchable nodes fails
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
+        mp1 = prepare_fx(m1, {'': torch.quantization.default_qconfig})
+        mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
+        with self.assertRaises(GraphMatchingException) as ex:
+            results = get_matching_node_pairs(mp1, mp2)
+
+    @override_qengines
+    def test_matching_failure_node_type(self):
+        # verify that matching graphs with non-matching node types fails
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        m2 = nn.Sequential(nn.Linear(1, 1)).eval()
+        mp1 = prepare_fx(m1, {'': torch.quantization.default_qconfig})
+        mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
+        with self.assertRaises(GraphMatchingException) as ex:
+            results = get_matching_node_pairs(mp1, mp2)
+
+
+class TestFXGraphMatcherModels(QuantizationTestCase):
+
+    @override_qengines
+    @skip_if_no_torchvision
+    def test_mobilenet_v2(self):
+        # verify that mobilenetv2 graph is able to be matched
+        import torchvision
+        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        # assume success if no exceptions
+        results = get_matching_node_pairs(mp, mq)
+
+    @override_qengines
+    @skip_if_no_torchvision
+    def test_mobilenet_v2_qat(self):
+        # verify that mobilenetv2 graph is able to be matched
+        import torchvision
+        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).float()
+        mp = prepare_qat_fx(m, {'': torch.quantization.get_default_qat_qconfig('fbgemm')})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        # assume success if no exceptions
+        results = get_matching_node_pairs(mp, mq)

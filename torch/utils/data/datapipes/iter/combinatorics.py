@@ -54,6 +54,15 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
     `buffer_size` is required to be larger than 0. For `buffer_size == 1`, the
     datapipe is not shuffled. In order to fully shuffle all elements from datapipe,
     `buffer_size` is required to be greater than or equal to the size of datapipe.
+
+    When it is used with :class:`~torch.utils.data.DataLoader`, the methods to
+    set up random seed are different based on :attr:`num_workers`.
+
+    For single-process mode (:attr:`num_workers == 0`), the random seed is set before
+    the :class:`~torch.utils.data.DataLoader` in the main process. For multi-process
+    mode (:attr:`num_worker > 0`), `worker_init_fn` is used to set up a random seed
+    for each worker process.
+
     args:
         datapipe: The IterDataPipe being shuffled
         buffer_size: The buffer size for shuffling
