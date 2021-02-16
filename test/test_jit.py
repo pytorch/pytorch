@@ -783,13 +783,13 @@ class TestJit(JitTestCase):
                 m(x)
                 m(x)
                 fwd = m._c._get_method("forward")
-                states = fwd.get_debug_state()
+                states = m.get_debug_state()
 
                 # after flushing there shouldn't be
                 # no opt plan
                 fwd._debug_flush_compilation_cache()
                 with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
-                    states = fwd.get_debug_state() # noqa
+                    states = m.get_debug_state() # noqa
 
     def test_numel(self):
         @torch.jit.script
