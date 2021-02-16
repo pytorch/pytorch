@@ -3593,6 +3593,61 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_gather_namedtuple(self):
+        # tests ability to gather a list of namedtuples and return a namedtuple where each
+        # element is of the expected tensor type.
+        fields = ['a', 'b']
+        TestNamedTupleInput_0 = collections.namedtuple('NamedTuple', fields)
+
+        num_gpus = torch.cuda.device_count()
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=1)
+        out1 = TestNamedTupleInput_0(a, b)
+
+        a = torch.rand(num_gpus * 2, device=1)
+        b = torch.rand(num_gpus * 2, device=0)
+        out2 = TestNamedTupleInput_0(a, b)
+
+        outputs = [out1, out2]
+
+        out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
+
+        out = scatter_gather.gather(outputs, 0)  # test on GPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))
+
+        class TestNamedTupleInput_1(NamedTuple):
+            a: torch.tensor
+            b: torch.tensor
+
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=1)
+        out1 = TestNamedTupleInput_1(a, b)
+
+        a = torch.rand(num_gpus * 2, device=1)
+        b = torch.rand(num_gpus * 2, device=0)
+        out2 = TestNamedTupleInput_1(a, b)
+
+        outputs = [out1, out2]
+
+        out = scatter_gather.gather(outputs, 0)  # test on GPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))
+
+        out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
 
 if __name__ == '__main__':
     run_tests()
