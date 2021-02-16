@@ -4275,6 +4275,39 @@ class TestNN(NNTestCase):
         for enabled in (False, True):
             with torch.backends.mkldnn.flags(enabled=enabled):
                 gradcheck(F.conv2d, (input, mod.weight))
+                
+    def test_Conv2d_OneDNN(self):
+        def run_once():
+            group_val = 24
+            ifm = torch.ones([1, group_val, 6, 6], dtype=torch.float32)
+            weights = torch.ones([group_val, 1, 3, 3], dtype=torch.float32)
+            op = torch.nn.Conv2d(
+                    in_channels=group_val,
+                    out_channels=group_val,
+                    kernel_size=[3,3],
+                    stride=[2,2],
+                    padding=[1,1],
+                    dilation=[1,1],
+                    groups=group_val,
+                    bias=False,
+                    padding_mode='zeros'
+                )
+
+            op.weight.data = weights
+            res = op(ifm)
+            grad_in = torch.ones(res.shape, dtype=torch.float32)
+            res.backward(grad_in)
+            return op.weight.grad
+        
+        with torch.backends.mkldnn.flags(enabled=False):
+            without_onednn = run_once()
+            
+        with torch.backends.mkldnn.flags(enabled=True):
+            with_onednn = run_once()
+            
+        self.assertEqual(without_onednn, with_onednn)
+            
+        
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
