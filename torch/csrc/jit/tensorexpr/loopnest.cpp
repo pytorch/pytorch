@@ -2142,10 +2142,10 @@ class SwapReduce : public IRMutator {
   SwapReduce(
       const ReduceOp* old_reduce,
       ReduceOp* new_reduce,
-      const std::vector<const Expr*>& new_indices)
+      std::vector<const Expr*> new_indices)
       : old_reduce_(old_reduce),
         new_reduce_(new_reduce),
-        new_indices_(new_indices) {}
+        new_indices_(std::move(new_indices)) {}
 
   Stmt* mutate(const Store* v) override {
     if (const ReduceOp* op = dynamic_cast<const ReduceOp*>(v->value())) {
@@ -2258,7 +2258,7 @@ void LoopNest::rfactor(
   StoreFinder sf(reduce_op);
   root_stmt()->accept(&sf);
   Stmt* st = sf.store();
-  if (!st) {
+  if (!st || !dynamic_cast<Store*>(st)) {
     std::cerr << "Can't find reduction to rfactor " << *reduce_op << "\n";
     return;
   }
@@ -2406,7 +2406,7 @@ void LoopNest::rfactor(
   }
 
   auto second_buf = dynamic_cast<const Buf*>(second_reduce->accumulator());
-  std::vector<const Expr*> second_indices = {old_outer};
+  auto const& second_indices = old_outer;
   if (insertion_point &&
       dynamic_cast<For*>(insertion_point->get_parent())->var() ==
           target_for->var()) {
