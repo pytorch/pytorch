@@ -44,6 +44,22 @@ c10::complex<T> compute_csqrt(const c10::complex<T>& z) {
   auto t = std::sqrt((-z.real() + std::abs(z)) * half);
   return c10::complex<T>(half * std::abs(z.imag() / t), std::copysign(t, z.imag()));
 }
+
+template<typename T>
+c10::complex<T> compute_cacos(const c10::complex<T>& z) {
+  auto constexpr one = T(1);
+  // Trust standard library to correctly handle infs and NaNs
+  if (std::isinf(z.real()) || std::isinf(z.imag()) ||
+      std::isnan(z.real()) || std::isnan(z.imag())) {
+    return static_cast<c10::complex<T>>(std::acos(static_cast<std::complex<T>>(z)));
+  }
+  auto a = compute_csqrt(c10::complex<T>(one - z.real(), -z.imag()));
+  auto b = compute_csqrt(c10::complex<T>(one + z.real(),  z.imag()));
+  auto c = compute_csqrt(c10::complex<T>(one + z.real(),  -z.imag()));
+  auto r = T(2) * std::atan2(a.real(), b.real());
+  auto i = std::asinh(a.real() * c.imag() + a.imag()  * c.real());
+  return c10::complex<T>(r, i);
+}
 } // anonymous namespace
 
 namespace c10_complex_math { namespace _detail {
@@ -53,6 +69,14 @@ c10::complex<float> sqrt(const c10::complex<float>& in) {
 
 c10::complex<double> sqrt(const c10::complex<double>& in) {
   return compute_csqrt(in);
+}
+
+c10::complex<float> acos(const c10::complex<float>& in) {
+  return compute_cacos(in);
+}
+
+c10::complex<double> acos(const c10::complex<double>& in) {
+  return compute_cacos(in);
 }
 
 }}
