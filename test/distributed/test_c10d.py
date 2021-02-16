@@ -384,8 +384,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         server_store.set("key", "value")
 
         # create and exit two different groups of workers
-        mp.spawn(create_client, args=(addr, port), nprocs=random.randint(5, 10))
-        mp.spawn(create_client, args=(addr, port), nprocs=random.randint(5, 10))
+        mp.start_processes(create_client, args=(addr, port), nprocs=random.randint(5, 10), start_method='fork')
+        mp.start_processes(create_client, args=(addr, port), nprocs=random.randint(5, 10), start_method='fork')
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):

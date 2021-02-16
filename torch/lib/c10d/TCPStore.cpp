@@ -416,7 +416,7 @@ TCPStore::TCPStore(
   // Connect to the daemon
   storeSocket_ = tcputil::connect(
       tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-  if (numWorkers > 0 && waitWorkers) {
+  if (numWorkers >= 0 && waitWorkers) {
     waitForWorkers();
   }
 }
