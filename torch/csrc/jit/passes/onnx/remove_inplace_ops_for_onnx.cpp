@@ -16,8 +16,12 @@ namespace jit {
 
 namespace {
 
-const std::set<c10::Symbol> inplace_ops =
-    {aten::append, aten::index_put_, aten::pop, aten::insert, aten::Delete};
+const std::set<c10::Symbol> inplace_ops = {
+    aten::append,
+    aten::index_put_,
+    aten::pop,
+    aten::insert,
+    aten::Delete};
 
 bool IsInplaceNode(const Node* n) {
   if (inplace_ops.find(n->kind()) != inplace_ops.end()) {
@@ -107,7 +111,7 @@ Value* MatchIfBlocksOutputForValue(
 //  block1():
 //    %28 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1, %spatial_size_1.1)
 //    %29 : Tensor = aten::randn(%28, %12, %12, %12, %12)
-//    %30: Tensor = aten::slice(%state.1, %13, %13, %10, %11)
+//    %30 : Tensor = aten::slice(%state.1, %13, %13, %10, %11)
 //    %31 : Tensor = aten::copy_(%30, %29, %9)
 //    -> ()
 // After updating:
@@ -183,8 +187,9 @@ void RegisterInplaceNodeInIfBlocks(
       next_block_node->addOutput()->setType(new_data->type());
     next_block = next_block_node->owningBlock();
   }
+
   orig_data->replaceAllUsesAfterNodeWith(
-      next_block_node,
+      next_block_node->output(0)->node(),
       next_block_node->outputs().at(next_block_node->outputs().size() - 1));
 }
 
@@ -209,7 +214,6 @@ void RegisterInplaceNodeInIfBlocks(
 //          %60 : Tensor = aten::index_put(%bias.1, %59, %45, %25)
 //          -> (%27, %60)
 //      -> (%27, %61)
-// clang-format on
 void RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
   Node* inplace_node = new_data->node();
   Block* outer_block = inplace_node->owningBlock();
@@ -256,10 +260,11 @@ void RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
     node_list.pop_back();
   }
 
-  // Update inplace node inputs inside the outer most block.
-  outer_block_node = outer_block->owningNode();
-  auto prev_data =
-      outer_block_node->inputs().at(outer_block_node->inputs().size() - 1);
+  // Update inplace node inputs inside the inner most block.
+  auto prev_data = inplace_node->inputs().at(0);
+  while (IsInplaceNode(prev_data->node())) {
+    prev_data = prev_data->node()->inputs().at(0);
+  }
   for (auto node : inplace_node->owningBlock()->nodes()) {
     size_t idx = 0;
     for (auto inputs_ : node->inputs()) {
@@ -457,6 +462,39 @@ static void PrepareListAppendAndInsertForONNX(Node* n) {
   }
 }
 
+static void PrepareInplaceOpsForONNX(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      PrepareInplaceOpsForONNX(child_block);
+    }
+
+    switch (it->kind()) {
+      case aten::copy_: {
+        PrepareCopyForONNX(*it);
+        break;
+      }
+      case aten::index_put:
+      case aten::index_put_: {
+        PrepareIndexPutForONNX(*it);
+        break;
+      }
+      case aten::pop: {
+        PrepareListPopForONNX(*it);
+        break;
+      }
+      case aten::insert:
+      case aten::append: {
+        PrepareListAppendAndInsertForONNX(*it);
+        break;
+      }
+      case aten::Delete: {
+        PrepareListDeleteForONNX(*it);
+        break;
+      }
+    }
+  }
+}
+
 // Remove Mutation pass does not handle mutation on block inputs.
 // To fix this, insert a clone node following the graph input:
 // Example for graph input node %0:
@@ -585,7 +623,8 @@ Value* registerSetAttrInBlocks(
     Node* cloneNode,
     Value* origValue,
     const std::string& output_name) {
-  RegisterInplaceNodeInLoopBlocks(origValue, cloneNode->output());
+  auto cloneNode = insertCloneBeforeNode(graph, newValue, block->return_node());
+
   RegisterInplaceNodeInIfBlocks(origValue, cloneNode->output(), output_name);
 
   Value* output = nullptr;
