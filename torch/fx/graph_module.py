@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import torch.overrides
 from torch.nn.modules.module import _addindent
-from torch.package.module_environment import ModuleEnv
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
 from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
+from torch.package import Importer, SysImporter
 import copy
 import sys
 import traceback
@@ -42,20 +42,20 @@ def _forward_from_src(src: str, globals: Dict[str, Any]):
     return globals['forward']
 
 
-def _format_import_statement(name: str, obj: Any, module_env: ModuleEnv) -> str:
+def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
     if name in _custom_builtins:
         return _custom_builtins[name].import_str
     if _is_from_torch(name):
         return 'import torch'
 
-    module_name, attr_name = module_env.get_name(obj)
+    module_name, attr_name = importer.get_name(obj)
     return f'from {module_name} import {attr_name} as {name}'
 
 
-def _format_import_block(globals: Dict[str, Any], module_env: ModuleEnv):
+def _format_import_block(globals: Dict[str, Any], importer: Importer):
     import_strs: Set[str] = set()
     for name, obj in globals.items():
-        import_strs.add(_format_import_statement(name, obj, module_env))
+        import_strs.add(_format_import_statement(name, obj, importer))
     return '\n'.join(import_strs)
 
 
@@ -368,7 +368,7 @@ class {module_name}(torch.nn.Module):
         """
         dict_without_graph = self.__dict__.copy()
         python_code = self.recompile()
-        import_block = _format_import_block(python_code.globals, ModuleEnv())
+        import_block = _format_import_block(python_code.globals, SysImporter)
         del dict_without_graph['_graph']
         return (deserialize_graphmodule, (dict_without_graph, import_block))
 

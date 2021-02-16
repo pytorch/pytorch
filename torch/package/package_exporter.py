@@ -7,7 +7,7 @@ from ._custom_import_pickler import create_custom_import_pickler
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
-from .module_environment import ModuleEnv
+from .importer import Importer, SysImporter
 import types
 from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, Optional
 from pathlib import Path
@@ -46,15 +46,14 @@ class PackageExporter:
     on each it finds, recursively resolving dependencies.
     """
 
-    """ A module environment that will be searched in order to find the module assocated with module names
+    """A module environment that will be searched in order to find the module assocated with module names
     referenced by other modules or by pickled objects. The default module environment just uses DefaultImporter,
     which searches the Python environment. When pickling code or objects loaded from an imported package,
-    you should create a ModuleEnv that has that `PackageImporter` listed first. When a name conflict occurs
-    between importers, the first importer in the list takes precedence.
+    you should create a OrderedImporter that has that `PackageImporter` listed first.
     """
-    module_env: ModuleEnv
+    importer: Importer
 
-    def __init__(self, f: Union[str, Path, BinaryIO], verbose: bool = True):
+    def __init__(self, f: Union[str, Path, BinaryIO], importer: Importer = SysImporter, verbose: bool = True):
         """
         Create an exporter.
 
@@ -76,7 +75,7 @@ class PackageExporter:
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
-        self.module_env = ModuleEnv()
+        self.importer = importer
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
 
@@ -170,7 +169,7 @@ class PackageExporter:
 
     def _import_module(self, module_name: str):
         try:
-            return self.module_env.import_module(module_name)
+            return self.importer.import_module(module_name)
         except ModuleNotFoundError as e:
             if not is_mangled(module_name):
                 raise
@@ -269,7 +268,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_custom_import_pickler(data_buf, self.module_env)
+        pickler = create_custom_import_pickler(data_buf, self.importer)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
