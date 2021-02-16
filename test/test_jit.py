@@ -756,17 +756,40 @@ class TestJit(JitTestCase):
     def test_debug_flush_compilation_cache(self):
         def foo(x):
             return x + 2
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+
+            def forward(self, t):
+                return t + 2
+
+        m = torch.jit.script(Mod())
         x = torch.rand(1, 10)
+
         with enable_profiling_mode_for_profiling_tests():
             jitted = self.checkScript(foo, (x,))
             # shouldn't throw
             states = jitted.get_debug_state()
+
             # after flushing there shouldn't be
             # no opt plan
-
             jitted._debug_flush_compilation_cache()
             with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
                 states = jitted.get_debug_state() # noqa
+
+            NUM_RUNS = 1
+            with num_profiled_runs(NUM_RUNS):
+                m(x)
+                m(x)
+                fwd = m._c._get_method("forward")
+                states = fwd.get_debug_state()
+
+                # after flushing there shouldn't be
+                # no opt plan
+                fwd._debug_flush_compilation_cache()
+                with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
+                    states = fwd.get_debug_state() # noqa
 
     def test_numel(self):
         @torch.jit.script
