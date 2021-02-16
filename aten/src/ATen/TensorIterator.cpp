@@ -831,6 +831,16 @@ void TensorIteratorBase::build_unary_float_op(const Tensor& out, const Tensor& a
       .promote_integer_inputs_to_float(true));
 }
 
+void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(out)
+      .add_input(a)
+      .cast_common_dtype_to_outputs(false)
+      .enforce_safe_casting_to_output(false)
+      .check_all_same_dtype(true));
+}
+
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_binary_op(out, a, b);

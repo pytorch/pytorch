@@ -412,7 +412,6 @@ Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 TORCH_IMPL_FUNC(sin_out) (const Tensor& self, const Tensor& result) {
   sin_stub(device_type(), *this);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 
 Tensor& cos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cos_stub); }
