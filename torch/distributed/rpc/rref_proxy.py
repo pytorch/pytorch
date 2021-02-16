@@ -15,11 +15,9 @@ def _local_invoke_async_execution(rref, func_name, args, kwargs):
 def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
     # Since rref._get_type can potentially issue an RPC, it should respect the
     # passed in timeout here.
-    # if rpc_sync, allow get_type to block, else, add invoke logic as a then()
-    # callback.
+    # if rpc_sync, allow get_type to block, else, add invoke logic as a callback
     block_on_type = rpc_api in [torch.distributed.rpc.rpc_sync, torch.distributed.rpc.remote]
     rref_type = rref._get_type(timeout=timeout, blocking=block_on_type)
-    # rref_type = rref_type.wait()
     should_wait_on_rref_type = isinstance(rref_type, torch._C.Future)
     # Helper function to allow invoke to be run as a chained callback instead of
     # inline.
@@ -69,7 +67,6 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
                 ret_fut.set_result(rpc_result)
             except BaseException as err:
                 ret_fut.set_exception(err)
-                assert ret_fut.done()
 
         def cb(rref_type_fut):
             rpc_fut = invoke_on_owner(rref_type_fut)
