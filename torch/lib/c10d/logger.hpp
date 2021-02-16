@@ -50,6 +50,8 @@ class Logger {
   // data fields.
   std::unique_ptr<c10::DDPLoggingData> ddp_logging_data_;
   std::shared_ptr<c10d::Reducer> reducer_;
+  // track the number of iterations when runtime stats are collected so far.
+  long num_iterations_stats_recorded_ = 0;
 };
 
 } // namespace c10d
