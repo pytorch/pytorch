@@ -1,12 +1,13 @@
 #include "caffe2/operators/pool_op.h"
 
+#include <c10/util/accumulate.h>
+#include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/math.h"
+
 #include <array>
 #include <functional>
 #include <limits>
 #include <numeric>
-
-#include "caffe2/core/context_gpu.h"
-#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -835,8 +836,7 @@ bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NHWC>(
     CUDAContext* context) const {
   // Each CUDA block handles one point, one thread per channel.
   const int ndim = X_dims.size();
-  const int Y_HxW = std::accumulate(
-      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  const auto Y_HxW = c10::multiply_integers(Y_dims.cbegin(), Y_dims.cend());
   switch (ndim) {
     case 1: {
       AveragePool1DForwardNHWCCUDAKernel<float>
@@ -1064,8 +1064,7 @@ bool AveragePoolFunctor<CUDAContext>::Backward<float, StorageOrder::NHWC>(
     float* dX,
     CUDAContext* context) const {
   const int ndim = X_dims.size();
-  const int X_HxW = std::accumulate(
-      X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
+  const auto X_HxW = c10::multiply_integers(X_dims.cbegin(), X_dims.cend());
   const int num_blocks = N * X_HxW;
   switch (ndim) {
     case 1: {
@@ -1867,8 +1866,7 @@ bool MaxPoolFunctor<CUDAContext>::Forward<float, StorageOrder::NHWC>(
     CUDAContext* context) const {
   // Each CUDA block handles one point, one thread per channel.
   const int ndim = X_dims.size();
-  const int Y_HxW = std::accumulate(
-      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  const auto Y_HxW = c10::multiply_integers(Y_dims.cbegin(), Y_dims.cend());
   switch (ndim) {
     case 1: {
       MaxPool1DForwardNHWCCUDAKernel<float>
@@ -2063,8 +2061,7 @@ bool MaxPoolFunctor<CUDAContext>::Backward<float, StorageOrder::NHWC>(
     float* dX,
     CUDAContext* context) const {
   const int ndim = X_dims.size();
-  const int X_HxW = std::accumulate(
-      X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
+  const auto X_HxW = c10::multiply_integers(X_dims.cbegin(), X_dims.cend());
   switch (ndim) {
     case 1: {
       MaxPool1DBackwardNHWCCUDAKernel<float>
