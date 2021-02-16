@@ -108,13 +108,13 @@ Module Method::owner() const {
   return Module(owner_);
 }
 void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner()._ivalue());
+  stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   function_->run(stack);
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
-  stack.insert(stack.begin(), owner()._ivalue());
+  stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
 }

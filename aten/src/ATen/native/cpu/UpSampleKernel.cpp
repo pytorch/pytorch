@@ -29,7 +29,7 @@ static inline int64_t nearest_idx(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_nearest(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     const scale_type& scales) {
   TORCH_CHECK(input_.dtype() == output_.dtype(), "expected dtype ", input_.dtype(),
@@ -115,7 +115,7 @@ void cpu_upsample_nearest(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_nearest_channels_last(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     const scale_type& scales) {
   TORCH_CHECK(input_.dtype() == output_.dtype(), "expected dtype ", input_.dtype(),
@@ -210,7 +210,7 @@ void cpu_upsample_nearest_channels_last(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_nearest_backward(
-    Tensor& grad_input_,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     const scale_type& scales) {
   TORCH_CHECK(grad_input_.dtype() == grad_output_.dtype(), "expected dtype ", grad_output_.dtype(),
@@ -300,7 +300,7 @@ void cpu_upsample_nearest_backward(
 
 using scale_t = std::vector<c10::optional<double>>;
 void upsample_nearest1d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest1d", [&] {
@@ -309,7 +309,7 @@ void upsample_nearest1d_kernel_impl(
 }
 
 void upsample_nearest2d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
@@ -342,7 +342,7 @@ void upsample_nearest3d_kernel_impl(
 }
 
 void upsample_nearest1d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
@@ -351,7 +351,7 @@ void upsample_nearest1d_backward_kernel_impl(
 }
 
 void upsample_nearest2d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {

@@ -524,7 +524,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     return e;
   }
 
-  auto tt = *v->type()->cast<TensorType>()->scalarType();
+  auto tt = *v->type()->castRaw<TensorType>()->scalarType();
 
   if (tt == static_cast<at::ScalarType>(e.dtype().scalar_type())) {
     return e;
@@ -1833,7 +1833,7 @@ Tensor* TensorExprKernel::computeSoftmax(
   // be deprecated.
   TORCH_INTERNAL_ASSERT(v->node()->input(1)->node()->kind() == prim::Constant);
   int64_t rank =
-      *v->node()->input(0)->type()->cast<TensorType>()->sizes().size();
+      *v->node()->input(0)->type()->castRaw<TensorType>()->sizes().size();
   size_t softmax_dim =
       normalizeAndCheckIndex(v->node()->input(1)->node()->i(attr::value), rank);
   std::vector<DimArg> non_softmax_dims;

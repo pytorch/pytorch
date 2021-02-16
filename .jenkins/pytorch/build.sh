@@ -53,6 +53,11 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export USE_CPP_CODE_COVERAGE=ON
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
+  # enable split torch_cuda build option in CMake
+  export BUILD_SPLIT_CUDA=ON
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 

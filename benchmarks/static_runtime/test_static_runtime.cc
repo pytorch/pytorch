@@ -59,6 +59,15 @@ void testStaticRuntime(
   script::Module module("module");
   module.define(jit_script);
 
+  std::vector<IValue> args_tensors, args_copy;
+  for (const auto& ival : args) {
+    if (ival.isTensor()) {
+      args_tensors.emplace_back(ival);
+      const at::Tensor& t = ival.toTensor();
+      args_copy.emplace_back(t.clone());
+    }
+  }
+
   auto expect = module.forward(args);
 
   StaticRuntime runtime(module);
@@ -72,6 +81,8 @@ void testStaticRuntime(
   } else {
     EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
   }
+  // make sure inputs were not modified
+  compareTensorLists(args_tensors, args_copy);
 }
 } // namespace
 
@@ -202,14 +213,30 @@ TEST(StaticRuntime, KWargsAPI_1) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
+      {
+        std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
 
-      // run jit graph executor
-      std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
-      at::Tensor output_1 = getTensor(module.forward(inputs));
+        // run jit graph executor
+        at::Tensor output_1 = getTensor(module.forward(inputs));
 
-      // run static runtime
-      at::Tensor output_2 = getTensor(runtime.run(inputs, {}));
-      EXPECT_TRUE(output_1.equal(output_2));
+        // run static runtime
+        c10::IValue output_ivalue = runtime.run(inputs, {});
+
+        at::Tensor output_2 = getTensor(output_ivalue);
+        EXPECT_TRUE(output_1.equal(output_2));
+
+        // check for output aliasing
+        EXPECT_EQ(output_ivalue.use_count(), 1);
+        output_ivalue = IValue();
+
+        EXPECT_EQ(output_2.getIntrusivePtr().use_count(), 1);
+      }
+
+      // check for input aliasing (deep & wide does not have ops
+      // that create aliases of input tensors)
+      EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(user_emb.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
 }
@@ -226,19 +253,32 @@ TEST(StaticRuntime, KWargsAPI_2) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
+      {
+        // run jit graph executor
+        std::vector<at::IValue> args({ad_emb_packed, user_emb, wide});
+        at::Tensor output_1 = getTensor(module.forward(args));
 
-      // run jit graph executor
-      std::vector<at::IValue> args({ad_emb_packed, user_emb, wide});
-      at::Tensor output_1 = getTensor(module.forward(args));
+        std::unordered_map<std::string, c10::IValue> kwargs(
+            {{"ad_emb_packed", ad_emb_packed},
+             {"user_emb", user_emb},
+             {"wide", wide}});
 
-      std::unordered_map<std::string, c10::IValue> kwargs(
-          {{"ad_emb_packed", ad_emb_packed},
-           {"user_emb", user_emb},
-           {"wide", wide}});
+        // run static runtime
+        c10::IValue output_ivalue = runtime.run({}, kwargs);
 
-      // run static runtime
-      at::Tensor output_2 = getTensor(runtime.run({}, kwargs));
-      EXPECT_TRUE(output_1.equal(output_2));
+        at::Tensor output_2 = getTensor(output_ivalue);
+        EXPECT_TRUE(output_1.equal(output_2));
+
+        // check for output aliasing
+        EXPECT_EQ(output_ivalue.use_count(), 1);
+        output_ivalue = IValue();
+
+        EXPECT_EQ(output_2.getIntrusivePtr().use_count(), 1);
+      }
+
+      EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(user_emb.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
 }

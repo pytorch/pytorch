@@ -100,7 +100,8 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() &&
           !new_grad.is_sparse() &&
           new_grad.use_count() <= num_expected_refs &&
-          utils::obeys_layout_contract(new_grad, variable)) {
+          ((!new_grad.is_mkldnn() && utils::obeys_layout_contract(new_grad, variable))
+           || new_grad.is_mkldnn())){
         // we aren't setting up for double-backward
         // not sparse
         // no other user-visible tensor references new_grad
@@ -134,8 +135,12 @@ struct TORCH_API AccumulateGrad : public Node {
         if (new_grad.is_sparse()) {
           update_grad(new_grad.clone());
         } else {
-          // Deep copies new_grad according to the "Gradient Layout Contract."
-          update_grad(utils::clone_obey_contract(new_grad, variable));
+          if (new_grad.is_mkldnn()) {
+            update_grad(new_grad.clone());
+          } else {
+            // Deep copies new_grad according to the "Gradient Layout Contract."
+            update_grad(utils::clone_obey_contract(new_grad, variable));
+          }
         }
       }
     } else if (!GradMode::is_enabled()) {

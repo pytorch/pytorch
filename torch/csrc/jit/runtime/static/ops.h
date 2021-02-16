@@ -74,6 +74,7 @@ bool canRunOutOfPlace(Node* n);
 bool canReuseInputsOutputs(Node* n);
 bool canReuseInputs(Node* n);
 bool canReuseOutputs(Node* n);
+bool isViewOp(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 

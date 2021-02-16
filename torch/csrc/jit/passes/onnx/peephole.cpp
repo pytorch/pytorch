@@ -565,7 +565,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
     if (input->node()->kind() == prim::ListConstruct) {
       auto* lc_node = input->node();
       TypePtr elem =
-          lc_node->output()->type()->cast<ListType>()->getElementType();
+          lc_node->output()->type()->castRaw<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
         // ListConstruct Int[] output case, we need to transform to ONNX
         // Concat to ensure the output is a single tensor(dynamic) type in

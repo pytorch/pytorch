@@ -3,6 +3,7 @@ import numpy as np
 import inspect
 import functools
 import pprint
+import pickle
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
@@ -839,6 +840,14 @@ class TestGradNewOnesOverride(TestCase):
         n = t.new_ones((1, 2))
         self.assertEqual(type(n), SubTensor2)
 
+class TestPickle(TestCase):
+    "Regression test for gh-47051"
+    def test_pickle(self):
+        t = torch.tensor([1]).as_subclass(SubTensor2)
+        t.abcd = "e"
+        t2 = pickle.loads(pickle.dumps(t))
+        self.assertIs(type(t2), SubTensor2)
+        self.assertEqual(t2.abcd, "e")
 
 class TestBroadcastAllOverride(TestCase):
     """ test for gh-37141 """
