@@ -5,14 +5,14 @@ from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 
 from .utils import (
-    get_node_io_type,
+    get_node_input_type,
     getattr_from_fqn,
     print_node,
-    NodeIOType,
+    NodeInputType,
     return_first_non_observer_node,
 )
 
-from typing import Dict, Tuple, Callable, Any, Optional
+from typing import Dict, Tuple, Callable, List, Any, Optional, Union
 
 def _insert_logger_after_node(
     node: Node,
@@ -89,7 +89,7 @@ def remove_observers_add_loggers(
 def _insert_dtype_cast_after_node(
     node_a: Node,
     node_c: Node,
-    prev_node_c: Node,
+    prev_node_c: Union[Node, List[Node]],
     gm_a: GraphModule,
     gm_b: GraphModule,
     graph_c: Graph,
@@ -112,17 +112,18 @@ def _insert_dtype_cast_after_node(
     will insert a dequant.
     """
     dtype_cast_op = None
-    node_io_type_a = get_node_io_type(node_a, gm_a)
-    node_io_type_c = get_node_io_type(node_c, gm_b)
+    node_input_type_a = get_node_input_type(node_a, gm_a)
+    node_input_type_c = get_node_input_type(node_c, gm_b)
 
-    if node_io_type_a == NodeIOType.FP32 and node_io_type_c == NodeIOType.INT8:
+    if node_input_type_a == NodeInputType.FP32 and node_input_type_c == NodeInputType.INT8:
         dtype_cast_op = torch.dequantize
     else:
         raise AssertionError(
-            f"dtype cast from {node_io_type_c} to {node_io_type_a} needs to be implemented")
+            f"dtype cast from {node_input_type_c} to {node_input_type_a} needs to be implemented")
 
     new_dtype_cast_name = \
         get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+
     return graph_c.create_node(
         'call_function', dtype_cast_op, (prev_node_c,), {},
         new_dtype_cast_name)

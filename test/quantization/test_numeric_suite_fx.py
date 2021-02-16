@@ -29,6 +29,7 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearDynamicModel,
     SingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
+    SparseNNModel,
     skip_if_no_torchvision,
     test_only_eval_fn,
 )
@@ -474,7 +475,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w = nn.Parameter(torch.Tensor(1, 4))
-                self.b = nn.Parameter(torch.Tensor(1))
+                self.b = nn.Parameter(torch.zeros(1))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
@@ -497,7 +498,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w = nn.Parameter(torch.Tensor(4, 1))
-                self.b = nn.Parameter(torch.Tensor(4))
+                self.b = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
@@ -623,7 +624,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w = nn.Parameter(torch.Tensor(4, 1))
-                self.b = nn.Parameter(torch.Tensor(4))
+                self.b = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
@@ -685,9 +686,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w1 = nn.Parameter(torch.Tensor(4, 4))
-                self.b1 = nn.Parameter(torch.Tensor(4))
+                self.b1 = nn.Parameter(torch.zeros(4))
                 self.w2 = nn.Parameter(torch.Tensor(4, 4))
-                self.b2 = nn.Parameter(torch.Tensor(4))
+                self.b2 = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
 
@@ -764,9 +765,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w1 = nn.Parameter(torch.Tensor(4, 4))
-                self.b1 = nn.Parameter(torch.Tensor(4))
+                self.b1 = nn.Parameter(torch.zeros(4))
                 self.w2 = nn.Parameter(torch.Tensor(4, 4))
-                self.b2 = nn.Parameter(torch.Tensor(4))
+                self.b2 = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
 
@@ -804,75 +805,9 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
     Tests numeric suite core APIs on non-toy models.
     """
 
-    def _get_sparsenn_toy_model(self):
-        class DenseTopMLP(nn.Module):
-
-            def __init__(self, dense_dim, dense_out, embedding_dim, top_out_in, top_out_out) -> None:
-                super(DenseTopMLP, self).__init__()
-
-                self.dense_mlp = nn.Sequential(
-                    nn.Linear(dense_dim, dense_out),
-                )
-                self.top_mlp = nn.Sequential(
-                    nn.Linear(dense_out + embedding_dim, top_out_in),
-                    nn.Linear(top_out_in, top_out_out),
-                )
-
-            def forward(
-                self,
-                sparse_feature: torch.Tensor,
-                dense: torch.Tensor,
-            ) -> torch.Tensor:
-                dense_feature = self.dense_mlp(dense)
-                features = torch.cat([dense_feature] + [sparse_feature], dim=1)
-
-                out = self.top_mlp(features)
-                return out
-
-        # thin wrapper around embedding bag, because tracing inside nn.Embedding
-        # bag is not supported at the moment and this is top level
-        class EmbBagWrapper(nn.Module):
-            def __init__(self, num_embeddings, embedding_dim):
-                super().__init__()
-                self.emb_bag = nn.EmbeddingBag(num_embeddings, embedding_dim, mode='sum')
-
-            def forward(self, indices, offsets):
-                return self.emb_bag(indices, offsets)
-
-        class SparseNN(nn.Module):
-            _NUM_EMBEDDINGS = 10
-            _EMBEDDING_DIM = 5
-            _DENSE_DIM = 4
-            _DENSE_OUTPUT = 2
-            _TOP_OUT_IN = 2
-            _TOP_OUT_OUT = 2
-            _TOP_MLP_DIM = 1
-
-            def __init__(self) -> None:
-                super(SparseNN, self).__init__()
-
-                self.model_sparse = EmbBagWrapper(self._NUM_EMBEDDINGS, self._EMBEDDING_DIM)
-                self.dense_top = DenseTopMLP(
-                    self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN,
-                    self._TOP_OUT_OUT)
-
-            def forward(
-                self,
-                sparse_indices: torch.Tensor,
-                sparse_offsets: torch.Tensor,
-                dense: torch.Tensor,
-            ) -> torch.Tensor:
-
-                sparse_feature = self.model_sparse(sparse_indices, sparse_offsets)
-                out = self.dense_top(sparse_feature, dense)
-
-                return out
-
-        return SparseNN()
-
     @override_qengines
     def test_sparsenn_compare_activations(self):
-        sparse_nn = self._get_sparsenn_toy_model().eval()
+        sparse_nn = SparseNNModel().eval()
 
         # quantize the embeddings and the dense part separately, using FX graph mode
         sparse_nn.dense_top = prepare_fx(
@@ -910,7 +845,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
 
     @override_qengines
     def test_sparsenn_shadow(self):
-        sparse_nn = self._get_sparsenn_toy_model().eval()
+        sparse_nn = SparseNNModel().eval()
 
         # quantize the embeddings and the dense part separately, using FX graph mode
         sparse_nn.dense_top = prepare_fx(
