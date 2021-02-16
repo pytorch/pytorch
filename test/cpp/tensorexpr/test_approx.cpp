@@ -49,7 +49,6 @@ TEST(Approx, log_vml) {
     at::Tensor B_t = at::empty_like(A_t);
     auto ap = A_t.data_ptr<float>();
     auto bp = B_t.data_ptr<float>();
-    auto rp = B_ref.data_ptr<float>();
     cg.call({ap, bp, A_t.numel()});
     // Results should be bit-identical.
     ASSERT_TRUE(torch::allclose(
