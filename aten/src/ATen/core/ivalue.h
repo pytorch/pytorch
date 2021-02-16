@@ -581,7 +581,9 @@ struct TORCH_API IValue final {
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
-  IValue(c10::List<T> v);
+  IValue(c10::List<T>&& v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(const c10::List<T>& v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>

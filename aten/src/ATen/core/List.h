@@ -208,7 +208,8 @@ private:
 };
 
 template<class T> List<T> toTypedList(List<IValue> list);
-template<class T> List<IValue> toList(List<T> list);
+template<class T> List<IValue> toList(List<T>&& list);
+template<class T> List<IValue> toList(const List<T>& list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
 }
 
@@ -460,9 +461,11 @@ public:
 
 private:
   explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
+  explicit List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
-  template<class T_> friend List<IValue> impl::toList(List<T_>);
+  template<class T_> friend List<IValue> impl::toList(List<T_>&&);
+  template<class T_> friend List<IValue> impl::toList(const List<T_>&);
   friend const IValue* impl::ptr_to_first_element(const List<IValue>& list);
 };
 

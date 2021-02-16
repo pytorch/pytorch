@@ -1152,7 +1152,9 @@ inline IValue::IValue(c10::impl::GenericList v)
 }
 
 template <class T, IValue::enable_if_ivalue_constructible<T>>
-inline IValue::IValue(c10::List<T> v) : IValue(impl::toList<T>(std::move(v))) {}
+inline IValue::IValue(c10::List<T>&& v) : IValue(impl::toList<T>(std::move(v))) {}
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(const c10::List<T>& v) : IValue(impl::toList<T>(v)) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
