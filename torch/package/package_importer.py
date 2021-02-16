@@ -1,5 +1,4 @@
 from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
-from abc import ABC, abstractmethod
 import builtins
 import importlib
 import inspect
@@ -18,17 +17,10 @@ from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _
     _normalize_path
 from ._mock_zipreader import MockZipReader
 from ._mangling import PackageMangler, demangle
+from .importer import Importer
 
 
-class BaseImporter(ABC):
-    modules: Dict[str, ModuleType]
-
-    @abstractmethod
-    def import_module(self, module_name: str) -> ModuleType:
-        pass
-
-
-class PackageImporter(BaseImporter):
+class PackageImporter(Importer):
     """Importers allow you to load code written to packages by PackageExporter.
     Code is loaded in a hermetic way, using files from the package
     rather than the normal python import system. This allows
