@@ -102,7 +102,7 @@ void reflection_pad1d_out_template(
           pad_l);
       });
     } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
         reflection_pad1d_out_frame<scalar_t>(
           input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           nplane,
@@ -121,7 +121,7 @@ void reflection_pad1d_out_template(
           pad_l);
       });
     } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
         reflection_pad1d_out_loop<scalar_t>(
           input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           nbatch, nplane,
@@ -208,7 +208,7 @@ void reflection_pad1d_backward_out_template(
 
   /* backprop */
   if (input.ndimension() == 2) {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       grad_input.scalar_type(), "reflection_pad1d_backward", [&] {
         reflection_pad1d_backward_out_frame(
           grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
@@ -218,7 +218,7 @@ void reflection_pad1d_backward_out_template(
         }
     );
   } else {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       grad_input.scalar_type(), "reflection_pad1d_backward", [&] {
         reflection_pad1d_backward_out_loop(
           grad_input.data_ptr<scalar_t>(),
@@ -346,23 +346,43 @@ void reflection_pad2d_out_template(
   if (input.ndimension() == 3) {
     /* resize output */
     output.resize_({nplane, output_h, output_w});
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
-      reflection_pad2d_out_frame(
-        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-        nplane,
-        input_w, input_h, output_w, output_h,
-        pad_l, pad_t);
-    });
+    if (input.is_quantized()) {
+      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
+        reflection_pad2d_out_frame(
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          nplane,
+          input_w, input_h, output_w, output_h,
+          pad_l, pad_t);
+      });
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
+        reflection_pad2d_out_frame(
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          nplane,
+          input_w, input_h, output_w, output_h,
+          pad_l, pad_t);
+      });
+    }
   } else {
     /* resize output */
     output.resize_({nbatch, nplane, output_h, output_w});
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
-      reflection_pad2d_out_loop(
-        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-        nbatch, nplane,
-        input_w, input_h, output_w, output_h,
-        pad_l, pad_t);
-    });
+    if (input.is_quantized()) {
+      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
+        reflection_pad2d_out_loop(
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          nbatch, nplane,
+          input_w, input_h, output_w, output_h,
+          pad_l, pad_t);
+      });
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
+        reflection_pad2d_out_loop(
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          nbatch, nplane,
+          input_w, input_h, output_w, output_h,
+          pad_l, pad_t);
+      });
+    }
   }
 }
 
@@ -471,7 +491,7 @@ void reflection_pad2d_backward_out_template(
 
   /* backprop */
   if (input.ndimension() == 3) {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
         reflection_pad2d_backward_out_frame(
           grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
@@ -481,7 +501,7 @@ void reflection_pad2d_backward_out_template(
       }
     );
   } else {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
         reflection_pad2d_backward_out_loop(
           grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
@@ -547,7 +567,18 @@ Tensor& reflection_pad2d_out_cpu(
 }
 
 Tensor reflection_pad2d_cpu(const Tensor& input, IntArrayRef padding) {
-  auto output = at::empty({0}, input.options());
+  Tensor output;
+  if (input.is_quantized()) {
+    if (input.qscheme() == kPerTensorAffine) {
+      output = at::_empty_affine_quantized({0}, input.options(),
+                                           input.q_scale(),
+                                           input.q_zero_point());
+    } else {
+      TORCH_CHECK(false, "Only per tensor quantization is supported");
+    }
+  } else {
+    output = at::empty({0}, input.options());
+  }
   reflection_pad2d_out_template(output, input, padding);
   return output;
 }

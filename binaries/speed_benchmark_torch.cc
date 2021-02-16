@@ -70,6 +70,8 @@ C10_DEFINE_bool(
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
 C10_DEFINE_bool(vulkan, false, "Whether to use Vulkan backend (GPU).");
 
+namespace {
+
 std::vector<std::string>
 split(char separator, const std::string& string, bool ignore_empty = true) {
   std::vector<std::string> pieces;
@@ -143,14 +145,11 @@ std::vector<c10::IValue> create_inputs() {
           "Unsupported input memory format: ", input_memory_format_list[i]);
     }
 
-    const auto input_tensor = torch::ones(
-        input_dims,
-        at::TensorOptions(input_type).memory_format(input_memory_format));
-    if (FLAGS_vulkan) {
-      inputs.push_back(input_tensor.vulkan());
-    } else {
-      inputs.push_back(input_tensor);
-    }
+    inputs.push_back(
+        torch::ones(
+            input_dims,
+            at::TensorOptions(input_type).
+            memory_format(input_memory_format)));
   }
 
   if (FLAGS_pytext_len > 0) {
@@ -160,6 +159,39 @@ std::vector<c10::IValue> create_inputs() {
 
   return inputs;
 }
+
+class Runner {
+ public:
+  virtual ~Runner() = default;
+  virtual c10::IValue run(
+      torch::jit::Module& module,
+      const std::vector<c10::IValue>& inputs) {
+    return module.forward(inputs);
+  }
+};
+
+class vkRunner final : public Runner {
+ public:
+  virtual ~vkRunner() = default;
+  virtual c10::IValue run(
+      torch::jit::Module& module,
+      const std::vector<c10::IValue>& inputs) override {
+    // Upload the input tensor(s) to GPU memory.
+    inputs_.clear();
+    inputs_.reserve(inputs.size());
+    for (const auto& input : inputs) {
+      inputs_.emplace_back(input.toTensor().vulkan());
+    }
+
+    // Run, and download the output tensor to system memory.
+    return module.forward(inputs_).toTensor().cpu();
+  }
+
+ private:
+  std::vector<c10::IValue> inputs_;
+};
+
+} // namespace
 
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
@@ -199,9 +231,13 @@ int main(int argc, char** argv) {
     inputs = all_inputs.get(FLAGS_use_bundled_input).toTuple()->elements();
   }
 
+  const std::unique_ptr<Runner> runner =
+      FLAGS_vulkan ? std::make_unique<vkRunner>() :
+                     std::make_unique<Runner>();
+
   module.eval();
   if (FLAGS_print_output) {
-    std::cout << module.forward(inputs) << std::endl;
+    std::cout << runner->run(module, inputs) << std::endl;
   }
 
   c10::CPUCachingAllocator caching_allocator;
@@ -217,7 +253,7 @@ int main(int argc, char** argv) {
       FLAGS_warmup,
       ".");
   for (int i = 0; i < FLAGS_warmup; ++i) {
-    module.forward(inputs);
+    runner->run(module, inputs);
   }
 
   std::cout << "Main runs." << std::endl;
@@ -231,7 +267,7 @@ int main(int argc, char** argv) {
   auto micros = timer.MicroSeconds();
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
-    module.forward(inputs);
+    runner->run(module, inputs);
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());

@@ -5,12 +5,15 @@
 
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
+C10_DECLARE_bool(torch_jit_disable_warning_prints);
+
 namespace at {
 class Tensor;
-CAFFE2_API void launch(std::function<void()> func);
+TORCH_API void launch(std::function<void()> func);
 } // namespace at
 namespace c10 {
 struct IValue;
@@ -102,7 +105,7 @@ struct Suspend : public std::exception {
 // thread local settings are propagated with ThreadLocalState
 struct InterpreterContinuation {
   InterpreterContinuation(
-      InterpreterState state_,
+      const InterpreterState& state_,
       Stack stack_,
       int64_t dist_autograd_context_id = 0,
       c10::optional<at::ThreadLocalState> tls_state = c10::nullopt)

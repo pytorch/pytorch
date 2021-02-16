@@ -1,43 +1,34 @@
 #pragma once
-#include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/core/ivalue.h>
 #include <c10/macros/Macros.h>
 
 namespace at {
-namespace internal {
-// This parameter is heuristically chosen to determine the minimum number of
-// work that warrants parallelism. For example, when summing an array, it is
-// deemed inefficient to parallelise over arrays shorter than 32768. Further,
-// no parallel algorithm (such as parallel_reduce) should split work into
-// smaller than GRAIN_SIZE chunks.
-constexpr int64_t GRAIN_SIZE = 32768;
-} // namespace internal
 
 inline int64_t divup(int64_t x, int64_t y) {
   return (x + y - 1) / y;
 }
 
 // Called during new thread initialization
-CAFFE2_API void init_num_threads();
+TORCH_API void init_num_threads();
 
 // Sets the number of threads to be used in parallel region
-CAFFE2_API void set_num_threads(int);
+TORCH_API void set_num_threads(int);
 
 // Returns the maximum number of threads that may be used in a parallel region
-CAFFE2_API int get_num_threads();
+TORCH_API int get_num_threads();
 
 // Returns the current thread number (starting from 0)
 // in the current parallel region, or 0 in the sequential region
-CAFFE2_API int get_thread_num();
+TORCH_API int get_thread_num();
 
 // Checks whether the code runs in parallel region
-CAFFE2_API bool in_parallel_region();
+TORCH_API bool in_parallel_region();
 
 namespace internal {
 
 // Initialise num_threads lazily at first parallel call
-inline CAFFE2_API void lazy_init_num_threads() {
+inline TORCH_API void lazy_init_num_threads() {
   thread_local bool init = false;
   if (C10_UNLIKELY(!init)) {
     at::init_num_threads();
@@ -119,29 +110,29 @@ inline scalar_t parallel_reduce(
     const SF& sf);
 
 // Returns a detailed string describing parallelization settings
-CAFFE2_API std::string get_parallel_info();
+TORCH_API std::string get_parallel_info();
 
 // Sets number of threads used for inter-op parallelism
-CAFFE2_API void set_num_interop_threads(int);
+TORCH_API void set_num_interop_threads(int);
 
 // Returns the number of threads used for inter-op parallelism
-CAFFE2_API int get_num_interop_threads();
+TORCH_API int get_num_interop_threads();
 
 // Launches inter-op parallel task
-CAFFE2_API void launch(std::function<void()> func);
+TORCH_API void launch(std::function<void()> func);
 namespace internal {
 void launch_no_thread_state(std::function<void()> fn);
 } // namespace internal
 
 // Launches intra-op parallel task
-CAFFE2_API void intraop_launch(std::function<void()> func);
+TORCH_API void intraop_launch(std::function<void()> func);
 
 // Launches intra-op parallel task, returns a future
-CAFFE2_API std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+TORCH_API std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func);
 
 // Returns number of intra-op threads used by default
-CAFFE2_API int intraop_default_num_threads();
+TORCH_API int intraop_default_num_threads();
 
 } // namespace at
 

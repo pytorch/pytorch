@@ -29,7 +29,6 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -37,9 +36,8 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::profile_optional,
+         prim::profile_ivalue,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOptionalOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -57,8 +55,35 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::RequiresGradCheck /* (...)  -> (..., bool) */,
+         [](const Node* node) -> Operation {
+           std::vector<bool> rg_props =
+               fmap(node->tys(attr::types), [](const TypePtr& t) {
+                 // if an rg property changes we assume a tensor does require
+                 // gradients which is set in `guardDifferentiableGraph`
+                 TORCH_INTERNAL_ASSERT(
+                     t->castRaw<TensorType>()->requiresGrad().has_value());
+                 return *t->castRaw<TensorType>()->requiresGrad();
+               });
+           return [rg_props](Stack* stack) {
+             auto num_inputs = rg_props.size();
+             // Check every input's shape against profiled (expected) shape.
+             for (size_t i = 0; i < num_inputs; i++) {
+               auto& input = peek(stack, i, num_inputs);
+               const auto& t = input.toTensor();
+               if (rg_props[i] != t.requires_grad()) {
+                 push(stack, false);
+                 return;
+               }
+             }
+
+             push(stack, true);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::TypeCheck /* (...)  -> (..., bool) */,
-         [](const Node * /* node */) -> Operation {
+         [](const Node* /* node */) -> Operation {
            return [](Stack* /* stack */) {
              AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
            };
@@ -233,14 +258,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::eq.device(Device a, Device b) -> bool",
-         [](Stack* stack) {
-           auto a = pop(stack).toDevice();
-           auto b = pop(stack).toDevice();
-           push(stack, a == b);
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::requires_grad(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -346,6 +363,34 @@ RegisterOperators reg(
          [](Stack* stack) { stack->emplace_back(at::Tensor()); },
          aliasAnalysisSpecialCase()),
      Operator(
+         "prim::ReductionSizes(int[] size, int[] red_axes, bool keepdim = False) -> int[]",
+         [](Stack* stack) {
+           bool keepdim = pop(stack).toBool();
+           c10::List<int64_t> axes = pop(stack).toIntList();
+           c10::List<int64_t> size = pop(stack).toIntList();
+           if (keepdim) {
+             for (const auto& axis : axes) {
+               size.set(axis, 1);
+             }
+           } else {
+             int64_t index = 0;
+             auto iter = size.begin();
+             std::sort(axes.begin(), axes.end());
+             for (const auto& axis : axes) {
+               // move iter to the next axis
+               iter += axis - index;
+
+               // input iter points to axis and is updated to axis + 1
+               iter = size.erase(iter);
+
+               // update current index for iter
+               index = axis + 1;
+             }
+           }
+           push(stack, IValue(std::move(size)));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::BroadcastSizes(...) -> int[]",
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
@@ -356,7 +401,7 @@ RegisterOperators reg(
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
            drop(stack, num_inputs);
-           push(stack, IValue(std::move(size)));
+           push(stack, IValue(size));
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -581,14 +626,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::dict() -> Dict(str, Tensor)",
-         [](Stack* stack) {
-           auto dict =
-               c10::impl::GenericDict(StringType::get(), TensorType::get());
-           push(stack, dict);
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack* stack) {
            auto val = pop(stack);
@@ -652,19 +689,6 @@ void hashValue(Stack* stack) {
   push(stack, value.hash());
 }
 
-// As described in https://docs.python.org/3/library/functions.html#round
-// When a number is exactly halfway between two integers, python builtin round
-// function will round to even number. We use round(x/2)*2 to handle the
-// special halfway case. For positive 'x', round(x/2)*2 =
-// round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
-// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
-// result will always be a even number. Due to symmetricity, it also applies to
-// negative cases.
-double round_to_even(double a) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
-}
-
 RegisterOperators reg2({
     // registered as Any[] so that heterogenous tuples can be called with len()
     Operator(
@@ -704,10 +728,6 @@ RegisterOperators reg2({
 
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
-    Operator(
-        "aten::__contains__.int_list(int[] l, int item) -> bool",
-        listContains<int64_t>,
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
@@ -889,7 +909,6 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_SCALAR_SCALAR_BINARY_OP(

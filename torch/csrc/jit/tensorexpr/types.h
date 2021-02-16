@@ -37,6 +37,7 @@ TORCH_API std::ostream& operator<<(
 
 TORCH_API bool is_integral(const ScalarType& type);
 TORCH_API bool is_floating_point(const ScalarType& type);
+TORCH_API bool is_signed(const ScalarType& type);
 
 // Data types for scalar and vector elements.
 class TORCH_API Dtype {
@@ -74,6 +75,9 @@ class TORCH_API Dtype {
   }
   bool is_floating_point() const {
     return tensorexpr::is_floating_point(scalar_type_);
+  }
+  bool is_signed() const {
+    return tensorexpr::is_signed(scalar_type_);
   }
 
   Dtype cloneWithScalarType(ScalarType nt) const {
@@ -128,10 +132,6 @@ inline Dtype BinaryOpDtype(
     Dtype op1_dtype,
     Dtype op2_dtype,
     ScalarType ret_type = ScalarType::None) {
-  if (op1_dtype.scalar_type() == ScalarType::Bool ||
-      op2_dtype.scalar_type() == ScalarType::Bool) {
-    throw malformed_input("arithmetic binary operations on Bool not supported");
-  }
   if (op1_dtype == op2_dtype) {
     if (ret_type == ScalarType::None) {
       return op1_dtype;

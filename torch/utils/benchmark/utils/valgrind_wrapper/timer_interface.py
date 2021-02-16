@@ -11,13 +11,13 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from types import ModuleType
 from typing import (
     cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
     Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
-from torch.utils.benchmark.utils import common
+from torch.utils.benchmark.utils import common, cpp_jit
+from torch.utils.benchmark.utils._stubs import CallgrindModuleType
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
@@ -34,6 +34,16 @@ FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
 class FunctionCounts(object):
+    """Container for manipulating Callgrind results.
+
+    It supports:
+        1) Addition and subtraction to combine or diff results.
+        2) Tuple-like indexing.
+        3) A `denoise` function which strips CPython calls which are known to
+           be non-deterministic and quite noisy.
+        4) Two higher order methods (`filter` and `transform`) for custom
+           manipulation.
+    """
     _data: Tuple[FunctionCount, ...]
     inclusive: bool
 
@@ -91,6 +101,12 @@ class FunctionCounts(object):
         return self._merge(other, lambda c: -c)
 
     def transform(self, map_fn: Callable[[str], str]) -> "FunctionCounts":
+        """Apply `map_fn` to all of the function names.
+
+        This can be used to regularize function names (e.g. stripping irrelevant
+        parts of the file path), coalesce entries by mapping multiple functions
+        to the same name (in which case the counts are added together), etc.
+        """
         counts: DefaultDict[str, int] = collections.defaultdict(int)
         for c, fn in self._data:
             counts[map_fn(fn)] += c
@@ -98,6 +114,7 @@ class FunctionCounts(object):
         return self._from_dict(counts, self.inclusive)
 
     def filter(self, filter_fn: Callable[[str], bool]) -> "FunctionCounts":
+        """Keep only the elements where `filter_fn` applied to function name returns True."""
         return FunctionCounts(tuple(i for i in self if filter_fn(i.function)), self.inclusive)
 
     def sum(self) -> int:
@@ -136,6 +153,13 @@ class FunctionCounts(object):
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
 class CallgrindStats(object):
+    """Top level container for Callgrind results collected by Timer.
+
+    Manipulation is generally done using the FunctionCounts class, which is
+    obtained by calling `CallgrindStats.stats(...)`. Several convenience
+    methods are provided as well; the most significant is
+    `CallgrindStats.as_standardized()`.
+    """
     task_spec: common.TaskSpec
     number_per_run: int
     built_with_debug_symbols: bool
@@ -163,13 +187,16 @@ class CallgrindStats(object):
         return output
 
     def stats(self, inclusive: bool = False) -> FunctionCounts:
-        """Returns stats as a tuple of (count, function)
+        """Returns detailed function counts.
+
+        Conceptually, the FunctionCounts returned can be thought of as a tuple
+        of (count, path_and_function_name) tuples.
 
         `inclusive` matches the semantics of callgrind. If True, the counts
         include instructions executed by children. `inclusive=True` is useful
         for identifying hot spots in code; `inclusive=False` is useful for
-        identifying reducing noise when diffing counts from two different
-        runs. (See CallgrindStats.delta(...) for more details)
+        reducing noise when diffing counts from two different runs. (See
+        CallgrindStats.delta(...) for more details)
         """
         if inclusive:
             return self.stmt_inclusive_stats - self.baseline_inclusive_stats
@@ -216,7 +243,8 @@ class CallgrindStats(object):
         when reporting a function (as it should). However, this can cause
         issues when diffing profiles. If a key component such as Python
         or PyTorch was built in separate locations in the two profiles, which
-        can result in something resembling:
+        can result in something resembling::
+
             23234231 /tmp/first_build_dir/thing.c:foo(...)
              9823794 /tmp/first_build_dir/thing.c:bar(...)
               ...
@@ -444,17 +472,14 @@ class GlobalsBridge:
 
 class _ValgrindWrapper(object):
     def __init__(self) -> None:
-        self._bindings_module: Optional[ModuleType] = None
+        self._bindings_module: Optional[CallgrindModuleType] = None
         if hasattr(torch._C, "_valgrind_supported_platform"):
             self._supported_platform: bool = torch._C._valgrind_supported_platform()
 
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
-            # This import will JIT the Callgrind control bindings, so don't
-            # invoke unless we know we'll need it.
-            from torch.utils.benchmark.utils.valgrind_wrapper.compat_bindings import bindings
-            self._bindings_module = bindings
-            self._supported_platform = bindings._valgrind_supported_platform()
+            self._bindings_module = cpp_jit.get_compat_bindings()
+            self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
         if self._supported_platform:
@@ -486,10 +511,13 @@ class _ValgrindWrapper(object):
         task_spec: common.TaskSpec,
         globals: Dict[str, Any],
         number: int,
-        collect_baseline: bool
+        collect_baseline: bool,
+        is_python: bool,
     ) -> CallgrindStats:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
+        assert is_python or not collect_baseline
+
         baseline_inclusive_stats = FunctionCounts((), inclusive=True)
         baseline_exclusive_stats = FunctionCounts((), inclusive=False)
         if collect_baseline:
@@ -499,15 +527,17 @@ class _ValgrindWrapper(object):
                     common.TaskSpec(
                         stmt="pass",
                         setup="pass",
-                        num_threads=task_spec.num_threads
+                        num_threads=task_spec.num_threads,
                     ),
                     globals={},
                     number=number,
+                    is_python=True,
                 )
             baseline_inclusive_stats, baseline_exclusive_stats = \
                 self._baseline_cache[cache_key]
 
-        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(task_spec, globals, number)
+        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
+            task_spec, globals, number, is_python)
         return CallgrindStats(
             task_spec=task_spec,
             number_per_run=number,
@@ -523,6 +553,7 @@ class _ValgrindWrapper(object):
         task_spec: common.TaskSpec,
         globals: Dict[str, Any],
         number: int,
+        is_python: bool,
     ) -> Tuple[FunctionCounts, FunctionCounts]:
         """Core invocation method for Callgrind collection.
 
@@ -568,20 +599,34 @@ class _ValgrindWrapper(object):
                 f_stdout_stderr.close()
 
         try:
-            if self._bindings_module is not None:
-                shutil.copy(
-                    self._bindings_module.__file__,
-                    os.path.join(working_dir, os.path.split(self._bindings_module.__file__)[1])
-                )
+            if is_python:
+                if self._bindings_module is not None:
+                    shutil.copy(
+                        self._bindings_module.__file__,
+                        os.path.join(working_dir, os.path.split(self._bindings_module.__file__)[1])
+                    )
 
-            with open(script_file, "wt") as f:
-                f.write(self._construct_script(
-                    task_spec,
-                    globals=GlobalsBridge(globals, data_dir),
-                    number=number,
-                    error_log=error_log,
-                    stat_log=stat_log,
-                    bindings=self._bindings_module))
+                script_file = os.path.join(working_dir, "timer_callgrind.py")
+                with open(script_file, "wt") as f:
+                    f.write(self._construct_script(
+                        task_spec,
+                        globals=GlobalsBridge(globals, data_dir),
+                        number=number,
+                        error_log=error_log,
+                        stat_log=stat_log,
+                        bindings=self._bindings_module))
+                run_loop_cmd = ["python", script_file]
+            else:
+                run_loop_exec = cpp_jit.compile_callgrind_template(
+                    task_spec.stmt,
+                    task_spec.setup,
+                )
+                run_loop_cmd = [
+                    run_loop_exec,
+                    "--number", str(number),
+                    "--number_warmup", str(min(number, 10)),
+                    "--number_threads", str(task_spec.num_threads),
+                ]
 
             valgrind_invocation, valgrind_invocation_output = run([
                 "valgrind",
@@ -591,9 +636,7 @@ class _ValgrindWrapper(object):
                 "--dump-instr=yes",
                 "--instr-atstart=yes",
                 "--collect-atstart=no",
-                "python",
-                script_file,
-            ])
+            ] + run_loop_cmd)
 
             if valgrind_invocation.returncode:
                 error_report = ""
@@ -643,7 +686,7 @@ class _ValgrindWrapper(object):
         number: int,
         error_log: str,
         stat_log: str,
-        bindings: Optional[ModuleType],
+        bindings: Optional[CallgrindModuleType],
     ) -> str:
         # The naive template looks something like:
         #   "for _ in range({number}): {stmt}"

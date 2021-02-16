@@ -376,7 +376,6 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   if (check_has_torch_function(self)) {
     return handle_torch_function(self, "__index__", args);
   }
-  jit::tracer::warn("Converting a tensor to a Python index", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
@@ -468,7 +467,7 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "nonzero()|deprecated",
+    "nonzero()",
     "nonzero(*, bool as_tuple)",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -506,6 +505,28 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::cuda_lazy_init();
+  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_xpu(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "xpu(Device? device=None, bool non_blocking=False, *, MemoryFormat? memory_format=None)",
+    "xpu(Device? device=None, bool async=False, *, MemoryFormat? memory_format=None)|deprecated"
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if (r.has_torch_function()) {
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto device = r.isNone(0) ? at::Device(at::DeviceType::XPU) : r.device(0);
+  auto opt_memory_format = r.memoryformatOptional(2);
+  TORCH_CHECK(device.is_xpu(), "Invalid device, must be xpu device");
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -1127,6 +1148,13 @@ PyMethodDef variable_methods[] = {
   {"__idiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div_>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__ifloordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide_>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__imod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder_>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__eq__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_eq>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__ne__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ne>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__lt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_lt>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__le__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__gt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_gt>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__ge__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ge>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__complex__", THPVariable_complex_scalar, METH_NOARGS, NULL},
@@ -1145,6 +1173,7 @@ PyMethodDef variable_methods[] = {
   {"copy_", castPyCFunctionWithKeywords(THPVariable_copy_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", castPyCFunctionWithKeywords(THPVariable_cpu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cuda", castPyCFunctionWithKeywords(THPVariable_cuda), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"xpu", castPyCFunctionWithKeywords(THPVariable_xpu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"data_ptr", THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", THPVariable_dim, METH_NOARGS, NULL},
   {"has_names", THPVariable_has_names, METH_NOARGS, NULL},

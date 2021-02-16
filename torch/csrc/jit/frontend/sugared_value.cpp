@@ -107,6 +107,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"data", "prim"},
            {"shape", "prim"},
            {"is_cuda", "prim"},
+           {"is_xpu", "prim"},
            {"is_sparse", "prim"},
            {"is_mkldnn", "prim"},
            {"is_quantized", "prim"},
@@ -186,6 +187,14 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   // none of the more-specific cases worked, so see if this is a builtin method
+  // If field is a type, then call the aten::to op
+  if (field == "type") {
+    if (auto builtin = BuiltinFunction::tryCreate(
+            Symbol::aten("to"), NamedValue(loc, "self", value_))) {
+      return builtin;
+    }
+  }
+
   if (auto builtin = BuiltinFunction::tryCreate(
           Symbol::aten(field), NamedValue(loc, "self", value_))) {
     return builtin;
@@ -560,7 +569,7 @@ SugaredValuePtr IterableTree::getitem(
 void IterableTree::addChild(
     const SourceRange& range,
     Function& m,
-    const SugaredValuePtr iter_value) {
+    const SugaredValuePtr& iter_value) {
   c10::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.size() == 0) {
     unroll_length_ = child_len;
@@ -625,6 +634,13 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
+  // Allow import_source.cpp to resolve calls to a submodule's
+  // hooks. Edge case because normally you wouldn't allow a module to
+  // call functions of a submodule
+  if (Function* hook = type_->findHook(field)) {
+    return std::make_shared<FunctionValue>(hook);
+  }
+
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
                            << type_->annotation_str();

@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -22,7 +24,7 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 // Sum an array to a single value.
-void testReduceSum1D() {
+TEST(Reductions, ReduceSum1D) {
   KernelScope kernel_scope;
 
   Placeholder b(BufHandle("b", {10}, kFloat));
@@ -45,7 +47,7 @@ void testReduceSum1D() {
   ASSERT_EQ(out[0], 45);
 }
 // Sum a 2D tensor to a 1D tensor with dynamic shapes.
-void testReduceSum2D() {
+TEST(Reductions, ReduceSum2D) {
   KernelScope kernel_scope;
 
   const int M = 3;
@@ -86,7 +88,7 @@ void testReduceSum2D() {
 
 // Sum a 3D tensor to both a 2D and 1D tensor, then reduce the 2D tensor flat to
 // check our work.
-void testReduceSum3D() {
+TEST(Reductions, ReduceSum3D) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -156,7 +158,7 @@ void testReduceSum3D() {
 }
 
 // Sum a large (10 D) Tensor 5 dimensions in.
-void testReduceSum10D() {
+TEST(Reductions, ReduceSum10D) {
   KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat));
@@ -189,7 +191,7 @@ void testReduceSum10D() {
 }
 
 // Reduce via Mul rather than Add using a custom Reducer.
-void testReduceProduct() {
+TEST(Reductions, ReduceProduct) {
   KernelScope kernel_scope;
 
   const int M = 4;
@@ -229,7 +231,7 @@ void testReduceProduct() {
 }
 
 // Maximum reductions.
-void testReduceMax() {
+TEST(Reductions, ReduceMax) {
   KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("b", {10}, kFloat));
@@ -257,9 +259,9 @@ void testReduceMax() {
 
   Tensor* m2d = Reduce("max", {{2, "n"}}, Maximum(kFloat), in2_, {{5, "m"}});
 
-  loop = LoopNest({m2d});
-  loop.prepareForCodegen();
-  s = loop.root_stmt();
+  LoopNest loop2({m2d});
+  loop2.prepareForCodegen();
+  s = loop2.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg2(s, {in2_, m2d});
@@ -270,7 +272,7 @@ void testReduceMax() {
 }
 
 // Minimum reduction, with custom initialization.
-void testReduceMinCustomInitializer() {
+TEST(Reductions, ReduceMinCustomInitializer) {
   KernelScope kernel_scope;
 
   VarHandle minInit("minInit", kFloat);
@@ -308,7 +310,7 @@ void testReduceMinCustomInitializer() {
 
 // Example implementation of Any/All.
 // TODO: this is very awkward without logical And/Or operators.
-void testReduceAnyAll() {
+TEST(Reductions, ReduceAnyAll) {
   KernelScope kernel_scope;
 
   VarHandle searchValue("searchValue", kInt);
@@ -370,9 +372,9 @@ void testReduceAnyAll() {
       },
       {{10, "j"}});
 
-  loop = LoopNest({allGreaterThan});
-  loop.prepareForCodegen();
-  s = loop.root_stmt();
+  LoopNest loop2({allGreaterThan});
+  loop2.prepareForCodegen();
+  s = loop2.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg2(s, {b, allGreaterThan, searchValue});
@@ -394,7 +396,7 @@ void testReduceAnyAll() {
   ASSERT_EQ(out[3], 1);
 }
 
-void testReduceMatmul2D() {
+TEST(Reductions, ReduceMatmul2D) {
   KernelScope kernel_scope;
 
   Placeholder tA(BufHandle("tA", {3, 2}, kFloat));
@@ -436,7 +438,7 @@ void testReduceMatmul2D() {
   }
 }
 
-void testReduceRfactorLike() {
+TEST(Reductions, ReduceRfactorLike) {
   KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {10, 10}, kFloat));
@@ -463,7 +465,7 @@ void testReduceRfactorLike() {
   ASSERT_EQ(out[0], 99 * 50);
 }
 
-void testReduceAsProducer() {
+TEST(Reductions, ReduceAsProducer) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -507,7 +509,7 @@ void testReduceAsProducer() {
   }
 }
 
-void testReduceAsConsumer() {
+TEST(Reductions, ReduceAsConsumer) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -556,7 +558,7 @@ void testReduceAsConsumer() {
   }
 }
 
-void testSplitReduceAxis() {
+TEST(Reductions, SplitReduceAxis) {
   KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
@@ -590,7 +592,7 @@ void testSplitReduceAxis() {
   }
 }
 
-void testSplitNonReduceAxis() {
+TEST(Reductions, SplitNonReduceAxis) {
   KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
@@ -628,7 +630,7 @@ void testSplitNonReduceAxis() {
   }
 }
 
-void testReorderedReductionInitializer() {
+TEST(Reductions, ReorderedReductionInitializer) {
   KernelScope kernel_scope;
   /* From the quip:
   for k in 0..1:  // blockIdx
@@ -677,7 +679,7 @@ void testReorderedReductionInitializer() {
   }
 }
 
-void testReduceRfactor() {
+TEST(Reductions, ReduceRfactor) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -697,7 +699,8 @@ void testReduceRfactor() {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(1)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -710,7 +713,7 @@ void testReduceRfactor() {
   ASSERT_EQ(out[0], 4950);
 }
 
-void testReduce3DRfactorInternal() {
+TEST(Reductions, Reduce3DRfactorInternal) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -732,7 +735,8 @@ void testReduce3DRfactorInternal() {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(1)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -745,7 +749,7 @@ void testReduce3DRfactorInternal() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactorInner() {
+TEST(Reductions, Reduce3DRfactorInner) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -767,7 +771,8 @@ void testReduce3DRfactorInner() {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(2)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -780,7 +785,7 @@ void testReduce3DRfactorInner() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactorOuter() {
+TEST(Reductions, Reduce3DRfactorOuter) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -802,7 +807,8 @@ void testReduce3DRfactorOuter() {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(0)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -814,7 +820,7 @@ void testReduce3DRfactorOuter() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactorWithOuter() {
+TEST(Reductions, Reduce3DRfactorWithOuter) {
   KernelScope kernel_scope;
 
   const int L = 5;
@@ -839,7 +845,8 @@ void testReduce3DRfactorWithOuter() {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(3)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -851,7 +858,7 @@ void testReduce3DRfactorWithOuter() {
   ASSERT_EQ(out[0], 7750);
 }
 
-void testReduce3DRfactorRepeated() {
+TEST(Reductions, Reduce3DRfactorRepeated) {
   KernelScope kernel_scope;
 
   const int M = 5;
@@ -868,12 +875,13 @@ void testReduce3DRfactorRepeated() {
   }
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
+  LoopNest orig_loopnest({c});
 
   for (int rVar1 = 0; rVar1 < 3; ++rVar1) {
     for (int rVar2 = 0; rVar2 < 2; ++rVar2) {
       std::vector<float> out(1, -1.f);
 
-      LoopNest loop({c});
+      LoopNest loop(orig_loopnest);
       auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
       ASSERT_EQ(reduces.size(), 1);
       auto v1 = reduces[0]->reduce_args()[rVar1];
@@ -899,7 +907,7 @@ void testReduce3DRfactorRepeated() {
   }
 }
 
-void testReduceRfactorInsertionPoint() {
+TEST(Reductions, ReduceRfactorInsertionPoint) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -919,7 +927,8 @@ void testReduceRfactorInsertionPoint() {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(0)->var();
-  loop.rfactor(c->body(), v, loops.at(0)->body());
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v, loops.at(0)->body());
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -932,7 +941,7 @@ void testReduceRfactorInsertionPoint() {
   ASSERT_EQ(out[0], 4950);
 }
 
-void testReduce3DRfactorInsertionPoint() {
+TEST(Reductions, Reduce3DRfactorInsertionPoint) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -954,7 +963,8 @@ void testReduce3DRfactorInsertionPoint() {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(1)->var();
-  loop.rfactor(c->body(), v, loops.at(1)->body());
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v, loops.at(1)->body());
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -966,7 +976,7 @@ void testReduce3DRfactorInsertionPoint() {
   ASSERT_EQ(out[0], 4950);
 }
 
-void testReduceRepeatedInternalRfactor() {
+TEST(Reductions, ReduceRepeatedInternalRfactor) {
   KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("in_", {2, 3, 4, 5, 6}, kFloat));
@@ -983,12 +993,11 @@ void testReduceRepeatedInternalRfactor() {
       in_,
       {{2, "a"}, {3, "b"}, {4, "c"}, {5, "d"}, {6, "e"}});
   LoopNest refloop({c});
+  LoopNest loop(refloop);
   refloop.prepareForCodegen();
   SimpleIREvaluator ref_cg(
       IRSimplifier::simplify(refloop.root_stmt()), {in_, c});
   ref_cg.call({in, ref});
-
-  LoopNest loop({c});
 
   // rfactor out "c".
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
@@ -1013,7 +1022,7 @@ void testReduceRepeatedInternalRfactor() {
 }
 
 // Split a reduction axis with a tail loop.
-void testReduceSplitTail() {
+TEST(Reductions, ReduceSplitTail) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1047,7 +1056,7 @@ void testReduceSplitTail() {
 }
 
 // Split a reduction axis cleanly so there is no tail loop.
-void testReduceSplitNoTail() {
+TEST(Reductions, ReduceSplitNoTail) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1081,7 +1090,7 @@ void testReduceSplitNoTail() {
 
 // Split a reduction axis with only a tail loop (the split loop will be size 0
 // and eliminated out).
-void testReduceOverSplitTail() {
+TEST(Reductions, ReduceOverSplitTail) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1115,7 +1124,7 @@ void testReduceOverSplitTail() {
 }
 
 // Split a reduction axis with a mask.
-void testReduceSplitMask() {
+TEST(Reductions, ReduceSplitMask) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1149,7 +1158,7 @@ void testReduceSplitMask() {
 }
 
 // Split a reduction axis cleanly not requiring a mask.
-void testReduceSplitNoMask() {
+TEST(Reductions, ReduceSplitNoMask) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1182,7 +1191,7 @@ void testReduceSplitNoMask() {
 }
 
 // Split a reduction axis with all logic in the mask.
-void testReduceOverSplitMask() {
+TEST(Reductions, ReduceOverSplitMask) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1217,7 +1226,7 @@ void testReduceOverSplitMask() {
 
 // Test an rfactor when there are two ReduceOps in the graph due to a
 // splitWithTail.
-void testReduceSplitRfactor() {
+TEST(Reductions, ReduceSplitRfactor) {
   KernelScope kernel_scope;
 
   const int M = 2;
@@ -1257,7 +1266,7 @@ void testReduceSplitRfactor() {
 
 // Test an rfactor which ends up being eliminated since the total loop size is
 // smaller than the split factor.
-void testReduceOverSplitRfactor() {
+TEST(Reductions, ReduceOverSplitRfactor) {
   KernelScope kernel_scope;
 
   const int N = 10;
@@ -1308,7 +1317,7 @@ void testReduceOverSplitRfactor() {
   // torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testReduceInlineReduction() {
+TEST(Reductions, ReduceInlineReduction) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1341,7 +1350,7 @@ void testReduceInlineReduction() {
   ASSERT_FALSE(l1.computeInline(x->buf()));
 }
 
-void testReduceInlineConsumer() {
+TEST(Reductions, ReduceInlineConsumer) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1371,7 +1380,7 @@ void testReduceInlineConsumer() {
   }
 
   LoopNest l1({y});
-  LoopNest l2({y});
+  LoopNest l2(l1);
   l2.computeInline(x->buf());
 
   l1.prepareForCodegen();
@@ -1380,8 +1389,8 @@ void testReduceInlineConsumer() {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M);
   PaddedBuffer<float> y_2(M);
@@ -1395,7 +1404,7 @@ void testReduceInlineConsumer() {
   ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
-void testReduceInlineReducerInternal() {
+TEST(Reductions, ReduceInlineReducerInternal) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1429,7 +1438,7 @@ void testReduceInlineReducerInternal() {
   }
 
   LoopNest l1({y});
-  LoopNest l2({y});
+  LoopNest l2(l1);
   l2.computeInline(x->buf());
 
   l1.prepareForCodegen();
@@ -1438,8 +1447,8 @@ void testReduceInlineReducerInternal() {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M);
   PaddedBuffer<float> y_2(M);
@@ -1453,7 +1462,7 @@ void testReduceInlineReducerInternal() {
   ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
-void testReductionCacheAccessesOuter() {
+TEST(Reductions, ReductionCacheAccessesOuter) {
   KernelScope kernel_scope;
 
   int L = 4;
@@ -1502,7 +1511,7 @@ void testReductionCacheAccessesOuter() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionCacheAccessesInner() {
+TEST(Reductions, ReductionCacheAccessesInner) {
   KernelScope kernel_scope;
 
   int L = 4;
@@ -1551,7 +1560,7 @@ void testReductionCacheAccessesInner() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionCacheBodyAccess() {
+TEST(Reductions, ReductionCacheBodyAccess) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
@@ -1581,7 +1590,7 @@ void testReductionCacheBodyAccess() {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(scale_local, float, {1, 32, 12});
+#CHECK: Allocate(scale_local, float, {384});
 #CHECK: for (int j = 0; j < 32; j++) {
 #CHECK:   for (int k = 0; k < 12; k++) {
 #CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];
@@ -1592,7 +1601,7 @@ void testReductionCacheBodyAccess() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionCacheConsumerAccess() {
+TEST(Reductions, ReductionCacheConsumerAccess) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
@@ -1635,7 +1644,7 @@ void testReductionCacheConsumerAccess() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionSplitCacheConsumerAccess() {
+TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
@@ -1683,7 +1692,7 @@ void testReductionSplitCacheConsumerAccess() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionReorderCacheConsumerAccess() {
+TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
@@ -1732,7 +1741,7 @@ void testReductionReorderCacheConsumerAccess() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionRfactorCacheTempOuter() {
+TEST(Reductions, ReductionRfactorCacheTempOuter) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1791,7 +1800,7 @@ void testReductionRfactorCacheTempOuter() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReductionRfactorCacheTempInner() {
+TEST(Reductions, ReductionRfactorCacheTempInner) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1843,6 +1852,129 @@ void testReductionRfactorCacheTempInner() {
 
   cg.call({in, out, M, N, K});
   ASSERT_EQ(out[0], 499500);
+}
+
+TEST(Reductions, ReductionVectorize) {
+  KernelScope kernel_scope;
+
+  std::vector<float> in_(8 * 8);
+  for (int i = 0; i < 8; ++i) {
+    for (int j = 0; j < 8; ++j) {
+      in_[i * 8 + j] = i;
+    }
+  }
+  std::vector<float> out_before(8, -1.f);
+  std::vector<float> out_after(8, -1.f);
+
+  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+
+  Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
+  LoopNest l_before({tensor});
+  LoopNest l(l_before);
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
+  cg_before.call({in_, out_before});
+
+  l.vectorize(l.getLoopStmtsFor(tensor)[0]);
+
+  Stmt* s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: sum[Ramp(0, 1, 8)] = Broadcast(0.f, 8);
+#CHECK: for (int n = 0; n < 8; n++) {
+#CHECK: sum[Ramp(0, 1, 8)] = ReduceOp((sum[Ramp(0, 1, 8)]) + (in[Ramp(n, 8, 8)]), out_args={Ramp(0, 1, 8)}, reduce_args={n});
+#CHECK: }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Vectorizing should not change result.
+  l.prepareForCodegen();
+  s = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(s, {in, tensor});
+  cg_after.call({in_, out_after});
+  for (int i = 0; i < 8; ++i) {
+    ASSERT_EQ(out_before[i], out_after[i]);
+  }
+}
+
+TEST(Reductions, ReductionVectorizeInner) {
+  KernelScope kernel_scope;
+
+  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+
+  Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
+  LoopNest l({tensor});
+
+  ASSERT_THROWS_WITH(
+      l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
+}
+
+TEST(Reductions, ReductionVectorizeRfactor) {
+  KernelScope kernel_scope;
+
+  std::vector<float> in_(8 * 8);
+  for (int i = 0; i < 8; ++i) {
+    for (int j = 0; j < 8; ++j) {
+      in_[i * 8 + j] = i;
+    }
+  }
+  std::vector<float> out_before(1, -1.f);
+  std::vector<float> out_after(1, -1.f);
+
+  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+
+  Tensor* tensor = Reduce("sum", {}, Sum(), in, {{8, "m"}, {8, "n"}});
+
+  LoopNest l_before({tensor});
+  LoopNest l(l_before);
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
+  cg_before.call({in_, out_before});
+
+  ASSERT_THROWS_WITH(
+      l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
+
+  // But if we rfactor this so it's not a reduce axis we can vectorize that
+  // loop.
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  auto v = loops.at(1)->var();
+  auto tensor_body = NodeFinder<ReduceOp>::find(l.root_stmt())[0];
+  l.rfactor(tensor_body, v);
+
+  loops = NodeFinder<For>::find(l.root_stmt());
+  l.vectorize(loops[2]);
+
+  Stmt* s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: sum = 0.f;
+#CHECK: for (int n = 0; n < 8; n++) {
+#CHECK:   tmp_buf[n] = 0.f;
+#CHECK: }
+#CHECK: for (int m = 0; m < 8; m++) {
+#CHECK:   tmp_buf[Ramp(0, 1, 8)] = ReduceOp((tmp_buf[Ramp(0, 1, 8)]) + (in[Ramp(8 * m, 1, 8)]), out_args={Ramp(0, 1, 8)}, reduce_args={m});
+#CHECK: }
+#CHECK: for (int n = 0; n < 8; n++) {
+#CHECK:   sum = ReduceOp((sum) + (tmp_buf[n]), out_args={}, reduce_args={n});
+#CHECK: }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Vectorizing should not change result.
+  l.prepareForCodegen();
+  s = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(s, {in, tensor});
+  cg_after.call({in_, out_after});
+
+  ASSERT_EQ(out_before[0], out_after[0]);
 }
 
 } // namespace jit

@@ -12,7 +12,7 @@ from . import matmul         # noqa: F401
 # from . import normalization  # noqa: F401
 # from . import pooling        # noqa: F401
 from . import reduction      # noqa: F401
-# from . import softmax        # noqa: F401
+from . import softmax        # noqa: F401
 from . import rnn_eltwise    # noqa: F401
 from . import swish          # noqa: F401
 
@@ -276,9 +276,10 @@ Works only with Python3.\n A few examples:
                             config[i] = value
                         except ValueError:
                             pass
-                    bench = bench_cls(*config)
+                    # TODO: output dtype in the config and  parse it back from the str
+                    bench = bench_cls(config[0], config[1], torch.float32, *config[2:])
                     bench.jit_mode = args.jit_mode
-                    bench.output_type = args.output_type
+                    bench.output_type = args.output
                     bench.run(args)
 
             if not match_class_name:

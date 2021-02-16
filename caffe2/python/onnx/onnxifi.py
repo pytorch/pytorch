@@ -11,9 +11,7 @@ ONNXIFI a Caffe2 net
 
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
 import caffe2.python._import_c_extension as C
-import numpy as np
 
 
 def onnxifi_caffe2_net(

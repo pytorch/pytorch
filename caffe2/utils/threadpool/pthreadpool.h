@@ -8,6 +8,25 @@
 #include <stddef.h> // for size_t
 #include <stdint.h> // for uint32_t
 
+#ifdef USE_PTHREADPOOL
+// This is a hack.
+// Mainly introduced here because
+// 1. NNPACK can be compiled to use internal legacy threadpool implementation because much of C2 depends on that.
+// 2. Then if we want to use NNPACK in PyTorch, which uses new pthreadpool, then we will supply new pthreadpool pointer
+//    to NNPACK. This will not work if NNPACK is compiled with internal legacy threadpool. Thus this guard
+//    along with changes in pthreadpool_impl.cc allows us to override that behavior.
+//    It enables us to use NNPACK from pytorch using `caffe2::pthreadpool_()`
+namespace caffe2 {
+class WithCastToNewThreadPool {
+  public:
+    explicit WithCastToNewThreadPool(bool use_new_threadpool);
+    ~WithCastToNewThreadPool();
+  private:
+    bool use_new_threadpool_;
+};
+}
+#endif
+
 typedef struct pthreadpool* legacy_pthreadpool_t;
 
 typedef void (*legacy_pthreadpool_function_1d_t)(void*, size_t);

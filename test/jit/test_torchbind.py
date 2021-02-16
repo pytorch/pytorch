@@ -266,6 +266,10 @@ class TestTorchbind(JitTestCase):
         traced = torch.jit.trace(TryTracing(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
 
+    def test_torchbind_pass_wrong_type(self):
+        with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):
+            torch.ops._TorchScriptTesting.take_an_instance(torch.rand(3, 4))
+
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
@@ -345,3 +349,9 @@ class TestTorchbind(JitTestCase):
 
         obj_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, True)
         self.assertEqual(obj_swap.diff(), -1)
+
+    def test_staticmethod(self):
+        def fn(inp: int) -> int:
+            return torch.classes._TorchScriptTesting._StaticMethod.staticMethod(inp)
+
+        self.checkScript(fn, (1,))

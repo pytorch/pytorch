@@ -1,9 +1,10 @@
+#include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/metal/MetalPrepackOpContext.h>
-#include <ATen/ATen.h>
+#include <c10/util/accumulate.h>
 
 
-#if defined(C10_IOS)
+#if (C10_IOS || TARGET_OS_MAC)
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 #endif
 
@@ -24,7 +25,7 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
   const auto ws = weightContig.sizes();
   auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
   auto packedWeight = at::empty(ws);
-  int64_t size_bytes = at::prod_intlist(ws) * sizeof(float);
+  int64_t size_bytes = c10::multiply_integers(ws) * sizeof(float);
   memcpy(packedWeight.data_ptr(), packed_buffer.data(), size_bytes);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
@@ -94,19 +95,19 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
 Tensor conv2d_prepack_run(
     const Tensor& input,
     const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
-#if defined(C10_IOS)
+#if (C10_IOS || TARGET_OS_MAC)
   return mpscnn::conv2d(input, *op_context);
 #else
-  TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS");
+  TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS and MacOS");
   return input;
 #endif
 }
 
 Tensor copy_to_host(const Tensor& input) {
-#if defined(C10_IOS)
+#if (C10_IOS || TARGET_OS_MAC)
   return mpscnn::copy_to_host(input);
 #else
-  TORCH_CHECK(false, "copy_to_host can only be invoked on iOS");
+  TORCH_CHECK(false, "copy_to_host can only be invoked on iOS and MacOS");
   return input;
 #endif
 }

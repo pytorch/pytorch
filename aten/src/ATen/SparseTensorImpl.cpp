@@ -9,6 +9,8 @@ namespace {
   DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
     if (key_set.has(DispatchKey::SparseCPU)) {
       return kCPU;
+    } else if (key_set.has(DispatchKey::SparseXPU)) {
+      return kXPU;
     } else if (key_set.has(DispatchKey::SparseCUDA)) {
       return kCUDA;
     } else {
@@ -46,6 +48,8 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   AT_ASSERT(values_.sizes() == IntArrayRef({0}));
   AT_ASSERT(values_.device() == indices_.device());
   AT_ASSERT(values_.device() == device());
+
+  is_non_overlapping_and_dense_ = false;
 }
 
 IntArrayRef SparseTensorImpl::strides() const {
@@ -66,17 +70,13 @@ void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("sparse tensors do not have set_storage_offset");
 }
-
-int64_t SparseTensorImpl::dim() const {
-  return sparse_dim_ + dense_dim_;
-}
+#ifdef DEBUG
 bool SparseTensorImpl::has_storage() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "SparseTensorImpl assumes that storage_ is never set");
   return false;
 }
+#endif
 const Storage& SparseTensorImpl::storage() const {
-  AT_ERROR("sparse tensors do not have storage");
-}
-int64_t SparseTensorImpl::storage_offset() const {
   AT_ERROR("sparse tensors do not have storage");
 }
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {

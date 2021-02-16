@@ -109,7 +109,7 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
 }
 
 template<typename traits, typename res_t>
-static void set_result(const int index, const res_t result, const TensorIterator &iter, const int num_outputs) {
+static void set_result(const int index, const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
   // static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
@@ -118,20 +118,20 @@ static void set_result(const int index, const res_t result, const TensorIterator
 }
 
 template<typename traits, typename res_t>
-static void set_results(const res_t result, const TensorIterator &iter, const int num_outputs) {
+static void set_results(const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
   AT_ASSERT(num_outputs == 1);
   set_result<traits>(0, result, iter, num_outputs);
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
 static inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
-for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, const int num_outputs) {
+for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
   return i;
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
 static inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
-for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, const int num_outputs) {
+for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
   if (i < (size_t)num_outputs) {
     set_result<traits>(i, std::get<i>(t), iter, num_outputs);
     return for_each_in_tuple<traits, i + 1, tuple_t...>(t, iter, num_outputs);
@@ -140,7 +140,7 @@ for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, c
 }
 
 template<typename traits, typename... res_t>
-static void set_results(const std::tuple<res_t...>& result, const TensorIterator &iter, const int num_outputs) {
+static void set_results(const std::tuple<res_t...>& result, const TensorIteratorBase &iter, const int num_outputs) {
   AT_ASSERT(num_outputs >= 1);
   std::size_t result_size = for_each_in_tuple<traits>(result, iter, num_outputs);
   AT_ASSERT((size_t)num_outputs == result_size);
@@ -178,7 +178,7 @@ struct all_same : guts::conjunction<
 // into several pieces, reduce each separately, and then combine them.
 
 template <typename ops_t, typename init_t>
-void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
+void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
   using rf_t = decltype(&ops_t::reduce);
   using cf_t = decltype(&ops_t::combine);
   using pf_t = decltype(&ops_t::project);
@@ -202,7 +202,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
     "the accumulate type must be default-constructible"
   );
   const int num_outputs = iter.noutputs();
-  iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIterator &sub_iter) {
+  iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIteratorBase &sub_iter) {
     auto reduction_body = [&ops, &sub_iter, num_outputs](acc_t acc, int64_t begin, int64_t end) -> acc_t {
       int ntensors = sub_iter.ntensors();
       sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors, begin](char** data, const int64_t* strides, int64_t size) {
@@ -244,7 +244,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
 }
 
 template <typename func_t, typename vec_func_t>
-void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident = 0) {
+void binary_kernel_reduce_vec(TensorIteratorBase& iter, func_t op, vec_func_t vop, double ident = 0) {
   using traits = binary_function_traits<func_t>;
   static_assert(
     all_same<

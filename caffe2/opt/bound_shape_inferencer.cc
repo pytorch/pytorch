@@ -322,6 +322,12 @@ void BoundShapeInferencer::InferGivenTensorFill(const OperatorDef& op) {
   if (it != shape_info_.end()) {
     it->second.setDimType(std::vector<TensorBoundShape::DimType>(
         it->second.shape.dims_size(), TensorBoundShape_DimType_CONSTANT));
+    if (op.type() == "ConstantFill" && op.input_size() >= 1) {
+        auto it_input = shape_info_.find(op.input(0));
+        if (it_input != shape_info_.end()) {
+          it->second.setDimType(it_input->second.getDimType());
+        }
+    }
   }
 }
 
@@ -870,7 +876,8 @@ void BoundShapeInferencer::InferCommonOp(
     const static std::unordered_set<std::string>
         types_with_independent_output_shape = {"Int8GenQuantParams",
                                                "Int8QuantSchemeBlobFill",
-                                               "ComputeEqualizationScale"};
+                                               "ComputeEqualizationScale",
+                                               "Int8GenQuantParamsMinMax"};
     const static std::unordered_set<std::string>
         pruning_ops = {"RowwisePruneI64", "RowwisePruneI32"};
     std::vector<TensorShape> input_shapes;
@@ -902,7 +909,8 @@ void BoundShapeInferencer::InferCommonOp(
         (op.type() != "Int8Dequantize") &&
         (op.type() != "Int8QuantSchemeBlobFill") &&
         (op.type() != "ComputeEqualizationScale") &&
-        (op.type() != "Int8GenQuantParams");
+        (op.type() != "Int8GenQuantParams") &&
+        (op.type() != "Int8GenQuantParamsMinMax");
     float scale = 1;
     int offset = 0;
 

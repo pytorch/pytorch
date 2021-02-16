@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorSort.cu"
 #else
 
+#include <c10/cuda/CUDAException.h>
+
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
@@ -53,8 +55,9 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
     dim3 block(blockSize);                                              \
                                                                         \
     if (dir) {                                                          \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, GTComp<scalar_t, true>, TYPE, SIZE> \
-        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(         \
+      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
+          GTComp<scalar_t, true>, TYPE, SIZE>                           \
+        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
           keyInfo,                                                      \
           keySlices,                                                    \
           (TYPE) keySliceSize,                                          \
@@ -62,16 +65,19 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
           GTComp<scalar_t, true>());                                    \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     } else {                                                            \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, LTComp<scalar_t, true>, TYPE, SIZE> \
-        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(         \
+      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
+      LTComp<scalar_t, true>, TYPE, SIZE>                               \
+        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
           keyInfo,                                                      \
           keySlices,                                                    \
           (TYPE) keySliceSize,                                          \
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          LTComp<scalar_t, true>());                                              \
+          LTComp<scalar_t, true>());                                    \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     }                                                                   \
   } while (0)
 
@@ -147,8 +153,6 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
 #undef HANDLE_CASE
 #undef HANDLE_SORT_CASE
 #undef HANDLE_A_CASE
-
-  THCudaCheck(cudaGetLastError());
 }
 
 void THCTensor_(sortViaThrust)(THCState* state,

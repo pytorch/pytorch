@@ -28,17 +28,16 @@ class TORCH_API LoopNest {
   LoopNest(const std::vector<Tensor*>& output_tensors);
 
   // A constructor for building a LoopNest from a pre-baked Stmt and meta-info
-  // TODO: Nuke intermediate_bufs_ and possibly buf_initializers from here if
-  // they can be deduced.
+  // TODO: Nuke intermediate_bufs_ from here if they can be deduced.
   LoopNest(
       Stmt* stmt,
       const std::unordered_set<const Buf*>& output_bufs,
-      const std::unordered_set<const Buf*>& intermediate_bufs,
-      const std::unordered_map<const Buf*, const Expr*>& buf_initializers)
+      const std::unordered_set<const Buf*>& intermediate_bufs)
       : root_stmt_(stmt),
         output_bufs_(output_bufs),
-        intermediate_bufs_(intermediate_bufs),
-        buf_initializers_(buf_initializers) {}
+        intermediate_bufs_(intermediate_bufs) {}
+
+  LoopNest(const LoopNest& other);
 
   Stmt* root_stmt() const {
     return root_stmt_;
@@ -49,11 +48,12 @@ class TORCH_API LoopNest {
   Stmt* getLoopBodyFor(Tensor*) const;
   bool hasLoopBodyFor(Tensor*) const;
 
-  void vectorize(Stmt*);
+  static void vectorize(For*);
+  Stmt* simplify();
 
   bool computeInline(Stmt* s);
   bool computeInline(const Buf* b);
-  void inlineIntermediateBufs();
+  void inlineIntermediateBufs(bool allow_duplicated_work);
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
@@ -107,6 +107,7 @@ class TORCH_API LoopNest {
       For* f,
       const std::unordered_map<std::string, const Buf*>& map);
 
+  void eliminateDeadStores();
   void prepareForCodegen();
 
   // Find the inner-most loops and vectorize them. Currently, this only works
@@ -123,7 +124,6 @@ class TORCH_API LoopNest {
  private:
   std::vector<Tensor*> findAllNeededTensors(
       const std::vector<Tensor*>& tensors);
-  Stmt* lowerToStmt(Tensor* t);
   Stmt* insertAllocFree(Stmt* stmt);
 
   Stmt* root_stmt_;
@@ -131,8 +131,6 @@ class TORCH_API LoopNest {
   std::unordered_set<const Buf*> input_bufs_;
   std::unordered_set<const Buf*> output_bufs_;
   std::unordered_set<const Buf*> intermediate_bufs_;
-  // Holds the initializer Expr of buffers that have been initialized.
-  std::unordered_map<const Buf*, const Expr*> buf_initializers_;
 };
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);
@@ -140,7 +138,7 @@ TORCH_API Stmt* FlattenIndexes(Stmt* s);
 // TODO: Revisit this once we decide on how dependencies analysis should look
 // like. Maybe we would choose to use a different API and BufUse would be
 // removed, or if we decide to keep it we need to properly document its API.
-struct BufUse {
+struct BufLoadOrStoreUse {
   Stmt* s;
   bool isStore;
 };
@@ -151,7 +149,8 @@ struct BufUse {
  * in the vectors reflects the order in which the uses appear in the given
  * statement.
  */
-std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s);
+std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>>
+findLoadOrStoreUses(Stmt* s);
 
 } // namespace tensorexpr
 } // namespace jit

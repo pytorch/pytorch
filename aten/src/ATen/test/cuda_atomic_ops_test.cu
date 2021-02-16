@@ -11,7 +11,7 @@ template <typename T>
 __global__ void addition_test_kernel(T * a, T * sum) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int idx = (tid) % arraysize;
-  
+
   gpuAtomicAdd(&sum[idx], a[idx]);
 }
 
@@ -19,7 +19,7 @@ template <typename T>
 __global__ void mul_test_kernel(T * a, T * sum) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int idx = (tid) % arraysize;
-  
+
   gpuAtomicMul(&sum[idx], a[idx]);
 }
 
@@ -29,7 +29,7 @@ void test_atomic_add() {
   dim3 dimGrid(1, 1);
 
   T *a, *sum, *answer, *ad, *sumd;
-  
+
   a = (T*)malloc(arraysize * sizeof(T));
   sum = (T*)malloc(arraysize * sizeof(T));
   answer = (T*)malloc(arraysize * sizeof(T));
@@ -42,7 +42,7 @@ void test_atomic_add() {
 
   cudaMalloc((void**)&ad, arraysize * sizeof(T));
   cudaMalloc((void**)&sumd, arraysize * sizeof(T));
-  
+
   cudaMemcpy(ad, a, arraysize * sizeof(T), cudaMemcpyHostToDevice);
   cudaMemcpy(sumd, sum, arraysize * sizeof(T), cudaMemcpyHostToDevice);
 
@@ -67,7 +67,7 @@ void test_atomic_mul() {
   dim3 dimGrid(1, 1);
 
   T *a, *sum, *answer, *ad, *sumd;
-  
+
   a = (T*)malloc(arraysize * sizeof(T));
   sum = (T*)malloc(arraysize * sizeof(T));
   answer = (T*)malloc(arraysize * sizeof(T));
@@ -75,12 +75,12 @@ void test_atomic_mul() {
   for (int i = 0; i < arraysize; ++i) {
     a[i] = 2;
     sum[i] = 2;
-    answer[i] = pow(sum[i], factor);
+    answer[i] = pow(sum[i], static_cast<T>(factor));
   }
 
   cudaMalloc((void**)&ad, arraysize * sizeof(T));
   cudaMalloc((void**)&sumd, arraysize * sizeof(T));
-  
+
   cudaMemcpy(ad, a, arraysize * sizeof(T), cudaMemcpyHostToDevice);
   cudaMemcpy(sumd, sum, arraysize * sizeof(T), cudaMemcpyHostToDevice);
 
@@ -105,7 +105,7 @@ TEST(TestAtomicOps, TestAtomicAdd) {
   test_atomic_add<int16_t>();
   test_atomic_add<int32_t>();
   test_atomic_add<int64_t>();
-  
+
   test_atomic_add<at::BFloat16>();
   test_atomic_add<at::Half>();
   test_atomic_add<float>();

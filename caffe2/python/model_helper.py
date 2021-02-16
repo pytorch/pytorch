@@ -21,7 +21,6 @@ from future.utils import viewitems, viewkeys
 from itertools import chain
 
 import logging
-import six
 
 
 # _known_working_ops are operators that do not need special care.
@@ -199,7 +198,7 @@ class ModelHelper(object):
         # ParameterSharing will be applied.
         if isinstance(param_name, core.BlobReference):
             param_name = str(param_name)
-        elif isinstance(param_name, six.string_types):
+        elif isinstance(param_name, str):
             # Parameter name will be equal to current Namescope that got
             # resolved with the respect of parameter sharing of the scopes.
             param_name = parameter_sharing_context.get_parameter_name(

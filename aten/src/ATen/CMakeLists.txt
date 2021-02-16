@@ -65,15 +65,14 @@ file(GLOB native_cpp "native/*.cpp")
 file(GLOB native_mkl_cpp "native/mkl/*.cpp")
 file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
-file(GLOB native_vulkan_cpp "native/vulkan/*.cpp")
-file(GLOB native_vulkan_api_cpp "native/vulkan/api/*.cpp" "native/vulkan/ops/*.cpp")
+file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/ops/*.cpp")
 
 # Metal
 file(GLOB metal_h "metal/*.h")
 file(GLOB metal_cpp "metal/*.cpp")
 file(GLOB_RECURSE native_metal_h "native/metal/*.h")
 file(GLOB metal_test_srcs "native/metal/mpscnn/tests/*.mm")
-file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm", "native/metal/*.cpp")
+file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm" "native/metal/*.cpp")
 EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
 file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
 file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
@@ -126,16 +125,13 @@ if(AT_MKLDNN_ENABLED)
 endif()
 if(USE_VULKAN)
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
-  if(USE_VULKAN_API)
-    set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_api_cpp})
-  endif()
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp})
 endif()
 
 # Metal
 if(USE_PYTORCH_METAL)
-  if(IOS)
+  if(APPLE)
     set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
   else()
     # Add files needed from optimized_for_mobile
@@ -329,6 +325,7 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
       )
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
@@ -342,9 +339,20 @@ if(USE_CUDA AND NOT USE_ROCM)
   if(CAFFE2_USE_CUDNN)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
   endif()
+  if($ENV{ATEN_STATIC_CUDA})
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
+  endif($ENV{ATEN_STATIC_CUDA})
+endif()
+
 
   if(USE_MAGMA)
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+    if(USE_CUDA)
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+    endif(USE_CUDA)
+    if(USE_ROCM)
+      list(APPEND ATen_HIP_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+    endif(USE_ROCM)
     if(MSVC)
       if($ENV{TH_BINARY_BUILD})
         # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
@@ -354,11 +362,6 @@ if(USE_CUDA AND NOT USE_ROCM)
       endif($ENV{TH_BINARY_BUILD})
     endif(MSVC)
   endif(USE_MAGMA)
-  if($ENV{ATEN_STATIC_CUDA})
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
-  endif($ENV{ATEN_STATIC_CUDA})
-endif()
 
 # NB: We're relying on cmake/Dependencies.cmake to appropriately setup HIP dependencies.
 # In principle we could duplicate them, but handling the rocblas

@@ -23,8 +23,10 @@ if is_available():
     from torch._C._distributed_c10d import (
         Store,
         FileStore,
+        TCPStore,
         ProcessGroup,
         Reducer,
+        Logger,
         BuiltinCommHookType,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _GradBucket,
@@ -36,7 +38,6 @@ if is_available():
     )
     if sys.platform != 'win32':
         from torch._C._distributed_c10d import (
-            TCPStore,
             HashStore,
             _round_robin_process_groups,
         )

@@ -334,6 +334,13 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   }
 }
 
+void testBackendName() {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+  if (pg->getBackendName() != std::string(c10d::MPI_BACKEND_NAME)) {
+    throw std::runtime_error("BOOM!");
+  }
+}
+
 int main(int argc, char** argv) {
 #ifdef MPIEXEC
   // If we are within an openmpi mpirun, then skip the exec
@@ -350,6 +357,7 @@ int main(int argc, char** argv) {
   testScatter();
   testSendRecv(false);
   testSendRecv(true);
+  testBackendName();
 
   std::cout << "Test successful" << std::endl;
 #else

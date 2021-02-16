@@ -23,7 +23,7 @@
 
 namespace caffe2 {
 
-CAFFE2_API uint32_t wipe_cache();
+TORCH_API uint32_t wipe_cache();
 
 } // namespace caffe2
 

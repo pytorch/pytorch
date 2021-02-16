@@ -11,6 +11,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
+export LANG=C.UTF-8
+
 if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
@@ -20,9 +22,13 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
+  export BUILD_SPLIT_CUDA=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
-  rocminfo | egrep 'Name:.*\sgfx|Marketing'
+  rocminfo | grep -E 'Name:.*\sgfx|Marketing'
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -93,7 +99,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); then
+if [ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
@@ -117,7 +123,7 @@ test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
   # scalar_tensor_test, basic, native_test
-  if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
@@ -240,6 +246,21 @@ test_custom_script_ops() {
   fi
 }
 
+test_jit_hooks() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+    echo "Testing jit hooks in cpp"
+    HOOK_BUILD="$PWD/../jit-hook-build"
+    pushd test/jit_hooks
+    cp -a "$HOOK_BUILD" build
+    # Run tests Python-side and export the script modules with hooks
+    python model.py --export-script-module=model
+    # Run tests C++-side and load the exported script modules
+    build/test_jit_hooks ./model
+    popd
+    assert_git_not_dirty
+  fi
+}
+
 test_torch_function_benchmark() {
   echo "Testing __torch_function__ benchmarks"
   pushd benchmarks/overrides_benchmark
@@ -255,7 +276,7 @@ test_torch_function_benchmark() {
 test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
-  XLA_PORT=`shuf -i 40701-40999 -n 1`
+  XLA_PORT=$(shuf -i 40701-40999 -n 1)
   export XRT_WORKERS="localservice:0;grpc://localhost:$XLA_PORT"
   pushd xla
   echo "Running Python Tests"
@@ -337,6 +358,11 @@ test_vec256() {
   fi
 }
 
+test_torch_deploy() {
+  SIMPLE_MODEL_PATH=torch/csrc/deploy/example/simple.pt LIBINTERPRETER_PATH=build/lib/libinterpreter.so build/bin/interpreter_test
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -354,6 +380,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
+    test_torch_deploy
+  fi
   install_torchvision
   test_python_shard1
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then

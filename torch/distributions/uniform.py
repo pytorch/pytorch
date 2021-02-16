@@ -22,7 +22,8 @@ class Uniform(Distribution):
         high (float or Tensor): upper range (exclusive).
     """
     # TODO allow (loc,scale) parameterization to allow independent constraints.
-    arg_constraints = {'low': constraints.dependent, 'high': constraints.dependent}
+    arg_constraints = {'low': constraints.dependent(is_discrete=False, event_dim=0),
+                       'high': constraints.dependent(is_discrete=False, event_dim=0)}
     has_rsample = True
 
     @property
@@ -58,7 +59,7 @@ class Uniform(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
         return constraints.interval(self.low, self.high)
 
@@ -81,8 +82,6 @@ class Uniform(Distribution):
         return result.clamp(min=0, max=1)
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         result = value * (self.high - self.low) + self.low
         return result
 

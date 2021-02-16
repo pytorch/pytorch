@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-struct CAFFE2_API QShapeInfo {
+struct TORCH_API QShapeInfo {
   QShapeInfo(float o = 0, float s = 1, uint32_t a = 1) {
     offset.clear();
     scale.clear();
@@ -18,7 +18,7 @@ struct CAFFE2_API QShapeInfo {
   vector<float> scale;
 };
 
-struct CAFFE2_API ShapeInfo {
+struct TORCH_API ShapeInfo {
   ShapeInfo(bool q = false) : is_quantized(q) {}
   ShapeInfo(
       std::vector<TensorBoundShape_DimType>&& t,
@@ -133,23 +133,23 @@ bool operator==(const ShapeInfo& lhs, const ShapeInfo& rhs);
 // since they are already inserted as CONSTANT, it will take effect here.
 // For SEQ typed tensors, there are only a few of them and they will be
 // handled by BoundShapeInferencer.
-CAFFE2_API ShapeInfo constructShapeInfoWithDefaultDimType(
+TORCH_API ShapeInfo constructShapeInfoWithDefaultDimType(
     TensorShape shape,
     TensorBoundShape_DimType defaultFirstDimType =
         TensorBoundShape_DimType_BATCH);
 
-CAFFE2_API void parseShapeInfoMapFromString(const std::string&, ShapeInfoMap&);
+TORCH_API void parseShapeInfoMapFromString(const std::string&, ShapeInfoMap&);
 
 // Extract shape info from tensorBoundShapes to a ShapeInfoMap.
 // Change shape according to new max_batch_size and max_feature_len
 // at the same time if necessary.
-CAFFE2_API ShapeInfoMap extractShapeInfoFromTensorBoundShapes(
+TORCH_API ShapeInfoMap extractShapeInfoFromTensorBoundShapes(
     TensorBoundShapes tensor_bound_shapes,
     int64_t new_max_batch_size = -1,
     int64_t new_max_feature_len = -1);
 
 // In-place modify TensorBoundShape to change shape size based on type
-CAFFE2_API void changeTensorBoundShapes(
+TORCH_API void changeTensorBoundShapes(
     TensorBoundShape& tensor_shape_and_type,
     const int64_t old_batch_size,
     const int64_t old_seq_size,
@@ -157,7 +157,7 @@ CAFFE2_API void changeTensorBoundShapes(
     const int64_t new_seq_size);
 
 // In-place modify TensorShape's shape at a specific dimension
-CAFFE2_API void modifyTensorShapeDimSize(
+TORCH_API void modifyTensorShapeDimSize(
     TensorShape* tensor_shape,
     int dim_index,
     const int64_t old_size,

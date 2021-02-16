@@ -5,7 +5,7 @@ import operator
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
-from .node import Target, Node, Argument, base_types
+from .node import Target, Node, Argument, base_types, map_aggregate
 
 class TracerBase:
     graph: Graph
@@ -33,8 +33,8 @@ class TracerBase:
 
         If kind = 'placeholder', then we're creating a Node that
         represents the parameter of a function. If we need to encode
-        a default parameter, we use the `args` tuple. `args` is
-        otherwise empty for `placeholder` Nodes.
+        a default parameter, we use the ``args`` tuple. ``args`` is
+        otherwise empty for ``placeholder`` Nodes.
         '''
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
@@ -50,13 +50,28 @@ class TracerBase:
         Can be override to support more trace-specific types.
         """
         # aggregates
-        if isinstance(a, (tuple, list)):
+        if isinstance(a, tuple) and hasattr(a, '_fields'):
+            # NamedTuple constructors don't seem to like getting a generator
+            # expression as an argument to their constructor, so build this
+            # intermediate tuple and unpack it into the NamedTuple constructor
+            args = tuple(self.create_arg(elem) for elem in a)
+            return type(a)(*args)  # type: ignore
+        elif isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
             r = {}
             for k, v in a.items():
-                if not isinstance(k, str):
-                    raise NotImplementedError(f"dictionaries with non-string keys: {a}")
+                # Check for invalid dict keys. We do not want a Proxy to appear
+                # anywhere within the key. Since keys can be collection types,
+                # we iterate through the key with map_aggregate
+                k = self.create_arg(k)
+
+                def no_node(arg):
+                    if isinstance(arg, Node):
+                        raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
+                                           "Node. Got key: {k}")
+                map_aggregate(k, no_node)
+
                 r[k] = self.create_arg(v)
             return r
         elif isinstance(a, slice):
@@ -65,7 +80,7 @@ class TracerBase:
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
-        elif isinstance(a, base_types) or a is None:
+        elif isinstance(a, base_types) or a is None or a is ...:
             return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
@@ -104,17 +119,21 @@ class GraphAppendingTracer(TracerBase):
 class TraceError(ValueError):
     pass
 
-# Proxy objects are stand-in values for normal values in a PyTorch computation.
-# Instead of performing compute they record computation into Graph.
-# Each proxy wraps the Node instance that represents the expression that define the
-# value.
 
 class Proxy:
+    """
+    ``Proxy`` objects are ``Node`` wrappers that flow through the
+    program during symbolic tracing and record all the operations
+    (``torch`` function calls, method calls, operators) that they touch
+    into the growing FX Graph.
+
+    If you're doing graph transforms, you can wrap your own ``Proxy``
+    method around a raw ``Node`` so that you can use the overloaded
+    operators to add additional things to a ``Graph``.
+    """
     def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
         if tracer is None:
-            # this allows you to create a proxy object around a raw node
-            # so that if you are doing graph transforms you can use the overloaded operators
-            # to add additional things to a graph.
+            # This allows you to create a Proxy object around a raw Node
             tracer = GraphAppendingTracer(node.graph)
         self.tracer = tracer
         self.node = node
@@ -147,6 +166,11 @@ class Proxy:
     def keys(self):
         return self.tracer.keys(self)
 
+    def __len__(self):
+        raise RuntimeError("'len' is not supported in symbolic tracing by default. If you want "
+                           "this call to be recorded, please call torch.fx.wrap('len') at "
+                           "module scope")
+
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
@@ -154,7 +178,7 @@ class Proxy:
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
             return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
-                                            name=self.tracer.graph._name(orig_method.__name__))
+                                            name=self.tracer.graph._target_to_str(orig_method.__name__))
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):

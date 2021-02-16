@@ -24,7 +24,7 @@ namespace at { namespace cuda {
 * called before the event is ever recorded, it will use the current device.
 * Later streams that record the event must match this device.
 */
-struct TORCH_CUDA_API CUDAEvent {
+struct TORCH_CUDA_CPP_API CUDAEvent {
   // Constructors
   // Default value for `flags` is specified below - it's cudaEventDisableTiming
   CUDAEvent() {}

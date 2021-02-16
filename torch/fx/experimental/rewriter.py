@@ -3,7 +3,7 @@ import inspect
 import textwrap
 import copy
 from types import FunctionType
-from typing import cast, Union, Callable
+from typing import cast, Union, Callable, Dict, Optional, Any
 from torch.fx.symbolic_trace import Tracer
 from torch.fx.graph import Graph
 from torch.jit.frontend import normalize_source_lines
@@ -47,10 +47,10 @@ class AST_Rewriter(ast.NodeTransformer):
     def visit_Assert(self, node):
         """
         Swap out the Assert node (Python's `assert`) with a callsite to the
-        symbolically-traceable torch.Assert function
+        symbolically-traceable torch._assert function
         """
         # Create the Call node
-        n = ast.parse('torch.Assert()', mode='eval')
+        n = ast.parse('torch._assert()', mode='eval')
         assert isinstance(n, ast.Expression)
         call_node = n.body
         assert isinstance(call_node, ast.Call)
@@ -61,13 +61,13 @@ class AST_Rewriter(ast.NodeTransformer):
         expr_wrapper = ast.Expr(value=call_node)
 
         # Return the new Call node to signify that we want to use it as
-        # a replacement for the original Assert node
+        # a replacement for the original _assert node
         return ast.copy_location(expr_wrapper, node)
 
 
 class RewritingTracer(Tracer):
-    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
-        return super().trace(_rewrite(root))
+    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
+        return super().trace(_rewrite(root), concrete_args)
 
 
 def _rewrite(fn : Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:

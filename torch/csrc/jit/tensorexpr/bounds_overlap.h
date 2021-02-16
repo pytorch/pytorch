@@ -32,9 +32,19 @@ struct TORCH_API Bound {
     return exprEquals(start, other.start) && exprEquals(end, other.end);
   }
 
+  bool operator==(const Bound& other) const {
+    return exprEquals(start, other.start) && exprEquals(end, other.end);
+  }
+
   void swap() {
     std::swap(start, end);
     swapped = !swapped;
+  }
+};
+
+struct BoundHash {
+  size_t operator()(const Bound& b) const {
+    return std::hash<const Expr*>()(b.start) ^ std::hash<const Expr*>()(b.end);
   }
 };
 

@@ -62,8 +62,8 @@ inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>
 } // namespace upsample
 
 using scale_t = c10::optional<double>;
-using upsampling_nearest1d = void(*)(Tensor& output, const Tensor& input, scale_t scales_w);
-using upsampling_nearest2d = void(*)(Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
+using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
+using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
 using upsampling_nearest3d = void(*)(Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_linear1d = void(*)(Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
 using upsampling_bilinear2d = void(*)(Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);

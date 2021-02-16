@@ -7,6 +7,8 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+using namespace api::utils;
+
 Tensor add_scalar(
     const Tensor& self_arg,
     const Scalar other,
@@ -18,17 +20,19 @@ Tensor add_scalar(
 
   vTensor v_output{
     context,
-    self.sizes(),
-    self.options(),
+    v_self.sizes(),
+    v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_output.has_image() && v_self.has_image()) {
-      const struct {
+    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+      const struct Block final {
+        uvec3 extents;
         float other;
       } block {
+        v_self.extents(),
         other.to<float>() * alpha.to<float>(),
       };
 
@@ -41,12 +45,18 @@ Tensor add_scalar(
           },
           VK_KERNEL(add_scalar),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -55,31 +65,32 @@ Tensor add_scalar(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
 
 Tensor& add_scalar_(
-    Tensor& self_arg,
+    Tensor& self,
     const Scalar other,
     const Scalar alpha) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
+      self.is_vulkan(),
       "Vulkan: In-place add is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_self.has_image()) {
-      const struct {
+    if C10_LIKELY(v_self.has_image()) {
+      const struct Block final {
+        uvec3 extents;
         float other;
       } block {
+        v_self.extents(),
         other.to<float>() * alpha.to<float>(),
       };
 
@@ -91,9 +102,13 @@ Tensor& add_scalar_(
           },
           VK_KERNEL(add_scalar_),
           v_self.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
-          v_self.image(command_buffer, vTensor::Access::Read | vTensor::Access::Write),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -102,10 +117,9 @@ Tensor& add_scalar_(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
-  return self_arg;
+  return self;
 }
 
 Tensor add_tensor(
@@ -122,17 +136,19 @@ Tensor add_tensor(
 
   vTensor v_output{
     context,
-    self.sizes(),
-    self.options(),
+    v_self.sizes(),
+    v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_self.has_image() && v_other.has_image()) {
-      const struct {
+    if C10_LIKELY(v_self.has_image() && v_other.has_image()) {
+      const struct Block final {
+        uvec3 extents;
         float alpha;
       } block {
+        v_output.extents(),
         alpha.to<float>(),
       };
 
@@ -146,15 +162,23 @@ Tensor add_tensor(
           },
           VK_KERNEL(add),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_other.image(command_buffer),
+          v_other.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -163,34 +187,35 @@ Tensor add_tensor(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
 
 Tensor& add_tensor_(
-    Tensor& self_arg,
+    Tensor& self,
     const Tensor& other_arg,
     const Scalar alpha) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
+      self.is_vulkan(),
       "Vulkan: In-place add is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
   const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
   const vTensor& v_other = convert(other);
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_self.has_image() && v_other.has_image()) {
-      const struct {
+    if C10_LIKELY(v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
+      const struct Block final {
+        uvec3 extents;
         float alpha;
       } block {
+        v_self.extents(),
         alpha.to<float>(),
       };
 
@@ -203,12 +228,18 @@ Tensor& add_tensor_(
           },
           VK_KERNEL(add_),
           v_self.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
-          v_self.image(command_buffer, vTensor::Access::Read | vTensor::Access::Write),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Read | vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_other.image(command_buffer),
+          v_other.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -217,10 +248,9 @@ Tensor& add_tensor_(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
-  return self_arg;
+  return self;
 }
 
 #ifdef USE_VULKAN_API

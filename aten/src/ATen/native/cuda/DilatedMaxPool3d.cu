@@ -112,7 +112,7 @@ void max_pool3d_with_indices_out_frame(
          pT, pH, pW,
          dilationT, dilationH, dilationW,
          offsetZ);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -177,7 +177,7 @@ void max_pool3d_with_indices_backward_out_frame(
         pT, pH, pW,
         dilationT, dilationH, dilationW,
         offsetZ);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
     offsetZ += 65535;

@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.modules.utils import _single, _pair
 from torch.nn.parameter import Parameter
+from typing import TypeVar
 
 _BN_CLASS_MAP = {
     1: nn.BatchNorm1d,
@@ -15,9 +16,13 @@ _BN_CLASS_MAP = {
 }
 
 
+MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
+
+
 class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
     _version = 2
+    _FLOAT_MODULE = MOD
 
     def __init__(self,
                  # ConvNd args
@@ -86,6 +91,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         return self
 
     def _forward(self, input):
+        assert isinstance(self.bn.running_var, torch.Tensor)
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
         weight_shape = [1] * len(self.weight.shape)
@@ -93,8 +99,13 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         bias_shape = [1] * len(self.weight.shape)
         bias_shape[1] = -1
         scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
-        # this does not include the conv bias
-        conv = self._conv_forward(input, scaled_weight)
+        # using zero bias here since the bias for original conv
+        # will be added later
+        if self.bias is not None:
+            zero_bias = torch.zeros_like(self.bias)
+        else:
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+        conv = self._conv_forward(input, scaled_weight, zero_bias)
         conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:
             conv_orig = conv_orig + self.bias.reshape(bias_shape)
@@ -199,7 +210,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         qat_convbn.bn.bias = bn.bias
         qat_convbn.bn.running_mean = bn.running_mean
         qat_convbn.bn.running_var = bn.running_var
-        qat_convbn.bn.num_batches_tracked = bn.num_batches_tracked
+        # mypy error: Cannot determine type of 'num_batches_tracked'
+        qat_convbn.bn.num_batches_tracked = bn.num_batches_tracked  # type: ignore[has-type]
         return qat_convbn
 
 class ConvBn1d(_ConvBnNd, nn.Conv1d):
@@ -259,7 +271,8 @@ class ConvBnReLU1d(ConvBn1d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvBnReLU1d
+    # base class defines _FLOAT_MODULE as "ConvBn1d"
+    _FLOAT_MODULE = nni.ConvBnReLU1d  # type: ignore[assignment]
 
     def __init__(self,
                  # Conv1d args
@@ -345,7 +358,8 @@ class ConvBnReLU2d(ConvBn2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvBnReLU2d
+    # base class defines _FLOAT_MODULE as "ConvBn2d"
+    _FLOAT_MODULE = nni.ConvBnReLU2d  # type: ignore[assignment]
 
     def __init__(self,
                  # Conv2d args
@@ -402,7 +416,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
 
     def forward(self, input):
         return F.relu(
-            self._conv_forward(input, self.weight_fake_quant(self.weight)))
+            self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
     def from_float(cls, mod):

@@ -16,6 +16,8 @@
 
 namespace c10d {
 
+constexpr const char* MPI_BACKEND_NAME = "mpi";
+
 // WorkEntry is the state associated with a single MPI run instance.
 // It include the source Tensor list and destination Tensor list, as well as
 // The actual run function that will operate either on src or dst or both.
@@ -108,6 +110,10 @@ class ProcessGroupMPI : public ProcessGroup {
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
 
+  const std::string getBackendName() const override {
+      return std::string(MPI_BACKEND_NAME);
+  }
+
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
@@ -170,16 +176,16 @@ class ProcessGroupMPI : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
-      int tag);
+      int tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
-      int tag);
+      int tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
-      int tag);
+      int tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;

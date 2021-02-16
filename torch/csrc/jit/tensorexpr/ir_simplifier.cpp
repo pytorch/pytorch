@@ -1293,7 +1293,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
   // Constant Folding.
   if (lhs_new->isConstant() && rhs_new->isConstant()) {
     const Expr* v_new = new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
     return evaluateOp(v_new);
   }
 
@@ -1302,7 +1307,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
   }
 
   // If diff is constant, we can determine it.
@@ -1311,7 +1321,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
 
   if (!diff->isConstant()) {
     return new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
   }
 
   bool equal = immediateEquals(diff, 0);
@@ -1334,7 +1349,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
 
   // should not be possible but just in case.
   return new CompareSelect(
-      lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+      lhs_new,
+      rhs_new,
+      true_branch,
+      false_branch,
+      v->compare_select_op(),
+      v->bias());
 }
 
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
@@ -1663,9 +1683,9 @@ const Expr* polyGCD(const Polynomial* poly) {
   // We ony want to factorize if we're saving complete operations, i.e. no
   // value in factorizing 6x + 4y into 2 * (3x + 2y) since we don't save work.
   int opsSaved = 1; // default to saving the scalar.
-  long GCD = immediateAs<long>(scalar);
+  long GCD = std::abs(immediateAs<long>(scalar));
   for (auto* t : variables) {
-    long termScalar = immediateAs<long>(t->scalar());
+    long termScalar = std::abs(immediateAs<long>(t->scalar()));
     long newGCD = gcd(std::max(GCD, termScalar), std::min(GCD, termScalar));
     if (newGCD == 1) {
       return nullptr;

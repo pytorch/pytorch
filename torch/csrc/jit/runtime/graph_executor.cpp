@@ -131,7 +131,7 @@ struct CaptureList {
       auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor& tensor : tensors) {
+      for (const at::Tensor tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -269,12 +269,14 @@ struct DifferentiableGraphBackward : public autograd::Node {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for (const at::Tensor& tensor : v.toTensorList()) {
+        for (at::Tensor tensor : v.toTensorList()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
         produceOutput(output_index++, std::move(v).toTensor(), outputs);
       } else {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(v.isNone());
+        output_index++;
         // Input grad can also be None even if it requires grad
         // Example: `other` in expand_as(self, other)
         outputs.emplace_back();
@@ -295,11 +297,14 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
-      for (const at::Tensor& tensor : value.toTensorList()) {
+      for (const at::Tensor tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
       }
-    } else {
+    } else if (value.isTensor()) {
       addOutputForTensor(value.toTensor());
+    } else {
+      // We could have None passed here via `Optional[Tensor]`
+      add_next_edge(autograd::Edge{});
     }
   }
 
@@ -319,7 +324,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     if (v.isTensorList()) {
       auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
-      for (const at::Tensor& tensor : tensors) {
+      for (const at::Tensor tensor : tensors) {
         addInputVariable(tensor);
       }
     } else if (v.isTensor()) {
@@ -719,7 +724,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 };
 
 GraphExecutor::GraphExecutor(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::string function_name)
     : pImpl(
           IsNewExecutorEnabled()
@@ -756,6 +761,16 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+void GraphExecutor::debugFlushCompilationCache() {
+  if (auto ppImpl =
+          std::dynamic_pointer_cast<ProfilingGraphExecutorImpl>(pImpl)) {
+    ppImpl->debugFlushCompilationCache();
+  } else {
+    // we are deprecating legacy executor
+    TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");
+  }
 }
 
 TORCH_API bool IsNewExecutorEnabled() {
@@ -865,7 +880,10 @@ void runNondiffOptimization(
       "After customPostPassses (end of runNondiffOptimization)\n", *graph);
 }
 
-void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
+void runOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool unroll,
+    bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
       "Before EliminateDeadCode (beginning of runOptimization)\n", *graph);
@@ -878,8 +896,14 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
 
   PeepholeOptimize(graph);
   GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
-  ConstantPropagation(graph);
+
+  if (const_prop_user_classes) {
+    ConstantPropagation(graph);
+  } else {
+    ConstantPropagation(graph, true);
+  }
   GRAPH_DEBUG("After ConstantPropagation, before ConstantPooling\n", *graph);
+
   ConstantPooling(graph);
   GRAPH_DEBUG("After ConstantPooling\n", *graph);
 

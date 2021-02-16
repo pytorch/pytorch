@@ -64,6 +64,7 @@ message TensorProto {
     DOUBLE = 13;   // double
 
     ZERO_COLLISION_HASH = 14;  // zero-collision hash state
+    REBATCHING_BUFFER= 15;     // rebatching buffer
   }
   optional DataType data_type = 2 [default = FLOAT];
 
@@ -239,7 +240,6 @@ enum DeviceTypeProto {
   PROTO_XLA = 9;                    // XLA / TPU
   // Change the following number if you add more devices in the code.
   PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
-  PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for

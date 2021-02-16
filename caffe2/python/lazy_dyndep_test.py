@@ -60,7 +60,7 @@ class TestLazyDynDepAllCompare(hu.HypothesisTestCase):
     @given(
         d=st.integers(1, 5), n=st.integers(2, 11), num_procs=st.integers(1, 8)
     )
-    @settings(deadline=10000)
+    @settings(deadline=None)
     def test_allcompare(self, d, n, num_procs):
         dims = []
         for _ in range(d):

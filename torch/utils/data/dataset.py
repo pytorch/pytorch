@@ -158,7 +158,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
 
     Each sample will be retrieved by indexing tensors along the first dimension.
 
-    Arguments:
+    Args:
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
     tensors: Tuple[Tensor, ...]
@@ -179,7 +179,7 @@ class ConcatDataset(Dataset[T_co]):
 
     This class is useful to assemble different existing datasets.
 
-    Arguments:
+    Args:
         datasets (sequence): List of datasets to be concatenated
     """
     datasets: List[Dataset[T_co]]
@@ -232,7 +232,7 @@ class ChainDataset(IterableDataset):
     chainning operation is done on-the-fly, so concatenating large-scale
     datasets with this class will be efficient.
 
-    Arguments:
+    Args:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
     def __init__(self, datasets: Iterable[Dataset]) -> None:
@@ -284,7 +284,7 @@ class BufferedShuffleDataset(IterableDataset[T_co]):
         ...     random.seed(...)
         >>> print(list(torch.utils.data.DataLoader(ds, ..., num_workers=n, worker_init_fn=init_fn)))
 
-    Arguments:
+    Args:
         dataset (IterableDataset): The original IterableDataset.
         buffer_size (int): The buffer size for shuffling.
     """
@@ -315,7 +315,7 @@ class Subset(Dataset[T_co]):
     r"""
     Subset of a dataset at specified indices.
 
-    Arguments:
+    Args:
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
@@ -341,7 +341,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
 
-    Arguments:
+    Args:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths of splits to be produced
         generator (Generator): Generator used for the random permutation.

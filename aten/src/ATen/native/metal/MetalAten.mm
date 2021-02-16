@@ -70,17 +70,20 @@ at::Tensor& metal_copy_impl_(at::Tensor& dst, const at::Tensor& src) {
 
 Tensor empty(
     IntArrayRef size,
-    const TensorOptions& options,
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory,
     c10::optional<MemoryFormat> memory_format) {
   TORCH_CHECK(
-      !options.has_pinned_memory(),
+      !pin_memory.has_value(),
       "'pin_memory' argument is incompatible with Metal tensor");
   TORCH_CHECK(
-      !options.has_memory_format() && !memory_format,
+      !memory_format.has_value(),
       "'memory_format' argument is incompatible with Metal tensor");
   MetalTensor mt{size.vec()};
   return MetalTensor::toTensor(
-      std::move(mt), at::device(at::kMetal).dtype(options.dtype()));
+      std::move(mt), at::device(at::kMetal).dtype(dtype));
 };
 
 at::Tensor empty_strided(
@@ -150,7 +153,6 @@ Tensor max_pool2d(
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(
       dilation[0] == dilation[1] == 1, "dilation is not supported on MPSCNN");
-  TORCH_CHECK(ceil_mode == false, "ceil_mode is not supported on MPSCNN");
   return mpscnn::max_pool2d(
       input, kernel_size, stride, padding, dilation, ceil_mode);
 }
@@ -170,6 +172,16 @@ Tensor sigmoid(const Tensor& input) {
   return mpscnn::sigmoid(input);
 }
 
+Tensor& hardsigmoid_(Tensor& input) {
+  TORCH_CHECK(input.is_metal());
+  return mpscnn::hardsigmoid_(input);
+}
+
+Tensor& hardswish_(Tensor& input) {
+  TORCH_CHECK(input.is_metal());
+  return mpscnn::hardswish_(input);
+}
+
 Tensor t(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(input.dim() == 2);
@@ -179,6 +191,10 @@ Tensor t(const Tensor& input) {
 Tensor view(const Tensor& input, IntArrayRef size) {
   TORCH_CHECK(input.is_metal());
   return mpscnn::view(input, size);
+}
+
+Tensor cat(const TensorList inputs, int64_t dim) {
+  return mpscnn::cat(inputs, dim);
 }
 
 Tensor upsample_nearest2d_vec(
@@ -249,7 +265,7 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("add.Tensor", TORCH_FN(add_Tensor));
   m.impl("add_.Tensor", TORCH_FN(add__Tensor));
   m.impl("addmm", TORCH_FN(addmm));
-  m.impl_UNBOXED("empty.memory_format", empty);
+  m.impl("empty.memory_format", empty);
   m.impl("empty_strided", TORCH_FN(empty_strided));
   m.impl("log_softmax.int", TORCH_FN(log_softmax_int));
   m.impl("max_pool2d", TORCH_FN(max_pool2d));
@@ -257,9 +273,12 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("relu", TORCH_FN(relu));
   m.impl("relu_", TORCH_FN(relu_));
   m.impl("sigmoid", TORCH_FN(sigmoid));
+  m.impl("hardsigmoid_", TORCH_FN(hardsigmoid_));
+  m.impl("hardswish_", TORCH_FN(hardswish_));
   m.impl("sub.Tensor", TORCH_FN(sub_Tensor));
   m.impl("upsample_nearest2d.vec", TORCH_FN(upsample_nearest2d_vec));
   m.impl("view", TORCH_FN(view));
+  m.impl("_cat", TORCH_FN(cat));
   m.impl("adaptive_avg_pool2d", TORCH_FN(adaptive_avg_pool2d));
   m.impl("hardtanh_", TORCH_FN(hardtanh_));
   m.impl("reshape", TORCH_FN(reshape));

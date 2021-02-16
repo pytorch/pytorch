@@ -110,7 +110,11 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         running_std = torch.sqrt(self.running_var + self.eps)
         scale_factor = self.gamma / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
-        conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight))
+        if self.bias is not None:
+            zero_bias = torch.zeros_like(self.bias)
+        else:
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+        conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), zero_bias)
 
         if self.training and not self.freeze_bn:
             # recovering original conv to get original batch_mean and batch_var

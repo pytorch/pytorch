@@ -166,49 +166,6 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
   return std::string(kNCCLAbortedCommStoreKey) + ":" + ncclIdStr;
 }
 
-#ifdef ENABLE_NCCL_P2P_SUPPORT
-
-ncclResult_t ncclAlltoallv(
-    void* sendbuff,
-    const size_t* sendcounts,
-    const size_t* senddispls,
-    void* recvbuff,
-    const size_t* recvcounts,
-    const size_t* recvdispls,
-    size_t size,
-    ncclDataType_t type,
-    ncclComm_t comm,
-    cudaStream_t stream) {
-  int numranks;
-  C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
-  C10D_NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
-    // NCCL uses 0 byte message for synchronization
-    // Avoid send/recv when message size is zero
-    if (sendcounts[r] != 0) {
-      C10D_NCCL_CHECK(ncclSend(
-          ((char*)sendbuff) + senddispls[r] * size,
-          sendcounts[r],
-          type,
-          r,
-          comm,
-          stream));
-    }
-    if (recvcounts[r] != 0) {
-      C10D_NCCL_CHECK(ncclRecv(
-          ((char*)recvbuff) + recvdispls[r] * size,
-          recvcounts[r],
-          type,
-          r,
-          comm,
-          stream));
-    }
-  }
-  C10D_NCCL_CHECK(ncclGroupEnd());
-  return ncclSuccess;
-}
-#endif
-
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -241,8 +198,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     const std::vector<at::Device>& devices,
     int rank,
     OpType opType,
-    const char* profilingTitle)
-    : Work(rank, opType, profilingTitle),
+    const char* profilingTitle, const c10::optional<std::vector<at::Tensor>>& inputs)
+    : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()) {
   // Creates the CUDA event wrappers
@@ -308,11 +265,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   for (size_t i = 0; i < devices_.size(); ++i) {
     // Checking the work's corresponding CUDA events' status
-    auto ret = cudaEventQuery((*cudaEvents_)[i]);
-    if (ret != cudaSuccess && ret != cudaErrorNotReady) {
-      AT_CUDA_CHECK(ret);
-    }
-    if (ret == cudaErrorNotReady) {
+    if (!(*cudaEvents_)[i].query()) {
       return false;
     }
   }
@@ -395,10 +348,16 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
           LOG(INFO) << "[Rank " << rank_
                     << "] Wrote aborted communicator id to store: " << storeKey;
         }
-        LOG(INFO) << "[Rank " << rank_
-                  << "] Caught collective operation timeout for work: "
-                  << (*this);
-        throw std::runtime_error("Operation timed out!");
+        auto currentTimepoint = std::chrono::steady_clock::now();
+        auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            currentTimepoint - workStartTime_);
+        std::string exceptionMsg = c10::str("[Rank ", rank_, "] ",
+                                            "Caught collective operation timeout: ",
+                                            (*this),
+                                            " ran for ",
+                                            timeElapsed.count(),
+                                            " milliseconds before timing out.");
+        throw std::runtime_error(exceptionMsg);
       }
       // Check for errors and throw appropriate exception.
       checkAndThrowException();
@@ -446,12 +405,19 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ncclCommCounter_(0),
       terminateProcessGroup_(false),
       opTimeout_(options->opTimeout),
-      futureNCCLCallbackStreams_(c10::cuda::device_count()),
       isHighPriorityStream_(options->isHighPriorityStream) {
   TORCH_CHECK(at::cuda::getNumGPUs() != 0,
     "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
+
+  if (blockingWait_ && asyncErrorHandling_) {
+    LOG(INFO) << "[Rank " << rank_
+              << "] NCCL_BLOCKING_WAIT and NCCL_ASYNC_ERROR_HANDLING "
+              << "should not both be enabled. "
+              << "Only NCCL_BLOCKING_WAIT is being used in this process.";
+    asyncErrorHandling_ = false;
+  }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
@@ -507,12 +473,18 @@ void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>&
     // Check for Timeouts in the WorkNCCL Operations, and abort all
     // communicators accordingly.
     if (work.timedOut()) {
-      LOG(INFO)
-          << "[Rank " << rank_
-          << "] Watchdog caught collective operation timeout for work: "
-          << work;
+      auto currentTimepoint = std::chrono::steady_clock::now();
+      auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          currentTimepoint - work.workStartTime_);
+      std::string exceptionMsg = c10::str("[Rank ", rank_, "] ",
+                                          "Watchdog caught collective operation timeout: ",
+                                          work,
+                                          " ran for ",
+                                          timeElapsed.count(),
+                                          " milliseconds before timing out.");
+      LOG(ERROR) << exceptionMsg;
       std::exception_ptr exception_ptr = std::make_exception_ptr(
-          std::runtime_error("NCCL Operation Timed Out"));
+          std::runtime_error(exceptionMsg));
       work.setException(exception_ptr);
       for (const auto& ncclComm : work.ncclComms_) {
         ncclComm->ncclCommAbort();
@@ -847,15 +819,6 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
     // Creates the NCCL streams
     streamVal.push_back(at::cuda::getStreamFromPool(isHighPriorityStream_));
-
-    // If not set before, get a dedicated stream for the device to run
-    // FutureNCCL then callbacks.
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (futureNCCLCallbackStreams_[deviceIndex] == nullptr) {
-      futureNCCLCallbackStreams_[deviceIndex] =
-          std::make_shared<at::cuda::CUDAStream>(
-              at::cuda::getStreamFromPool(isHighPriorityStream_));
-    }
   }
 
   // [Note 2 ]
@@ -988,8 +951,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     std::vector<at::Device> devices,
     int rank,
     OpType opType,
-    const char* profilingTitle) {
-  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType, profilingTitle);
+    const char* profilingTitle, const c10::optional<std::vector<at::Tensor>>& inputs) {
+  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType, profilingTitle, inputs);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -998,17 +961,7 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
-  TORCH_INTERNAL_ASSERT(
-      outputs_->size() == 1,
-      "WorkNCCL's getFuture API is only supported for single-process single-device mode.");
-  auto deviceIndex = (*outputs_)[0].device().index();
-  // Create a new FutureNCCL object after checking for single-process
-  // single-device mode.
-  return c10::make_intrusive<FutureNCCL>(
-      at::IValue(*outputs_),
-      deviceIndex,
-      cudaEvents_,
-      futureNCCLCallbackStreams_[deviceIndex]);
+  return future_;
 }
 
 void ProcessGroupNCCL::workEnqueue(
@@ -1044,23 +997,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   bool can_profile = outputs.size() == 1;
-  auto work = initWork(devices, rank_, opType, can_profile ? profilingTitle : nullptr);
+  auto work = initWork(devices, rank_, opType, can_profile ? profilingTitle : nullptr, can_profile ? c10::optional<std::vector<at::Tensor>>(inputs) : c10::nullopt);
 
-  // Store references to outputs and futureNCCLCallbackStream to be used by
-  // WorkNCCL::getFuture.
+  // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
-  work->futureNCCLCallbackStreams_ = futureNCCLCallbackStreams_;
-
-  if (work->recordFunctionEndCallback_) {
-    // recordFunctionEndCallback_ is normally called in fininsh() function by
-    // base class, but since finish is not called by WorkNCCL, we schedule this
-    // function to be run when work is done.
-    // Note when can_profile is false, profilingTitle is not provided and so,
-    // recordFunctionEndCallback_ is not set.
-    work->getFuture()->addCallback(std::move(work->recordFunctionEndCallback_));
-  }
-
-
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
@@ -1101,10 +1041,28 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->ncclComms_[i] = ncclComms[i];
   }
 
+  {
+    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
+        c10::ListType::create(c10::TensorType::get()));
+    work->future_->markCompleted(at::IValue(*work->outputs_));
+  }
+
   // Set appropriate work parameters.
   work->blockingWait_ = blockingWait_;
   work->opTimeout_ = opTimeout_;
   work->store_ = store_;
+
+  if (work->recordFunctionEndCallback_) {
+    // recordFunctionEndCallback_ is normally called in fininsh() function by
+    // base class, but since finish is not called by WorkNCCL, we schedule this
+    // function to be run when work is done. Note that addCallback() onto the
+    // Work's CUDAFuture is not useful here, as it would just run the callback
+    // inline.
+    // Note when can_profile is false, profilingTitle is not provided and so,
+    // recordFunctionEndCallback_ is not set.
+    work->recordFunctionEndCallback_();
+  }
 
   if (asyncErrorHandling_) {
     workEnqueue(work);
@@ -1134,10 +1092,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   auto work = initWork(devices, rank_, opType);
 
   if (opType == OpType::RECV) {
-    // Store references to outputs and futureNCCLCallbackStream to be used by
-    // WorkNCCL::getFuture.
+    // Store references to outputs to be used by WorkNCCL::result and operator<<.
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
-    work->futureNCCLCallbackStreams_ = futureNCCLCallbackStreams_;
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
@@ -1180,6 +1136,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = opTimeout_;
     work->store_ = store_;
+  }
+
+  if (opType == OpType::RECV) {
+    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
+        c10::ListType::create(c10::TensorType::get()));
+    work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
   return work;
@@ -1403,7 +1366,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
     const BarrierOptions& opts) {
   std::vector<at::Device> devices;
-  if (usedDeviceIdxs_.empty()) {
+
+  // Use user defined GPU device ids if provided
+  if (!opts.device_ids.empty()) {
+    for (auto device : opts.device_ids) {
+      devices.emplace_back(at::DeviceType::CUDA, device);
+    }
+  } else if (usedDeviceIdxs_.empty()) {
     // This means there is not yet a NCCL collective being called
     // Here we have to use the best guesses and will use a single GPU to call
     // allreduce to achieve barrier.
@@ -1411,10 +1380,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
     // ensure that each process is on a different GPU
     auto numGPUs = at::cuda::getNumGPUs();
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    devices.push_back(at::Device(at::DeviceType::CUDA, deviceIdx));
+    devices.emplace_back(at::DeviceType::CUDA, deviceIdx);
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
-      devices.push_back(at::Device(at::DeviceType::CUDA, usedDeviceIdx));
+      devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);
     }
   }
 
@@ -1462,7 +1431,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
         // See [Sync Streams].
         c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
-        torch::cuda::nccl::all2all(
+        torch::cuda::nccl::all2all_single_equal_split(
               input,
               output,
               this->getSize(),
@@ -1495,7 +1464,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
-          return ncclAlltoallv(
+          torch::cuda::nccl::all2all_single_unequal_split(
               input.data_ptr(),
               send_lengths.data(),
               send_offsets.data(),
@@ -1503,13 +1472,40 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               recv_lengths.data(),
               recv_offsets.data(),
               input.element_size(),
-              getNcclDataType(input.scalar_type()),
+              input.scalar_type(),
               comm,
-              stream.stream());
+              stream);
+          return ncclSuccess;
         },
         OpType::ALLTOALL_BASE,
         "nccl:all_to_all");
   }
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const AllToAllOptions& /* unused */) {
+  auto device = outputTensors[0].device();
+  for (size_t r = 0; r < outputTensors.size(); r++) {
+    check_gpu_single_tensor(outputTensors[r]);
+    check_gpu_single_tensor(inputTensors[r]);
+    TORCH_CHECK(device == outputTensors[r].device() && device == inputTensors[r].device(),
+      "Tensors must be on the same device")
+  }
+  std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
+  std::vector<at::Tensor> outputTensor0 = {outputTensors[0]};
+  return collective(
+    inputTensor0,
+    outputTensor0,
+    [&](at::Tensor& /* unused */,
+        at::Tensor& /* unused */,
+        ncclComm_t comm,
+        at::cuda::CUDAStream& stream) {
+      torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
+      return ncclSuccess;
+    },
+    OpType::ALLTOALL);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
@@ -1560,6 +1556,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllToAllOptions& /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
+}
+
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
@@ -1589,13 +1593,6 @@ void ProcessGroupNCCL::groupEnd() {
   C10D_NCCL_CHECK(ncclGroupEnd());
 #endif
   --ncclActiveGroupCounter_;
-}
-
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
-    std::vector<at::Tensor>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
-    const AllToAllOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(

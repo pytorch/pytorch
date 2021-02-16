@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_KINETO=0
+#     disables usage of libkineto library for profiling
+#
 #   USE_NUMPY=0
 #     disables the NumPy build
 #
@@ -183,7 +186,7 @@ if sys.version_info < python_min_version:
                                                                      python_min_version_str))
     sys.exit(-1)
 
-from setuptools import setup, Extension, distutils, find_packages
+from setuptools import setup, Extension, find_packages
 from collections import defaultdict
 from distutils import core
 from distutils.core import Distribution
@@ -324,8 +327,16 @@ def build_deps():
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
-    sym_files = ['tools/shared/_utils_internal.py']
-    orig_files = ['torch/_utils_internal.py']
+    sym_files = [
+        'tools/shared/_utils_internal.py',
+        'torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h',
+        'torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h',
+    ]
+    orig_files = [
+        'torch/_utils_internal.py',
+        'third_party/valgrind-headers/callgrind.h',
+        'third_party/valgrind-headers/valgrind.h',
+    ]
     for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if os.path.exists(sym_file):
@@ -436,7 +447,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Building without distributed package')
 
-        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
         if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
@@ -540,6 +551,50 @@ class build_ext(setuptools.command.build_ext.build_ext):
         if contents != new_contents:
             with open('compile_commands.json', 'w') as f:
                 f.write(new_contents)
+
+class concat_license_files():
+    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
+
+    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
+    from all the licenses found in ./third_party/. We concatenate them so there
+    is a single license file in the sdist and wheels with all of the necessary
+    licensing info.
+    """
+    def __init__(self):
+        self.f1 = 'LICENSE'
+        self.f2 = 'third_party/LICENSES_BUNDLED.txt'
+
+    def __enter__(self):
+        """Concatenate files"""
+        with open(self.f1, 'r') as f1:
+            self.bsd_text = f1.read()
+
+        with open(self.f1, 'a') as f1:
+            with open(self.f2, 'r') as f2:
+                self.bundled_text = f2.read()
+                f1.write('\n\n')
+                f1.write(self.bundled_text)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        """Restore content of f1"""
+        with open(self.f1, 'w') as f:
+            f.write(self.bsd_text)
+
+
+try:
+    from wheel.bdist_wheel import bdist_wheel
+except ImportError:
+    # This is useful when wheel is not installed and bdist_wheel is not
+    # specified on the command line. If it _is_ specified, parsing the command
+    # line will fail before wheel_concatenate is needed
+    wheel_concatenate = None
+else:
+    # Need to create the proper LICENSE.txt for the wheel
+    class wheel_concatenate(bdist_wheel):
+        """ check submodules on sdist to prevent incomplete tarballs """
+        def run(self):
+            with concat_license_files():
+                super().run()
 
 
 class install(setuptools.command.install.install):
@@ -713,6 +768,7 @@ def configure_extension_build():
         'build_ext': build_ext,
         'clean': clean,
         'install': install,
+        'bdist_wheel': wheel_concatenate,
     }
 
     entry_points = {
@@ -881,6 +937,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/serialization/*.h',
                 'include/torch/csrc/jit/python/*.h',
                 'include/torch/csrc/jit/testing/*.h',
+                'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/pybind11/*.h',
@@ -904,6 +961,9 @@ if __name__ == '__main__':
                 'share/cmake/Gloo/*.cmake',
                 'share/cmake/Tensorpipe/*.cmake',
                 'share/cmake/Torch/*.cmake',
+                'utils/benchmark/utils/*.cpp',
+                'utils/benchmark/utils/valgrind_wrapper/*.cpp',
+                'utils/benchmark/utils/valgrind_wrapper/*.h',
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',

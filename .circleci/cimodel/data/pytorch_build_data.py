@@ -57,7 +57,7 @@ CONFIG_TREE_DATA = [
                     ]),
                 ]),
             ]),
-            ("11.0", [
+            ("11.2", [
                 ("3.8", [
                     X(True),
                     ("libtorch", [
@@ -93,7 +93,7 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("rocm", [
-            ("3.7", [
+            ("3.9", [
                 ("3.6", [
                     ('build_only', [XImportant(True)]),
                 ]),

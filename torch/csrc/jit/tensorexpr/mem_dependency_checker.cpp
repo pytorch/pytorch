@@ -20,6 +20,10 @@ const char* AccessToString(AccessType a) {
       return "Call";
     case AccessType::AtomicAdd:
       return "AtomicAdd";
+    case AccessType::Alloc:
+      return "Alloc";
+    case AccessType::Free:
+      return "Free";
     default:
       break;
   }
@@ -135,6 +139,8 @@ bool AccessInfo::isWrite() const {
     case AccessType::Input:
     case AccessType::Store:
     case AccessType::AtomicAdd:
+    case AccessType::Alloc:
+    case AccessType::Free:
       return true;
     default:
       break;
@@ -173,7 +179,8 @@ void AccessInfo::print() const {
 }
 
 void AccessInfo::dumpDOT(std::ostream& os) const {
-  if (type_ == AccessType::Input || type_ == AccessType::Output) {
+  if (type_ == AccessType::Input || type_ == AccessType::Output ||
+      type_ == AccessType::Alloc) {
     os << "n" << id_ << " [\n";
     os << "label = \"" << AccessToString(type_) << "\\n " << *var_ << "[";
     if (bounds_.size() > 0) {
@@ -233,6 +240,9 @@ const char* AccessInfo::AccessTypeColour() const {
       return "dodgerblue";
     case AccessType::Call:
       return "violet";
+    case AccessType::Alloc:
+    case AccessType::Free:
+      return "sandybrown";
     default:
       break;
   }
@@ -276,7 +286,7 @@ bool MemDependencyChecker::allowLoopExecutionOrderAnalysis(bool allow) {
   return allow;
 }
 
-const std::deque<std::shared_ptr<AccessInfo>>& MemDependencyChecker::
+const std::vector<std::shared_ptr<AccessInfo>>& MemDependencyChecker::
     getHistory() const {
   return currentScope_->accesses_;
 }
@@ -452,6 +462,27 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(
   return nullptr;
 }
 
+std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
+    accessesWithin(const Stmt* A) const {
+  auto it = scopeToAccesses_.find(A);
+  if (it != scopeToAccesses_.end()) {
+    return std::unordered_set<std::shared_ptr<AccessInfo>>(
+        it->second.begin(), it->second.end());
+  }
+
+  std::unordered_set<std::shared_ptr<AccessInfo>> ret;
+  auto bound = stmtToAccess_.equal_range(A);
+  for (auto it = bound.first; it != bound.second; ++it) {
+    ret.insert(it->second);
+  }
+  return ret;
+}
+
+std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
+    accessesWithin(const Expr* A) const {
+  return {accessFor(A)};
+}
+
 std::shared_ptr<AccessInfo> MemDependencyChecker::input(const Buf* b) const {
   auto it = inputs_.find(b);
   if (it == inputs_.end()) {
@@ -588,51 +619,6 @@ void MemDependencyChecker::visit(const FunctionCall* v) {
   currentScope_->accesses_.push_back(call);
 }
 
-void MemDependencyChecker::visit(const ReduceOp* v) {
-  auto indicesScope =
-      std::make_shared<Scope>(currentScope_->block, currentScope_);
-  currentScope_ = indicesScope;
-
-  for (const Expr* ind : v->output_args()) {
-    ind->accept(this);
-  }
-
-  const Var* var = v->accumulator()->base_handle();
-
-  // ReduceOps are functionally Loads, and the distinction isn't meaningful so
-  // just record them as Loads. They get lowered directly to load during
-  // prepareForCodegen anyway.
-  auto load = std::make_shared<AccessInfo>(
-      nextAccess_++,
-      AccessType::Load,
-      v,
-      lastStmt_,
-      var,
-      getIndicesBounds(v->output_args()));
-
-  // If there were loads in the output_args, this call depends on them, also
-  // merge.
-  if (!indicesScope->accesses_.empty()) {
-    for (auto& access : indicesScope->accesses_) {
-      load->addDependency(access);
-      access->addDependent(load);
-    }
-    mergeScope(indicesScope, indicesScope->parent, false);
-  }
-
-  stmtToAccess_.emplace(lastStmt_, load);
-  exprToAccess_.emplace(v, load);
-
-  // Intentionally using operator[], we want it to be created if it does not
-  // exist.
-  auto& writeHistory = currentScope_->openWrites_[var];
-  updateWriteHistory(writeHistory, load, load->id());
-  currentScope_->accesses_.push_back(load);
-
-  // accept the body of the reduction to handle further reads.
-  v->body().node()->accept(this);
-}
-
 // This check determines if two accesses within a loop are "safe" from loop-self
 // dependence. This function does not consider overlap in bound range, but
 // rather the stride of the bound relative to the loop variable. This is the
@@ -643,6 +629,10 @@ bool executionSafetyCheck(
     const std::vector<const Expr*>& aStrides,
     const std::vector<const Expr*>& oStrides,
     bool parallelized) {
+  if (aStrides.empty() || oStrides.empty()) {
+    return false;
+  }
+  TORCH_INTERNAL_ASSERT(info->bounds().size() == other->bounds().size());
   for (size_t b = 0; b < info->bounds().size(); ++b) {
     const Expr* aIndexStride = aStrides[b];
     const Expr* oIndexStride = oStrides[b];
@@ -853,11 +843,24 @@ void MemDependencyChecker::visit(const For* v) {
   bool parallelized = v->loop_options().is_gpu_block_index() ||
       v->loop_options().is_gpu_thread_index();
 
+  // Store buffers allocated at this scope.
+  std::unordered_set<const Var*> local_intermediates;
+
   // Scanning from the top of the loop, we look for accesses which may depend
   // on a previous or parallel loop iteration.
   for (size_t a = 0; a < currentScope_->accesses_.size(); ++a) {
     auto& info = currentScope_->accesses_[a];
+    if (info->type() == AccessType::Alloc) {
+      local_intermediates.insert(info->var());
+      continue;
+    }
+
     if (!info->isRead()) {
+      continue;
+    }
+
+    // Vars that don't carry outside this scope can't have loop self dependence.
+    if (local_intermediates.count(info->var())) {
       continue;
     }
 
@@ -924,6 +927,19 @@ void MemDependencyChecker::visit(const For* v) {
     }
   }
 
+  std::vector<std::shared_ptr<AccessInfo>> mergedAccesses;
+  mergedAccesses.reserve(
+      extentsScope->accesses_.size() + currentScope_->accesses_.size());
+  std::copy(
+      extentsScope->accesses_.begin(),
+      extentsScope->accesses_.end(),
+      std::back_inserter(mergedAccesses));
+  std::copy(
+      currentScope_->accesses_.begin(),
+      currentScope_->accesses_.end(),
+      std::back_inserter(mergedAccesses));
+  scopeToAccesses_.emplace(v, mergedAccesses);
+
   // it's a little faster to merge without closing, and since no writes can
   // occur within the start and stop exprs we'll do that.
   mergeScope(extentsScope, extentsScope->parent, false);
@@ -935,13 +951,15 @@ void MemDependencyChecker::visit(const Cond* v) {
   const Stmt* last = lastStmt_;
   lastStmt_ = v;
 
+  auto enclosingScope =
+      std::make_shared<Scope>(currentScope_->block, currentScope_);
+
   // condition is in enclosing scope.
   v->condition()->accept(this);
 
   Block* true_stmt = v->true_stmt();
   Block* false_stmt = v->false_stmt();
 
-  auto enclosingScope = currentScope_;
   // Create scopes so the Block visitor doesn't create and merge a new scope.
   auto trueScope = std::make_shared<Scope>(true_stmt, enclosingScope);
   auto falseScope = std::make_shared<Scope>(false_stmt, enclosingScope);
@@ -968,7 +986,13 @@ void MemDependencyChecker::visit(const Cond* v) {
   mergeScope(trueScope, enclosingScope, false);
   mergeScope(falseScope, enclosingScope, false);
 
+  // Merge the enclosing scope into it's parent.
+  mergeScope(enclosingScope, enclosingScope->parent, false);
+
   currentScope_ = enclosingScope;
+  scopeToAccesses_.emplace(v, enclosingScope->accesses_);
+
+  currentScope_ = enclosingScope->parent;
   lastStmt_ = last;
 }
 
@@ -1091,6 +1115,8 @@ void MemDependencyChecker::visit(const Block* v) {
     knownVarBounds_[pair.first] = pair.second;
   }
 
+  scopeToAccesses_.emplace(v, currentScope_->accesses_);
+
   if (currentScope_ != prev_scope) {
     mergeScope(currentScope_, prev_scope, true);
     currentScope_ = prev_scope;
@@ -1123,6 +1149,51 @@ void MemDependencyChecker::visit(const Let* v) {
 // and a write. It's only inserted during Cuda codegen so this should be okay.
 void MemDependencyChecker::visit(const AtomicAdd* v) {
   throw std::runtime_error("MemDependencyChecker AtomicAdd unimplemented");
+}
+
+void MemDependencyChecker::visit(const Allocate* v) {
+  const Stmt* last = lastStmt_;
+  lastStmt_ = v;
+
+  IRVisitor::visit(v);
+
+  const Var* var = v->buffer_var();
+  IndexBounds bounds;
+  for (auto* d : v->dims()) {
+    bounds.push_back(
+        {new IntImm(0), IRSimplifier::simplify(new Sub(d, new IntImm(1)))});
+  }
+  auto info = std::make_shared<AccessInfo>(
+      nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
+
+  intermediates_[var] = info;
+
+  auto& history = currentScope_->openWrites_[var];
+  history.emplace_back(std::make_pair(info->bounds(), info));
+  currentScope_->accesses_.push_back(info);
+
+  lastStmt_ = last;
+}
+
+void MemDependencyChecker::visit(const Free* v) {
+  const Stmt* last = lastStmt_;
+  lastStmt_ = v;
+
+  IRVisitor::visit(v);
+
+  const Var* var = v->buffer_var();
+  auto it = intermediates_.find(var);
+  TORCH_INTERNAL_ASSERT(it != intermediates_.end());
+
+  IndexBounds bounds = it->second->bounds();
+  auto info = std::make_shared<AccessInfo>(
+      nextAccess_++, AccessType::Free, nullptr, var, bounds);
+
+  auto& history = currentScope_->openWrites_[var];
+  updateWriteHistory(history, info, info->id());
+  currentScope_->accesses_.push_back(info);
+
+  lastStmt_ = last;
 }
 
 void MemDependencyChecker::updateWriteHistory(

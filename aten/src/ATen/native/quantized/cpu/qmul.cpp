@@ -59,7 +59,7 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       } else {
         out.copy_(self);
       }
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));
     } else if (other_val == 0.0) {
       scale_prime = 1.0;
@@ -74,7 +74,7 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
           [&](Vec256<scalar_t> vec) -> Vec256<scalar_t> {
             return Vec256<scalar_t>(scalar_t(0));
           });
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));
     } else /* other_val < 0.0 */ {
       scale_prime = std::abs(other_val) * self_scale;
@@ -91,7 +91,7 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
             }
             return a;
           });
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));
     }
   });
