@@ -231,15 +231,15 @@ void ProfilerThreadLocalState::pushRange(
       evt.setFlops(computeFlops(std::string(fn.name().str()), evt.extraArgs()));
     }
 #ifndef C10_MOBILE
-    // backward nodes source range corresponds to the forward node
-    // TODO: consider using C++ stack trace
-    if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
-      auto cs = prepareCallstack(jit::currentCallstack());
-      if (cs.empty()) {
-        cs = prepareCallstack(jit::tracer::pythonCallstack());
-      }
-      evt.setStack(callstackStr(cs));
-    }
+    // // backward nodes source range corresponds to the forward node
+    // // TODO: consider using C++ stack trace
+    // if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+    //   auto cs = prepareCallstack(jit::currentCallstack());
+    //   if (cs.empty()) {
+    //     cs = prepareCallstack(jit::tracer::pythonCallstack());
+    //   }
+    //   evt.setStack(callstackStr(cs));
+    // }
 #endif
     getEventList().record(std::move(evt));
   }
