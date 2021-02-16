@@ -741,6 +741,10 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
 add_library(torch ${DUMMY_EMPTY_FILE})
+if(BUILD_SPLIT_CUDA)
+  # When we split torch_cuda, we want a dummy torch_cuda library that contains both parts
+  add_library(torch_cuda ${DUMMY_EMPTY_FILE})
+endif()
 if(HAVE_SOVERSION)
   set_target_properties(torch PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -1236,7 +1240,10 @@ caffe2_interface_library(torch_cpu torch_cpu_library)
 if(BUILD_SPLIT_CUDA)
   caffe2_interface_library(torch_cuda_cu torch_cuda_cu_library)
   caffe2_interface_library(torch_cuda_cpp torch_cuda_cpp_library)
-elseif(USE_CUDA)
+endif()
+
+if(USE_CUDA)
+  # we want this to be run for BUILD_SPLIT_CUDA as well
   caffe2_interface_library(torch_cuda torch_cuda_library)
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
@@ -1248,7 +1255,10 @@ install(TARGETS torch_cpu torch_cpu_library EXPORT Caffe2Targets DESTINATION "${
 if(BUILD_SPLIT_CUDA)
   install(TARGETS torch_cuda_cu torch_cuda_cu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   install(TARGETS torch_cuda_cpp torch_cuda_cpp_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-elseif(USE_CUDA)
+endif()
+
+if(USE_CUDA)
+  # we want this to run for BUILD_SPLIT_CUDA as well
   install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -1257,10 +1267,13 @@ install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_IN
 
 target_link_libraries(torch PUBLIC torch_cpu_library)
 if(BUILD_SPLIT_CUDA)
-  target_link_libraries(torch PUBLIC torch_cuda_cu_library)
-  target_link_libraries(torch PUBLIC torch_cuda_cpp_library)
-elseif(USE_CUDA)
-  target_link_libraries(torch PUBLIC torch_cuda_library)
+  target_link_libraries(torch_cuda PUBLIC torch_cuda_cu_library)
+  target_link_libraries(torch_cuda PUBLIC torch_cuda_cpp_library)
+endif()
+
+if(USE_CUDA)
+  # we want this to be run for BUILD_SPLIT_CUDA as well
+  target_link_libraries(torch PUBLIC torch_cuda_library) # should this be torch_cuda?
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
 endif()
