@@ -533,6 +533,16 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::is_complex(Tensor self) -> bool"),
+         [](Stack* stack) {
+           RECORD_FUNCTION("is_complex", std::vector<c10::IValue>());
+           auto result =
+               ((std::move(peek(stack, 0, 1))).toTensor()).is_complex();
+           drop(stack, 1);
+           pack(stack, result);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::is_contiguous(Tensor self) -> bool"),
          [](Stack* stack) {
            RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
