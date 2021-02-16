@@ -3102,28 +3102,34 @@ t2.start()
         elem = 4
 
         # this was annoying to write but stresses the expectations pretty rigorously
-        cases = ((512 // elem, 1, kSmallBuffer, "small_pool"),
-                 (kSmallSize // elem, 2, 2 * kSmallBuffer, "small_pool"),)
-                 # (kSmallSize + 512, 1, kLargeBuffer, "large_pool"),
-                 # (kMinLargeAlloc - 512, 2, 2 * kLargeBuffer, "large_pool"),
-                 # ( kMinLargeAlloc + 512, 3,
-                 #  kRoundLarge * ((kMinLargeAlloc + 512 + kRoundLarge - 1) // kRoundLarge),
-                 #  "large_pool"))
+        cases = ((512 // elem, 1, kSmallBuffer, kSmallBuffer, "small_pool"),
+                 (kSmallSize // elem, 2, 2 * kSmallBuffer, kSmallBuffer, "small_pool"),
+                 ((kSmallSize + 512) // elem, 1, kLargeBuffer, kLargeBuffer, "large_pool"),
+                 ((kMinLargeAlloc - 512) // elem, 2, 2 * kLargeBuffer, kLargeBuffer, "large_pool"),
+                 ((kMinLargeAlloc + 512) // elem, 3,
+                  3 * (kRoundLarge * ((kMinLargeAlloc + 512 + kRoundLarge - 1) // kRoundLarge)),
+                  kRoundLarge * ((kMinLargeAlloc + 512 + kRoundLarge - 1) // kRoundLarge),
+                  "large_pool"),)
 
         stats_to_check = ("segment.",
                           "reserved_bytes.",
                           "active.",
                           "active_bytes.")
 
+        gc.collect()
+        torch.cuda.empty_cache()
+
         for (numel,
              delta_cudaMallocs,
              delta_cudaMalloc_bytes,
+             delta_cudaMalloc_bytes_post_del_g,
              pool_string) in cases:
-            gc.collect()
-            torch.cuda.empty_cache()
-
-            delta_active_blocks = 2  # one from "b" plus a sneaky one from CUDAGraph's one-element rng offset holder
-            delta_active_bytes = numel * elem + 512  # + 512 for CUDAGraph's rng offset holder
+            if pool_string == "small_pool":
+                delta_active_blocks = 2  # one from "b" plus a sneaky one from CUDAGraph's one-element rng offset holder
+                delta_active_bytes = numel * elem + 512  # + 512 for CUDAGraph's rng offset holder
+            else:
+                delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
+                delta_active_bytes = numel * elem
 
             a = torch.ones((numel,), device="cuda")
 
@@ -3144,33 +3150,40 @@ t2.start()
                          delta_cudaMalloc_bytes,
                          delta_active_blocks,
                          delta_active_bytes)
-            for stat, expected in zip(stats_to_check, expecteds):
-                stat = stat + pool_string + ".current"
-                current = postcapture_stats[stat] - precapture_stats[stat]
-                self.assertEqual(current, expected, "Pre to post capture delta of " +
-                                 stat + " = {}, expected = {}, numel = {}".format(current, expected, numel))
+            # Double checks replay and stats before and after a call to empty_cache
+            for i in range(2):
+                for stat, expected in zip(stats_to_check, expecteds):
+                    stat = stat + pool_string + ".current"
+                    current = postcapture_stats[stat] - precapture_stats[stat]
+                    self.assertEqual(current, expected, "Pre to post capture delta of " +
+                                     stat + " = {}, expected = {}, numel = {}".format(current, expected, numel))
 
-            g.replay()
-            self.assertEqual(b.sum().item(), 6 * numel)
+                g.replay()
+                self.assertEqual(b.sum().item(), 6 * numel)
+                if i == 0:
+                    torch.cuda.empty_cache()
 
             del g
             gc.collect()
             torch.cuda.empty_cache()
             postdel_stats = torch.cuda.memory_stats()
 
+            # Uses graph result b after graph has been deleted
             self.assertEqual(b.sum().item(), 6 * numel)
 
             # b should be the only live reference remaining from the graph's private pool
-            expecteds = (1, kSmallBuffer, 1, numel * elem)
+            expecteds = (1, delta_cudaMalloc_bytes_post_del_g, 1, numel * elem)
             for stat, expected in zip(stats_to_check, expecteds):
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
                 self.assertEqual(current, expected, "Pre capture to post graph delete delta of " +
                                  stat + " = {}, expected = {}, numel = {}".format(current, expected, numel))
 
-            # deleting b before the next test is essential, otherwise b will be overwritten in the next capture,
-            # contributing a spurious -1 to the change in active blocks during the next capture.
+            # del a, b before the next case is essential, otherwise overwriting a and b in the next case
+            # can throw off its allocation/deallocation counts.
+            del a
             del b
+            torch.cuda.empty_cache()
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or

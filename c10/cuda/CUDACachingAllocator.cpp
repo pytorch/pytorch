@@ -226,6 +226,9 @@ struct PrivatePool {
     cudaMalloc_count(0),
     large_blocks(BlockComparator, false, this),
     small_blocks(BlockComparator, true, this) {}
+  PrivatePool(const PrivatePool&) = delete;
+  PrivatePool(PrivatePool&&) = delete;
+  PrivatePool& operator=(const PrivatePool&) = delete;
   // Number of live graphs using this pool
   int use_count;
   // Number of unfreed cudaMallocs made for this pool. When use_count and cudaMalloc_count
