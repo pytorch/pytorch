@@ -5,7 +5,8 @@ from torch._C import _add_docstr, _special  # type: ignore
 
 Tensor = torch.Tensor
 
-lgamma = _add_docstr(_special.special_lgamma, r"""
+lgamma = _add_docstr(_special.special_lgamma,
+                     r"""
 lgamma(input, *, out=None) -> Tensor
 
 Computes the logarithm of the gamma function on :attr:`input`.
