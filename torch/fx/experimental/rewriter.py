@@ -3,7 +3,7 @@ import inspect
 import textwrap
 import copy
 from types import FunctionType
-from typing import cast, Union, Callable
+from typing import cast, Union, Callable, Dict, Optional, Any
 from torch.fx.symbolic_trace import Tracer
 from torch.fx.graph import Graph
 from torch.jit.frontend import normalize_source_lines
@@ -66,8 +66,8 @@ class AST_Rewriter(ast.NodeTransformer):
 
 
 class RewritingTracer(Tracer):
-    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
-        return super().trace(_rewrite(root))
+    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
+        return super().trace(_rewrite(root), concrete_args)
 
 
 def _rewrite(fn : Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:

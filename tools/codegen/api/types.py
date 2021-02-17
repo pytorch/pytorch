@@ -31,14 +31,16 @@ class BaseCType:
     type: str
     name: ArgName
 
-    def cpp_type(self) -> str:
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
         return self.type
 
 @dataclass(frozen=True)
 class ConstRefCType:
     elem: 'CType'
 
-    def cpp_type(self) -> str:
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        if strip_ref:
+            return self.elem.cpp_type(strip_ref=strip_ref)
         return f'const {self.elem.cpp_type()} &'
 
     @property
@@ -49,7 +51,9 @@ class ConstRefCType:
 class MutRefCType:
     elem: 'CType'
 
-    def cpp_type(self) -> str:
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        if strip_ref:
+            return self.elem.cpp_type(strip_ref=strip_ref)
         return f'{self.elem.cpp_type()} &'
 
     @property
@@ -60,7 +64,8 @@ class MutRefCType:
 class OptionalCType:
     elem: 'CType'
 
-    def cpp_type(self) -> str:
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
         return f'c10::optional<{self.elem.cpp_type()}>'
 
     @property
@@ -240,8 +245,10 @@ class NativeSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
+    prefix: str = ""
+
     def name(self) -> str:
-        return native.name(self.func)
+        return self.prefix + native.name(self.func)
 
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(a.defn() for a in self.arguments())
@@ -257,12 +264,11 @@ class NativeSignature:
     def arguments(self) -> List[Binding]:
         return native.arguments(self.func)
 
+    def returns_type(self) -> str:
+        return native.returns_type(self.func.returns)
+
     def dispatcher_exprs(self) -> List[Expr]:
         return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
-
-    @staticmethod
-    def from_schema(func: FunctionSchema) -> 'NativeSignature':
-        return NativeSignature(func)
 
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native, translate

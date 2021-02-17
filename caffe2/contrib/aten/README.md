@@ -1,6 +1,6 @@
 # An ATen operator for Caffe2
 
-[ATen](https://github.com/zdevito/aten) is a simple tensor library thats exposes the Tensor operations in Torch
+ATen is a simple tensor library thats exposes the Tensor operations in Torch
 and PyTorch directly in C++14. This library provides a generated wrapper around the ATen API
 that makes these functions available in Caffe2 as an operator. It also makes it accessible using the
 ToffeeIR.
@@ -8,8 +8,8 @@ ToffeeIR.
 
 ### Example Usage in Caffe2
 
-First identify a function in ATen you want to call in [Functions.h](https://github.com/zdevito/ATen/blob/master/doc/Functions.h),
-[Tensor.h](https://github.com/zdevito/ATen/blob/master/doc/Tensor.h), or [Type.h](https://github.com/zdevito/ATen/blob/master/doc/Type.h).
+First identify a function in ATen you want to call in Functions.h,
+Tensor.h, or Type.h.
 
 We will call the `pow` operator:
 

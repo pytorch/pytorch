@@ -34,7 +34,7 @@ class Passkey {
   Passkey() {}
 };
 
-class TORCH_CUDA_API NamedScalar : public Val {
+class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
   NamedScalar(Passkey, std::string name, DataType dtype)
       : Val(ValType::KirNamedScalar, dtype, true, true), name_(name) {}
@@ -64,7 +64,7 @@ class TORCH_CUDA_API NamedScalar : public Val {
   std::string name_;
 };
 
-class TORCH_CUDA_API Bool : public Val {
+class TORCH_CUDA_CU_API Bool : public Val {
  public:
   explicit Bool(Passkey, const c10::optional<bool>& value)
       : Val(ValType::KirScalar, DataType::Bool, true, true),
@@ -87,7 +87,7 @@ class TORCH_CUDA_API Bool : public Val {
   const c10::optional<bool> maybe_value_;
 };
 
-class TORCH_CUDA_API Float : public Val {
+class TORCH_CUDA_CU_API Float : public Val {
  public:
   using ScalarType = double;
 
@@ -112,7 +112,7 @@ class TORCH_CUDA_API Float : public Val {
   const c10::optional<ScalarType> maybe_value_;
 };
 
-class TORCH_CUDA_API Half : public Val {
+class TORCH_CUDA_CU_API Half : public Val {
  public:
   explicit Half(Passkey, const c10::optional<float>& value)
       : Val(ValType::KirScalar, DataType::Half, true, true),
@@ -135,7 +135,7 @@ class TORCH_CUDA_API Half : public Val {
   const c10::optional<float> maybe_value_;
 };
 
-class TORCH_CUDA_API Int : public Val {
+class TORCH_CUDA_CU_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
@@ -163,7 +163,7 @@ class TORCH_CUDA_API Int : public Val {
   const c10::optional<ScalarType> maybe_value_;
 };
 
-class TORCH_CUDA_API IterDomain : public Val {
+class TORCH_CUDA_CU_API IterDomain : public Val {
  public:
   IterDomain(Passkey, Val* start, Val* extent);
 
@@ -233,7 +233,7 @@ class TORCH_CUDA_API IterDomain : public Val {
   bool is_rfactor_domain_ = false;
 };
 
-class TORCH_CUDA_API TensorDomain : public Val {
+class TORCH_CUDA_CU_API TensorDomain : public Val {
  public:
   explicit TensorDomain(Passkey, std::vector<IterDomain*> domain);
 
@@ -304,7 +304,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   const std::vector<bool> contiguity_;
 };
 
-class TORCH_CUDA_API TensorView : public Val {
+class TORCH_CUDA_CU_API TensorView : public Val {
  public:
   explicit TensorView(Passkey, const fuser::cuda::TensorView* tv);
 
@@ -329,7 +329,7 @@ class TORCH_CUDA_API TensorView : public Val {
   const fuser::cuda::TensorView* fuser_tv_ = nullptr;
 };
 
-class TORCH_CUDA_API UnaryOp : public Expr {
+class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
   UnaryOp(Passkey, UnaryOpType type, Val* out, Val* in);
 
@@ -351,7 +351,7 @@ class TORCH_CUDA_API UnaryOp : public Expr {
   Val* const in_ = nullptr;
 };
 
-class TORCH_CUDA_API BinaryOp : public Expr {
+class TORCH_CUDA_CU_API BinaryOp : public Expr {
  public:
   BinaryOp(Passkey, BinaryOpType type, Val* out, Val* lhs, Val* rhs);
 
@@ -378,7 +378,7 @@ class TORCH_CUDA_API BinaryOp : public Expr {
   Val* const rhs_ = nullptr;
 };
 
-class TORCH_CUDA_API TernaryOp : public Expr {
+class TORCH_CUDA_CU_API TernaryOp : public Expr {
  public:
   TernaryOp(
       Passkey,
@@ -416,7 +416,7 @@ class TORCH_CUDA_API TernaryOp : public Expr {
   Val* const in3_ = nullptr;
 };
 
-class TORCH_CUDA_API ReductionOp : public Expr {
+class TORCH_CUDA_CU_API ReductionOp : public Expr {
  public:
   ReductionOp(
       Passkey,
@@ -460,7 +460,7 @@ class TORCH_CUDA_API ReductionOp : public Expr {
   Bool* const pred_ = nullptr;
 };
 
-class TORCH_CUDA_API TensorIndex : public Val {
+class TORCH_CUDA_CU_API TensorIndex : public Val {
  public:
   TensorIndex(
       Passkey,
@@ -486,7 +486,7 @@ class TORCH_CUDA_API TensorIndex : public Val {
   std::vector<Val*> indices_;
 };
 
-class TORCH_CUDA_API BroadcastOp : public Expr {
+class TORCH_CUDA_CU_API BroadcastOp : public Expr {
  public:
   BroadcastOp(Passkey, Val* out, Val* in);
 
@@ -510,7 +510,7 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
 //
 // TODO: The components of Allocate like Type and Name could be separated from
 // the the assocated TensorView.  Perhaps that is more appropriate?
-class TORCH_CUDA_API Allocate : public Expr {
+class TORCH_CUDA_CU_API Allocate : public Expr {
  public:
   explicit Allocate(
       Passkey,
@@ -560,7 +560,7 @@ class TORCH_CUDA_API Allocate : public Expr {
 };
 
 // Sync represents __syncthreads barrier for block level coordination.
-class TORCH_CUDA_API Sync : public Expr {
+class TORCH_CUDA_CU_API Sync : public Expr {
  public:
   explicit Sync(Passkey, bool war_sync = false);
 
@@ -574,7 +574,7 @@ class TORCH_CUDA_API Sync : public Expr {
 };
 
 // TODO(kir): promote to IR node
-class TORCH_CUDA_API Scope {
+class TORCH_CUDA_CU_API Scope {
  public:
   Scope() = default;
 
@@ -633,7 +633,7 @@ class TORCH_CUDA_API Scope {
 //
 // TODO(kir): this is not a real expression
 //
-class TORCH_CUDA_API ForLoop : public Expr {
+class TORCH_CUDA_CU_API ForLoop : public Expr {
  public:
   ForLoop(Passkey, Val* index, IterDomain* iter_domain, Expr* parent_scope);
 
@@ -673,7 +673,7 @@ class TORCH_CUDA_API ForLoop : public Expr {
 //
 // TODO(kir): this is not a real expression
 //
-class TORCH_CUDA_API IfThenElse : public Expr {
+class TORCH_CUDA_CU_API IfThenElse : public Expr {
  public:
   explicit IfThenElse(Passkey, Bool* cond, Expr* parent_scope);
 
@@ -717,7 +717,7 @@ class TORCH_CUDA_API IfThenElse : public Expr {
 // explicitly mark a grid reduction and the buffer allocation needed to do it.
 // This node provides FusionExecutor the information it needs to allocate the
 // reduction and sync buffers.
-class TORCH_CUDA_API GridReduction : public Expr {
+class TORCH_CUDA_CU_API GridReduction : public Expr {
  public:
   explicit GridReduction(Passkey, ReductionOp* reduction_op);
 

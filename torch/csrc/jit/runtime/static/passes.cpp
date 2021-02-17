@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
+
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch {
@@ -22,6 +23,22 @@ void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
         %y3 = aten::nan_to_num_(%y2, %f, %g, %h)
         %res = aten::clamp(%y3, %i, %j)
         return (%res))IR";
+  std::string pattern3 = R"IR(
+    graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
+        %y0 = aten::cat(%a, %b)
+        %y1 = aten::add(%y0, %c, %d)
+        %y2 = aten::mul(%y1, %e)
+        %y3 = aten::nan_to_num_(%y2, %f, %g, %h)
+        %res = aten::clamp_(%y3, %i, %j)
+        return (%res))IR";
+  std::string pattern4 = R"IR(
+    graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
+        %y0 = aten::cat(%a, %b)
+        %y1 = aten::add(%y0, %c, %d)
+        %y2 = aten::mul(%y1, %e)
+        %y3 = aten::nan_to_num(%y2, %f, %g, %h)
+        %res = aten::clamp_(%y3, %i, %j)
+        return (%res))IR";
   std::string fused_pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
         %res = fb::concat_add_mul_replacenan_clip(%c, %e, %a, %i, %j)
@@ -32,6 +49,12 @@ void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 
   fuse.RegisterRewritePattern(pattern2, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  fuse.RegisterRewritePattern(pattern3, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  fuse.RegisterRewritePattern(pattern4, fused_pattern);
   fuse.runOnGraph(graph);
 }
 

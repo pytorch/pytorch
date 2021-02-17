@@ -51,6 +51,7 @@ Sections start with a reference to the source file where the code related to the
   - [Interpreter](#interpreter)
   - [Graph Executor](#graph-executor)
   - [JIT Logging](#jit-logging)
+  - [JIT Optimization Limitter](#jit-optimization-limitter)
   - [DifferentiableGraphOp](#differentiablegraphop)
   - [Interpreter](#interpreter-1)
   - [FusionGroup](#fusiongroup)
@@ -1183,6 +1184,32 @@ By default, types in the graph are printed with maximum verbosity.  The verbosit
 * `1`: Types and shapes only
 * `2`: Also print strides
 * `3`: Also print device type and whether gradient is required
+
+## JIT Optimization Limitter ##
+
+[jit_opt_limit.h](jit_opt_limit.h)
+
+Often times, we need to limit the number of optimizations for any lowering passes for debugging purposes.
+
+`TorchScript` offers a simple optimization limit checker that can be configured through environment variable `PYTORCH_JIT_OPT_LIMIT`. The purpose is to limit how many optimization you can make per pass. This is useful for debugging any passes.
+
+Opt limit checker is enabled on a per file basis (hence per pass). For example, in `constant_propagation.cpp`, `PYTORCH_JIT_OPT_LIMIT` should be set to `constant_propagation=<opt_limit>` where `<opt_limit>` is the number of optimizations you want to make for the pass. (i.e.
+`PYTORCH_JIT_OPT_LIMIT="constant_propagation=<opt_limit>"`).
+
+Multiple files can be configured by separating each file name with a colon
+`:` as in the following example,
+`PYTORCH_JIT_OPT_LIMIT="constant_propagation=<opt_limit>:dead_code_elimination=<opt_limit>"`
+
+You can call opt limiter by calling a macro `JIT_OPT_ALLOWED`. It will return true if
+we haven't reached the optimization limit yet. Otherwise, it will return
+false. Typical usage:
+
+```cpp
+if (!JIT_OPT_ALLOWED) {
+    GRAPH_DUMP(...); //supplied from jit_log
+    return;
+}
+```
 
 ## DifferentiableGraphOp ##
 

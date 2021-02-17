@@ -206,7 +206,7 @@ class intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
+      std::is_base_of<TTarget, typename std::remove_pointer<decltype(NullType::singleton())>::type>::value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -509,7 +509,7 @@ class weak_intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
+      std::is_base_of<TTarget, typename std::remove_pointer<decltype(NullType::singleton())>::type>::value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;

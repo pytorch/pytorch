@@ -31,6 +31,37 @@ bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
   return (a - b).abs().max().item<float>() == 0.0f;
 }
 
+void showRtol(const at::Tensor& a, const at::Tensor& b) {
+  const auto diff = (a - b).abs();
+
+  float maxValue = a.abs().max().item<float>();
+  maxValue = fmax(b.abs().max().item<float>(), maxValue);
+
+#ifdef USE_VULKAN_FP16_INFERENCE
+  constexpr float tolerance = 1e-2;
+#else
+  constexpr float tolerance = 1e-5;
+#endif
+
+  const float maxDiff = maxValue * tolerance;
+  std::cout << "Max Diff allowed: " << maxDiff << std::endl;
+  if (diff.sizes().size() == 2) {
+    for (int y = 0; y < diff.sizes()[0]; y++) {
+      std::cout << y << ":";
+      for (int x = 0; x < diff.sizes()[1]; x++) {
+        float diff_xy = diff[y][x].item<float>();
+        if (diff_xy > maxDiff) {
+          std::cout << std::setw(5) << x;
+        }
+        else {
+          std::cout << std::setw(5) << " ";
+        }
+      }
+      std::cout << std::endl;
+    }
+  }
+}
+
 } // namespace
 
 namespace {
@@ -46,8 +77,7 @@ TEST(VulkanAPITest, adaptive_avg_pool2d) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -69,8 +99,7 @@ TEST(VulkanAPITest, add) {
 
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << c_cpu << std::endl;
-    std::cout << "Got:\n" << c_vulkan.cpu() << std::endl;
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -92,8 +121,7 @@ TEST(VulkanAPITest, add_) {
 
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << a_cpu << std::endl;
-    std::cout << "Got:\n" << a_vulkan.cpu() << std::endl;
+    showRtol(b_cpu, b_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -114,8 +142,7 @@ TEST(VulkanAPITest, add_scalar) {
 
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << c_cpu << std::endl;
-    std::cout << "Got:\n" << c_vulkan.cpu() << std::endl;
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -136,12 +163,32 @@ TEST(VulkanAPITest, add_scalar_) {
 
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << a_cpu << std::endl;
-    std::cout << "Got:\n" << a_vulkan.cpu() << std::endl;
+    showRtol(a_cpu, a_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
 }
+
+TEST(VulkanAPITest, mm) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto m1_cpu = at::rand({179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = m1_cpu.mm(m2_cpu);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto out_vulkan = m1_vulkan.mm(m2_cpu);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 
 TEST(VulkanAPITest, addmm) {
   if (!at::is_vulkan_available()) {
@@ -156,15 +203,12 @@ TEST(VulkanAPITest, addmm) {
   const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 
-  const auto bias_vulkan = bias_cpu.vulkan();
   const auto m1_vulkan = m1_cpu.vulkan();
-  const auto m2_vulkan = m2_cpu.vulkan();
-  const auto out_vulkan = at::addmm(bias_vulkan, m1_vulkan, m2_vulkan, beta, alpha);
+  const auto out_vulkan = at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -183,15 +227,12 @@ TEST(VulkanAPITest, addmm_expand) {
   const auto m2_cpu = at::rand({1280, 1000}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 
-  const auto bias_vulkan = bias_cpu.vulkan();
   const auto m1_vulkan = m1_cpu.vulkan();
-  const auto m2_vulkan = m2_cpu.vulkan();
-  const auto out_vulkan = at::addmm(bias_vulkan, m1_vulkan, m2_vulkan, beta, alpha);
+  const auto out_vulkan = at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -208,8 +249,7 @@ TEST(VulkanAPITest, avg_pool2d) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -231,8 +271,7 @@ TEST(VulkanAPITest, clamp) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -254,8 +293,7 @@ TEST(VulkanAPITest, clamp_) {
 
   const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << cpu << std::endl;
-    std::cout << "Got:\n" << vulkan.cpu() << std::endl;
+    showRtol(cpu, vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -328,8 +366,7 @@ TEST(VulkanAPITest, conv2d) {
 
   const bool check = almostEqual(output_cpu, output_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << output_cpu << std::endl;
-    std::cout << "Got:\n" << output_vulkan.cpu() << std::endl;
+    showRtol(output_cpu, output_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -401,8 +438,7 @@ TEST(VulkanAPITest, conv2d_dw) {
 
   const bool check = almostEqual(output_cpu, output_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << output_cpu << std::endl;
-    std::cout << "Got:\n" << output_vulkan.cpu() << std::endl;
+    showRtol(output_cpu, output_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -474,8 +510,7 @@ TEST(VulkanAPITest, conv2d_pw) {
 
   const bool check = almostEqual(output_cpu, output_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << output_cpu << std::endl;
-    std::cout << "Got:\n" << output_vulkan.cpu() << std::endl;
+    showRtol(output_cpu, output_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -491,8 +526,7 @@ TEST(VulkanAPITest, copy) {
 
   const auto check = exactlyEqual(cpu, vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << cpu << std::endl;
-    std::cout << "Got:\n" << vulkan.cpu() << std::endl;
+    showRtol(cpu, vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -515,8 +549,7 @@ TEST(VulkanAPITest, mean) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -528,28 +561,6 @@ TEST(VulkanAPITest, mean2d) {
 
   const auto in_vulkan = in_cpu.vulkan();
   const auto out_vulkan = at::mean(in_vulkan, {-1, -2}, false);
-
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST(VulkanAPITest, mm) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
-  const auto m1_cpu = at::rand({241, 313}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({313, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = m1_cpu.mm(m2_cpu);
-
-  const auto m1_vulkan = m1_cpu.vulkan();
-  const auto m2_vulkan = m2_cpu.vulkan();
-  const auto out_vulkan = m1_vulkan.mm(m2_vulkan);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
@@ -575,8 +586,7 @@ TEST(VulkanAPITest, mul_scalar) {
 
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << c_cpu << std::endl;
-    std::cout << "Got:\n" << c_vulkan.cpu() << std::endl;
+    showRtol(c_cpu, c_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -597,8 +607,7 @@ TEST(VulkanAPITest, mul_scalar_) {
 
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << a_cpu << std::endl;
-    std::cout << "Got:\n" << a_vulkan.cpu() << std::endl;
+    showRtol(a_cpu, a_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -619,8 +628,7 @@ TEST(VulkanAPITest, reshape) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-  std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -641,8 +649,7 @@ TEST(VulkanAPITest, reshape_) {
 
   const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << cpu << std::endl;
-    std::cout << "Got:\n" << vulkan.cpu() << std::endl;
+    showRtol(cpu, vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -661,8 +668,7 @@ TEST(VulkanAPITest, upsample_nearest2d) {
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -697,16 +703,14 @@ class Addmm final : public BaseOp {
       const float alpha)
     : BaseOp(OpType::addmm),
       m2_(at::rand(c10::IntArrayRef({m1W, m2W}), at::device(at::kCPU).dtype(at::kFloat))),
-      v_m2(m2_.vulkan()),
       b_(at::rand(c10::IntArrayRef({m1H, m2W}), at::device(at::kCPU).dtype(at::kFloat))),
-      v_b_(b_.vulkan()),
       beta_(beta),
       alpha_(alpha) {
   }
 
   at::Tensor run(at::Tensor& t) const override {
     if (t.is_vulkan()) {
-      return at::addmm(v_b_, t, v_m2, beta_, alpha_);
+      return at::addmm(b_, t, m2_, beta_, alpha_);
     }
 
     return at::addmm(b_, t, m2_, beta_, alpha_);
@@ -718,9 +722,7 @@ class Addmm final : public BaseOp {
 
  private:
   at::Tensor m2_;
-  at::Tensor v_m2;
   at::Tensor b_;
-  at::Tensor v_b_;
   float beta_;
   float alpha_;
 };
@@ -741,7 +743,7 @@ class Conv2d final : public BaseOp {
   }
 
   at::Tensor run(at::Tensor& t) const override {
-    return at::conv2d(t, w_, b_, stride_, padding_, 1, groups_);
+    return at::conv2d(t, w_, b_, {stride_}, {padding_}, {1}, groups_);
   }
 
   std::string toString() const override {
@@ -922,8 +924,7 @@ TEST(VulkanAPITest, mobilenetv2) {
 
   const auto check = almostEqual(output.first, output.second.cpu());
   if (!check) {
-    std::cout << "Expected:\n" << output.first << std::endl;
-    std::cout << "Got:\n" << output.second.cpu() << std::endl;
+    showRtol(output.first, output.second.cpu());
   }
 
   ASSERT_TRUE(check);

@@ -36,7 +36,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'grid_sample',
 ])
 
-def check_against_reference(self, func, reference_func, args, kwargs=None,
+def check_against_reference(self, func, reference_func, output_func, args, kwargs=None,
                             allow_unused=True, check_types=True, no_grad=False):
     kwargs = kwargs if kwargs else {}
 
@@ -72,10 +72,10 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
 
     with enable_profiling_mode_for_profiling_tests():
         # test single grad case
-        outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
+        outputs = output_func(self.runAndSaveRNG(reference_func, recording_inputs, kwargs))
         grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                     allow_unused=allow_unused)
-        outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
+        outputs_test = output_func(self.runAndSaveRNG(func, recording_inputs, kwargs))
         grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                          allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_test)
@@ -84,7 +84,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         if self._testMethodName in nn_functional_single_grad:
             return
 
-        outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
+        outputs = output_func(self.runAndSaveRNG(reference_func, recording_inputs, kwargs))
         l1 = allSum(outputs)
         grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                     allow_unused=allow_unused)
@@ -92,7 +92,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         l2 = (allSum(grads) * l1)
         grads2 = torch.autograd.grad(l2, recording_tensors, allow_unused=allow_unused)
         recording_inputs, recording_tensors = clone_inputs(True)
-        outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
+        outputs_test = output_func(self.runAndSaveRNG(func, recording_inputs, kwargs))
         l1_test = allSum(outputs_test)
         grads_test = torch.autograd.grad(
             l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
@@ -146,37 +146,69 @@ class JitCommonTestCase(TestCase):
     def autoDiffErrorMessage(self, should_autodiff_node, nodes_not_in_diff_graph, 
                              fusion_nodes_not_found, non_fusible_nodes_being_fused, 
                              fusion_nodes_found, nodes_in_diff_graph):
-        err_msg = "\nFailure in testing nodes' autodifferentiation, "
+        err_msg = "\nFailure in testing nodes' autodifferentiation. "
         if should_autodiff_node:
-            err_msg += "one or more nodes were expected to be autodiffed, " \
+            err_msg += "One or more nodes were expected to be autodiffed, " \
                 "but were not found in specified fusible/nonfusible " \
                 "DifferentiableGraph groups. \nSpecifically:"
+            # The node is intended to appear in a differentiable graph but doesn't 
+            diff_nodes_missing = []
+            # The node is intended to appear in a differentiable graph
+            # outside of a fusion group but instead is in a fusion group
+            diff_nodes_in_fusion = []
+            # The node is intended to appear in a fusion group but doesn't
+            fusion_nodes_missing = []
+            # The node is intended to appear in a fusion group but instead
+            # is just in an outer differentiable graph
+            fusion_nodes_in_diff = []
             for node in nodes_not_in_diff_graph:
-                err_msg += f"\n  {node} was not in one of the DifferentiableGraphs " \
-                    "when it was expected to be. Did you intend for this node to be " \
-                    "autodiffed? If not, remove it from the list of nonfusible nodes."
                 if node in non_fusible_nodes_being_fused:
-                    err_msg += "Additionally, This node was found in a FusionGroup " \
-                        "in a DifferentiableGraph. If that was intended, " \
-                        "reclassify this node as a fusible node. If not, your " \
-                        "autodifferention logic might be wrong."
+                    diff_nodes_in_fusion.append(node)
+                else:
+                    diff_nodes_missing.append(node)
             for node in fusion_nodes_not_found:
-                err_msg += f"\n  {node} was not in one of the DifferentiableGraphs' " \
-                    "fusion groups when it was expected to be. " \
-                    "Did you intend for this node to be fused? If not, you should " \
-                    "move this node into the test's non-fusible nodes."
+                if node in nodes_in_diff_graph:
+                    fusion_nodes_in_diff.append(node)
+                else:
+                    fusion_nodes_missing.append(node)
+            if len(diff_nodes_missing) > 0:
+                err_msg += f"\n  {diff_nodes_missing} were not in one of the " \
+                    "DifferentiableGraphs when they were expected to be. " \
+                    "Did you intend for these nodes to be autodiffed? " \
+                    "If not, remove them from the list of nonfusible nodes."
+            if len(diff_nodes_in_fusion) > 0:
+                err_msg += f"\n  {diff_nodes_in_fusion} were found in one of the FusionGroups " \
+                    "when they were expected to be just in a DifferentiableGraph. If it was " \
+                    "intended for these nodes to be in FusionGroups, reclassify these nodes as " \
+                    "fusible nodes. If these nodes were not intended to be fused, your " \
+                    "autodifferentiation logic might be wrong."
+            if len(fusion_nodes_missing) > 0:
+                err_msg += f"\n  {fusion_nodes_missing} were not in one of the FusionGroups " \
+                    "of the DifferentiableGraphs when they were expected to be. " \
+                    "They were also not found in an outer DifferentiableGraph. Did you " \
+                    "intend for these nodes to be autodifferentiated? If not, you should " \
+                    "remove these nodes from the test's fusible nodes. Otherwise your " \
+                    "autodifferentiation logic might be wrong."
+            if len(fusion_nodes_in_diff) > 0:
+                err_msg += f"\n  {fusion_nodes_in_diff} were not in one of the FusionGroups " \
+                    "of the DifferentiableGraphs when they were expected to be, " \
+                    "instead they were found just in an outer DifferentiableGraph. " \
+                    "Did you intend for these nodes to be fused? If not, you should " \
+                    "move these nodes into the test's nonfusible nodes. Otherwise your " \
+                    "autodifferentiation logic might be wrong."
         else: 
-            err_msg += "one or more nodes were not expected to be autodiffed, " \
-                "but were found in a fused/nonfused DifferentiableGraph group. " \
-                "Did you intend for these nodes to be autodiffed? " \
-                "If so, change this test to expect autodifferention. " \
+            err_msg += "One or more nodes were not expected to be autodiffed " \
+                "but were found in a DifferentiableGraph or in a FusionGroup " \
+                "of a DifferentiableGraph. Did you intend for these nodes to be " \
+                "autodiffed? If so, change this test to expect autodifferentiation. " \
                 "\nSpecifically:"
-            for node in fusion_nodes_found:
-                err_msg += f"\n  {node} was not expected to in one of the " \
-                    "DifferentiableGraph's fusion groups but was. "
-            for node in nodes_in_diff_graph:
-                err_msg += f"\n  {node} was not expected to be in a " \
-                    "DifferentiableGraph but was."
+            if len(fusion_nodes_found) > 0:
+                err_msg += f"\n  {fusion_nodes_found} were not expected to be in " \
+                    "one of the DifferentiableGraphs, but appeared in a FusionGroup " \
+                    "of a DifferentiableGraph. "
+            if len(nodes_in_diff_graph) > 0:
+                err_msg += f"\n  {nodes_in_diff_graph} were not expected to " \
+                    "be in one of the DifferentiableGraphs but were."
         return err_msg
 
     def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):

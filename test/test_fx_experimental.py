@@ -11,7 +11,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.passes.split_module import split_module
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
@@ -21,6 +21,7 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionMode
 )
 from torch.fx.experimental.fuser import fuse
+from torch.fx.experimental import merge_matmul
 
 try:
     from torchvision.models import resnet18
@@ -79,31 +80,33 @@ class TestFXExperimental(JitTestCase):
             node.shape = a.shape
             node.dtype = a.dtype
 
-        agm1 = graph_manipulation.AcceleratedGraphModule(traced)
-        agm2 = graph_manipulation.AcceleratedGraphModule(module_with_submodules)
-        assert len(agm1.weights) == 4
-        assert len(agm2.weights) == 4
-        assert len(agm1.serialized_graph["nodes"]) == 10
-        assert len(agm1.serialized_graph["weights"]) == 4
-        assert len(agm1.serialized_graph["modules"]) == 0
-        assert len(agm2.serialized_graph["nodes"]) == 6
-        assert len(agm2.serialized_graph["weights"]) == 4
-        assert len(agm2.serialized_graph["modules"]) == 1
-        assert agm1.serialized_graph["weights"]["linear.weight"]["shape"] == "[4, 4]"
+        weights1 = {}
+        weights2 = {}
+        serialized_graph1 = graph_manipulation.serialize_module(traced, weights1)
+        serialized_graph2 = graph_manipulation.serialize_module(module_with_submodules, weights2)
+        assert len(weights1) == 4
+        assert len(weights2) == 4
+        assert len(serialized_graph1["nodes"]) == 10
+        assert len(serialized_graph1["weights"]) == 4
+        assert len(serialized_graph1["modules"]) == 0
+        assert len(serialized_graph2["nodes"]) == 6
+        assert len(serialized_graph2["weights"]) == 4
+        assert len(serialized_graph2["modules"]) == 1
+        assert serialized_graph1["weights"]["linear.weight"]["shape"] == "[4, 4]"
         assert (
-            agm1.serialized_graph["weights"]["linear.weight"]["dtype"]
+            serialized_graph1["weights"]["linear.weight"]["dtype"]
             == "torch.float32"
         )
         assert (
-            agm1.serialized_graph["weights"]["linear.weight"]["is_quantized"] is False
+            serialized_graph1["weights"]["linear.weight"]["is_quantized"] is False
         )
-        assert agm1.serialized_graph["nodes"][0]["shape"] == "[4]"
-        assert agm1.serialized_graph["nodes"][0]["dtype"] == "torch.float32"
-        assert agm1.serialized_graph["nodes"][0]["target"] == "a"
-        assert agm1.serialized_graph["nodes"][0]["op_code"] == "placeholder"
-        assert agm1.serialized_graph["nodes"][0]["name"] == "a"
-        assert agm1.serialized_graph["nodes"][6]["args"][0]["name"] == "add_2"
-        assert agm1.serialized_graph["nodes"][6]["args"][0]["is_node"] is True
+        assert serialized_graph1["nodes"][0]["shape"] == "[4]"
+        assert serialized_graph1["nodes"][0]["dtype"] == "torch.float32"
+        assert serialized_graph1["nodes"][0]["target"] == "a"
+        assert serialized_graph1["nodes"][0]["op_code"] == "placeholder"
+        assert serialized_graph1["nodes"][0]["name"] == "a"
+        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_2"
+        assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
         x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
@@ -844,6 +847,128 @@ terrible spacing
                 for p_name in para_list:
                     assert p_name in node.attrs_for_lowering
 
+    def test_merge_matmuls(self):
+        """
+        A collection of test cases for torch.fx.experimental.merge_matmul,
+        a graph transformation that merges matrix multiplication operations.
+        """
+        # Utility function for counting matmuls for test assertions.
+        def _count_matmuls(mod):
+            gm = torch.fx.symbolic_trace(mod)
+
+            num_matmuls = 0
+            for node in gm.graph.nodes:
+                if node.target == torch.matmul:
+                    num_matmuls += 1
+
+            return num_matmuls
+
+        # Simple test case in which there are two matmuls of the same size to merge.
+        class SimpleMergeMatmulModule(torch.nn.Module):
+            def __init__(self, rhs):
+                super().__init__()
+                self.rhs = rhs
+
+            def forward(self, x, y):
+                a = torch.matmul(x, self.rhs)
+                b = torch.matmul(y, self.rhs)
+                return a + b
+
+        # Initialize inputs.
+        a = torch.randn(3, 3)
+        b = torch.randn(3, 3)
+
+        # Initialize RHS for matmuls.
+        rhs = torch.randn(3, 4)
+
+        # Construct SimpleMergeMatmulModule and call merge_matmul on it.
+        module = SimpleMergeMatmulModule(rhs)
+        opt_module = merge_matmul.merge_matmul(module)
+
+        # Numerical correctness check.
+        before = module(a, b)
+        after = opt_module(a, b)
+        before.allclose(after)
+
+        # Basic graph structure check; original module should have 2 matmuls
+        # and optimized module should have 1.
+        self.assertEqual(_count_matmuls(module), 2)
+        self.assertEqual(_count_matmuls(opt_module), 1)
+
+        # Test case in which there are multiple matmuls of different sizes to merge.
+        class FiveMergeMatmulModule(torch.nn.Module):
+            def __init__(self, rhs):
+                super().__init__()
+                self.rhs = rhs
+
+            def forward(self, a, b, c, d, e):
+                s = torch.Tensor((0))
+                matmuls = []
+
+                # For some reason using a list comprehension or for-loop for this
+                # doesn't work.
+                matmuls.append(torch.matmul(a, self.rhs))
+                matmuls.append(torch.matmul(b, self.rhs))
+                matmuls.append(torch.matmul(c, self.rhs))
+                matmuls.append(torch.matmul(d, self.rhs))
+                matmuls.append(torch.matmul(e, self.rhs))
+
+                for m in matmuls:
+                    s += torch.sum(m)
+
+                return s
+
+        # Initialize inputs.
+        inputs = [torch.randn(2 * i + 1, 5) for i in range(5)]
+
+        # Initialize RHS.
+        rhs = torch.randn(5, 4)
+
+        # Construct FiveMergeMatmulModule and call merge_matmul on it.
+        module = FiveMergeMatmulModule(rhs)
+        opt_module = merge_matmul.merge_matmul(module)
+
+        # Numerical correctness check.
+        before = module(*inputs)
+        after = opt_module(*inputs)
+        before.allclose(after)
+
+        # Basic graph structure check; original module should have len(inputs) matmuls
+        # and optimized module should have 1.
+        self.assertEqual(_count_matmuls(module), len(inputs))
+        self.assertEqual(_count_matmuls(opt_module), 1)
+
+        # Simple test case in which two matmuls cannot be merged due to a data dependency between
+        # the LHS operands.
+        class UnmergeableMatmulModule(torch.nn.Module):
+            def __init__(self, rhs):
+                super().__init__()
+                self.rhs = rhs
+
+            def forward(self, x):
+                a = torch.matmul(x, self.rhs)
+                a_abs = torch.abs(a)
+                b = torch.matmul(a_abs.transpose(1, 0), self.rhs)
+                return b
+
+        # Initialize inputs.
+        a = torch.randn(3, 3)
+
+        # Initialize RHS for matmuls.
+        rhs = torch.randn(3, 4)
+
+        # Construct UnmergeableMatmulModule and call merge_matmul on it.
+        module = UnmergeableMatmulModule(rhs)
+        opt_module = merge_matmul.merge_matmul(module)
+
+        # Numerical correctness check.
+        before = module(a)
+        after = opt_module(a)
+        before.allclose(after)
+
+        # Basic graph structure check; the number of matrix multiplcations should not have changed.
+        self.assertEqual(_count_matmuls(module), 2)
+        self.assertEqual(_count_matmuls(opt_module), 2)
 
 if __name__ == "__main__":
     run_tests()

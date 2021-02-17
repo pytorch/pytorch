@@ -2,15 +2,16 @@ import torch
 import copy
 from torch.fx import GraphModule  # type: ignore
 from torch.fx.graph import Graph
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, List
 
 class ObservedGraphModule(GraphModule):
 
-    def get_preserved_attr_names(self):
+    def get_preserved_attr_names(self) -> List[str]:
         return ['_activation_post_process_map',
                 '_patterns',
                 '_qconfig_map',
-                '_prepare_custom_config_dict']
+                '_prepare_custom_config_dict',
+                '_node_name_to_scope']
 
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
         preserved_attrs = dict()
@@ -35,6 +36,12 @@ def is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
+    def get_preserved_attr_names(self) -> List[str] :
+        return super().get_preserved_attr_names() + [
+            "_standalone_module_input_quantized_idxs",
+            "_standalone_module_output_quantized_idxs"
+        ]
+
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)

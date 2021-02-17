@@ -6,7 +6,7 @@
 namespace at {
 namespace cuda {
 
-struct TORCH_CUDA_API CUDAGraph {
+struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
 

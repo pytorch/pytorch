@@ -39,6 +39,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   auto _C_m = py::handle(torch_C_module).cast<py::module>();
   auto m = _C_m.def_submodule("_autograd", "autograd bindings");
 
+  auto parameter_module = THPObjectPtr(PyImport_ImportModule("torch.nn.parameter"));
+  if (!parameter_module)
+    return nullptr;
+
+  // NOTE: "leaks" ParameterClass
+  ParameterClass = PyObject_GetAttrString(parameter_module, "Parameter");
+  if (!ParameterClass)
+    return nullptr;
 
   py::enum_<ProfilerState>(m, "ProfilerState")
       .value("Disabled", ProfilerState::Disabled)
@@ -151,7 +159,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.deviceType();
       })
       // correlation id of a linked event
-      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId);
+      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId)
+      // compute flops
+      .def("flops", [](const KinetoEvent& e) {
+        return e.flops();
+      });
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
     .def("events", &ProfilerResult::events)
