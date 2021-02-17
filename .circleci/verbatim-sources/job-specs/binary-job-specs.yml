@@ -160,7 +160,7 @@
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "12.0"
+      xcode: "12.3.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
