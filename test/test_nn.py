@@ -34,7 +34,7 @@ from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
 from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    IS_WINDOWS, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
+    TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -12738,7 +12738,6 @@ class TestNNDeviceType(NNTestCase):
         for mode, trainable in itertools.product(modes, trainable_scale):
             test_per_sample_weights(mode, trainable)
 
-    @unittest.skipIf(IS_WINDOWS, "FIXME: CUDA error: too many resources requested on 11.2")
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
     @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
@@ -12773,7 +12772,6 @@ class TestNNDeviceType(NNTestCase):
         for mode, trainable in itertools.product(modes, trainable_scale):
             test_per_sample_weights(mode, trainable)
 
-    @unittest.skipIf(IS_WINDOWS, "FIXME: CUDA error: too many resources requested on 11.2")
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
     @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
