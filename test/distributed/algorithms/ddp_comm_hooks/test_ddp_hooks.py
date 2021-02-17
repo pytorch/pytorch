@@ -132,7 +132,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_ddp_comm_hook_quantize_per_tensor_hook(self):
         """
         This unit test verifies the ``quantize per tensor`` hook registered case
