@@ -235,10 +235,10 @@ class IDP(IterDataPipe):
         return self.length
 
 
-def _fake_fn(self, data, *args, **kwargs):
+def _fake_fn(data, *args, **kwargs):
     return data
 
-def _fake_filter_fn(self, data, *args, **kwargs):
+def _fake_filter_fn(data, *args, **kwargs):
     return data >= 5
 
 class TestFunctionalIterDataPipe(TestCase):
@@ -261,8 +261,12 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Filter, IDP(arr), {'filter_fn': lambda x: x >= 5}),
         ]
         for dpipe, input_dp, kargs in unpicklable_datapipes:
-            with self.assertRaises(AttributeError):
-                p = pickle.dumps(dpipe(input_dp, **kargs))  # type: ignore
+            with warnings.catch_warnings(record=True) as wa:
+                datapipe = dpipe(input_dp, **kargs)
+                self.assertEqual(len(wa), 1)
+                self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
+                with self.assertRaises(AttributeError):
+                    p = pickle.dumps(datapipe)  # type: ignore
 
     def test_map_datapipe(self):
         arr = range(10)
