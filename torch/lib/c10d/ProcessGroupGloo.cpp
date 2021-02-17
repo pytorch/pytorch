@@ -386,7 +386,13 @@ const auto kLoopbackAddress = "127.0.0.1";
 ProcessGroupGloo::SendWork::SendWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
-    : tensor_(tensor), buffer_(std::move(buffer)) {}
+    : ProcessGroupGloo::Work(
+          -1,
+          OpType::SEND,
+          "gloo:send",
+          c10::optional<std::vector<at::Tensor>>({tensor})),
+      tensor_(tensor),
+      buffer_(std::move(buffer)) {}
 
 bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds timeout) {
   bool sendCompleted = false;
@@ -412,8 +418,16 @@ void ProcessGroupGloo::SendWork::abort() {
 
 ProcessGroupGloo::RecvWork::RecvWork(
     at::Tensor& tensor,
-    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
-    : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(-1) {}
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+    const char* profilingTitle)
+    : ProcessGroupGloo::Work(
+          -1,
+          OpType::UNKNOWN,
+          profilingTitle,
+          c10::optional<std::vector<at::Tensor>>({tensor})),
+      tensor_(tensor),
+      buffer_(std::move(buffer)),
+      srcRank_(-1) {}
 
 int ProcessGroupGloo::RecvWork::sourceRank() const {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -2558,7 +2572,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return c10::make_intrusive<RecvWork>(tensor, std::move(buf));
+  return c10::make_intrusive<RecvWork>(tensor, std::move(buf), "gloo:recv");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
@@ -2586,7 +2600,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return c10::make_intrusive<RecvWork>(tensor, std::move(buf));
+  return c10::make_intrusive<RecvWork>(
+      tensor, std::move(buf), "gloo:recvAnySource");
 }
 
 namespace {
