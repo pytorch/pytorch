@@ -2193,6 +2193,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool, torch.float16),
            # sort on CUDA is still in the TH, no torch.bool/torch.float16 support yet
            dtypesIfCUDA=all_types_and(torch.float16),
+           dtypesIfROCM=all_types_and(torch.float16),
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_sort),
