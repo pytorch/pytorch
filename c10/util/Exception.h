@@ -282,16 +282,14 @@ C10_API std::string GetExceptionString(const std::exception& e);
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
     ::c10::detail::torchCheckFail(                              \
         __func__, __FILE__, static_cast<uint32_t>(__LINE__),    \
-        ([&]() C10_NOINLINE {                                   \
-          return ::c10::str(                                    \
-              #cond " INTERNAL ASSERT FAILED at "               \
-              C10_STRINGIZE(__FILE__)                           \
-              ":"                                               \
-              C10_STRINGIZE(__LINE__)                           \
-              ", please report a bug to PyTorch. ",             \
-              ::c10::str(__VA_ARGS__)                           \
-          );                                                    \
-        })());                                                  \
+        ::c10::str(                                             \
+            #cond " INTERNAL ASSERT FAILED at "                 \
+            C10_STRINGIZE(__FILE__)                             \
+            ":"                                                 \
+            C10_STRINGIZE(__LINE__)                             \
+            ", please report a bug to PyTorch. ",               \
+            ::c10::str(__VA_ARGS__)                             \
+        ));                                                     \
   }
 #endif
 
