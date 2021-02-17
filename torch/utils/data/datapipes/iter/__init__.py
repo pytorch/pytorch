@@ -6,9 +6,15 @@ from torch.utils.data.datapipes.iter.routeddecoder import RoutedDecoderIterDataP
 from torch.utils.data.datapipes.iter.groupbykey import GroupByKeyIterDataPipe as GroupByKey
 
 # Functional DataPipe
-from torch.utils.data.datapipes.iter.batch import BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch
-from torch.utils.data.datapipes.iter.callable import CallableIterDataPipe as Callable, CollateIterDataPipe as Collate
-from torch.utils.data.datapipes.iter.sampler import SamplerIterDataPipe as Sampler
+from torch.utils.data.datapipes.iter.callable import \
+    (MapIterDataPipe as Map, CollateIterDataPipe as Collate)
+from torch.utils.data.datapipes.iter.combinatorics import \
+    (SamplerIterDataPipe as Sampler)
+from torch.utils.data.datapipes.iter.grouping import \
+    (BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch)
+from torch.utils.data.datapipes.iter.selecting import \
+    (FilterIterDataPipe as Filter)
 
-__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFormTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
-           'Batch', 'BucketBatch', 'Callable', 'Collate', 'Sampler']
+
+__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
+           'Batch', 'BucketBatch', 'Collate', 'Filter', 'Map', 'Sampler']

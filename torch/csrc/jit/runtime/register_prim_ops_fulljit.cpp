@@ -626,14 +626,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::dict() -> Dict(str, Tensor)",
-         [](Stack* stack) {
-           auto dict =
-               c10::impl::GenericDict(StringType::get(), TensorType::get());
-           push(stack, dict);
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack* stack) {
            auto val = pop(stack);
