@@ -593,6 +593,8 @@ class _NnapiSerializer(object):
             self.add_tuple_construct(node),
         "aten::reshape": lambda self, node:
             self.add_reshape(node),
+        "aten::size": lambda self, node:
+            self.add_size(node),
         "aten::quantize_per_tensor": lambda self, node:
             self.add_quantize(node),
         "aten::dequantize": lambda self, node:
@@ -705,6 +707,16 @@ class _NnapiSerializer(object):
         outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
+
+    def add_size(self, node):
+        assert node.inputsSize() == 2
+        assert node.outputsSize() == 1
+
+        _, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        _, value = self.constants[node.inputsAt(1)]
+        res = in_oper.shape[value]
+        output = node.outputsAt(0)
+        self.add_constant_value(output, output.type(), res)
 
     def add_quantize(self, node):
         assert node.inputsSize() == 4
