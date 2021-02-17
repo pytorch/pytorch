@@ -138,6 +138,17 @@ class Net(nn.Module):
         x = self.fc3(x)
         return F.softmax(x, dim=1)
 
+class LargeNet(nn.Module):
+    def __init__(self):
+        super(LargeNet, self).__init__()
+        self.fc1 = nn.Linear(1000, 2000, bias=False)
+        self.fc2 = nn.Linear(2000, 500, bias=False)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
+
 class Task(nn.Module):
     def __init__(self):
         super().__init__()
@@ -3219,10 +3230,13 @@ class DistributedTest:
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
         def test_ddp_logging_data_cpu(self):
+            def parse_env(var):
+                return os.environ[var] if var in os.environ else "N/A"
+
             group, group_id, rank = self._init_global_test()
             model_DDP = copy.deepcopy(DDP_NET)
-            model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, bucket_cap_mb=0.001)
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
             self.assertEqual(ddp_logging_data.module_name, 'Net')
@@ -3231,10 +3245,40 @@ class DistributedTest:
             # output_device of CPU training is -1.
             self.assertEqual(ddp_logging_data.output_device, -1)
             self.assertEqual(ddp_logging_data.broadcast_buffers, True)
-            self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 0.001)
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
             self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
+            self.assertEqual(ddp_logging_data.iteration, 0)
+            params = list(model_DDP.parameters())
+            num_params = 0
+            param_size = 0
+            params = list(parameter for parameter in filter(lambda parameter: parameter.requires_grad, params))
+            for p in params:
+                num_params += 1
+                param_size += p.numel() * p.element_size()
+            self.assertEqual(ddp_logging_data.dtype, "float")
+            self.assertEqual(ddp_logging_data.total_parameter_size_bytes, param_size)
+            self.assertEqual(ddp_logging_data.num_parameter_tensors, num_params)
+            self.assertEqual(ddp_logging_data.bucket_sizes, [param_size])
+            self.assertEqual(ddp_logging_data.master_port, parse_env("MASTER_PORT"))
+            self.assertEqual(ddp_logging_data.master_addr, parse_env("MASTER_ADDR"))
+            self.assertEqual(ddp_logging_data.cuda_visible_devices, parse_env("CUDA_VISIBLE_DEVICES"))
+            self.assertEqual(ddp_logging_data.gloo_socket_ifname, parse_env("GLOO_SOCKET_IFNAME"))
+            self.assertEqual(ddp_logging_data.gloo_device_transport, parse_env("GLOO_DEVICE_TRANSPORT"))
+            self.assertEqual(ddp_logging_data.nccl_socket_ifname, parse_env("NCCL_SOCKET_IFNAME"))
+            self.assertEqual(ddp_logging_data.nccl_blocking_wait, parse_env("NCCL_BLOCKING_WAIT"))
+            self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
+            self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
+            self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
+            # test larger net and verify multiple bucket sizes
+            model = LargeNet()
+            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1)
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
+            params = list(model_DDP.parameters())
+            self.assertEqual(
+                ddp_logging_data.bucket_sizes,
+                [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()])
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -3244,7 +3288,7 @@ class DistributedTest:
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP.cuda(rank)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=[rank])
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.device_ids, [rank])
             self.assertEqual(ddp_logging_data.output_device, rank)
 

@@ -876,7 +876,8 @@ void BoundShapeInferencer::InferCommonOp(
     const static std::unordered_set<std::string>
         types_with_independent_output_shape = {"Int8GenQuantParams",
                                                "Int8QuantSchemeBlobFill",
-                                               "ComputeEqualizationScale"};
+                                               "ComputeEqualizationScale",
+                                               "Int8GenQuantParamsMinMax"};
     const static std::unordered_set<std::string>
         pruning_ops = {"RowwisePruneI64", "RowwisePruneI32"};
     std::vector<TensorShape> input_shapes;
@@ -908,7 +909,8 @@ void BoundShapeInferencer::InferCommonOp(
         (op.type() != "Int8Dequantize") &&
         (op.type() != "Int8QuantSchemeBlobFill") &&
         (op.type() != "ComputeEqualizationScale") &&
-        (op.type() != "Int8GenQuantParams");
+        (op.type() != "Int8GenQuantParams") &&
+        (op.type() != "Int8GenQuantParamsMinMax");
     float scale = 1;
     int offset = 0;
 

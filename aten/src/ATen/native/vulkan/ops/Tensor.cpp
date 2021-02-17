@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Tensor.h>
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -165,7 +166,7 @@ VkDeviceSize buffer_bytes(
     size *= extents.data[0u] * extents.data[1u] * (4u * extents.data[2u]);
   }
   else {
-    size *= prod_intlist(sizes);
+    size *= c10::multiply_integers(sizes);
   }
 
   return size;

@@ -63,10 +63,6 @@ Layout Tensor::layout() const noexcept {
   return impl_->layout();
 }
 
-Device Tensor::device() const {
-  return impl_->device();
-}
-
 int64_t Tensor::get_device() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->get_device();
