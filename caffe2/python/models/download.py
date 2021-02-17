@@ -14,15 +14,8 @@ import json
 from caffe2.proto import caffe2_pb2
 
 # Import urllib
-try:
-    import urllib.error as urlliberror
-    import urllib.request as urllib
-    HTTPError = urlliberror.HTTPError
-    URLError = urlliberror.URLError
-except ImportError:
-    import urllib2 as urllib
-    HTTPError = urllib.HTTPError
-    URLError = urllib.URLError
+from urllib.error import HTTPError, URLError
+import urllib.request as urllib
 
 # urllib requires more work to deal with a redirect, so not using vanity url
 DOWNLOAD_BASE_URL = "https://s3.amazonaws.com/download.caffe2.ai/models/"

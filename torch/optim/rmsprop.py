@@ -1,5 +1,5 @@
 import torch
-from . import functional as F
+from . import _functional as F
 from .optimizer import Optimizer
 
 
@@ -103,16 +103,16 @@ class RMSprop(Optimizer):
                 state['step'] += 1
 
 
-            F._rmsprop(params_with_grad,
-                       grads,
-                       square_avgs,
-                       grad_avgs,
-                       momentum_buffer_list,
-                       group['lr'],
-                       group['alpha'],
-                       group['eps'],
-                       group['weight_decay'],
-                       group['momentum'],
-                       group['centered'])
+            F.rmsprop(params_with_grad,
+                      grads,
+                      square_avgs,
+                      grad_avgs,
+                      momentum_buffer_list,
+                      group['lr'],
+                      group['alpha'],
+                      group['eps'],
+                      group['weight_decay'],
+                      group['momentum'],
+                      group['centered'])
 
         return loss
