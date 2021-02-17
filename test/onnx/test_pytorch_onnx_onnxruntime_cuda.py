@@ -31,9 +31,9 @@ class TestONNXRuntime_cuda(unittest.TestCase):
     def test_softmaxCrossEntropy_fusion_fp16(self):
         class FusionModel(torch.nn.Module):
             def __init__(self):
-                    super(FusionModel, self).__init__()
-                    self.loss = torch.nn.NLLLoss(reduction='none')
-                    self.m = torch.nn.LogSoftmax(dim=1)
+                super(FusionModel, self).__init__()
+                self.loss = torch.nn.NLLLoss(reduction='none')
+                self.m = torch.nn.LogSoftmax(dim=1)
 
             @autocast()
             def forward(self, input, target):
