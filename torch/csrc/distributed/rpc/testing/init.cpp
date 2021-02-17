@@ -84,7 +84,8 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "join",
           &ProcessGroupAgent::join,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("shutdown") = false)
       .def(
           "shutdown",
           &ProcessGroupAgent::shutdown,
