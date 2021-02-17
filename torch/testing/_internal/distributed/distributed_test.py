@@ -4804,7 +4804,7 @@ class DistributedTest:
                                 self.assertTrue(
                                     s in msg,
                                     f"Expected {s} to be in {msg}"
-                            )
+                                )
                             for s in unexpected_strs:
                                 self.assertFalse(
                                     s in msg,
