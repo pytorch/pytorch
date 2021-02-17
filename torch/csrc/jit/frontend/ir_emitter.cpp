@@ -1917,11 +1917,6 @@ struct to_ir {
       if (exitSchema.arguments().size() != 4) {
         throw ErrorReport(e.range()) << "__exit__ must have four arguments";
       } else {
-        auto returnType = exitSchema.returns().at(0).type();
-        if (!returnType->isSubtypeOf(OptionalType::create(BoolType::get()))) {
-          throw ErrorReport(e.range()) << "__exit__ must return Optional[bool]";
-        }
-
         for (unsigned i = 1; i < 4; ++i) {
           if (exitSchema.arguments().at(i).type() != AnyType::get()) {
             throw ErrorReport(e.range())
