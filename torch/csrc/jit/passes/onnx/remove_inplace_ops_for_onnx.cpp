@@ -16,12 +16,8 @@ namespace jit {
 
 namespace {
 
-const std::set<c10::Symbol> inplace_ops = {
-    aten::append,
-    aten::index_put_,
-    aten::pop,
-    aten::insert,
-    aten::Delete};
+const std::set<c10::Symbol> inplace_ops =
+    {aten::append, aten::index_put_, aten::pop, aten::insert, aten::Delete};
 
 bool IsInplaceNode(const Node* n) {
   if (inplace_ops.find(n->kind()) != inplace_ops.end()) {
@@ -556,7 +552,7 @@ Value* findArgumentAsInputParam(
       name);
 }
 
-Node* insertCloneAfterNode(
+Node* insertCloneBeforeNode(
     const std::shared_ptr<Graph>& graph,
     Value* orig_data,
     Node* node) {
@@ -589,11 +585,9 @@ Value* registerSetAttrInBlocks(
     const std::string& output_name) {
   auto next_node = block->owningNode();
 
-  RegisterInplaceNodeInLoopBlocks(
-      origValue, cloneNode->output());
+  RegisterInplaceNodeInLoopBlocks(origValue, cloneNode->output());
 
-  RegisterInplaceNodeInIfBlocks(
-      origValue, cloneNode->output(), output_name);
+  RegisterInplaceNodeInIfBlocks(origValue, cloneNode->output(), output_name);
 
   Value* output = nullptr;
   while (nullptr != block->owningNode() &&
@@ -648,7 +642,7 @@ void trackAndRegisterAttributesInBlocks(
       // If inside a block, keep the output value to register in block
       // output.
       auto block_ = n->owningBlock();
-      Node* cloneNode = insertCloneAfterNode(graph, n->inputs().at(1), n);
+      Node* cloneNode = insertCloneBeforeNode(graph, n->inputs().at(1), n);
       if (block_->owningNode() &&
           (block_->owningNode()->kind() == prim::If ||
            block_->owningNode()->kind() == prim::Loop)) {
