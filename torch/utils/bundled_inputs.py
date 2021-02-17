@@ -87,10 +87,6 @@ def augment_many_model_functions_with_bundled_inputs(
       - The `inputs` argument to this function can be a dictionary mapping functions to a
         list of tuples, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
 
-      It is highly recommended (though not enforced) that if multiple functions have the same input style, that
-      you create separate bundled inputs for each function. Reusing the same input and bundling it to multiple
-      functions can cause issues with other torch.jit functionality like freeze
-
     Info is an optional parameter that maps functions to a list of strings providing extra information about that
     function's bundled inputs. This could be descriptions, expected outputs, etc.
         - Ex: info={model.forward : ['man eating icecream', 'an airplane', 'a dog']}
@@ -102,6 +98,9 @@ def augment_many_model_functions_with_bundled_inputs(
     """
     if not isinstance(model, torch.jit.ScriptModule):
         raise Exception("Only ScriptModule is supported.")
+
+    if not inputs:
+        raise Exception("Please provide inputs for at least 1 function")
 
     get_bundled_inputs_functions_and_info_template = ""
 
