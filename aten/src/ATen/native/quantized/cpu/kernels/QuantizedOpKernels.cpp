@@ -2062,6 +2062,7 @@ void fake_quantize_tensor_cachemask_kernel(
     int64_t z_point,
     int64_t quant_min,
     int64_t quant_max) {
+
   float inv_scale = 1.0f / sc;
 
   auto iter_combined = TensorIteratorConfig()
@@ -2071,17 +2072,18 @@ void fake_quantize_tensor_cachemask_kernel(
     .add_input(input)
     .build();
 
-  // TODO(#51090): make it work for other dtypes
-  iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    for (int64_t i = 0; i < n; i++) {
-      float* output_val = (float*)(data[0] + i * strides[0]);
-      bool* mask_val = (bool*)(data[1] + i * strides[1]);
-      float* input_val = (float*)(data[2] + i * strides[2]);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
+    iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
+      for (int64_t i = 0; i < n; i++) {
+        scalar_t* output_val = (scalar_t*)(data[0] + i * strides[0]);
+        bool* mask_val = (bool*)(data[1] + i * strides[1]);
+        scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
-      const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
-      *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
-      *mask_val = ((quant_min <= qval) && (qval <= quant_max));
-    }
+        const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+        *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
+        *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+      }
+    });
   });
 
 }
@@ -2096,42 +2098,44 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
     float grad_factor) {
   float dscale_small = quant_min - zero_point;
   float dscale_big = quant_max - zero_point;
-  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    /*  When a for_each call is made on a TensorIterator with multiple inputs and outputs,
-        the order they are accessed follows the order they are built within the iterator.
-        For example, if an iterator is built in the following order:
-        auto iter = TensorIteratorConfig().
-          .add_output(firstOutput)
-          .add_output(secondOutput)
-          .add_input(firstInput)
-          .add_input(secondInput)
-          .build()
-        data will contain 4 pointers to pointers to values in the following order:
-        firstOutput, secondOutput, firstInput, secondInput.
-        Proper pointer referencing and dereferencing, along with the usage of strides
-        (to move onto different elements), can allow accessing of the input and assignment
-        to the right output.
-    */
-    for (int64_t i = 0; i < n; i++) {
-      float* dXOutput = (float*)(data[0] + i * strides[0]);
-      float* dScaleOutput = (float*)(data[1] + i * strides[1]);
-      float* dZeroPointOutput = (float*)(data[2] + i * strides[2]);
-      float* XInput = (float*)(data[3] + i * strides[3]);
-      float* dYInput = (float*)(data[4] + i * strides[4]);
-      // Calculate gradients for X.
-      int64_t xqi = std::nearbyint(zero_point + (*XInput) * inv_scale);
-      *dXOutput = (*dYInput) * (xqi >= quant_min && xqi <= quant_max);
-      // Calculate gradients for scale and zero point.
-      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - zero_point) * scale);
-      // Calculate gradients according to the gradient of the clamp function.
-      if (xqi < quant_min || xqi > quant_max) {
-        *dZeroPointOutput = (*dYInput) * (-1) * scale * grad_factor;
-        *dScaleOutput = ((xqi < quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big)) * grad_factor;
-      } else {
-        *dZeroPointOutput = 0;
-        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale * grad_factor;
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "fake_quantize_backward_tensor_cachemask_kernel_types", [&] {
+    iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+      /*  When a for_each call is made on a TensorIterator with multiple inputs and outputs,
+          the order they are accessed follows the order they are built within the iterator.
+          For example, if an iterator is built in the following order:
+          auto iter = TensorIteratorConfig().
+            .add_output(firstOutput)
+            .add_output(secondOutput)
+            .add_input(firstInput)
+            .add_input(secondInput)
+            .build()
+          data will contain 4 pointers to pointers to values in the following order:
+          firstOutput, secondOutput, firstInput, secondInput.
+          Proper pointer referencing and dereferencing, along with the usage of strides
+          (to move onto different elements), can allow accessing of the input and assignment
+          to the right output.
+      */
+      for (int64_t i = 0; i < n; i++) {
+        scalar_t* dXOutput = (scalar_t*)(data[0] + i * strides[0]);
+        scalar_t* dScaleOutput = (scalar_t*)(data[1] + i * strides[1]);
+        scalar_t* dZeroPointOutput = (scalar_t*)(data[2] + i * strides[2]);
+        scalar_t* XInput = (scalar_t*)(data[3] + i * strides[3]);
+        scalar_t* dYInput = (scalar_t*)(data[4] + i * strides[4]);
+        // Calculate gradients for X.
+        int64_t xqi = std::nearbyint(zero_point + (*XInput) * inv_scale);
+        *dXOutput = (*dYInput) * (xqi >= quant_min && xqi <= quant_max);
+        // Calculate gradients for scale and zero point.
+        scalar_t xfqi = static_cast<scalar_t>((std::max(std::min(xqi, quant_max), quant_min) - zero_point) * scale);
+        // Calculate gradients according to the gradient of the clamp function.
+        if (xqi < quant_min || xqi > quant_max) {
+          *dZeroPointOutput = (*dYInput) * (-1) * scale * grad_factor;
+          *dScaleOutput = ((xqi < quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big)) * grad_factor;
+        } else {
+          *dZeroPointOutput = 0;
+          *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale * grad_factor;
+        }
       }
-    }
+    });
   });
 }
 
