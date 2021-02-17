@@ -11,6 +11,8 @@ class _ConvNd(nnq._ConvNd):
         optimization for quantized backends supported in PyTorch (fbgemm/qnnpack),
         this is useful when user want to use this module in other backends like Glow.
     """
+    __annotations__ = {"_bias": Optional[torch.Tensor]}
+
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + '_qweight'] = self._qweight
