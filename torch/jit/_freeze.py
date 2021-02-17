@@ -27,10 +27,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
         Attributes modified in preserved methods will also be preserved.
 
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly 
-        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_allclose` 
-        when applied on a single transformation, however in a module where many transformations are applied 
-        the rtol or atol may no longer fall within the default `assert_allclose` tolerance. Full details of optimization
-        can be found at `torch.jit.optimize_frozen_module`.
+        preserve numerics. Full details of optimization can be found at `torch.jit.optimize_frozen_module`.
 
     Returns:
         Frozen :class:`ScriptModule`.
@@ -103,7 +100,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs))
     RecursiveScriptModule._finalize_scriptmodule(out)
-    optimize_frozen_module(out, )
+    optimize_frozen_module(out, optimize_numerics)
 
     return out
 
@@ -123,8 +120,8 @@ def optimize_frozen_module(mod, optimize_numerics: bool = True):
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly 
         preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_allclose` 
         when applied on a single transformation, however in a module where many transformations are applied 
-        the rtol or atol may no longer fall within the default `assert_allclose` tolerance. Full details of optimization
-        can be found at `torch.jit.optimize_frozen_module`.
+        the rtol or atol may no longer fall within the default `assert_allclose` tolerance. Conv -> Batchnorm folding, 
+        Conv-Add/Sub, and Conv -> Mul/Div folding all may alter numerics.
 
     Returns:
         None
