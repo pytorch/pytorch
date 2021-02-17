@@ -27,6 +27,8 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
+    from torch.fx.graph import Node
+    from torch.fx import GraphModule
     HAS_FX = True
 except ImportError:
     HAS_FX = False
@@ -40,6 +42,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
+from typing import Callable, Tuple, Dict
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -604,6 +607,53 @@ class QuantizationTestCase(TestCase):
         return str_to_print
 
     if HAS_FX:
+
+        def assert_types_for_matched_node_pairs(
+            self,
+            matched_node_pairs: Dict[str, Tuple[Node, Node]],
+            expected_types: Dict[str, Tuple[Callable, Callable]],
+            gm_a: GraphModule,
+            gm_b: GraphModule,
+        ) -> None:
+            """
+            Verifies that the types specified in expected_types match
+            the underlying objects pointed to by the nodes in matched_node_pairs.
+
+            An example successful test case:
+
+              matched_node_pairs = {'x0': (graph_a_conv_0_node, graph_b_conv_0_node)}
+              expected_types = {'x0': (nn.Conv2d, nnq.Conv2d)}
+
+            The function tests for key equivalence, and verifies types with
+            instance checks.
+            """
+
+            def _get_underlying_op_type(node: Node, gm: GraphModule) -> Callable:
+                if node.op == 'call_module':
+                    mod = getattr(gm, node.target)
+                    return type(mod)
+                else:
+                    assert node.op == 'call_function'
+                    return node.target
+
+            self.assertTrue(
+                len(matched_node_pairs) == len(expected_types),
+                'Expected length of results to match, but got %d and %d' %
+                (len(matched_node_pairs), len(expected_types))
+            )
+            for k, v in expected_types.items():
+                expected_type_a, expected_type_b = v
+                node_a, node_b = matched_node_pairs[k]
+                actual_type_a = _get_underlying_op_type(node_a, gm_a)
+                actual_type_b = _get_underlying_op_type(node_b, gm_b)
+                types_match = (expected_type_a is actual_type_a) and \
+                    (expected_type_b is actual_type_b)
+                self.assertTrue(
+                    types_match,
+                    'Type mismatch at %s: expected %s, got %s' %
+                    (k, (expected_type_a, expected_type_b), (actual_type_a, actual_type_b))
+                )
+
         def checkGraphModeFxOp(self, model, inputs, quant_type,
                                expected_node=None,
                                expected_node_occurrence=None,
