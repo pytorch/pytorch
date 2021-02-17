@@ -188,7 +188,6 @@ template <typename scalar_t>
 void batch_norm_cpu_collect_stats_contiguous_impl(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
 
-  using Vec = Vec256<scalar_t>;
   using accscalar_t = at::acc_type<scalar_t, false>;
   int64_t n_batch = input.size(0);
   int64_t n_channel = input.size(1);

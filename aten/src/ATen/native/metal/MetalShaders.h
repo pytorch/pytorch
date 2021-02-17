@@ -204,6 +204,230 @@ kernel void copy_nonarray(texture2d<half, access::read> in[[texture(0)]],
     out.write(in.read(gid), gid);
 }
 
+kernel void copy_offset(texture2d_array<half, access::read> in[[texture(0)]],
+                        texture2d_array<half, access::write> out[[texture(1)]],
+                        constant ushort* offset_buf[[buffer(0)]],
+                        ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+    out.write(in.read(gid_, gid.z), gid_, gid.z + offset_buf[0]);
+}
+
+kernel void copy_offset_nonarray(texture2d<half, access::read> in[[texture(0)]],
+                                 texture2d_array<half, access::write> out[[texture(1)]],
+                                 constant ushort* offset_buf[[buffer(0)]],
+                                 ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+    out.write(in.read(gid_), gid_, gid.z + offset_buf[0]);
+}
+
+kernel void append_features_off0(texture2d_array<half, access::read> in[[texture(0)]],
+                                 texture2d_array<half, access::read_write> out[[texture(1)]],
+                                 constant ushort* offset_buf[[buffer(0)]],
+                                 ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height() || gid.z >= offset_buf[4]) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+
+    ushort batch = gid.z / offset_buf[0];
+    ushort feature = gid.z % offset_buf[0];
+    ushort outz = batch * offset_buf[1] + offset_buf[2] + feature;
+    ushort inz = batch * offset_buf[3] + feature;
+
+    half4 intex1 = in.read(gid_, inz);
+    half4 outtex = intex1;
+
+    out.write(outtex, gid_, outz);
+}
+
+kernel void append_features_off0_nonarray(texture2d<half, access::read> in[[texture(0)]],
+                                          texture2d_array<half, access::read_write> out[[texture(1)]],
+                                          constant ushort* offset_buf[[buffer(0)]],
+                                          ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+    out.write(in.read(gid_), gid_, offset_buf[2]);
+}
+
+kernel void append_features_off1(texture2d_array<half, access::read> in[[texture(0)]],
+                                 texture2d_array<half, access::read_write> out[[texture(1)]],
+                                 constant ushort* offset_buf[[buffer(0)]],
+                                 ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height() || gid.z >= offset_buf[4]) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+
+    ushort batch = gid.z / offset_buf[0];
+    ushort feature = gid.z % offset_buf[0];
+    ushort outz = batch * offset_buf[1] + offset_buf[2] + feature;
+    ushort inz = batch * offset_buf[3] + feature;
+
+    half4 outtex = out.read(gid_, outz);
+    half4 intex1 = in.read(gid_, inz);
+    if (feature == 0) {
+      outtex.y = intex1.x;
+      outtex.z = intex1.y;
+      outtex.w = intex1.z;
+      out.write(outtex, gid_, outz);
+      return;
+    }
+    half4 intex0 = in.read(gid_, inz-1);
+    outtex.x = intex0.w;
+    outtex.y = intex1.x;
+    outtex.z = intex1.y;
+    outtex.w = intex1.z;
+
+    out.write(outtex, gid_, outz);
+}
+
+kernel void append_features_off1_nonarray(texture2d<half, access::read> in[[texture(0)]],
+                                          texture2d_array<half, access::read_write> out[[texture(1)]],
+                                          constant ushort* offset_buf[[buffer(0)]],
+                                          ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+
+    ushort feature = gid.z;
+    ushort outz = offset_buf[2] + feature;
+
+    half4 outtex = out.read(gid_, outz);
+    half4 intex = in.read(gid_);
+    if (feature == 0) {
+      outtex.y = intex.x;
+      outtex.z = intex.y;
+      outtex.w = intex.z;
+    }
+    else {
+      outtex.x = intex.w;
+    }
+
+    out.write(outtex, gid_, outz);
+}
+
+kernel void append_features_off2(texture2d_array<half, access::read> in[[texture(0)]],
+                                 texture2d_array<half, access::read_write> out[[texture(1)]],
+                                 constant ushort* offset_buf[[buffer(0)]],
+                                 ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height() || gid.z >= offset_buf[4]) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+
+    ushort batch = gid.z / offset_buf[0];
+    ushort feature = gid.z % offset_buf[0];
+    ushort outz = batch * offset_buf[1] + offset_buf[2] + feature;
+    ushort inz = batch * offset_buf[3] + feature;
+
+    half4 outtex = out.read(gid_, outz);
+    half4 intex1 = in.read(gid_, inz);
+    if (feature == 0) {
+      outtex.z = intex1.x;
+      outtex.w = intex1.y;
+      out.write(outtex, gid_, outz);
+      return;
+    }
+    half4 intex0 = in.read(gid_, inz-1);
+    outtex.x = intex0.z;
+    outtex.y = intex0.w;
+    outtex.z = intex1.x;
+    outtex.w = intex1.y;
+
+    out.write(outtex, gid_, outz);
+}
+
+kernel void append_features_off2_nonarray(texture2d<half, access::read> in[[texture(0)]],
+                                          texture2d_array<half, access::read_write> out[[texture(1)]],
+                                          constant ushort* offset_buf[[buffer(0)]],
+                                          ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+
+    ushort feature = gid.z;
+    ushort outz = offset_buf[2] + feature;
+
+    half4 outtex = out.read(gid_, outz);
+    half4 intex = in.read(gid_);
+    if (feature == 0) {
+      outtex.z = intex.x;
+      outtex.w = intex.y;
+    }
+    else {
+      outtex.x = intex.z;
+      outtex.y = intex.w;
+    }
+
+    out.write(outtex, gid_, outz);
+}
+
+kernel void append_features_off3(texture2d_array<half, access::read> in[[texture(0)]],
+                                 texture2d_array<half, access::read_write> out[[texture(1)]],
+                                 constant ushort* offset_buf[[buffer(0)]],
+                                 ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height() || gid.z >= offset_buf[4]) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+
+    ushort batch = gid.z / offset_buf[0];
+    ushort feature = gid.z % offset_buf[0];
+    ushort outz = batch * offset_buf[1] + offset_buf[2] + feature;
+    ushort inz = batch * offset_buf[3] + feature;
+
+    half4 outtex = out.read(gid_, outz);
+    half4 intex1 = in.read(gid_, inz);
+    if (feature == 0) {
+      outtex.w = intex1.x;
+      out.write(outtex, gid_, outz);
+      return;
+    }
+    half4 intex0 = in.read(gid_, inz-1);
+    outtex.x = intex0.y;
+    outtex.y = intex0.z;
+    outtex.z = intex0.w;
+    outtex.w = intex1.x;
+
+    out.write(outtex, gid_, outz);
+}
+
+kernel void append_features_off3_nonarray(texture2d<half, access::read> in[[texture(0)]],
+                                          texture2d_array<half, access::read_write> out[[texture(1)]],
+                                          constant ushort* offset_buf[[buffer(0)]],
+                                          ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+
+    ushort feature = gid.z;
+    ushort outz = offset_buf[2] + feature;
+
+    half4 outtex = out.read(gid_, outz);
+    half4 intex = in.read(gid_);
+    if (feature == 0) {
+      outtex.w = intex.x;
+    }
+    else {
+      outtex.x = intex.y;
+      outtex.y = intex.z;
+      outtex.z = intex.w;
+    }
+
+    out.write(outtex, gid_, outz);
+}
+
 kernel void clamp_half4(texture2d_array<half, access::read> in[[texture(0)]],
                  texture2d_array<half, access::write> out[[texture(1)]],
                  constant half* clamp_buf[[buffer(0)]],
@@ -231,6 +455,33 @@ kernel void clamp_half4_nonarray(texture2d<half, access::read> in[[texture(0)]],
     half4 value = in.read(gid);
     half4 clamped = clamp(value, min_, max_);
     out.write(clamped, gid);
+}
+
+kernel void hardswish(texture2d_array<half, access::read> in[[texture(0)]],
+                      texture2d_array<half, access::write> out[[texture(1)]],
+                      ushort3 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+    half4 value = in.read(gid_, gid.z);
+    half4 mask1 = half4(value < 3.0);
+    half4 mask2 = half4(value > -3.0);
+    half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
+    out.write(outval, gid_, gid.z);
+}
+
+kernel void hardswish_nonarray(texture2d<half, access::read> in[[texture(0)]],
+                               texture2d<half, access::write> out[[texture(1)]],
+                               ushort2 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    half4 value = in.read(gid);
+    half4 mask1 = half4(value < 3);
+    half4 mask2 = half4(value > -3.0);
+    half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
+    out.write(outval, gid);
 }
 
 kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]],

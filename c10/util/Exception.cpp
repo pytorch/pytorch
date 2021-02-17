@@ -131,6 +131,16 @@ WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
 }
 
+bool warn_always = false;
+
+void set_warnAlways(bool setting) noexcept(true) {
+    warn_always = setting;
+}
+
+bool get_warnAlways() noexcept(true) {
+    return warn_always;
+}
+
 } // namespace Warning
 
 void WarningHandler::process(

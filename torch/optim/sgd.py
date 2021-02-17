@@ -1,5 +1,5 @@
 import torch
-from . import functional as F
+from . import _functional as F
 from .optimizer import Optimizer, required
 
 
@@ -107,14 +107,14 @@ class SGD(Optimizer):
                     else:
                         momentum_buffer_list.append(state['momentum_buffer'])
 
-            F._sgd(params_with_grad,
-                   d_p_list,
-                   momentum_buffer_list,
-                   weight_decay,
-                   momentum,
-                   lr,
-                   dampening,
-                   nesterov)
+            F.sgd(params_with_grad,
+                  d_p_list,
+                  momentum_buffer_list,
+                  weight_decay,
+                  momentum,
+                  lr,
+                  dampening,
+                  nesterov)
 
             # update momentum_buffers in state
             for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
