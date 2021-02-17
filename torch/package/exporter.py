@@ -14,6 +14,7 @@ from pathlib import Path
 import linecache
 from urllib.parse import quote
 import re
+from copy import deepcopy
 
 
 class PackageExporter:
@@ -450,6 +451,50 @@ node [shape=box];
     def _can_implicitly_extern(self, module_name: str):
         return module_name == 'torch' or (module_name not in _DISALLOWED_MODULES
                                           and is_stdlib_module(module_name))
+
+    def get_reverse_dependencies(self, module: str) -> List[List[str]]:
+        """Returns list of dependency chains which cause `module_name` to be pulled into the exported package.
+        Front of dependency chain is the root object which depends on `module_name`.
+
+        Args:
+            module_name (str): e.g. `torchvision.models.util` 
+        """
+        complete_reverse_deps: List[List[str]] = [] 
+
+        def build_dep_lists(name: str, l: List[str]):
+            is_leaf: bool = True
+            l.insert(0, name)
+            for dep in self.debug_deps:
+                if dep[1] == name:
+                    is_leaf = False
+                    build_dep_lists(dep[0], deepcopy(l))
+            if is_leaf :
+                complete_reverse_deps.append(l)
+
+        for dep in self.debug_deps:
+            if dep[1] == module:
+                build_dep_lists(dep[0], [module])
+
+        return complete_reverse_deps
+
+    def print_reverse_dependencies(self, module_name: str) -> None:
+        """Prints out the modules which depend on `module_name` in the exported package.
+
+        Args:
+            module_name (str): e.g. `torchvision.models.util` 
+        """
+        print(f"Modules which depend on '{module_name}':")
+        complete_reverse_deps = self.get_reverse_dependencies(module_name)
+        for outer_list in complete_reverse_deps:
+            result = "│ "
+            for i, dep in enumerate(outer_list):
+                result += "[" + dep + "]"
+                if i < len(outer_list) - 1:
+                    result += " -> "
+            print(result)
+        if len(complete_reverse_deps) == 0:
+            print("│ None")
+        print("└") 
 
 # even though these are in the standard library, we do not allow them to be
 # automatically externed since they offer a lot of system level access

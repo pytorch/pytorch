@@ -10,6 +10,7 @@ import torch
 from sys import version_info
 from io import StringIO, BytesIO
 import pickle
+from contextlib import redirect_stdout
 
 try:
     from torchvision.models import resnet18
@@ -97,6 +98,33 @@ the_math = math
         package_a_i = hi.import_module('package_a')
         self.assertEqual(package_a_i.result, 'package_a')
         self.assertIsNot(package_a_i, package_a)
+
+    def test_print_reverse_dependencies(self):
+        filename = self.temp()
+
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        torch_reverse_dependencies: List[List[str]] = \
+            [['obj.obj.pkl', 'package_a.subpackage']]
+
+        printed_dependencies = """\
+Modules which depend on 'package_a.subpackage':
+│ [obj.obj.pkl] -> [package_a.subpackage]
+└
+"""
+        with PackageExporter(filename, verbose=False) as he:
+            he.save_pickle('obj', 'obj.pkl', obj2)
+            dependencies = he.get_reverse_dependencies('package_a.subpackage')
+            self.assertEqual(torch_reverse_dependencies, dependencies)
+            f2 = self.temp()
+            with open(f2, 'w') as f:
+                with redirect_stdout(f):
+                    he.print_reverse_dependencies('package_a.subpackage')
+            with open(f2, 'r') as f:
+                printed_result = f.read()
+            self.assertEqual(printed_dependencies, printed_result)
 
     def test_pickle(self):
         import package_a.subpackage
