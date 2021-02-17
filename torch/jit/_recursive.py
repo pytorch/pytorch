@@ -221,7 +221,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     # populate overloads
     overloads = getattr(nn_module, "__overloads__", {})
     # update with any annotated overloads
-    overloads.update(get_overload_name_mapping(get_overload_annotations(nn_module)))
+    overloads.update(get_overload_name_mapping(get_overload_annotations(nn_module, user_annotated_ignored_attributes)))
     for name, overloaded_names in overloads.items():
         concrete_type_builder.add_overload(name, overloaded_names)
 
@@ -410,6 +410,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     method_stubs = stubs_fn(nn_module)
     property_stubs = get_property_stubs(nn_module)
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
+    user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", list())
 
     def init_fn(script_module):
         # Initialize the ScriptModule:
@@ -440,6 +441,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # 3. Copy @ignored/@unused methods and attrs from the original `nn_module` to the new ScriptModule.
         #    This ensures we can access these Python methods on the ScriptModule.
         for name in dir(nn_module):
+            if name in user_annotated_ignored_attributes:
+                continue
             item = getattr(nn_module, name, None)
             if inspect.ismethod(item) and _jit_internal.is_ignored_fn(item):
                 unbound_function = getattr(type(nn_module), name)
@@ -521,6 +524,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # copy over python methods to script module if they aren't defined on the script module
     # this is currently an internal api used only on module containers
     for name in dir(nn_module):
+        if name in user_annotated_ignored_attributes:
+            continue
         item = getattr(nn_module, name, None)
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
             add_python_attr_to_scripted_model(script_module, nn_module, name)
@@ -544,11 +549,13 @@ def add_python_attr_to_scripted_model(script_model, orig, attr):
     if hasattr(orig, attr) and script_model_defines_attr(script_model, attr):
         setattr(script_model, attr, getattr(orig, attr))
 
-def get_overload_annotations(mod):
+def get_overload_annotations(mod, ignored_attrs):
     # original function => [(mangled overload name, overload function)]
     overloads = {}
 
     for name in dir(type(mod)):
+        if name in ignored_attrs:
+            continue
         item = getattr(mod, name, None)
         if not callable(item):
             continue
@@ -627,7 +634,10 @@ def infer_methods_to_compile(nn_module):
             methods = ['forward']
 
     exported = []
+    user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", list())
     for name in dir(nn_module):
+        if name in user_annotated_ignored_attributes:
+            continue
         item = getattr(nn_module, name, None)
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
             exported.append(name)
@@ -635,7 +645,7 @@ def infer_methods_to_compile(nn_module):
     methods = methods + exported
 
     overload_name_mappings = dict(getattr(nn_module, "__overloads__", {}))
-    overload_info = get_overload_annotations(nn_module)
+    overload_info = get_overload_annotations(nn_module, user_annotated_ignored_attributes)
     overload_name_mappings.update(get_overload_name_mapping(overload_info))
     overload_stubs = make_stubs_for_overloads(overload_info)
 

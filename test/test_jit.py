@@ -12994,6 +12994,21 @@ dedent """
             return a, b
         self.checkScript(foo, (torch.rand(3), torch.rand(3)))
 
+    def test_ignored_props(self):
+        class A(nn.Module):
+            __jit_ignored_attributes__ = ["ignored"]
+
+            def __init__(self):
+                super().__init__()
+
+            @property
+            def ignored(self):
+                raise ValueError("shouldn't be called")
+
+        f = torch.jit.script(A())
+        # jank way to test if there is no assertion
+        self.assertTrue(isinstance(f, torch.jit.ScriptModule))
+
     def test_pass(self):
         def foo(x):
             # type: (bool) -> int
