@@ -26,6 +26,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 namespace at {
 namespace native {
@@ -39,6 +40,11 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     bool train,
     double momentum,
     double eps) {
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
   ideep::tensor& x = itensor_from_mkldnn(input);
   ideep::tensor& w = itensor_from_mkldnn(weight);
   ideep::tensor& b = itensor_from_mkldnn(bias);

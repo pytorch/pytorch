@@ -168,21 +168,9 @@ list_element_to_const_ref(const IValue& element) {
 }
 
 template<>
-inline typename ListElementConstReferenceTraits<std::string>::const_reference
-list_element_to_const_ref<std::string>(const IValue& element) {
-  return element.toStringRef();
-}
-
-template<>
 inline typename ListElementConstReferenceTraits<c10::optional<std::string>>::const_reference
 list_element_to_const_ref<c10::optional<std::string>>(const IValue& element) {
   return element.toOptionalStringRef();
-}
-
-template<>
-inline typename ListElementConstReferenceTraits<at::Tensor>::const_reference
-list_element_to_const_ref<at::Tensor>(const IValue& element) {
-  return element.toTensor();
 }
 
 } // namespace impl
