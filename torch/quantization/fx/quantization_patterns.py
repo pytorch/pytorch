@@ -18,7 +18,6 @@ from ..utils import (
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
     weight_is_statically_quantized,
-    weight_dtype,
     get_qconfig_dtypes,
 )
 
