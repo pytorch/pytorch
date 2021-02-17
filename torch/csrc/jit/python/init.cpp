@@ -1191,6 +1191,15 @@ void initJITBindings(PyObject* module) {
     });
   });
   m.def("get_custom_class_schemas", customClassSchemasForBCCheck);
+  top.def("get_all_schemas", []() {
+    const std::vector<std::shared_ptr<Operator>>& operations =
+        getAllOperators();
+    return fmap(operations, [](const std::shared_ptr<Operator>& op) {
+      return op->schema();
+    });
+  });
+  top.def("get_custom_class_schemas", customClassSchemasForBCCheck);
+
   m.def("get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
     const auto& operations = getAllOperatorsFor(symbol);
@@ -1361,6 +1370,9 @@ void initJITBindings(PyObject* module) {
   initPythonCustomClassBindings(m.ptr());
   initPythonIRBindings(m.ptr());
   tracer::initPythonTracerBindings(m.ptr());
+  top.def(
+      "_get_tracing_state", []() { return jit::tracer::getTracingState(); });
+
   initTreeViewBindings(m.ptr());
   initJitScriptBindings(m.ptr());
   initJitBackendBindings(m.ptr());

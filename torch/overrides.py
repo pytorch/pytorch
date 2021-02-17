@@ -156,6 +156,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.vander,
         torch.zeros,
         torch._jit_internal.boolean_dispatch,
+        torch.fuser_get_fused_kernel_code,
         torch.nn.functional.assert_int_or_pair,
         torch.nn.functional.upsample,
         torch.nn.functional.upsample_bilinear,
