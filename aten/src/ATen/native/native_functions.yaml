@@ -8784,7 +8784,7 @@
 - func: _remove_batch_dim(Tensor self, int level, int batch_size, int out_dim) -> Tensor
   variants: function
 
-## Functions related to the fast Fourier transform and the torch.fft namespace
+## Functions related to the `torch.special` namespace
 # Note [special namespace binding]
 # Functions in the special python module should have their names start with
 #   "special_" underscore and be bound to the desired Python name in
