@@ -157,7 +157,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             setattr(module, name, observed_child)
             # TODO: These are the modules that cannot be observed
             #       Once there are more, we should move them to a separate list
-            if custom_module_class_mapping[type(child)] != nnqa.LSTM:
+            if custom_module_class_mapping[type(child)] not in [nnqa.LSTM, nnqa.MultiheadAttention]:
                 insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
