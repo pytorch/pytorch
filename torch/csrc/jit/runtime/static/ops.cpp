@@ -4,6 +4,8 @@
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -459,6 +461,19 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {
     at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
   };
 });
+REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    auto in1_l =
+        at::native::toListOfOptionalTensors(p_node->Input(1).toListRef());
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::index_out(out_t, in0_t, in1_l);
+  };
+});
 
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
@@ -495,6 +510,31 @@ REGISTER_VIEW_OPERATOR_FUNCTOR(
         at::native::flatten_out(out, self, start_dim, end_dim);
       };
     });
+
+REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const at::Tensor& self = p_node->Input(0).toTensor();
+    std::vector<int64_t> dim = {};
+    if ((p_node->inputs().size() > 1) && (!p_node->Input(1).isNone())) {
+      dim = p_node->Input(1).toIntList().vec();
+    }
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(self);
+    }
+    auto& output = p_node->Output(0).toTensor();
+    fastResizeToZero(output);
+    if (p_node->inputs().size() > 2) {
+      at::native::sum_out(
+          output,
+          self,
+          dim,
+          p_node->Input(2).toBool(),
+          p_node->Input(3).toOptional<at::ScalarType>());
+      return;
+    }
+    at::native::sum_out(output, self, dim);
+  };
+});
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
   auto op_name = n->kind().toQualString();

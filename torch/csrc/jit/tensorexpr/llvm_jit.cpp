@@ -94,7 +94,7 @@ namespace orc {
 
 // Lightly modified implementation from LLVM's Kaleidoscope JIT tutorial:
 // https://llvm.org/docs/tutorial/BuildingAJIT1.html
-#if LLVM_VERSION_MAJOR >= 9 && LLVM_VERSION_MAJOR <= 12
+#if LLVM_VERSION_MAJOR >= 9
 class TORCH_API PytorchLLVMJITImpl {
  private:
   std::unique_ptr<TargetMachine> TM;
@@ -233,7 +233,7 @@ class TORCH_API PytorchLLVMJITImpl {
 };
 
 #else // LLVM_VERSION_MAJOR
-#error Only LLVM versions 8 through 12 are supported.
+#error Only LLVM versions 8 and above are supported.
 #endif
 
 PytorchLLVMJIT::PytorchLLVMJIT()

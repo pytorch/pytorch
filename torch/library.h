@@ -107,8 +107,7 @@ public:
   explicit CppFunction(Func* f, std::enable_if_t<c10::guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<Func>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Func>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>())
     , debug_()
     {}
 
@@ -117,8 +116,7 @@ public:
   explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<typename FuncPtr::FuncType>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<typename FuncPtr::FuncType>())
     , debug_()
     {}
 
@@ -127,8 +125,7 @@ public:
   explicit CppFunction(Lambda&& f, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     , cpp_signature_(c10::impl::CppSignature::make<Lambda>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Lambda>>())
     , debug_()
     {}
 
@@ -196,6 +193,18 @@ public:
   /// typically only used to register backend fallbacks via
   /// torch::Library::fallback().
   template<c10::KernelFunction::BoxedKernelFunction* func>
+  static CppFunction makeFromBoxedFunction() {
+    // TODO: more user friendly API
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunction<func>(),
+      /* cpp_signature */ c10::nullopt, // not known for boxed functions
+      /* schema */ nullptr
+    );
+  }
+
+  // Variant that takes in a boxed kernel function with a plumbed DispatchKeySet.
+  // See Note [Plumbing Keys Through The Dispatcher] for details.
+  template<c10::KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
   static CppFunction makeFromBoxedFunction() {
     // TODO: more user friendly API
     return CppFunction(

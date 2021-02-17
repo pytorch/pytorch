@@ -1323,6 +1323,7 @@ class TestLinalg(TestCase):
 
     # Test degenerate shape results match numpy for linalg.norm matrix norms
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_matrix_degenerate_shapes(self, device, dtype):
@@ -5485,6 +5486,7 @@ else:
             torch.chain_matmul()
 
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -5810,6 +5812,7 @@ else:
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
 
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_inverse(self, device, dtype):
