@@ -1026,7 +1026,19 @@ RegisterOperators reg2({
           for (const auto& elem : l) {
             sum += elem;
           }
+<<<<<<< HEAD
           push(stack, sum);
+=======
+
+          // To handle cases where the List only contains int,
+          // For eg., x : List[Float] = [1, 2, 3], the sum is
+          // casted to int.
+          if (std::floor(sum) == sum) {
+            push(stack, int(sum));
+          } else {
+            push(stack, sum);
+          }
+>>>>>>> b8a685acd664fd37863fb88b163c1dc9bf26c1d4
         },
         aliasAnalysisFromSchema()),
     Operator(
