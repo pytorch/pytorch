@@ -220,8 +220,16 @@ TEST(StaticRuntime, KWargsAPI_1) {
         at::Tensor output_1 = getTensor(module.forward(inputs));
 
         // run static runtime
-        at::Tensor output_2 = getTensor(runtime.run(inputs, {}));
+        c10::IValue output_ivalue = runtime.run(inputs, {});
+
+        at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(output_1.equal(output_2));
+
+        // check for output aliasing
+        EXPECT_EQ(output_ivalue.use_count(), 1);
+        output_ivalue = IValue();
+
+        EXPECT_EQ(output_2.getIntrusivePtr().use_count(), 1);
       }
 
       // check for input aliasing (deep & wide does not have ops
@@ -256,8 +264,16 @@ TEST(StaticRuntime, KWargsAPI_2) {
              {"wide", wide}});
 
         // run static runtime
-        at::Tensor output_2 = getTensor(runtime.run({}, kwargs));
+        c10::IValue output_ivalue = runtime.run({}, kwargs);
+
+        at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(output_1.equal(output_2));
+
+        // check for output aliasing
+        EXPECT_EQ(output_ivalue.use_count(), 1);
+        output_ivalue = IValue();
+
+        EXPECT_EQ(output_2.getIntrusivePtr().use_count(), 1);
       }
 
       EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
