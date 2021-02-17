@@ -1324,11 +1324,10 @@ class TestCase(expecttest.TestCase):
                 torch.set_warn_always(prev)
                 if len(ws) == 0:
                     self.fail('no warning caught')
-                if len(ws) > 1:
-                    self.fail('too many warnings caught: %s' % '\n    '.join([str(w) for w in ws]))
-                self.assertTrue(type(ws[0].message) is category)
-                self.assertTrue(re.match(pattern, str(ws[0].message)),
-                                f'{pattern}, {ws[0].message}')
+                for w in ws:
+                    self.assertTrue(type(w.message) is category)
+                    self.assertTrue(re.match(pattern, str(w.message)),
+                                    f'{pattern}, {w.message}')
 
     def assertExpected(self, s, subname=None):
         r"""

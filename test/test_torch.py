@@ -2841,21 +2841,21 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(len(w), 0)
 
             # Setting use_deterministic_algorithms(True) throws a warning once per process
-            with self.maybeWarnsRegex(UserWarning, "torch.use_deterministic_algorithms is in beta"):
+            with self.assertWarnsOnceRegex(UserWarning, "torch.use_deterministic_algorithms is in beta"):
                 torch.use_deterministic_algorithms(True)
 
     @onlyCPU
     def test_set_deterministic_deprecated_warning(self, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             # Calling set_deterministic throws a warning about deprecation once per process
-            with self.maybeWarnsRegex(UserWarning, "torch.set_deterministic is deprecated"):
+            with self.assertWarnsOnceRegex(UserWarning, "torch.set_deterministic is deprecated"):
                 torch.set_deterministic(True)
 
     @onlyCPU
     def test_is_deterministic_deprecated_warning(self, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             # Calling is_deterministic throws a warning about deprecation once per process
-            with self.maybeWarnsRegex(UserWarning, "torch.is_deterministic is deprecated"):
+            with self.assertWarnsOnceRegex(UserWarning, "torch.is_deterministic is deprecated"):
                 torch.is_deterministic()
 
     @dtypes(torch.float32, torch.complex64)
@@ -4373,7 +4373,7 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(expected, actual)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, "This overload of addcmul is deprecated"):
             self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
 
@@ -5099,7 +5099,7 @@ class TestTorchDeviceType(TestCase):
             actual = torch.addcdiv(a, b, c, value=alpha)
             self.assertEqual(expected, actual)
 
-            with self.maybeWarnsRegex(
+            with self.assertWarnsOnceRegex(
                     UserWarning, "This overload of addcdiv is deprecated"):
                 self.assertEqual(actual, torch.addcdiv(a, alpha, b, c))
 

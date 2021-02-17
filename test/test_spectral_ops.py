@@ -710,7 +710,7 @@ class TestFFT(TestCase):
             else:
                 window = None
             if expected_error is None:
-                with self.maybeWarnsRegex(UserWarning, "stft with return_complex=False"):
+                with self.assertWarnsOnceRegex(UserWarning, "stft with return_complex=False"):
                     result = x.stft(n_fft, hop_length, win_length, window,
                                     center=center, return_complex=False)
                 # NB: librosa defaults to np.complex64 output, no matter what
