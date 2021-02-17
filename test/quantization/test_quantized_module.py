@@ -232,7 +232,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         in_channels_per_group, input_feature_map_size, out_channels_per_group,
         groups, kernel_size, stride, padding, padding_mode, dilation,
         X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
-        use_bias, use_fused, use_channelwise, reference):
+        use_bias, use_fused, use_channelwise, reference
+    ):
         for i in range(len(kernel_size)):
             assume(input_feature_map_size[i] + 2 * padding[i]
                    >= dilation[i] * (kernel_size[i] - 1) + 1)
@@ -382,7 +383,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self, batch_size, in_channels_per_group, length, out_channels_per_group,
         groups, kernel, stride, pad_mode, pad, dilation,
         X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
-        use_bias, use_fused, use_channelwise, reference):
+        use_bias, use_fused, use_channelwise, reference
+    ):
         # Tests the correctness of the conv2d module.
         in_channels = in_channels_per_group * groups
         out_channels = out_channels_per_group * groups
@@ -452,7 +454,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self, batch_size, in_channels_per_group, H, W, out_channels_per_group,
         groups, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w, pad_mode,
         dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-        Y_zero_point, use_bias, use_fused, use_channelwise, reference):
+        Y_zero_point, use_bias, use_fused, use_channelwise, reference
+    ):
         # Tests the correctness of the conv2d module.
         in_channels = in_channels_per_group * groups
         out_channels = out_channels_per_group * groups
@@ -546,7 +549,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         with override_quantized_engine('fbgemm'):
             qconv_cls, module_name = class_map[(use_fused, reference)]
             qconv_module = qconv_cls(
-                in_channels, out_channels, kernel, stride, pad,
+                in_channels, out_channels, kernel_size, stride, padding,
                 dilation, groups, use_bias, padding_mode=pad_mode
             )
 
