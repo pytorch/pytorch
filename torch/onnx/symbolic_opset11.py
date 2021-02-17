@@ -121,14 +121,13 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   %33 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
         #               = aten::index_put(%mask, %32, %28, %38)
         #   return (%33)
-        if len(list(index.node().inputs())) > 0:
-            bool_inp = list(index.node().inputs())[0]
-            if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
-                rank = sym_help._get_tensor_rank(values)
-                if rank is not None and rank == 0:
-                    from torch.onnx.symbolic_opset9 import masked_fill
-                    return masked_fill(g, self, bool_inp, values)
-                return masked_scatter(g, self, bool_inp, values)
+        bool_inp = index
+        if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
+            rank = sym_help._get_tensor_rank(values)
+            if rank is not None and rank == 0:
+                from torch.onnx.symbolic_opset9 import masked_fill
+                return masked_fill(g, self, bool_inp, values)
+            return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = sym_help._unsqueeze_helper(g, index, [-1])
     sub_data_shape = sym_help._slice_helper(

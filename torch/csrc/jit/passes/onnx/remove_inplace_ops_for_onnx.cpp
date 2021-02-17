@@ -260,10 +260,10 @@ void RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
   }
 
   // Update inplace node inputs inside the outer most block.
-  auto outer_block_node = outer_block->owningNode();
+  outer_block_node = outer_block->owningNode();
   auto prev_data =
       outer_block_node->inputs().at(outer_block_node->inputs().size() - 1);
-  for (auto node : block_node->owningBlock()->nodes()) {
+  for (auto node : inplace_node->owningBlock()->nodes()) {
     size_t idx = 0;
     for (auto inputs_ : node->inputs()) {
       if (inputs_ == prev_data) {
@@ -590,10 +590,10 @@ Value* registerSetAttrInBlocks(
   auto next_node = block->owningNode();
 
   RegisterInplaceNodeInLoopBlocks(
-      origValue, cloneNode->output(), cloneNode, block, next_node);
+      origValue, cloneNode->output());
 
   RegisterInplaceNodeInIfBlocks(
-      origValue, cloneNode->output(), block, next_node, output_name);
+      origValue, cloneNode->output(), output_name);
 
   Value* output = nullptr;
   while (nullptr != block->owningNode() &&
@@ -744,7 +744,6 @@ void RegisterInplaceOpAsBlockOutputs(
 
   registerInplaceOpAsBlockOutputs(
       graph->block(), graph, allAttrValues, setAttrValues, mr, module);
-  EliminateDeadCode(graph->block());
 }
 
 } // namespace
@@ -755,9 +754,9 @@ void RemoveInplaceOpsForONNX(
   MutationRemover mr(graph);
   ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
-  RegisterInplaceOpAsBlockOutputs(model, graph, mr);
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
+  RegisterInplaceOpAsBlockOutputs(model, graph, mr);
 }
 
 } // namespace jit

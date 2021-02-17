@@ -131,9 +131,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
-
     torch._C._jit_pass_lower_all_tuples(graph)
-    torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
+
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
     # use constant prop to maintain our current level of onnx support
@@ -162,7 +161,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # until the point where it is unpacked by listUnpack node.
         # This pass does a preprocess, and prepares the nodes such that enough context can be received
         # by the symbolic function.
+        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
         torch._C._jit_pass_onnx_preprocess(graph)
+
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lint(graph)
 
