@@ -583,7 +583,6 @@ Value* registerSetAttrInBlocks(
     Node* cloneNode,
     Value* origValue,
     const std::string& output_name) {
-  auto next_node = block->owningNode();
 
   RegisterInplaceNodeInLoopBlocks(origValue, cloneNode->output());
 
