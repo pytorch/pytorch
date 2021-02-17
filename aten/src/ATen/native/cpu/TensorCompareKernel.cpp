@@ -260,9 +260,12 @@ static void mode_kernel_impl(
 
         std::transform(
             idxs.begin(), idxs.end(), elements.begin(), [=](int64_t i) {
-              return std::make_pair(self_data[i * self_dim_stride], i);
+                return std::make_pair(self_data[i * self_dim_stride], i);
             });
-        std::sort(elements.begin(), elements.end());
+        std::sort(
+            elements.begin(),
+            elements.end(),
+            [=](const auto& i, const auto& j) { return i.first < j.first; });
 
         for (int64_t i = 0; i < self_dim_size; i++) {
           temp_freq++;
