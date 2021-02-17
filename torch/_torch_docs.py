@@ -8520,7 +8520,7 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 .. warning:: Extra care needs to be taken when backward through outputs. Such
              operation is only stable when all eigenvalues are distinct and becomes
-             less stable the smaller :math:`\min{i != j} |\lambda_i - \lambda_j|` is.
+             less stable the smaller :math:`\min_{i \neq j} |\lambda_i - \lambda_j|` is.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
