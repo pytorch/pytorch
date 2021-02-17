@@ -8,6 +8,7 @@
 #include <torch/torch.h>
 #include <cstring>
 
+using namespace torch::indexing;
 namespace te = torch::jit::tensorexpr;
 
 static void vectorize(te::LoopNest* ln, te::Tensor* target, int width) {
@@ -15,6 +16,17 @@ static void vectorize(te::LoopNest* ln, te::Tensor* target, int width) {
   te::For *outer, *inner, *tail;
   ln->splitWithTail(loops[0], width, &outer, &inner, &tail);
   ln->vectorize(inner);
+}
+
+std::string diffs(const at::Tensor& a, const at::Tensor& b) {
+  auto diff = torch::abs(a.flatten() - b.flatten());
+  auto count_diffs = torch::sum(diff > 0.f);
+  auto greatest_diff_index = torch::argmax(diff);
+  std::stringstream ss;
+  ss << "Found " << count_diffs << " unequal element(s). "
+     << "The greatest difference was " << diff.index({greatest_diff_index})
+     << " at index " << greatest_diff_index;
+  return ss.str();
 }
 
 TEST(Approx, log_vml) {
@@ -31,19 +43,25 @@ TEST(Approx, log_vml) {
   s = te::IRSimplifier::simplify(s);
   te::LLVMCodeGen cg(s, {A, B, N});
 
+  auto eps = std::numeric_limits<float>::epsilon();
   auto test = [&](const at::Tensor& A_t) {
     at::Tensor B_ref = at::log(A_t);
     at::Tensor B_t = at::empty_like(A_t);
-    cg.call({A_t.data_ptr<float>(), B_t.data_ptr<float>(), A_t.numel()});
+    auto ap = A_t.data_ptr<float>();
+    auto bp = B_t.data_ptr<float>();
+    cg.call({ap, bp, A_t.numel()});
     // Results should be bit-identical.
-    ASSERT_TRUE(
-        memcmp(
-            B_ref.data_ptr<float>(), B_t.data_ptr<float>(), B_ref.nbytes()) ==
-        0);
+    ASSERT_TRUE(torch::allclose(
+        B_t, B_ref, /*rtol=*/eps, /*atol=*/0.0f, /*equal_nan=*/true))
+        << "Input[:8]\n"
+        << A_t.index({Slice(0, 8)}) << "\n"
+        << "Test[:8]\n"
+        << B_t.index({Slice(0, 8)}) << "\n"
+        << "Ref[:8]\n"
+        << B_ref.index({Slice(0, 8)}) << diffs(B_t, B_ref);
   };
 
   // Generate every single-precision FP value in [1.0, 2.0).
-  auto eps = std::numeric_limits<float>::epsilon();
   at::Tensor A_t = torch::arange(1.0f, 2.0f, eps);
   ASSERT_EQ(A_t.numel(), 1 << 23);
 
