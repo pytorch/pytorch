@@ -27,6 +27,10 @@ if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Pac
   mv _Instances "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
 fi
 
+if [[ "$CIRCLECI" == 'true' && -d "C:\\Microsoft" ]]; then
+  rm -rf "C:\\Microsoft\\Android*"
+fi
+
 echo "Free space on filesystem before build:"
 df -h
 

@@ -65,7 +65,7 @@ void cpu_avg_pool(
       }
 
       scalar_t sum = 0;
-    
+
       int64_t divide_factor;
       if (divisor_override.has_value()) {
         divide_factor = divisor_override.value();

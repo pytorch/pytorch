@@ -223,8 +223,9 @@ class Measurement:
     @staticmethod
     def merge(measurements):  # type: (Iterable[Measurement]) -> List[Measurement]
         """Convenience method for merging replicates.
-        NB: merge will extrapolate times to `number_per_run=1` and will not
-            transfer any metadata (since it might differ between replicates)
+
+        Merge will extrapolate times to `number_per_run=1` and will not
+        transfer any metadata. (Since it might differ between replicates)
         """
         grouped_measurements: DefaultDict[TaskSpec, List[Measurement]] = collections.defaultdict(list)
         for m in measurements:
