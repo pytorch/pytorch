@@ -510,7 +510,9 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     return op
                 else:
                     # choose linear dynamic or linear dynamic fp16 op based on weight dtype
-                    qlinear_op = torch.ops.quantized.linear_dynamic if weight_dtype == torch.int8 else torch.ops.quantized.linear_dynamic_fp16
+                    qlinear_op = torch.ops.quantized.linear_dynamic \
+                        if weight_dtype == torch.int8 \
+                        else torch.ops.quantized.linear_dynamic_fp16
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore
                     op_out = quantizer.quantized_graph.create_node(
