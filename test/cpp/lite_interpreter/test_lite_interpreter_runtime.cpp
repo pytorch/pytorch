@@ -12,7 +12,7 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-TEST(CoresTest, LoadAndForward) {
+TEST(RunTimeTest, LoadAndForward) {
   // Load check in model: sequence.ptl
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);

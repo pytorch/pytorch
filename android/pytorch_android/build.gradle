@@ -33,8 +33,13 @@ android {
     sourceSets {
         main {
             java {
-                // exclude 'org/pytorch/LiteModuleLoader.java'
-                // exclude 'org/pytorch/LiteNativePeer.java'
+              if(System.env.BUILD_LITE_INTERPRETER == '1') {
+                println 'Build pytorch_jni_lite'
+              } else {
+                println 'Build pytorch_jni'
+                exclude 'org/pytorch/LiteModuleLoader.java'
+                exclude 'org/pytorch/LiteNativePeer.java'
+              }
             }
             jniLibs.srcDirs = ['src/main/jniLibs']
         }

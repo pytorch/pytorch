@@ -1,7 +1,7 @@
 set(LITE_INTERPRETER_TEST_DIR "${TORCH_ROOT}/test/cpp/lite_interpreter")
 set(LITE_INTERPRETER_TEST_DIR
   ${TORCH_ROOT}/test/cpp/lite_interpreter/main.cpp
-  ${TORCH_ROOT}/test/cpp/lite_interpreter/test_cores.cpp
+  ${TORCH_ROOT}/test/cpp/lite_interpreter/test_lite_interpreter_runtime.cpp
 )
 
 add_executable(test_lite_interpreter ${LITE_INTERPRETER_TEST_DIR})
