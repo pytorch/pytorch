@@ -13351,10 +13351,11 @@ class TestNNDeviceType(NNTestCase):
         gradcheck(func, [x])
         gradgradcheck(func, [x])
 
+        x = torch.randn(2, 7, 7, requires_grad=True, device=device)
+        self.assertEqual(func(x).shape, (2, 3, 3))
         if self.device_type != 'cuda':
-            x = torch.randn(2, 7, 7, requires_grad=True, device=device)
-            samples = x.new(2, 2).uniform_()
-            self.assertEqual(func(x).shape, (2, 3, 3))
+            # Raises -> RuntimeError: TensorAccessor expected 4 dims but tensor has 3
+            # on CUDA in gradcheck
             gradcheck(func, [x])
             gradgradcheck(func, [x])
 
@@ -13376,7 +13377,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyOnCPUAndCUDA
     def test_fractional_max_pool3d(self, device):
         x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
-        samples = x.new(1, 2, 2).uniform_()
+        samples = x.new(1, 2, 3).uniform_()
 
         def func(x):
             return F.fractional_max_pool3d(
@@ -13386,12 +13387,10 @@ class TestNNDeviceType(NNTestCase):
         gradcheck(func, [x])
         gradgradcheck(func, [x])
 
-        if self.device_type != 'cuda':
-            x = torch.randn(2, 7, 7, 7, requires_grad=True, device=device)
-            samples = x.new(2, 2).uniform_()
-            self.assertEqual(func(x).shape, (2, 3, 3, 3))
-            gradcheck(func, [x])
-            gradgradcheck(func, [x])
+        x = torch.randn(2, 7, 7, 7, requires_grad=True, device=device)
+        self.assertEqual(func(x).shape, (2, 3, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
 
         for kernel_size in [(), (1,), (1, 1)]:
             with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
