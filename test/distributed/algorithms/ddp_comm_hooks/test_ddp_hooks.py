@@ -14,7 +14,6 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
-    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import run_tests
 
