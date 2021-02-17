@@ -1284,8 +1284,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [](const ExprHandle& a,
              const ExprHandle& min_val,
              const ExprHandle& max_val) {
-             auto mm = CompareSelect::make(a, min_val, min_val, a, kLT);
-             return CompareSelect::make(mm, max_val, max_val, mm, kGT);
+            auto mm = CompareSelect::make(a, min_val, min_val, a, kLT);
+            return CompareSelect::make(mm, max_val, max_val, mm, kGT);
           });
     } break;
 
