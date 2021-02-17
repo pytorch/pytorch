@@ -1,9 +1,6 @@
 #include <c10/util/complex.h>
 
 #include <cmath>
-#include <istream>
-#include <limits>
-#include <iomanip>
 
 // Note [ Complex Square root in libc++]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -16,7 +13,7 @@
 #ifdef _LIBCPP_VERSION
 
 namespace {
-template<typename T>
+template <typename T>
 c10::complex<T> compute_csqrt(const c10::complex<T>& z) {
   constexpr auto half = T(.5);
 
@@ -45,7 +42,12 @@ c10::complex<T> compute_csqrt(const c10::complex<T>& z) {
   return c10::complex<T>(half * std::abs(z.imag() / t), std::copysign(t, z.imag()));
 }
 
-template<typename T>
+
+// Compute complex arccosine using formula from W. Kahan
+// "Branch Cuts for Complex Elementary Functions" 1986 paper:
+// cacos(z).re = 2*atan2(sqrt(1-z).re(), sqrt(1+z).re())
+// cacos(z).im = asinh((sqrt(conj(1+z))*sqrt(1-z)).im())
+template <typename T>
 c10::complex<T> compute_cacos(const c10::complex<T>& z) {
   auto constexpr one = T(1);
   // Trust standard library to correctly handle infs and NaNs
@@ -55,12 +57,14 @@ c10::complex<T> compute_cacos(const c10::complex<T>& z) {
   }
   auto a = compute_csqrt(c10::complex<T>(one - z.real(), -z.imag()));
   auto b = compute_csqrt(c10::complex<T>(one + z.real(),  z.imag()));
-  auto c = compute_csqrt(c10::complex<T>(one + z.real(),  -z.imag()));
+  auto c = compute_csqrt(c10::complex<T>(one + z.real(), -z.imag()));
   auto r = T(2) * std::atan2(a.real(), b.real());
-  auto i = std::asinh(a.real() * c.imag() + a.imag()  * c.real());
+  // Explicitly unroll (a*c).imag()
+  auto i = std::asinh(a.real() * c.imag() + a.imag() * c.real());
   return c10::complex<T>(r, i);
 }
 } // anonymous namespace
+
 
 namespace c10_complex_math { namespace _detail {
 c10::complex<float> sqrt(const c10::complex<float>& in) {
@@ -79,5 +83,5 @@ c10::complex<double> acos(const c10::complex<double>& in) {
   return compute_cacos(in);
 }
 
-}}
+}} // namespace c10_complex_math::_detail
 #endif
