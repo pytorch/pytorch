@@ -356,7 +356,8 @@ struct DDPLoggingData {
   // Rebuild buckets stats after 1st iteration
   bool has_rebuilt_buckets = false;
   std::vector<int> rebuilt_bucket_sizes = std::vector<int>();
-  // Average performance stats per iteration (ns)
+  // Average performance stats for the number of iterations
+  // when time is recorded (ns).
   int64_t avg_forward_compute_time = 0;
   int64_t avg_backward_compute_time = 0;
   int64_t avg_backward_comm_time = 0;

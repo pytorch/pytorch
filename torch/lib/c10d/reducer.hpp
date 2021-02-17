@@ -22,6 +22,8 @@ namespace c10d {
 
 constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
 constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+// Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
+constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
 class Reducer {
  public:
@@ -366,6 +368,13 @@ class Reducer {
   // when executing autograd. This can be used to derive a timeline of
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
   std::vector<std::vector<int64_t>> backward_stats_;
+
+  bool should_collect_runtime_stats();
+  void record_forward_compute_start_time();
+  void record_backward_compute_start_time();
+  void record_backward_compute_end_time();
+  void record_backward_comm_start_time();
+  void record_backward_comm_end_time();
 
   bool is_multi_device_module_ = false;
 

@@ -105,13 +105,13 @@ void Logger::calculate_avg_cpu_time(
   // end time can not be recorded in this iteration and thus can not
   // calculate the valid avg_time.
   // In this case, skip calculating the avg_time and return.
-  TORCH_CHECK(reducer_->num_iterations_ > 0);
+  TORCH_CHECK(num_iterations_stats_recorded_ > 0);
   if (cpu_end_time < cpu_start_time) {
     return;
   }
-  long num_iters = reducer_->num_iterations_;
-  avg_time = ((cpu_end_time - cpu_start_time) + avg_time * (num_iters - 1)) /
-      num_iters;
+  avg_time = ((cpu_end_time - cpu_start_time) +
+              avg_time * (num_iterations_stats_recorded_ - 1)) /
+      num_iterations_stats_recorded_;
 }
 
 #ifdef USE_CUDA
@@ -119,8 +119,7 @@ void Logger::calculate_avg_gpu_time(
     int64_t& avg_time,
     at::cuda::CUDAEvent& gpu_start,
     at::cuda::CUDAEvent& gpu_end) {
-  TORCH_CHECK(reducer_->num_iterations_ > 0);
-  long num_iters = reducer_->num_iterations_;
+  TORCH_CHECK(num_iterations_stats_recorded_ > 0);
   float milliseconds = gpu_start.elapsed_time(gpu_end);
   // If gpu_end is not recorded in this iteration,
   // milliseconds will have invalid value.
@@ -132,8 +131,8 @@ void Logger::calculate_avg_gpu_time(
     return;
   }
   avg_time = (int(milliseconds * kMilliSecondToNanosSecond) +
-              avg_time * (num_iters - 1)) /
-      num_iters;
+              avg_time * (num_iterations_stats_recorded_ - 1)) /
+      num_iterations_stats_recorded_;
 }
 #endif
 
@@ -141,9 +140,10 @@ void Logger::set_runtime_stats_and_log() {
   // Sync with reducer's data
   std::lock_guard<std::mutex> lock(reducer_->mutex_);
   // set runtime stats after 1st iteration is complete.
-  if (reducer_->num_iterations_ == 0) {
+  if (!reducer_->should_collect_runtime_stats()) {
     return;
   }
+  num_iterations_stats_recorded_++;
   // Set ith iteration when the runtime stats are set.
   ddp_logging_data_->iteration = reducer_->num_iterations_;
   // If unused_parameters_ is not empty, calculate its sizes.
@@ -166,6 +166,9 @@ void Logger::set_runtime_stats_and_log() {
     // Cuda time stats are only collected for single process single
     // device and single device module.
     if (reducer_->replicas_.size() > 1 || reducer_->is_multi_device_module_) {
+      TORCH_WARN_ONCE(
+          "Cuda time stats are not collected for single process "
+          "multiple device program or multi-device modules.");
       return;
     }
     // Check events on the replicas_[0][0].device().
