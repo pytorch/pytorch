@@ -1,0 +1,32 @@
+name: Prune anaconda packages on pytorch-nightly / pytorch-test
+on:
+  schedule:
+    # Prune the nightly packages daily at 1 PM UTC
+    - cron: '0 13 * * *'
+  # Have the ability to trigger this job manually using the API as well
+  workflow_dispatch:
+
+jobs:
+  anaconda-prune:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-18.04
+    container:
+      image: continuumio/miniconda3
+    strategy:
+      matrix:
+        channel: ["pytorch-nightly", "pytorch-test"]
+    env:
+      ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      CHANNEL: ${{ matrix.channel }}
+      PACKAGES: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          ref: master
+      - name: Install anaconda-client
+        run: |
+          conda install -yq anaconda-client
+      - name: Prune packages
+        run: |
+          scripts/release/anaconda-prune/run.sh
