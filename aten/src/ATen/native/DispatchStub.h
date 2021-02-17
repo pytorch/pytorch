@@ -62,34 +62,43 @@ template <typename FnPtr, typename T>
 struct TORCH_API DispatchStub;
 
 /**
- * The CPUImplFunctionHolder struct holds pointers for default implementations
- * of CPU dispatch methods that are specialized for a given architecture. The
- * actual method is chosen in decreasing order of preference by
- * DispatchStubImpl::choose_cpu_impl() in case none is found by
- * DispatchStubImpl::get_call_ptr() in cpu_dispatch_ptr.
- */
-struct TORCH_API CPUImplFunctionHolder {
-  void *DEFAULT;
-#ifdef HAVE_AVX_CPU_DEFINITION
-  void *AVX;
-#endif
-#ifdef HAVE_AVX2_CPU_DEFINITION
-  void *AVX2;
-#endif
-#ifdef HAVE_VSX_CPU_DEFINITION
-  void *VSX;
-#endif
-};
-
-/**
  * The sole purpose of this class is to outline methods that don't need to be
  * specialized or otherwise inlined and duplicated (by the compiler due to
  * template expansion), since it causes size bloat if there are a significant
  * number of specialization of the DispatchStub<> class.
  */
 struct TORCH_API DispatchStubImpl {
-  void* get_call_ptr(DeviceType device_type, CPUImplFunctionHolder(*cpu_impl_data)());
-  void* choose_cpu_impl(const CPUImplFunctionHolder &data);
+  void* get_call_ptr(
+    DeviceType device_type
+    , void *DEFAULT
+#ifdef HAVE_AVX_CPU_DEFINITION
+      , void *AVX
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      , void *VSX
+#endif
+  );
+
+  /**
+   * The CPU Dispatch actual method is chosen in decreasing order of preference by
+   * DispatchStubImpl::choose_cpu_impl() in case none is found by
+   * DispatchStubImpl::get_call_ptr() in cpu_dispatch_ptr.
+   */
+  void* choose_cpu_impl(
+    void *DEFAULT
+#ifdef HAVE_AVX_CPU_DEFINITION
+    , void *AVX
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+    , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+    , void *VSX
+#endif
+  );
 
   // Fixing dispatch error in Windows debug builds.
   // See https://github.com/pytorch/pytorch/issues/22681 for more details.
@@ -114,19 +123,9 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
 
 private:
   FnPtr get_call_ptr(DeviceType device_type) {
-    return reinterpret_cast<FnPtr>(impl.get_call_ptr(device_type, cpu_impl_data_provider));
-  }
-
-public:
-  template <typename... ArgTypes>
-  rT operator()(DeviceType device_type, ArgTypes&&... args) {
-    FnPtr call_ptr = get_call_ptr(device_type);
-    return (*call_ptr)(std::forward<ArgTypes>(args)...);
-  }
-
-  static CPUImplFunctionHolder cpu_impl_data_provider() {
-    CPUImplFunctionHolder ret{
-      reinterpret_cast<void*>(DEFAULT)
+    return reinterpret_cast<FnPtr>(
+      impl.get_call_ptr(device_type
+      , reinterpret_cast<void*>(DEFAULT)
 #ifdef HAVE_AVX_CPU_DEFINITION
       , reinterpret_cast<void*>(AVX)
 #endif
@@ -136,8 +135,23 @@ public:
 #ifdef HAVE_VSX_CPU_DEFINITION
       , reinterpret_cast<void*>(VSX)
 #endif
-    };
-    return ret;
+      )
+    );
+  }
+
+public:
+  template <typename... ArgTypes>
+  rT operator()(DeviceType device_type, ArgTypes&&... args) {
+    FnPtr call_ptr = get_call_ptr(device_type);
+    return (*call_ptr)(std::forward<ArgTypes>(args)...);
+  }
+
+  void set_cuda_dispatch_ptr(FnPtr fn_ptr) {
+    impl.cuda_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  }
+
+  void set_hip_dispatch_ptr(FnPtr fn_ptr) {
+    impl.hip_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
   static FnPtr DEFAULT;
@@ -158,7 +172,7 @@ namespace {
 template <typename FnPtr, typename T>
 struct RegisterCUDADispatch {
   RegisterCUDADispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
-    stub.cuda_dispatch_ptr = reinterpret_cast<void*>(value);
+    stub.set_cuda_dispatch_ptr(value);
   }
 };
 
@@ -166,7 +180,7 @@ template <typename FnPtr, typename T>
 struct RegisterHIPDispatch {
   RegisterHIPDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
     // TODO: make this point at hip_dispatch_ptr
-    stub.cuda_dispatch_ptr = reinterpret_cast<void*>(value);
+    stub.set_cuda_dispatch_ptr(value);
   }
 };
 } // anonymous namespace

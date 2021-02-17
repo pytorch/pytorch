@@ -1323,6 +1323,7 @@ class TestLinalg(TestCase):
 
     # Test degenerate shape results match numpy for linalg.norm matrix norms
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_matrix_degenerate_shapes(self, device, dtype):

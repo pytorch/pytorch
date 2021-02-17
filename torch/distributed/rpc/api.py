@@ -310,7 +310,7 @@ def shutdown(graceful=True):
     if graceful:
         _wait_all_workers()
         _delete_all_user_and_unforked_owner_rrefs()
-        _get_current_rpc_agent().join()
+        _get_current_rpc_agent().join(shutdown=True)
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
