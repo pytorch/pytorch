@@ -4714,30 +4714,17 @@ class DistributedTest:
 
             inp = torch.randn(10, 10)
 
-            for i in range(2):
-                ctx = (
-                    suppress()
-                    if i == 0
-                    else self.assertRaisesRegex(
-                        RuntimeError,
-                        "Expected to have finished reduction in the prior iteration",
+            for ddp in [net, net_with_find_unused]:
+                for i in range(2):
+                    ctx = (
+                        suppress()
+                        if i == 0
+                        else self.assertRaisesRegex(
+                            RuntimeError,
+                            "Expected to have finished reduction in the prior iteration",
+                        )
                     )
-                )
-                with ctx:
-                    a, b = net(inp)
-                    loss = b.sum()
-                    loss.backward()
-
-            for i in range(2):
-                ctx = (
-                    suppress()
-                    if i == 0
-                    else self.assertRaisesRegex(
-                        RuntimeError,
-                        "Expected to have finished reduction in the prior iteration",
-                    )
-                )
-                with ctx:
-                    a, b = net_with_find_unused(inp)
-                    loss = b.sum()
-                    loss.backward()
+                    with ctx:
+                        a, b = ddp(inp)
+                        loss = b.sum()
+                        loss.backward()
