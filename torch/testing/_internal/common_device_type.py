@@ -884,7 +884,7 @@ def skipCUDAVersionIn(versions : List[List[int]] = None):
         def wrap_fn(self, device, *args, **kwargs):
             if self.device_type == 'cuda':
                 version = _get_torch_cuda_version()
-                if version in versions:
+                if version in (versions or []):
                     reason = "test skipped for CUDA version {0}.{1}".format(version[0], version[1])
                     raise unittest.SkipTest(reason)
             return fn(self, device, *args, **kwargs)
