@@ -5,7 +5,6 @@ import warnings
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantizable as nnqa
 from torch.nn.intrinsic import _FusedModule
 
 from .quantization_mappings import (
@@ -13,6 +12,7 @@ from .quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
+    no_observer_set,
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
@@ -157,7 +157,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             setattr(module, name, observed_child)
             # TODO: These are the modules that cannot be observed
             #       Once there are more, we should move them to a separate list
-            if custom_module_class_mapping[type(child)] not in [nnqa.LSTM, nnqa.MultiheadAttention]:
+            if custom_module_class_mapping[type(child)] not in no_observer_set():
                 insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
