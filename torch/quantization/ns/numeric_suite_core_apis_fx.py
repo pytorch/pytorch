@@ -167,13 +167,36 @@ def prepare_model_outputs(
         name_b, gm_b, subgraphs_to_instrument_b, logger_cls)
     return (gm_a, gm_b)
 
+def add_activation_info_to_dict(
+    model_name: str,
+    model: GraphModule,
+    results: Dict[str, Dict[str, List[torch.Tensor]]],
+    logger_cls: Callable,
+) -> None:
+    for gm_name, mod in model.named_modules():
+        # TODO(future PR): better check when scripted
+        is_logger = (
+            isinstance(mod, logger_cls)  # type: ignore
+            or (
+                isinstance(mod, torch.jit.RecursiveScriptModule)
+                and mod.original_name == 'OutputLogger'
+            )
+        )
+        if is_logger:
+            key = mod.ref_node_name + '.stats'
+            if key not in results:
+                results[key] = {}
+            results[key][model_name] = mod.stats
+
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
 #   expose FX types.
 # TODO(future PR): align on naming
 # this is equivalent of just the comparison extraction part of `ns.compare_model_outputs`
 def get_matching_activations(
+    model_name_a: str,
     gm_a: GraphModule,
+    model_name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
 ) -> Dict[str, Dict[str, List[torch.Tensor]]]:
@@ -200,21 +223,11 @@ def get_matching_activations(
        the return type for calibrating with 1 input vs N inputs.
     3. `logger_cls` is included in the API for easy result extraction
     """
-    results: Dict[str, Dict[str, List[torch.Tensor]]] = \
-        collections.defaultdict(dict)
+    results: Dict[str, Dict[str, List[torch.Tensor]]] = {}
     for gm in (gm_a, gm_b):
-        for gm_name, mod in gm.named_modules():
-            # TODO(future PR): better check when scripted
-            is_logger = (
-                isinstance(mod, logger_cls)  # type: ignore
-                or (
-                    isinstance(mod, torch.jit.RecursiveScriptModule)
-                    and mod.original_name == 'OutputLogger'
-                )
-            )
-            if is_logger:
-                results[mod.ref_node_name + '.stats'][mod.model_name] = mod.stats
-    return dict(results)
+        add_activation_info_to_dict(model_name_a, gm_a, results, logger_cls)
+        add_activation_info_to_dict(model_name_b, gm_b, results, logger_cls)
+    return results
 
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
