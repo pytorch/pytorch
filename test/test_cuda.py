@@ -3092,22 +3092,36 @@ t2.start()
 
             a = torch.ones((size,), device="cuda")
 
+            def func_with_temps(t, val):
+                x = t.clone() + val
+                y = t.clone() + val
+                return x + y
+
             g0.capture_begin()
             b = a.clone()
             for _ in range(5):
-                b = b.clone() + 1
+                b = func_with_temps(b, 1)
             g0.capture_end()
 
             args = (g0.pool(),) if share_mem else ()
             g1.capture_begin(*args)
             for _ in range(5):
-                b = b.clone() + 2
+                b = func_with_temps(b, 1)
             g1.capture_end()
 
+            # mixes unrelated eager ops with replays
+            c = a.clone()
+            for _ in range(2):
+                c = func_with_temps(c, 3)
             g0.replay()
+            for _ in range(2):
+                c = func_with_temps(c, 3)
             g1.replay()
+            for _ in range(2):
+                c = func_with_temps(c, 3)
 
-            self.assertEqual(b.sum().item(), size * 16)
+            self.assertEqual(b.sum().item(), size * 3070)
+            self.assertEqual(c.sum().item(), size * 442)
 
             if share_mem:
                 self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
@@ -3122,9 +3136,14 @@ t2.start()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_concurrent_replay(self):
+        torch.cuda.empty_cache()
+
         size = 1000000  # largeish to help expose race conditions
 
-        torch.cuda.empty_cache()
+        def func_with_temps(t, val):
+            x = t.clone() + val
+            y = t.clone() + val
+            return x + y
 
         for share_mem in (False, True):
             g0 = torch.cuda._Graph()
@@ -3138,22 +3157,16 @@ t2.start()
             g0.capture_begin()
             b = a.clone()
             for _ in range(5):
-                x = b.clone() + 1
-                y = b.clone() + 1
-                b = x + y
+                b = func_with_temps(b, 1)
             g0.capture_end()
-            del x, y
 
             args = (g0.pool(),) if share_mem else ()
 
             g1.capture_begin(*args)
             c = a.clone()
             for _ in range(5):
-                x = c.clone() + 2
-                y = c.clone() + 2
-                c = x + y
+                c = func_with_temps(c, 2)
             g1.capture_end()
-            del x, y
 
             s0.wait_stream(torch.cuda.current_stream())
             s1.wait_stream(torch.cuda.current_stream())
@@ -3180,7 +3193,54 @@ t2.start()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_three_successive(self):
-        pass
+        torch.cuda.empty_cache()
+
+        size = 1000
+
+        for share_mem in (False, True):
+            a = torch.ones((size,), device="cuda")
+
+            g0 = torch.cuda._Graph()
+            g1 = torch.cuda._Graph()
+            g2 = torch.cuda._Graph()
+
+            g0.capture_begin()
+            b = a.clone()
+            c = b + 1
+            d = b + 2
+            g0.capture_end()
+
+            args = (g0.pool(),) if share_mem else ()
+
+            g1.capture_begin(*args)
+            e = c + 3
+            del c
+            g1.capture_end()
+
+            g2.capture_begin(*args)
+            f = d + 4
+            g2.capture_end()
+
+            # Tests that replaying in capture order is valid
+            g0.replay()
+            g1.replay()
+            g2.replay()
+
+            self.assertEqual(e.sum().item(), size * 5)
+            self.assertEqual(f.sum().item(), size * 7)
+
+            # Tests that replaying as g0, g2, g1 is only valid if they don't share a pool
+            g0.replay()
+            g2.replay()
+            g1.replay()
+
+            # If share_mem is True, g2's capture should have reused c's memory for f. We replayed g2 then g1,
+            # so we expect g1's captured "e = c + 3" mistakenly filled e with "f's vals + 3".
+            self.assertEqual(e.sum().item(), size * (7 + 3) if share_mem else size * 5)
+            self.assertEqual(f.sum().item(), size * 7)
+
+            del a, b, d, e, f, g0, g1, g2
+            torch.cuda.empty_cache()
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
