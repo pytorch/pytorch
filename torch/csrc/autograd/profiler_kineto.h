@@ -170,7 +170,7 @@ struct TORCH_API KinetoEvent {
   uint8_t activity_type_;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
-  uint64_t flops_;
+  uint64_t flops_ = 0;
 
   std::string name_;
   uint64_t device_index_ = 0;
@@ -219,7 +219,13 @@ TORCH_API void prepareProfiler(
     const std::set<ActivityType>& activities);
 #endif // USE_KINETO
 
-TORCH_API bool kinetoAvailable();
+TORCH_API constexpr bool kinetoAvailable() {
+#ifdef USE_KINETO
+  return true;
+#else
+  return false;
+#endif // USE_KINETO
+}
 
 } // namespace profiler
 }} // namespace torch::autograd
