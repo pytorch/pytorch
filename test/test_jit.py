@@ -13006,7 +13006,7 @@ dedent """
                 raise ValueError("shouldn't be called")
 
         f = torch.jit.script(A())
-        # jank way to test if there is no assertion
+        # jank way to test if there is no error
         self.assertTrue(isinstance(f, torch.jit.ScriptModule))
 
     def test_pass(self):
