@@ -260,7 +260,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test members
         self.assertTrue(module_name in str(qconv_module))
-        self.assertTrue(hasattr(qconv_module, '_packed_params'))
+        # self.assertTrue(hasattr(qconv_module, '_packed_params'))
         self.assertTrue(hasattr(qconv_module, 'scale'))
         self.assertTrue(hasattr(qconv_module, 'zero_point'))
 
@@ -309,7 +309,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         self.assertTrue(dir(loaded_qconv_module) == dir(qconv_module))
         self.assertTrue(module_name in str(loaded_qconv_module))
-        self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
+        # self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
         self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
 
         self.assertEqual(qconv_module.weight(), loaded_qconv_module.weight())
@@ -399,7 +399,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 dilation, groups, use_bias, padding_mode=pad_mode)
         else:
             module_name = "QuantizedConv1d"
-            qconv_module = nnq.Conv1d(
+            qconv_module = nnqr.Conv1d(
                 in_channels, out_channels, kernel, stride, pad,
                 dilation, groups, use_bias, padding_mode=pad_mode)
 

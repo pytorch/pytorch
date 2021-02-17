@@ -173,6 +173,9 @@ class _ConvNd(nn.Module):
         self.scale = state[12]
         self.zero_point = state[13]
         self.training = state[14]
+        # this is for:
+        # RuntimeError: The field '_is_full_backward_hook' was left uninitialized after '__setstate__', but expected a value of type 'None'
+        super().__setstate__({})
 
     @classmethod
     def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
