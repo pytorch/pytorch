@@ -213,14 +213,22 @@ TEST(StaticRuntime, KWargsAPI_1) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
+      {
+        std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
 
-      // run jit graph executor
-      std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
-      at::Tensor output_1 = getTensor(module.forward(inputs));
+        // run jit graph executor
+        at::Tensor output_1 = getTensor(module.forward(inputs));
 
-      // run static runtime
-      at::Tensor output_2 = getTensor(runtime.run(inputs, {}));
-      EXPECT_TRUE(output_1.equal(output_2));
+        // run static runtime
+        at::Tensor output_2 = getTensor(runtime.run(inputs, {}));
+        EXPECT_TRUE(output_1.equal(output_2));
+      }
+
+      // check for input aliasing (deep & wide does not have ops
+      // that create aliases of input tensors)
+      EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(user_emb.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
 }
@@ -237,19 +245,24 @@ TEST(StaticRuntime, KWargsAPI_2) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
+      {
+        // run jit graph executor
+        std::vector<at::IValue> args({ad_emb_packed, user_emb, wide});
+        at::Tensor output_1 = getTensor(module.forward(args));
 
-      // run jit graph executor
-      std::vector<at::IValue> args({ad_emb_packed, user_emb, wide});
-      at::Tensor output_1 = getTensor(module.forward(args));
+        std::unordered_map<std::string, c10::IValue> kwargs(
+            {{"ad_emb_packed", ad_emb_packed},
+             {"user_emb", user_emb},
+             {"wide", wide}});
 
-      std::unordered_map<std::string, c10::IValue> kwargs(
-          {{"ad_emb_packed", ad_emb_packed},
-           {"user_emb", user_emb},
-           {"wide", wide}});
+        // run static runtime
+        at::Tensor output_2 = getTensor(runtime.run({}, kwargs));
+        EXPECT_TRUE(output_1.equal(output_2));
+      }
 
-      // run static runtime
-      at::Tensor output_2 = getTensor(runtime.run({}, kwargs));
-      EXPECT_TRUE(output_1.equal(output_2));
+      EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(user_emb.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
 }
