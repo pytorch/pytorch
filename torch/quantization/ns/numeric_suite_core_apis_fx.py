@@ -103,7 +103,7 @@ class OutputLogger(nn.Module):
         self,
         node_name: str,
         model_name: str,
-        other_node_name: Optional[str] = None,
+        ref_node_name: Optional[str] = None,
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
@@ -111,17 +111,38 @@ class OutputLogger(nn.Module):
         self.node_name = node_name
         # name of the model from which the node originated from
         self.model_name = model_name
-        # name of the other node with a matching Logger
+        # name of the reference node with a matching Logger
         # used to link node_a_copy -> logger_a to node_c -> logger_c
         # in a_shadows_b
-        self.other_node_name = other_node_name
+        self.ref_node_name = ref_node_name
 
     def forward(self, x: torch.Tensor):
         self.stats.append(x.detach())
         return x
 
     def __repr__(self):
-        return f"OutputLogger(node_name={self.node_name}, model_name={self.model_name}, other_node_name={self.other_node_name})"
+        return f"OutputLogger(node_name={self.node_name}, model_name={self.model_name}, ref_node_name={self.ref_node_name})"
+
+def prepare_single_model_output(
+    model_name: str,
+    model: GraphModule,
+    subgraphs_to_instrument: List[Tuple[Tuple[Node, Node], str]],
+    logger_cls: Callable,
+) -> GraphModule:
+
+    # TODO(future PR): do not observe nodes we do not care
+    #   about (both fp32, denylist, etc)
+    # Note: for matching activations we always use the end nodes,
+    # such as observing the output of relu in linear-relu
+    # Note: ref_node_name is set to None in model B's loggers,
+    # and set to the corresponding model B's node in model A's loggers.
+    node_to_instrument_to_ref_node_name: Dict[Node, Optional[str]] = {}
+    for (node_start, node_end), ref_node_name in subgraphs_to_instrument:
+        node_to_instrument_to_ref_node_name[node_end] = ref_node_name
+
+    model = remove_observers_add_loggers(
+        model, node_to_instrument_to_ref_node_name, logger_cls, model_name)
+    return model
 
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
@@ -133,26 +154,17 @@ def prepare_model_outputs(
     gm_b: GraphModule,
     logger_cls: Callable,
 ) -> Tuple[GraphModule, GraphModule]:
-
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
+    subgraphs_to_instrument_a = []
+    subgraphs_to_instrument_b = []
+    for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
+        subgraphs_to_instrument_a.append((subgraph_a, match_name))
+        subgraphs_to_instrument_b.append((subgraph_b, match_name))
 
-    node_to_instrument_to_other_node_name_a: Dict[Node, Optional[str]] = {}
-    node_to_instrument_to_other_node_name_b: Dict[Node, Optional[str]] = {}
-    for match_name, match in matched_subgraph_pairs.items():
-        (node_start_a, node_end_a), (node_start_b, node_end_b) = match
-        # TODO(future PR): do not observe pairs of nodes we do not care
-        #   about (both fp32, denylist, etc)
-        # Note: for matching activations we always use the end nodes,
-        # such as observing the output of relu in linear-relu
-        # Note: other_node_name is set to None in model B's loggers,
-        # and set to the corresponding model B's node in model A's loggers.
-        node_to_instrument_to_other_node_name_a[node_end_a] = node_end_b.name
-        node_to_instrument_to_other_node_name_b[node_end_b] = None
-
-    gm_a = remove_observers_add_loggers(
-        gm_a, node_to_instrument_to_other_node_name_a, logger_cls, name_a)
-    gm_b = remove_observers_add_loggers(
-        gm_b, node_to_instrument_to_other_node_name_b, logger_cls, name_b)
+    gm_a = prepare_single_model_output(
+        name_a, gm_a, subgraphs_to_instrument_a, logger_cls)
+    gm_b = prepare_single_model_output(
+        name_b, gm_b, subgraphs_to_instrument_b, logger_cls)
     return (gm_a, gm_b)
 
 # Note: this is not a user facing API
@@ -201,12 +213,7 @@ def get_matching_activations(
                 )
             )
             if is_logger:
-                # If logger_obj.other_node_name is populated, then this logger
-                # is from model A, and other_node_name is the name from model B.
-                if mod.other_node_name is None:
-                    results[mod.node_name + '.stats'][mod.model_name] = mod.stats
-                else:
-                    results[mod.other_node_name + '.stats'][mod.model_name] = mod.stats
+                results[mod.ref_node_name + '.stats'][mod.model_name] = mod.stats
     return dict(results)
 
 # Note: this is not a user facing API
@@ -253,10 +260,10 @@ def get_matching_activations_a_shadows_b(
             )
         )
         if is_logger:
-            # If logger_obj.other_node_name is populated, then this logger
-            # is from model A, and other_node_name is the name from model B.
-            if mod.other_node_name is None:
+            # If logger_obj.ref_node_name is populated, then this logger
+            # is from model A, and ref_node_name is the name from model B.
+            if mod.ref_node_name is None:
                 results[mod.node_name + '.stats'][mod.model_name] = mod.stats
             else:
-                results[mod.other_node_name + '.stats'][mod.model_name] = mod.stats
+                results[mod.ref_node_name + '.stats'][mod.model_name] = mod.stats
     return dict(results)
