@@ -46,9 +46,45 @@ class ASGD(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+            params_with_grad = []
+            d_p_list = []
+            weight_decay = group['weight_decay']
+            lambd = group['lambd']
+            lr = group['lr']
+            etas = []
+            axs = []
+            state_steps = []
+
             for p in group['params']:
-                if p.grad is None:
-                    continue
+                if p.grad is not None:
+                    params_with_grad.append(p)
+                    if grad.is_sparse:
+                        raise RuntimeError('ASGD does not support sparse gradients')
+                    d_p_list.append(p.grad)
+
+                    state = self.state[p]
+
+                    # State initialization
+                    if len(state) == 0:
+                        state['step'] = 0
+                        state['eta'] = group['lr']
+                        etas.append(state['eta'])
+                        state['mu'] = 1
+                        state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        axs.append(state['ax'])
+
+                    state['step'] += 1
+                    state_steps.append(state['step'])
+
+
+            F.asgd(params_with_grad,
+                   d_p_list,
+                   state_steps,
+                   weight_decay,
+                   lambd,
+                   eta,
+                   lr)
+
                 grad = p.grad
                 if grad.is_sparse:
                     raise RuntimeError('ASGD does not support sparse gradients')

@@ -238,3 +238,35 @@ def rmsprop(params: List[Tensor],
             param.add_(buf, alpha=-lr)
         else:
             param.addcdiv_(grad, avg, value=-lr)
+
+
+def asgd(params: List[Tensor],
+         d_p_list: List[Tensor],
+         weight_decay: float,
+         lambd: float,
+         eta: float,
+         lr: float):
+    r"""Functional API that performs ASGD algorithm computation.
+
+    See :class:`~torch.optim.ASGD` for details.
+    """
+
+    if weight_decay != 0:
+        grad = grad.add(p, alpha=weight_decay)
+
+    # decay term
+    p.mul_(1 - lambd * state['eta'])
+
+    # update parameter
+    p.add_(grad, alpha=-state['eta'])
+
+    # averaging
+    if state['mu'] != 1:
+        state['ax'].add_(p.sub(state['ax']).mul(state['mu']))
+    else:
+        state['ax'].copy_(p)
+
+    # update eta and mu
+    state['eta'] = (lr /
+                    math.pow((1 + lamba * lr * state_steps[i]), group['alpha']))
+    state['mu'] = 1 / max(1, state_steps[i] - group['t0'])
