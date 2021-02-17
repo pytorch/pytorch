@@ -734,14 +734,15 @@ void pyCompilationUnitDefine(
   }
 }
 
-void initJitScriptBindings(PyObject* module) {
+void initJitScriptBindings(PyObject* module, PyObject* parent) {
   auto m = py::handle(module).cast<py::module>();
+  auto parent_m = py::handle(parent).cast<py::module>();
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<c10::Capsule>(m, "Capsule");
 
   auto object_class =
-      py::class_<Object>(m, "ScriptObject")
+      py::class_<Object>(parent_m, "ScriptObject")
           .def("_type", [](Module& m) { return m.type(); })
           .def(
               "_get_method",

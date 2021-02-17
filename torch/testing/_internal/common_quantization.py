@@ -765,8 +765,8 @@ class QuantizationTestCase(TestCase):
         embedding_unpack = torch.ops.quantized.embedding_bag_unpack
         # Check unpacked weight values explicitly
         for key in emb_dict:
-            if isinstance(emb_dict[key], torch._C._jit.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C._jit.ScriptObject)
+            if isinstance(emb_dict[key], torch._C.ScriptObject):
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
                 emb_weight = embedding_unpack(emb_dict[key])
                 loaded_weight = embedding_unpack(loaded_dict[key])
                 self.assertEqual(emb_weight, loaded_weight)

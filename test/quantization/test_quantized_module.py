@@ -152,8 +152,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         b.seek(0)
         loaded_dict = torch.load(b)
         for key in model_dict:
-            if isinstance(model_dict[key], torch._C._jit.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C._jit.ScriptObject)
+            if isinstance(model_dict[key], torch._C.ScriptObject):
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
                 w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
                 w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
                 self.assertEqual(w_model, w_loaded)
@@ -899,8 +899,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         b.seek(0)
         loaded_dict = torch.load(b)
         for key in model_dict:
-            if isinstance(model_dict[key], torch._C._jit.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C._jit.ScriptObject)
+            if isinstance(model_dict[key], torch._C.ScriptObject):
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
                 w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
                 w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
                 self.assertEqual(w_model, w_loaded)

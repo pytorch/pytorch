@@ -1183,22 +1183,15 @@ void initJITBindings(PyObject* module) {
       .def("has_default_value", [](Argument& self) -> py::bool_ {
         return self.default_value().has_value();
       });
-  m.def("get_all_schemas", []() {
+
+  top.def("_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations =
         getAllOperators();
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
       return op->schema();
     });
   });
-  m.def("get_custom_class_schemas", customClassSchemasForBCCheck);
-  top.def("get_all_schemas", []() {
-    const std::vector<std::shared_ptr<Operator>>& operations =
-        getAllOperators();
-    return fmap(operations, [](const std::shared_ptr<Operator>& op) {
-      return op->schema();
-    });
-  });
-  top.def("get_custom_class_schemas", customClassSchemasForBCCheck);
+  top.def("_jit_get_custom_class_schemas", customClassSchemasForBCCheck);
 
   m.def("get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
@@ -1374,7 +1367,7 @@ void initJITBindings(PyObject* module) {
       "_get_tracing_state", []() { return jit::tracer::getTracingState(); });
 
   initTreeViewBindings(m.ptr());
-  initJitScriptBindings(m.ptr());
+  initJitScriptBindings(m.ptr(), top.ptr());
   initJitBackendBindings(m.ptr());
   initStaticRuntimeBindings(m.ptr());
   initTensorExprBindings(m.ptr());
