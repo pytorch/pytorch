@@ -757,6 +757,8 @@ terrible spacing
 
         class FunctionalTracer(torch.fx.Tracer):
             def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                # `leaves` contains the set of standard `nn.Modules` that are not
+                # currently symbolically traceable. Ideally this set would be empty
                 leaves = set([torch.nn.BatchNorm2d])
                 return type(m) in leaves
 
@@ -787,14 +789,19 @@ terrible spacing
         """
         for test_params in module_tests + new_module_tests:
             if 'constructor' not in test_params:
-                name = test_params.pop('module_name')
-                test_params['constructor'] = getattr(torch.nn, name)
+                constructor = getattr(torch.nn, test_params['module_name'])
+            else:
+                constructor = test_params['constructor']
+
             if 'constructor_args' not in test_params:
                 args = ()
             else:
                 args = test_params['constructor_args']
 
-            mod = test_params['constructor'](*args)
+            mod = constructor(*args)
+            # Skip modules that are not standard `torch.nn`
+            # instances, including functionals. (functionals
+            # are tested in test_normalize_args)
             if mod.__class__.__name__ not in dir(torch.nn):
                 continue
 
@@ -808,6 +815,7 @@ terrible spacing
 
             params = ', '.join(f'v{i}' for i in range(len(inputs)))
 
+            # Generate a class to wrap this standard `nn.Module` instance
             test_classname = f'Test{mod.__class__.__name__}'
             test_mod_code = f"""
 class {test_classname}(torch.nn.Module):
@@ -822,17 +830,22 @@ class {test_classname}(torch.nn.Module):
             gbls = {'torch' : torch}
             exec(test_mod_code, gbls)
 
-            test_class = gbls[test_classname](mod)
-            traced = symbolic_trace(test_class)
+            test_instance = gbls[test_classname](mod)
+            traced = symbolic_trace(test_instance)
 
+            # Now actually test arg normalization!
             traced = NormalizeArgs(traced).transform()
 
+            # These Modules have an RNG in their forward, so testing
+            # correctness by comparing outputs is not correct. Skip that
+            # check for these
             stochastic_modules = {'FractionalMaxPool2d', 'FractionalMaxPool3d',
                                   'RReLU'}
 
             if mod.__class__.__name__ not in stochastic_modules:
                 self.assertEqual(traced(*inputs), mod(*inputs))
 
+            # Ensure all args/kwargs are normalized into kwargs
             modules = dict(traced.named_modules())
             for node in traced.graph.nodes:
                 if node.op == 'call_module':

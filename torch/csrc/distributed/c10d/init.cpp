@@ -28,6 +28,7 @@
 #include <c10d/comm.hpp>
 #include <c10d/frontend.hpp>
 #include <c10d/reducer.hpp>
+#include <c10d/logger.hpp>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -180,29 +181,7 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           "_register_builtin_comm_hook",
           &_register_builtin_comm_hook,
           py::arg("reducer"),
-          py::arg("comm_hook_type"))
-      .def(
-          "_set_construction_logging_data",
-          [](
-              ::c10d::Reducer& reducer,
-              const std::string& module_name,
-              const std::vector<int>& device_ids,
-              int output_device,
-              bool broadcast_buffers) -> void {
-            reducer.set_construction_logging_data(
-                module_name, device_ids, output_device, broadcast_buffers);
-          },
-          py::arg("reducer"),
-          py::arg("module_name"),
-          py::arg("device_ids"),
-          py::arg("output_device"),
-          py::arg("broadcast_buffers"))
-      .def(
-          "_get_ddp_logging_data",
-          [](::c10d::Reducer& reducer) -> c10::DDPLoggingData {
-            return reducer.get_ddp_logging_data();
-          },
-          py::arg("reducer"));
+          py::arg("comm_hook_type"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
       .def(
@@ -301,6 +280,24 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_get_local_used_maps",
           &::c10d::Reducer::get_local_used_maps_on_device);
+
+  shared_ptr_class_<::c10d::Logger>(module, "Logger")
+        .def(
+          py::init<std::shared_ptr<::c10d::Reducer>>(),
+          py::arg("reducer"),
+          py::call_guard<py::gil_scoped_release>())
+        .def(
+          "set_construction_data_and_log",
+          &::c10d::Logger::set_construction_data_and_log,
+          py::arg("module_name"),
+          py::arg("device_ids"),
+          py::arg("output_device"),
+          py::arg("broadcast_buffers"),
+          py::call_guard<py::gil_scoped_release>())
+        .def(
+          "get_ddp_logging_data",
+          &::c10d::Logger::get_ddp_logging_data,
+          py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
@@ -1230,7 +1227,22 @@ Arguments:
       .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
       .def_readwrite("find_unused_parameters", &c10::DDPLoggingData::find_unused_parameters)
       .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view)
-      .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name);
+      .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
+      .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
+      .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
+      .def_readwrite("total_parameter_size_bytes", &c10::DDPLoggingData::total_parameter_size_bytes)
+      .def_readwrite("num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
+      .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
+      .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
+      .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
+      .def_readwrite("cuda_visible_devices", &c10::DDPLoggingData::cuda_visible_devices)
+      .def_readwrite("gloo_socket_ifname", &c10::DDPLoggingData::gloo_socket_ifname)
+      .def_readwrite("gloo_device_transport", &c10::DDPLoggingData::gloo_device_transport)
+      .def_readwrite("nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
+      .def_readwrite("nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
+      .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
+      .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
+      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout);
 
   module.def(
       "_compute_bucket_assignment_by_size",

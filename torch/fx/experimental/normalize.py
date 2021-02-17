@@ -14,6 +14,14 @@ class NormalizeArgs(Transformer):
     signature and rewritten to exclusively kwargs in positional order.
     Also populates default values. Does not support positional-only
     parameters or varargs parameters (*args, **kwargs).
+
+    Example usage:
+
+        m = torchvision.models.resnet18()
+
+        traced = torch.fx.symbolic_trace(m)
+
+        traced = NormalizeArgs(traced).transform()
     """
     def __init__(self, module : torch.nn.Module, normalize_functionals : bool = True,
                  normalize_modules : bool = True):
@@ -58,6 +66,22 @@ class NormalizeArgs(Transformer):
 
     def _args_kwargs_to_normalized_kwargs(self, target : Target, args : Tuple[Argument, ...],
                                           kwargs : Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Given a call target, args, and kwargs, return the arguments normalized into
+        a single kwargs dict, or None if the type signature is not supported by
+        this normalization.
+
+        Args:
+
+            target (Callable): Python callable to normalize arguments for
+            args (Tuple): Arguments that appear at the callsite for `target`
+            kwargs (Dict): Keyword arugments that appear at the callsite for `target`
+
+        Returns:
+
+            Optional[Dict]: Normalized kwargs for `target`, or `None` if this target is not
+                supported
+        """
         assert not isinstance(target, str)
         sig = inspect.signature(inspect.unwrap(target))
         # Don't currently support positional-only
