@@ -881,13 +881,13 @@ def skipCUDAIfNotRocm(fn):
 def skipCUDAVersionIn(versions : List[List[int]] = None):
     def dec_fn(fn):
         @wraps(fn)
-        def wrap_fn(self, device, *args, **kwargs):
+        def wrap_fn(self, *args, **kwargs):
             if self.device_type == 'cuda':
                 version = _get_torch_cuda_version()
                 if version in (versions or []):
                     reason = "test skipped for CUDA version {0}.{1}".format(version[0], version[1])
                     raise unittest.SkipTest(reason)
-            return fn(self, device, *args, **kwargs)
+            return fn(self, *args, **kwargs)
 
         return wrap_fn
     return dec_fn
