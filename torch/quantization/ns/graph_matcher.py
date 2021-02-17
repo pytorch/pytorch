@@ -11,16 +11,9 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from typing import Dict, Tuple, List, Optional, Set, Callable, Any
+from .utils import getattr_from_fqn
 
-# TODO(before land): delete this
-def _print_node(node: Optional[Node]) -> None:
-    if node is None:
-        print(None)
-    else:
-        print(
-            node, ', target:', node.target, ', op:', node.op,
-            ', args:', node.args, ', kwargs:', node.kwargs)
+from typing import Dict, Tuple, List, Optional, Set, Callable
 
 def _get_output_nodes(g: Graph) -> List[Node]:
     return [n for n in g.nodes if n.op == 'output']
@@ -89,16 +82,6 @@ def get_non_matchable_modules() -> Set[Callable]:
         torch.quantization.FakeQuantizeBase,
     ])
 
-def _getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
-    """
-    Given a gm and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
-    """
-    fqn_parts = fqn.split(".")
-    cur_val = gm
-    for part in fqn_parts:
-        cur_val = getattr(cur_val, part)
-    return cur_val
-
 class _NSGraphMatchableNodesIterator:
     """
     Iterates through the graph of gm, starting with the output nodes
@@ -153,7 +136,7 @@ class _NSGraphMatchableNodesIterator:
         elif node.op == 'call_module':
             assert isinstance(node.target, str)
             # target_mod = getattr(self.gm, node.target)
-            target_mod = _getattr_from_fqn(self.gm, node.target)
+            target_mod = getattr_from_fqn(self.gm, node.target)
             return not \
                 any(isinstance(target_mod, t)  # type: ignore
                     for t in self.non_matchable_modules)
@@ -187,9 +170,9 @@ def _node_a_related_to_b(
     elif node_a.op == 'call_module':
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node_a.target, str)
-        mod_a = _getattr_from_fqn(gm_a, node_a.target)
+        mod_a = getattr_from_fqn(gm_a, node_a.target)
         assert isinstance(node_b.target, str)
-        mod_b = _getattr_from_fqn(gm_b, node_b.target)
+        mod_b = getattr_from_fqn(gm_b, node_b.target)
         # modules with equivalent types always match (i.e. nn.Conv2d and nn.Conv2d)
         if type(mod_a) == type(mod_b):
             return True
@@ -213,7 +196,7 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[Callable]:
         return node.target  # type: ignore
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
-        mod = _getattr_from_fqn(gm, node.target)
+        mod = getattr_from_fqn(gm, node.target)
         return type(mod)
     return None
 
@@ -279,13 +262,6 @@ def get_matching_node_pairs(
             cur_node_b = next(graph_b_iterator)
         except StopIteration:
             pass
-
-        # TODO(before land): remove
-        if False:
-            print('a')
-            _print_node(cur_node_a)
-            print('b')
-            _print_node(cur_node_b)
 
         # look up types of a and b for useful error messages
         type_a, type_b = None, None
