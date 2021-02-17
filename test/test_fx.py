@@ -1681,6 +1681,75 @@ class TestFX(JitTestCase):
         self.assertEqual(mod_true(3), 6)
         self.assertEqual(mod_false(3), 3)
 
+    def test_submodule_manipulation_API(self):
+        class C(torch.nn.Module):
+            def __init__(self):
+                super(C, self).__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3, stride=2)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+                self.linear = torch.nn.Linear(100, 200)
+                self.net_c = C()
+
+            def forward(self, x):
+                return self.linear(self.net_c(x))
+
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+                self.net_b = B()
+
+            def forward(self, x):
+                return self.net_b(x)
+
+        a = symbolic_trace(A())
+
+        a.insert_submodule("net_b.net_c.dropout", torch.nn.Dropout(p=0.2))
+
+        conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"][-1]
+        with a.graph.inserting_before(conv):
+            dropout = a.graph.call_module(module_name='net_b.net_c.dropout',
+                                          args=conv.args)
+
+        conv.replace_all_uses_with(dropout)
+        a.graph.erase_node(conv)
+        a.recompile()
+
+        # Test that we added the "dropout" submodule
+        self.assertEqual(hasattr(getattr(getattr(a, "net_b"), "net_c"), "dropout"),    # noqa: B009
+                         True)
+
+        # Test `has_submodule` with an added submodule
+        self.assertEqual(a.has_submodule("net_b.net_c.dropout"), True)
+
+        # Test that the "conv" submodule is still there
+        self.assertEqual(hasattr(getattr(getattr(a, "net_b"), "net_c"), "conv"),       # noqa: B009
+                         True)
+
+        # Test `has_submodule` with an original module
+        self.assertEqual(a.has_submodule("net_b.net_c.conv"), True)
+
+        # Test that the "conv" node is NOT still there
+        conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"]
+        self.assertEqual(conv, [])
+
+        a.delete_submodule("net_b.net_c.conv")
+
+        # Test that the "conv" submodule is now gone
+        self.assertEqual(hasattr(getattr(getattr(a, "net_b"), "net_c"), "conv"),    # noqa: B009
+                         False)
+
+        # Test `has_submodule` with a deleted submodule
+        self.assertEqual(a.has_submodule("net_b.net_c.conv"), False)
+
+        a.graph.lint(a)
+
+
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))

@@ -102,20 +102,6 @@ def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target:
         setattr(to_module, field, orig)
 
 
-# Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
-# This installs empty Modules where none exist yet if they are subpaths of target
-def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
-    *prefix, field = target.split('.')
-    for item in prefix:
-        t = getattr(to_module, item, None)
-
-        if t is None:
-            t = torch.nn.Module()
-            setattr(to_module, item, t)
-        to_module = t
-
-    setattr(to_module, field, from_obj)
-
 class GraphModule(torch.nn.Module):
     """
     GraphModule is an nn.Module generated from an fx.Graph. Graphmodule has a
@@ -188,10 +174,11 @@ class GraphModule(torch.nn.Module):
             # ``foo.bar.baz``
             targets_to_copy.sort(key=lambda t: t.count('.'))
             for target_to_copy in targets_to_copy:
-                _assign_attr(root[target_to_copy], self, target_to_copy)
+                self.insert_submodule(target_to_copy, root[target_to_copy])
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
         self.graph = graph
+        graph._gm = self
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -214,6 +201,7 @@ class GraphModule(torch.nn.Module):
         corresponds to ``g``
         """
         self._graph = g
+        g._gm = self
         self.recompile()
 
     def to_folder(self, folder: Union[str, os.PathLike], module_name : str = "FxModule"):
@@ -275,6 +263,113 @@ class {module_name}(torch.nn.Module):
         if len(blobified_modules) > 0:
             warnings.warn("Was not able to save the following children modules as reprs -"
                           f"saved as pickled files instead: {blobified_modules}")
+
+    def has_submodule(self, target: str) -> bool:
+        """
+        Returns whether or not this GraphModule contains the submodule
+        given by ``str``.
+
+        Args:
+            target: The fully-qualified string name of the submodule
+                to look for.
+        """
+        atoms: List[str] = target.split(".")
+        mod: torch.nn.Module = self
+
+        for item in atoms:
+            if not hasattr(mod, item):
+                return False
+            mod = getattr(mod, item)
+
+        return True
+
+    def insert_submodule(self, target: str, m: torch.nn.Module) -> None:
+        """
+        Adds the given submodule to ``self``.
+
+        This installs empty Modules where none exist yet if they are 
+        subpaths of ``target``.
+
+        Args:
+            target: The fully-qualified string name of the new submodule
+            m: The submodule itself; the actual object we want to
+                install in the current GraphModule
+        """
+        *prefix, field = target.split('.')
+
+        for item in prefix:
+
+            t = getattr(self, item, None)
+
+            if t is None:
+                t = torch.nn.Module()
+                setattr(self, item, t)
+
+            self = t
+
+        setattr(self, field, m)
+
+    def delete_submodule(self, target: str) -> bool:
+        """
+        Deletes the given submodule from ``self``.
+
+        The module will not be deleted if ``target`` is not a valid
+        target. This method will also delete parent submodules if they
+        if become unused after deleting their child. For example,
+        ``target=foo.baz.bar`` will first cause ``bar`` to be deleted.
+        If deleting ``bar`` means that ``foo.baz`` is unused, then
+        ``foo.baz`` will be deleted. If deleting ``baz`` means that
+        ``foo`` is unused, ``foo`` will be deleted as well. The most
+        deeply-nested submodule will always be deleted, regardless of
+        whether or not it contains other submodules. (So, in the above
+        example, ``foo.bar.baz`` will be deleted even if it contains
+        ``foo.bar.baz.qux``.)
+
+        Args:
+            target: The fully-qualified string name of the new submodule
+
+        Returns:
+            bool: Whether or not the target string referenced a
+                submodule we want to delete. A return value of ``False``
+                could mean either a) the submodule doesn't exist or
+                b) the submodule is an intermediary submodule that
+                contains other submodules and thus can't be safely
+                deleted.
+        """
+
+        def delete_nested(mod: torch.nn.Module, target: str) -> bool:
+            item, *suffix_list = target.split('.', 1)
+
+            if not hasattr(mod, item):
+                return False
+
+            # If we've reached the final item in `target`, e.g. `baz` of
+            # `foo.bar.baz`
+            if not suffix_list:
+                delattr(mod, item)
+                return True
+
+            submod = getattr(mod, item)
+
+            if not delete_nested(submod, "".join(suffix_list)):
+                return False
+
+            # We can delete the current module if it doesn't have any
+            # other child modules. `named_children` returns an iterator,
+            # which is why we want to check using a try-except block
+            has_other_submodules = True
+            try:
+                next(submod.named_children())
+            except StopIteration:
+                has_other_submodules = False
+
+            if has_other_submodules:
+                return False
+
+            delattr(mod, submod)
+            return True
+
+        return delete_nested(self, target)
 
     @property
     def code(self) -> str:

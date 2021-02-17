@@ -1,5 +1,4 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
-
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import torch
 import keyword
@@ -121,7 +120,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self):
+    def __init__(self, gm: Optional["GraphModule"] = None):     # type: ignore[name-defined]
         """
         Construct an empty Graph.
         """
@@ -129,6 +128,7 @@ class Graph:
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
+        self._gm = gm
 
     @property
     def nodes(self) -> _node_list:
@@ -342,6 +342,12 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
         """
+        if self._gm and not self._gm.has_submodule(qualified_name):
+            raise RuntimeError("Attempted to insert a get_attr Node "
+                               "with no underlying reference in the "
+                               "owning GraphModule! Call "
+                               "GraphModule.add_submodule to add the "
+                               "necessary submodule")
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
     def call_module(self,
@@ -379,6 +385,12 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
+        if self._gm and not self._gm.has_submodule(module_name):
+            raise RuntimeError("Attempted to insert a call_module Node "
+                               "with no underlying reference in the "
+                               "owning GraphModule! Call "
+                               "GraphModule.insert_submodule to add the"
+                               " necessary submodule")
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
     def call_method(self,
