@@ -1447,25 +1447,38 @@ void Reducer::ensure_prior_reduction_finished() {
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
   if (require_finalize_) {
-    TORCH_CHECK(
-        false,
-        "Expected to have finished reduction in the prior iteration before ",
-        "starting a new one. ",
-        "",
-        "This error indicates that your module has parameters that were ",
-        "not used in producing loss. ",
-        "",
-        "You can enable unused parameter detection by (1) passing the keyword "
-        "argument `find_unused_parameters=True` to ",
-        "`torch.nn.parallel.DistributedDataParallel`; (2) making sure all ",
-        "`forward` function outputs participate in calculating loss. "
-        "",
-        "If you already have done the above two steps, then the distributed ",
-        "data parallel module wasn't able to locate the output tensors in the ",
-        "return value of your module's `forward` function. ",
-        "Please include the loss function and the structure of the return ",
-        "value of `forward` of your module when reporting this issue (e.g. ",
-        "list, dict, iterable).");
+    std::string kBaseErrorMsg = "Expected to have finished reduction in the prior iteration before "
+        "starting a new one. "
+        ""
+        "This error indicates that your module has parameters that were "
+        "not used in producing loss. ";
+    std::string kOutputsNotUsedInLossErrorMsg = "making sure all "
+        "`forward` function outputs participate in calculating loss. ";
+    std::string kDDPBugErrorMsg = "\nIf you already have done the above, then the distributed "
+        "data parallel module wasn't able to locate the output tensors in the "
+        "return value of your module's `forward` function. "
+        "Please include the loss function and the structure of the return "
+        "value of `forward` of your module when reporting this issue (e.g. "
+        "list, dict, iterable).";
+
+    if (!find_unused_parameters_) {
+      // Parameters may have been unused in forward pass, or not all outputs
+      // were used in producing loss.
+      kBaseErrorMsg += "You can enable unused parameter detection by passing the "
+      "keyword argument `find_unused_parameters=True` to "
+      "`torch.nn.parallel.DistributedDataParallel`, and by \n";
+      kBaseErrorMsg += kOutputsNotUsedInLossErrorMsg;
+      kBaseErrorMsg += kDDPBugErrorMsg;
+    } else {
+      // Note that it does not really matter whether unused_parameters_.empty(),
+      // since user may have enabled detection but this particular iteration
+      // could have used or not used all parameters.
+      kBaseErrorMsg += "Since `find_unused_parameters=True` is enabled, this likely "
+      " means that not all `forward` outputs participate in computing loss. You can fix this by ";
+      kBaseErrorMsg += kOutputsNotUsedInLossErrorMsg;
+      kBaseErrorMsg += kDDPBugErrorMsg;
+    }
+     TORCH_CHECK(false, kBaseErrorMsg);
   }
 }
 
