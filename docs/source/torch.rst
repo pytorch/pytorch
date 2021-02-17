@@ -563,5 +563,4 @@ Utilities
     promote_types
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
-    vmap
     _assert
