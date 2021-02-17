@@ -7,7 +7,6 @@ import os
 import re
 from subprocess import check_call, check_output
 import sys
-import distutils
 import distutils.sysconfig
 from distutils.version import LooseVersion
 

@@ -369,6 +369,11 @@ int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
 }
 
+void CUDAHooks::deviceSynchronize(int64_t device_index) const {
+  at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
+  c10::cuda::device_synchronize();
+}
+
 // Sigh, the registry doesn't support namespaces :(
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;

@@ -9,13 +9,14 @@ import os
 import threading
 import itertools
 import warnings
+import queue
 from typing import Any, Callable, TypeVar, Generic, Sequence, List, Optional
 
 import multiprocessing as python_multiprocessing
 import torch
 import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
-from torch._six import queue, string_classes
+from torch._six import string_classes
 
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
@@ -308,10 +309,6 @@ class DataLoader(Generic[T_co]):
     def multiprocessing_context(self, multiprocessing_context):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
-                if not multiprocessing._supports_context:
-                    raise ValueError('multiprocessing_context relies on Python >= 3.4, with '
-                                     'support for different start methods')
-
                 if isinstance(multiprocessing_context, string_classes):
                     valid_start_methods = multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
@@ -966,8 +963,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self._index_queues[idx].put(_utils.worker._ResumeIteration())
             resume_iteration_cnt = self._num_workers
             while resume_iteration_cnt > 0:
-                data = self._get_data()
-                if isinstance(data, _utils.worker._ResumeIteration):
+                return_idx, return_data = self._get_data()
+                if isinstance(return_idx, _utils.worker._ResumeIteration):
+                    assert return_data is None
                     resume_iteration_cnt -= 1
         # prime the prefetch loop
         for _ in range(self._prefetch_factor * self._num_workers):

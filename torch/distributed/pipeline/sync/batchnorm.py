@@ -9,7 +9,7 @@ from typing import Optional, TypeVar, cast
 
 import torch
 from torch import Tensor, nn
-import torch.nn.functional as F
+from torch.nn.functional import batch_norm
 from torch.nn.modules.batchnorm import _BatchNorm
 
 from .checkpoint import is_recomputing
@@ -97,7 +97,7 @@ class DeferredBatchNorm(_BatchNorm):
     def forward(self, input: Tensor) -> Tensor:  # type: ignore
         if not self.training:
             # Don't train parameters on the evaluation mode.
-            return F.batch_norm(
+            return batch_norm(
                 input,
                 running_mean=self.running_mean,
                 running_var=self.running_var,
@@ -119,7 +119,7 @@ class DeferredBatchNorm(_BatchNorm):
                 self._commit()
 
         # Normalize a micro-batch and train the parameters.
-        return F.batch_norm(
+        return batch_norm(
             input,
             running_mean=None,
             running_var=None,

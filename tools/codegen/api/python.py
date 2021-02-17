@@ -3,7 +3,6 @@ from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
 
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
-import tools.codegen.local as local
 from tools.codegen.gen import pythonify_default
 from tools.codegen.model import *
 
@@ -599,11 +598,8 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
 
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
-            if not simple_type or local.use_c10_dispatcher().dispatcher_uses_new_style():
-                # Is it desired to keep '?' for simple_type with new style dispatcher?
-                return 'Tensor?'
-            else:
-                return 'Tensor'
+            # Is it desired to keep '?' for simple_type with new style dispatcher?
+            return 'Tensor?'
         elem = argument_type_str(t.elem, simple_type=simple_type)
         if elem == 'Layout':
             # TODO: fix this special case in PythonArgParser?
@@ -1022,10 +1018,7 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
 
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
-            if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                return 'optionalTensor'
-            else:
-                return 'tensor'
+            return 'optionalTensor'
 
         elif isinstance(t.elem, BaseType):
             if t.elem.name in [BaseTy.ScalarType, BaseTy.Scalar,

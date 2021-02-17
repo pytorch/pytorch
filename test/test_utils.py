@@ -10,6 +10,7 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.utils.data
+from torch.utils.data import DataLoader
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
@@ -28,7 +29,7 @@ HAS_CUDA = torch.cuda.is_available()
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class RandomDatasetMock(object):
+class RandomDatasetMock(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
@@ -190,7 +191,7 @@ class TestCheckpoint(TestCase):
         b = torch.randn(1, 100, requires_grad=True)
 
         with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1, a, b)
+            checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -200,7 +201,7 @@ class TestCheckpoint(TestCase):
         model = nn.Sequential(Noop())
 
         with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1)
+            checkpoint_sequential(model, 1)  # type: ignore[call-arg]
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
@@ -277,7 +278,7 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, input_var2)
         out[0].sum().backward()
 
-        def run_fn(tensor1, tensor2):
+        def run_fn2(tensor1, tensor2):
             return tensor1
         input_var = torch.randn(1, 4, requires_grad=False)
         input_var2 = torch.randn(1, 4, requires_grad=True)
@@ -285,7 +286,7 @@ class TestCheckpoint(TestCase):
             RuntimeError,
             r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
         ):
-            out = checkpoint(run_fn, input_var, input_var2)
+            out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
 
 class TestDataLoader(TestCase):
@@ -308,35 +309,38 @@ class TestDataLoader(TestCase):
         self.assertEqual(x1, x2)
 
     def test_single_keep(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=0,
-                                                 drop_last=False)
+        # self.dataset is a Tensor here; technically not a valid input because
+        # not a Dataset subclass, but needs to stay working so add ignore's
+        # for type checking with mypy
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_single_drop(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=0,
-                                                 drop_last=True)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=2,
-                                                 drop_last=False)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_multi_drop(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=2,
-                                                 drop_last=True)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
@@ -347,7 +351,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # noqa: F401
+            from torch.utils.ffi import create_extension  # type: ignore  # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -364,9 +368,9 @@ class TestBottleneck(TestCase):
             p.kill()
             output, err = p.communicate()
         rc = p.returncode
-        output = output.decode("ascii")
-        err = err.decode("ascii")
-        return (rc, output, err)
+        output_str = output.decode("ascii")
+        err_str = err.decode("ascii")
+        return (rc, output_str, err_str)
 
     def _run_bottleneck(self, test_file, scriptargs=''):
         curdir = os.path.dirname(os.path.abspath(__file__))
@@ -661,11 +665,11 @@ class TestAssert(TestCase):
         # data can be passed without errors
         x = torch.randn(4, 4).fill_(1.0)
         ms(x)
-        with self.assertRaisesRegex(torch.jit.Error, "foo"):
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
             ms(torch.tensor([False], dtype=torch.bool))
 
 
-@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only.")
+@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()

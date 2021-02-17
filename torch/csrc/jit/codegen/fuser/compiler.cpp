@@ -260,7 +260,7 @@ std::shared_ptr<FusedKernel> compileKernel(
       sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
     }
 
-    auto scalar_type = o->type()->expect<TensorType>()->scalarType();
+    auto scalar_type = o->type()->expectRef<TensorType>().scalarType();
     TORCH_INTERNAL_ASSERT(scalar_type);
     auto type = TensorType::createContiguous(*scalar_type, device, sizes);
     output_desc.emplace_back(type);

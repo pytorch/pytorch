@@ -31,8 +31,10 @@ TEST_SKIPS = {
     "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
-    "skipIfRocm": TestSkip(78, "Test skipped for ROCm")
+    "skipIfRocm": TestSkip(78, "Test skipped for ROCm"),
+    "no_peer_access": TestSkip(79, "Test skipped because no GPU peer access"),
 }
+
 
 def skip_if_no_gpu(func):
     """ Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
@@ -268,6 +270,10 @@ class MultiProcessTestCase(TestCase):
     # simulate failures and in those cases, we can't have an exit code of 0,
     # but we still want to ensure we didn't run into any other errors.
     TEST_ERROR_EXIT_CODE = 10
+
+    # do not early terminate for distributed tests.
+    def _should_stop_test_suite(self):
+        return False
 
     @property
     def world_size(self):

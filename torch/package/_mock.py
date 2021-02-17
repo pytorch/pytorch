@@ -23,7 +23,23 @@ _magic_methods = ['__subclasscheck__', '__hex__', '__rmul__',
 class MockedObject:
     _name: str
 
-    def __init__(self, name):
+    def __new__(cls, *args, **kwargs):
+        # _suppress_err is set by us in the mocked module impl, so that we can
+        # construct instances of MockedObject to hand out to people looking up
+        # module attributes.
+
+        # Any other attempt to construct a MockedOject instance (say, in the
+        # unpickling process) should give an error.
+        if not kwargs.get("_suppress_err"):
+            raise NotImplementedError(f"Object '{cls._name}' was mocked out during packaging "
+                                      f"but it is being used in '__new__'. If this error is "
+                                      "happening during 'load_pickle', please ensure that your "
+                                      "pickled object doesn't contain any mocked objects.")
+        # Otherwise, this is just a regular object creation
+        # (e.g. `x = MockedObject("foo")`), so pass it through normally.
+        return super().__new__(cls)
+
+    def __init__(self, name: str, _suppress_err: bool):
         self.__dict__['_name'] = name
 
     def __repr__(self):

@@ -35,13 +35,14 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def _forward_from_src(src : str):
-    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan}
+def _forward_from_src(src: str):
+    # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
+    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
     exec_with_source(src, gbls)
     return gbls['forward']
 
 
-def deserialize_graphmodule(body : dict) -> torch.nn.Module:
+def deserialize_graphmodule(body: Dict[Any, Any]) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -139,7 +140,7 @@ class GraphModule(torch.nn.Module):
             pass
         return super().__new__(GraphModuleImpl)
 
-    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, class_name: str = 'GraphModule'):
         """
         Construct a GraphModule.
 
@@ -156,8 +157,13 @@ class GraphModule(torch.nn.Module):
 
             graph (Graph): ``graph`` contains the nodes this GraphModule should use for code generation
 
+            name (str): ``name`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
+                error messages will report as originating from ``GraphModule``. It may be helpful to set this
+                to ``root``'s original name or a name that makes sense within the context of your transform.
+
         """
         super().__init__()
+        self.__class__.__name__ = class_name
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
@@ -185,6 +191,7 @@ class GraphModule(torch.nn.Module):
                 _assign_attr(root[target_to_copy], self, target_to_copy)
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
+
         self.graph = graph
 
     # TorchScript breaks trying to compile the graph setter because of the
@@ -292,16 +299,45 @@ class {module_name}(torch.nn.Module):
 
         cls_call = cls.__call__
 
-        def print_full_traceback(exctype, value, tb):
-            traceback.print_exception(exctype, value, tb)
+        # Previously, if an error occurred when valid
+        # symbolically-traced code was run with an invalid input, the
+        # user would see the source of the error as coming from
+        # `File "<eval_with_key_N">`, where N is some number. We use
+        # this function to generate a more informative error message. We
+        # return the traceback itself, a message explaining that the
+        # error occurred in a traced Module's generated forward
+        # function, and five lines of context surrounding the faulty
+        # line
+        def generate_error_message(frame_summary: traceback.FrameSummary) -> str:
+            # auxiliary variables (for readability)
+            err_lineno = frame_summary.lineno
+            err_line_len = len(frame_summary.line)
+            all_src_lines = _eval_cache[frame_summary.filename]
+
+            # constiuent substrings of the error message
+            tb_repr = traceback.format_exc()
+            custom_msg = ("Call using an FX-traced Module, "
+                          f"line {err_lineno} of the traced Module’s "
+                          "generated forward function:")
+            before_err = "".join(all_src_lines[err_lineno - 2 : err_lineno])
+            marker = "~" * err_line_len + "~~~ <--- HERE"
+            err_and_after_err = "\n".join(all_src_lines[err_lineno : err_lineno + 2])
+
+            # joined message
+            return "\n".join([tb_repr, custom_msg, before_err, marker, err_and_after_err])
 
         def wrapped_call(self, *args, **kwargs):
-            old_excepthook = sys.excepthook
             try:
-                sys.excepthook = print_full_traceback
                 return cls_call(self, *args, **kwargs)
-            finally:
-                sys.excepthook = old_excepthook
+            except Exception as e:
+                assert e.__traceback__
+                topmost_framesummary: traceback.FrameSummary = \
+                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
+                if "eval_with_key" in topmost_framesummary.filename:
+                    print(generate_error_message(topmost_framesummary),
+                          file=sys.stderr)
+                raise e.with_traceback(None)
+
         cls.__call__ = wrapped_call
 
     def __reduce__(self):

@@ -36,7 +36,7 @@ if args.aten_root:
     if not os.path.exists(args.aten_root):
         raise ValueError('aten_root ({}) does not exist'.format(
             args.aten_root))
-    sys.path.append(os.path.join(args.aten_root, '..'))  # TODO: fix this
+    sys.path.insert(0, os.path.join(args.aten_root, '..'))
     from tools.codegen.code_template import CodeTemplate as CT
 else:
     from tools.codegen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
@@ -236,11 +236,11 @@ if __name__ == '__main__':
     decls = yaml.load(read(os.path.join(args.yaml_dir, 'Declarations.yaml')), Loader=Loader)
     factory_methods = find_factory_methods(decls)
     filtered = [expanded for o in decls for expanded in expand(o) if supports(expanded, factory_methods)]
-    top_env = {
+    top_env: Dict[str, List] = {
         'mappings': [],
         'implementations': [],
         'cases': [],
-    }  # type: Dict[str, List]
+    }
     seen: Set[str] = set()
     key = 0
     for o in filtered:
@@ -285,8 +285,7 @@ if __name__ == '__main__':
         real_inputs = 0
         for i, arg in enumerate(o['arguments']):
             env['arguments'].append(arg['name'])
-            # Emulate logic in gen_unboxing_wrappers.py. Pretend the flat argument
-            # list is a stack where the end is the top.
+            # Pretend the flat argument list is a stack where the end is the top.
             view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
             if arg['type'] == 'TensorList':
                 # NOTE: do not advance real_inputs here. After this we will

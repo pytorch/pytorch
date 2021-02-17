@@ -744,8 +744,9 @@ struct CodeImpl {
 
     // Emit the expected type.
     size_t types_start = type_table_.size();
+    auto types = node->tys(attr::types);
     for (size_t i = 0; i < num_inputs; i++) {
-      emitType(node->outputs()[i]->type());
+      emitType(types[i]);
     }
     insertInstruction(TYPECHECK, types_start, num_inputs);
   }
@@ -789,9 +790,6 @@ struct CodeImpl {
     insertInstruction(PROFILE_OP, profile_function_table_.size());
     if (node->cast<ProfileOp>()) {
       profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
-    } else if (node->cast<ProfileOptionalOp>()) {
-      profile_function_table_.push_back(
-          node->cast<ProfileOptionalOp>()->getCallback());
     } else if (node->cast<ProfileIValueOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileIValueOp>()->getCallback());
@@ -846,7 +844,7 @@ struct CodeImpl {
 
   void emitTupleConstruct(Node* node) {
     bool named =
-        node->output()->type()->expect<TupleType>()->name().has_value();
+        node->output()->type()->expectRef<TupleType>().name().has_value();
     if (named) {
       emitContainerConstruct(NAMED_TUPLE_CONSTRUCT, node);
     } else {
@@ -937,7 +935,7 @@ struct CodeImpl {
         break;
       case prim::CallFunction:
         emitCall(
-            node->inputs().at(0)->type()->expect<FunctionType>()->function(),
+            node->inputs().at(0)->type()->expectRef<FunctionType>().function(),
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
@@ -954,7 +952,6 @@ struct CodeImpl {
         emitBailOut(node);
         break;
       case prim::profile_ivalue:
-      case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
         break;
@@ -1418,7 +1415,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
-              auto t = input.toTensor();
+              auto& t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
               if (t.defined() && !expected_type->matchTensor(t)) {
@@ -1439,7 +1436,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               // so it's safe to pass this guard check
               push(stack, true);
             } else {
-              auto t = stack.back().toTensor();
+              auto& t = stack.back().toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X];
               auto expected_type = expected->cast<TensorType>();
               if (t.defined() &&
@@ -1495,7 +1492,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case LIST_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<ListType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<ListType>();
             listConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
