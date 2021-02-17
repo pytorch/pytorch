@@ -28,7 +28,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      record_function, emit_nvtx)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
@@ -5025,8 +5025,6 @@ separate_complex_tests = ['view_as_real', 'real', 'imag', 'div', 'pow', 'rsqrt',
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
 
-# TODO: Add back 'sgn' to complex_list; removed because of Windows test failure with 11.2
-# See: https://github.com/pytorch/pytorch/issues/51980
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
                 'repeat', 'expand', 'rot90', 'transpose',
@@ -5039,6 +5037,12 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile',
                 'baddbmm', 'addbmm', 'addmv'] + separate_complex_tests
+
+# TODO: Add back 'sgn' to complex_list; removed because of Windows test failure with 11.2
+# See: https://github.com/pytorch/pytorch/issues/51980
+if _get_torch_cuda_version() != [11, 2]:
+    complex_list.append('sgn')
+    print(complex_list)
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([

@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import (
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIfNoMagma,
+    skipCUDAIfNoMagma, skipCUDAVersion,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
@@ -6362,8 +6362,7 @@ class TestTorchDeviceType(TestCase):
 
         self._test_where_scalar_template(device, dtype, checkRaises)
 
-    # See https://github.com/pytorch/pytorch/issues/51980
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA misaligned address error on Windows w/ 11.2')
+    @skipCUDAVersion([11, 2])  # test fails for 11.2, see https://github.com/pytorch/pytorch/issues/51980
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
