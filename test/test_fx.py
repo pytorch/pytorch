@@ -19,7 +19,6 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Trac
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.fx.experimental.rewriter import RewritingTracer
 from copy import deepcopy
 
 from torch.fx.proxy import TraceError
@@ -1728,48 +1727,9 @@ class TestFX(JitTestCase):
         except RuntimeError:
             captured = traceback.format_exc()
 
-        self.assertNotIn("Call using an FX-traced Module, line 4 of the"
-                         " traced Module’s generated forward function:",
+        self.assertNotIn("Call using an FX-traced Module, line 4 of the "
+                         "traced Module’s generated forward function:",
                          captured)
-
-    def test_ast_rewriter_rewrites_assert(self):
-        class M(torch.nn.Module):
-            def forward(self, x: torch.Tensor, y: int, z: int):
-                assert y == z
-                return torch.add(x, x)
-
-        ast_rewriter = RewritingTracer()
-        graph = ast_rewriter.trace(M())
-        traced = GraphModule(ast_rewriter.root, graph, "gm")
-
-        traced.graph.lint(traced)
-
-    def test_ast_rewriter_rewrites_assert_with_message(self):
-        class M(torch.nn.Module):
-            def forward(self, x: torch.Tensor, y: int, z: int):
-                assert y == z, "msg"
-                return torch.add(x, x)
-
-        ast_rewriter = RewritingTracer()
-        graph = ast_rewriter.trace(M())
-        traced = GraphModule(ast_rewriter.root, graph, "gm")
-
-        traced.graph.lint(traced)
-
-    def test_ast_rewriter_reassigns_submodules(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.bn = torch.nn.BatchNorm2d(100)
-
-            def forward(self, x: torch.Tensor):
-                return torch.add(x, x)
-
-        ast_rewriter = RewritingTracer()
-        graph = ast_rewriter.trace(M())
-        traced = GraphModule(ast_rewriter.root, graph, "gm")
-
-        traced.graph.lint(traced)
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
