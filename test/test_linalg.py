@@ -3046,7 +3046,7 @@ class TestLinalg(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.cfloat)
-    @precisionOverride({torch.float: 1e-03, torch.cfloat: 1e-02})
+    @precisionOverride({torch.float: 1e-02, torch.cfloat: 1e-02})
     def test_multi_dot(self, device, dtype):
         def check(*shapes):
             tensors = [make_tensor(shape, device, dtype, low=None, high=None) for shape in shapes]

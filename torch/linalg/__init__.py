@@ -459,7 +459,7 @@ of size `(b)` and `(c, d)` the output will have size `(d)`.
           :func:`torch.mm` instead for the matrix multiplications.
 
 Args:
-    input (list of Tensors): two or more tensors to multiply. The first and last
+    tensors (sequence of Tensors): two or more tensors to multiply. The first and last
         tensors may be 1D or 2D. Every other tensor must be 2D.
 
 Keyword args:
