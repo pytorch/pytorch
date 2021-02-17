@@ -22,7 +22,7 @@ static CPUCapability compute_cpu_capability() {
     if (strcmp(envar, "avx") == 0) {
       return CPUCapability::AVX;
     }
-#endif     
+#endif
     if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
     }
