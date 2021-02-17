@@ -1128,7 +1128,9 @@ void initJITBindings(PyObject* module) {
     parseIR(input, &*graph);
     return graph;
   });
-  m.def("parse_schema", parseSchema);
+
+  top.def("parse_schema", parseSchema);
+
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);

@@ -109,8 +109,8 @@ def dont_parse(schema_line):
 
 
 def check_bc(existing_schemas):
-    new_schemas = torch._C._jit.get_all_schemas()
-    new_schemas += torch._C._jit.get_custom_class_schemas()
+    new_schemas = torch._C._jit_get_all_schemas()
+    new_schemas += torch._C._jit_get_custom_class_schemas()
     new_schema_dict = defaultdict(list)
     for s in new_schemas:
         new_schema_dict[s.name].append(s)
