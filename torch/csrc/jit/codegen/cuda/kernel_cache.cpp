@@ -316,8 +316,10 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("runFusionWithInputs");
 
+  // TODO: This seems overly conservative to send to normalization scheduler. We
+  // may want to check there's a "residual path" around the reduction.
   auto detect_normalization_fusion = [&]() {
-    for (auto expr : fusion_->unordered_exprs()) {
+    for (auto expr : fusion_->exprs()) {
       if (expr->getExprType() == ExprType::BroadcastOp) {
         auto output = expr->output(0);
         auto input_def_expr = expr->input(0)->definition();
@@ -384,7 +386,6 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 
         // Separate the reduction TensorViews from the other TensorViews
         // Ignore input TensorViews
-        // Heavy weight call
         std::vector<TensorView*> clone_reduction_tv;
         std::vector<TensorView*> clone_other_tv;
         auto all_values = DependencyCheck::getAllValsBetween(

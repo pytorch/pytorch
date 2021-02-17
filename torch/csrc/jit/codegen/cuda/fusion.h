@@ -169,7 +169,9 @@ class TORCH_CUDA_CU_API Fusion final {
   //! Return in insertion order
   const std::deque<Val*>& deterministic_vals() const noexcept;
 
-  //! Return the set of Exprs registered with this fusion
+  //! Return the set of Exprs registered with this fusion. Warning: This will
+  //! return exprs outside inputs/outputs, so can be unsafe for use with
+  //! segmented fusions.
   const std::unordered_set<Expr*>& unordered_exprs() const noexcept;
 
   //! Return all Exprs that use val
