@@ -469,10 +469,10 @@ class TestUnaryUfuncs(TestCase):
         # sqrt Test Reference: https://github.com/pytorch/pytorch/pull/47424
         x = torch.tensor(0. - 1.0e+20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
-        # acos test reference: https://github.com/pytorch/pytorch/issue/42952A
+        # acos test reference: https://github.com/pytorch/pytorch/issue/42952
         # Skip on Windows, as CUDA acos  returns conjugate value
         # see https://github.com/pytorch/pytorch/issues/52299
-        if not (IS_WINDOWS and dtype==torch.cdouble and "cuda" in device):
+        if not (IS_WINDOWS and dtype == torch.cdouble and "cuda" in device):
             self.compare_with_numpy(torch.acos, np.arccos, x)
 
         x = torch.tensor((-1.0e+60 if dtype == torch.cdouble else -1.0e+20) - 4988429.2j, dtype=dtype, device=device)
