@@ -822,6 +822,14 @@ class TestHistogramObserver(QuantizationTestCase):
 
 
 class TestFakeQuantize(TestCase):
+    def test_half_precision_fake_quantize(self):
+        r"""Tests the half precision fake quantize function
+        """
+        x = torch.randn(4, 4)
+        x = x.half()
+        hold_type = torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255).type()
+        self.assertTrue(hold_type == x.type())
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
