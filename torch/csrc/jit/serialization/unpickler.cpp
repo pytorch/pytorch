@@ -319,19 +319,16 @@ PickleOpCode Unpickler::readInstruction() {
         tuple->elements().emplace_back(*it);
       }
       stack_.erase(start_it, stack_.end());
-      stack_.emplace_back(tuple);
+      stack_.emplace_back(std::move(tuple));
     } break;
     case PickleOpCode::TUPLE1: {
-      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 1));
-      stack_.emplace_back(tuple);
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 1)));
     } break;
     case PickleOpCode::TUPLE2: {
-      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 2));
-      stack_.emplace_back(tuple);
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 2)));
     } break;
     case PickleOpCode::TUPLE3: {
-      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 3));
-      stack_.emplace_back(tuple);
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 3)));
     } break;
     case PickleOpCode::EMPTY_DICT:
       stack_.emplace_back(
