@@ -286,16 +286,39 @@ bool ComputeAtRootDomainMap::canMap(
       "Non-root domain is not supproted: ",
       id_b);
 
-  if (id_a->isBroadcast()) {
-    for (const auto& key_a : getConcretizedKeys(td_a, id_a)) {
-      if (!canMap(key_a, td_b, id_b)) {
+  // Forward to overloaded functions
+  if (!id_a->isBroadcast() && !id_b->isBroadcast()) {
+    return canMap(DomainKey(td_a, id_a), DomainKey(td_b, id_b));
+  } else if (!id_a->isBroadcast()) {
+    return canMap(DomainKey(td_a, id_a), td_b, id_b);
+  } else if (!id_b->isBroadcast()) {
+    return canMap(DomainKey(td_b, id_b), td_a, id_a);
+  }
+
+  // At this point, both are broadcast. Every pair of concrete IDs of
+  // both id_a and id_b needs to be looked at. Whether they are
+  // mappable depends on whether the concrete IDs are broadcast or
+  // not. Note that a broadcast axis is used a concrete ID when it is
+  // part of an output tensor domain, i.e., when it never gets
+  // concretized with any non-broadcast axis.
+
+  // If there exists a pair of non-broadcast concrete IDs is not
+  // mappable, id_a and id_b can't be mapped together. Otherwise, they
+  // can be mapped when there is any mappable pair is found.
+  bool mappable_pair_found = false;
+  for (const auto& key_a : getConcretizedKeys(td_a, id_a)) {
+    for (const auto& key_b : getConcretizedKeys(td_b, id_b)) {
+      const bool mappable = canMap(key_a, key_b);
+      mappable_pair_found = mappable_pair_found || mappable;
+      // If both concrete IDs are not broadcast, they must be mappable
+      if (!key_a.concreteId()->isBroadcast() &&
+          !key_b.concreteId()->isBroadcast() && !mappable) {
         return false;
       }
     }
-    return true;
-  } else {
-    return canMap(DomainKey(td_a, id_a), td_b, id_b);
   }
+
+  return mappable_pair_found;
 }
 
 bool ComputeAtRootDomainMap::canMap(
@@ -307,16 +330,32 @@ bool ComputeAtRootDomainMap::canMap(
       "Non-root domain is not supproted: ",
       id_b);
 
-  if (id_b->isBroadcast()) {
-    for (const auto& key_b_bc : getConcretizedKeys(td_b, id_b)) {
-      if (!canMap(key_a, key_b_bc)) {
-        return false;
-      }
-    }
-    return true;
-  } else {
+  if (!id_b->isBroadcast()) {
     return canMap(key_a, DomainKey(td_b, id_b));
   }
+
+  // If id_b is broadcast, look at all the concrete IDs that id_b may
+  // be concretized to. Whether it is mappable with key_a depends on
+  // whether key_a's concrete ID is also broadcast.
+  // 1) key_a's concrete ID is also broadcast: They are mappable when
+  // there is any mappable concrete ID exists in the concrete ID set
+  // of id_b.
+  // 2) key_a's concrete ID is not broadcast: Since key_a is indeed
+  // concrete, it must be mappable with any of concrete ID of id_b,
+  // except when a id_b concrete is broadcast.
+  const bool key_a_bcast =
+      key_a.concreteId() && key_a.concreteId()->isBroadcast();
+  bool mappable_pair_found = false;
+  for (const auto& key_b : getConcretizedKeys(td_b, id_b)) {
+    const bool mappable = canMap(key_a, key_b);
+    mappable_pair_found = mappable_pair_found || mappable;
+    // If both concrete IDs are not broadcast, they must be mappable
+    if (!key_a_bcast && !key_b.concreteId()->isBroadcast() && !mappable) {
+      return false;
+    }
+  }
+
+  return mappable_pair_found;
 }
 
 bool ComputeAtRootDomainMap::canMap(
@@ -442,7 +481,9 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
         " Producer root: ",
         producer_root,
         ". Consumer root: ",
-        consumer_root);
+        consumer_root,
+        ". Mapping: ",
+        toString(*this));
   }
   return id_map;
 }

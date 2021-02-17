@@ -4812,7 +4812,7 @@ TEST(NVFuserTest, FusionAdvancedLowering2_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
-// TODO: Enable test
+// TODO: Complete test
 TEST(NVFuserTest, FusionAdvancedLowering3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -4837,8 +4837,28 @@ TEST(NVFuserTest, FusionAdvancedLowering3_CUDA) {
   fusion.addOutput(tv4);
   fusion.addOutput(tv5);
 
-  // TODO: Enable this computeAt, enable test.
-  // tv0->computeAt(tv4, -1);
+  tv0->computeAt(tv4, -1);
+
+  tv3->setMemoryType(MemoryType::Global);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  int x = 13, y = 9;
+  at::Tensor t0 = at::randn({1, y}, options);
+  at::Tensor t1 = at::randn({x, y}, options);
+
+  auto t4 = t0 + 2 + 4;
+  auto t5 = t0 + 2 + t1 + 3;
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<at::Tensor> aten_outputs = {t4, t5};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
 // This excercises indexing with broadcast root axes. Non-broadcast
