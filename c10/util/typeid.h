@@ -506,7 +506,6 @@ private:
   //
   #define MaxTypeIndex 32
 
-public:
   static std::atomic<uint16_t> nextTypeIndex;
 
   static detail::TypeMetaData* typeMetaDatas();
