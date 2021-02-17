@@ -278,8 +278,6 @@ C10_API std::string GetExceptionString(const std::exception& e);
         #cond "INTERNAL ASSERT FAILED at" C10_STRINGIZE(__FILE__)); \
   }
 #else
-// TODO: evaluate whether a wrapper function around c10::str() would give the compiler
-// a place to outline argument calls if helpful.
 // It would be nice if we could build a combined string literal out of
 // the TORCH_INTERNAL_ASSERT prefix and a user-provided string literal
 // as the first argument, but there doesn't seem to be any good way to
