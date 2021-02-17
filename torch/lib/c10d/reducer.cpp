@@ -1516,7 +1516,9 @@ void Reducer::ensure_prior_reduction_finished() {
 }
 
 bool Reducer::should_collect_runtime_stats() {
-  if (num_iterations_ > 0 && num_iterations_ % kDDPRuntimeLoggingSampleRate == 0) {
+  if (num_iterations_ == 1 ||
+    (num_iterations_ > 0
+    && num_iterations_ % kDDPRuntimeLoggingSampleRate == 0)) {
     return true;
   }
   return false;

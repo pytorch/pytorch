@@ -3399,7 +3399,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
             self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
-            self.assertEqual(ddp_logging_data.iteration, 4)
+            self.assertEqual(ddp_logging_data.iteration, 1)
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
@@ -3423,8 +3423,8 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
             # test runtime logging fields
             self.assertEqual(ddp_logging_data.unused_parameter_size, 0)
-            self.assertEqual(ddp_logging_data.has_rebuilt_buckets, True)
-            self.assertEqual(ddp_logging_data.rebuilt_bucket_sizes, [param_size])
+            self.assertEqual(ddp_logging_data.has_rebuilt_buckets, False)
+            self.assertEqual(ddp_logging_data.rebuilt_bucket_sizes, [])
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
             self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
