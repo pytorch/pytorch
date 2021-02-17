@@ -3019,7 +3019,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             # Quantize the weights to 8bits
             qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=qtype)
             real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
-            self.assertEqual(isinstance(real_packed_weight, torch._C.ScriptObject), True)
+            self.assertEqual(isinstance(real_packed_weight, torch._C._jit.ScriptObject), True)
             unpacked_weight = torch.ops.quantized.embedding_bag_unpack(real_packed_weight)
             self.assertEqual(unpacked_weight.int_repr().numpy(), qweight.int_repr().numpy())
             self.assertEqual(unpacked_weight.q_per_channel_scales(), qweight.q_per_channel_scales())
