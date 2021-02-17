@@ -8,6 +8,7 @@
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/request_callback_no_python.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
@@ -47,13 +48,13 @@ std::unique_ptr<RpcCommandBase> RequestCallbackNoPython::
   return rpc;
 }
 
-std::shared_ptr<FutureMessage> RequestCallbackNoPython::processMessage(
+std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
     Message& request) const {
   // We need two futures here because it could pause twice when processing a
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
   //  2) waiting for processRpc to finish.
-  auto retFuture = std::make_shared<FutureMessage>();
+  auto retFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
@@ -62,44 +63,43 @@ std::shared_ptr<FutureMessage> RequestCallbackNoPython::processMessage(
         deserializeRequest(request), request.type());
     auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
 
-    rrefsReadyFuture->addCallback([
-      this,
-      retFuture,
-      // std::function must be copyable, hence hae to cast the unique_ptr to
-      // a shared_ptr here.
-      rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
-      messageType = request.type(),
-      id = request.id()
-    ]() {
-      // The cost of pre-request check is minimal thanks to
-      // std::shared_lock. The cost is in magnitude
-      // of 10us.
-      auto serverProcessGlobalProfilerStateStackEntryPtr =
-          profiler::processglobal::StateStackEntry::current();
-      // If server global profiler is enabled, we futher pay the
-      // cost of thread local profiler state initialization.
-      if (serverProcessGlobalProfilerStateStackEntryPtr) {
-        // Initialize thread-local profiler state from process-global
-        // profiler state.
-        ::torch::autograd::profiler::enableProfilerLegacy(
-            serverProcessGlobalProfilerStateStackEntryPtr->statePtr()
-                ->config());
-      }
+    rrefsReadyFuture->addCallback(
+        [this,
+         retFuture,
+         // std::function must be copyable, hence hae to cast the unique_ptr to
+         // a shared_ptr here.
+         rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
+         messageType = request.type(),
+         id = request.id()]() {
+          // The cost of pre-request check is minimal thanks to
+          // std::shared_lock. The cost is in magnitude
+          // of 10us.
+          auto serverProcessGlobalProfilerStateStackEntryPtr =
+              profiler::processglobal::StateStackEntry::current();
+          // If server global profiler is enabled, we futher pay the
+          // cost of thread local profiler state initialization.
+          if (serverProcessGlobalProfilerStateStackEntryPtr) {
+            // Initialize thread-local profiler state from process-global
+            // profiler state.
+            ::torch::autograd::profiler::enableProfilerLegacy(
+                serverProcessGlobalProfilerStateStackEntryPtr->statePtr()
+                    ->config());
+          }
 
-      processRpcWithErrors(*rpc, messageType, id, retFuture);
+          processRpcWithErrors(*rpc, messageType, id, retFuture);
 
-      // Response message has been sent at this moment, this post-response
-      // work doesn't affect RPC trip time.
-      if (serverProcessGlobalProfilerStateStackEntryPtr) {
-        // Restore thread-local profiler state.
-        ::torch::autograd::profiler::thread_event_lists event_lists =
-            ::torch::autograd::profiler::disableProfilerLegacy();
-        // Put thread_local event_lists into the process-global profiler
-        // state.
-        profiler::processglobal::pushResultRecursive(
-            serverProcessGlobalProfilerStateStackEntryPtr, event_lists);
-      }
-    });
+          // Response message has been sent at this moment, this post-response
+          // work doesn't affect RPC trip time.
+          if (serverProcessGlobalProfilerStateStackEntryPtr) {
+            // Restore thread-local profiler state.
+            ::torch::autograd::profiler::thread_event_lists event_lists =
+                ::torch::autograd::profiler::disableProfilerLegacy();
+            // Put thread_local event_lists into the process-global profiler
+            // state.
+            profiler::processglobal::pushResultRecursive(
+                serverProcessGlobalProfilerStateStackEntryPtr, event_lists);
+          }
+        });
   } catch (std::exception& e) {
     retFuture->markCompleted(handleError(e, request.type(), request.id()));
     rrefContext.clearRecordedPendingRRefsOnError();
@@ -111,7 +111,7 @@ void RequestCallbackNoPython::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture) const {
   try {
     processRpc(rpc, messageType, messageId, responseFuture);
   } catch (std::exception& e) {
@@ -123,7 +123,7 @@ void RequestCallbackNoPython::processScriptCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
   auto& stack = scriptCall.stackRef();
   TORCH_CHECK(
@@ -161,7 +161,7 @@ void RequestCallbackNoPython::processPythonCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -169,7 +169,7 @@ void RequestCallbackNoPython::processPythonRemoteCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -187,7 +187,7 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
   auto rrefId = scriptRemoteCall.retRRefId();
   auto forkId = scriptRemoteCall.retForkId();
@@ -208,7 +208,8 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
     }
     Message m = RemoteRet(rrefId, forkId).toMessage();
     m.setId(messageId);
-    responseFuture->markCompleted(std::move(m));
+    responseFuture->markCompleted(
+        IValue(c10::make_intrusive<Message>(std::move(m))));
   };
 
   // scriptRemoteCall is only alive within this block, use reference to
@@ -259,7 +260,7 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
   auto& ctx = RRefContext::getInstance();
 
@@ -283,15 +284,16 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
     whenValueSet->addCallback(
         [responseFuture, messageId, rref, whenValueSet]() {
           if (whenValueSet->hasError()) {
-            responseFuture->setError(whenValueSet->tryRetrieveErrorMessage());
+            responseFuture->setError(whenValueSet->exception_ptr());
             return;
           }
           try {
             Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
             m.setId(messageId);
-            responseFuture->markCompleted(std::move(m));
-          } catch (const std::exception& e) {
-            responseFuture->setError(e.what());
+            responseFuture->markCompleted(
+                IValue(c10::make_intrusive<Message>(std::move(m))));
+          } catch (const std::exception& /* unused */) {
+            responseFuture->setError(std::current_exception());
           }
         });
   });
@@ -300,7 +302,7 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
 void RequestCallbackNoPython::processPythonRRefFetchCall(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -340,14 +342,22 @@ void RequestCallbackNoPython::processRRefForkRequest(
 void RequestCallbackNoPython::processForwardAutogradReq(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
+
+  // Need to reverse the device map for the backward pass of distributed
+  // autograd.
+  std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+  for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
+    reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
+  }
 
   // Attach 'recv' autograd function.
   auto autogradContext = addRecvRpcBackward(
       rpcWithAutograd.autogradMetadata(),
       rpcWithAutograd.tensors(),
-      rpcWithAutograd.fromWorkerId());
+      rpcWithAutograd.fromWorkerId(),
+      reverseDeviceMap);
   // For this recv thread on server side, before processRpc(),
   // set current_context_id_ to be context_id passed from client.
   // In this way, if there is nested rpc call in python rpc call, original
@@ -362,7 +372,8 @@ void RequestCallbackNoPython::processForwardAutogradReq(
   // Process the original RPC.
   auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
   // Make an overall future for the wrapped response.
-  auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
+  auto wrappedRpcResponseFuture =
+      std::make_shared<JitFuture>(at::AnyClassType::get());
   // Kick off processing for the nested RPC command.
   // wrappedRpcResponseFuture will be a Future<T> to the result.
   processRpc(
@@ -375,45 +386,46 @@ void RequestCallbackNoPython::processForwardAutogradReq(
   // The original future needs to be marked as completed when the wrapped
   // one completes, with the autograd context information wrapped.
   // Uses weak_ptr so we can std::move the value.
-  wrappedRpcResponseFuture->addCallback([
-    responseFuture,
-    messageId,
-    fromWorkerId,
-    weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture),
-    ctxId = autogradContext->contextId()
-  ]() {
-    // As this callback can be invoked by a different thread, we have to
-    // make sure that the thread_local states in the previous thread is
-    // correctly propagated.
-    // NB: The execution of TorchScript functions can also run on a
-    // different thread, which is addressed by
-    // https://github.com/pytorch/pytorch/pull/36395
-    // NB: when adding async UDF support, we should also propagate
-    // thread_local states there.
-    // TODO: Land on a general solution for RPC ThreadLocalState. See
-    // https://github.com/pytorch/pytorch/issues/38510
-    DistAutogradContextGuard cbCtxGuard(ctxId);
+  wrappedRpcResponseFuture->addCallback(
+      [responseFuture,
+       messageId,
+       fromWorkerId,
+       weak = std::weak_ptr<JitFuture>(wrappedRpcResponseFuture),
+       ctxId = autogradContext->contextId()]() {
+        // As this callback can be invoked by a different thread, we have to
+        // make sure that the thread_local states in the previous thread is
+        // correctly propagated.
+        // NB: The execution of TorchScript functions can also run on a
+        // different thread, which is addressed by
+        // https://github.com/pytorch/pytorch/pull/36395
+        // NB: when adding async UDF support, we should also propagate
+        // thread_local states there.
+        // TODO: Land on a general solution for RPC ThreadLocalState. See
+        // https://github.com/pytorch/pytorch/issues/38510
+        DistAutogradContextGuard cbCtxGuard(ctxId);
 
-    auto wrappedRpcResponseFuture = weak.lock();
-    TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
-    if (wrappedRpcResponseFuture->hasError()) {
-      // Propagate error to responseFuture if we had one.
-      responseFuture->setError(wrappedRpcResponseFuture->error()->what());
-    } else {
-      auto msg = getMessageWithAutograd(
-          fromWorkerId,
-          std::move(*wrappedRpcResponseFuture).moveValue(),
-          MessageType::FORWARD_AUTOGRAD_RESP);
-      msg.setId(messageId);
-      responseFuture->markCompleted(std::move(msg));
-    }
-  });
+        auto wrappedRpcResponseFuture = weak.lock();
+        TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
+        if (wrappedRpcResponseFuture->hasError()) {
+          // Propagate error to responseFuture if we had one.
+          responseFuture->setError(wrappedRpcResponseFuture->exception_ptr());
+        } else {
+          auto msg = getMessageWithAutograd(
+              fromWorkerId,
+              std::move(
+                  *wrappedRpcResponseFuture->value().toCustomClass<Message>()),
+              MessageType::FORWARD_AUTOGRAD_RESP);
+          msg.setId(messageId);
+          responseFuture->markCompleted(
+              IValue(c10::make_intrusive<Message>(std::move(msg))));
+        }
+      });
 }
 
 void RequestCallbackNoPython::processBackwardAutogradReq(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
   const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
 
@@ -437,9 +449,10 @@ void RequestCallbackNoPython::processBackwardAutogradReq(
     if (!execFuture->hasError()) {
       Message m = std::move(PropagateGradientsResp()).toMessage();
       m.setId(messageId);
-      responseFuture->markCompleted(std::move(m));
+      responseFuture->markCompleted(
+          IValue(c10::make_intrusive<Message>(std::move(m))));
     } else {
-      responseFuture->setError(execFuture->tryRetrieveErrorMessage());
+      responseFuture->setError(execFuture->exception_ptr());
     }
   });
 }
@@ -461,7 +474,7 @@ void RequestCallbackNoPython::processCleanupAutogradContextReq(
 void RequestCallbackNoPython::processRunWithProfilingReq(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
   auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
   auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
@@ -483,7 +496,8 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
           this->cudaAvailable(),
       "Profiler state set to CUDA but CUDA not available.");
   const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
-  auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
+  auto wrappedRpcResponseFuture =
+      std::make_shared<JitFuture>(at::AnyClassType::get());
   // Enable the profiler with the config from the sender.
   // When enabling on the main thread, ensure profiler states are cleaned
   // up, but defer consolidation of all profiled events to the continuation
@@ -504,11 +518,11 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         messageId,
         wrappedRpcResponseFuture);
 
-    wrappedRpcResponseFuture->addCallback(at::wrapPropagateTLSState<void>(
-        [wrappedRpcResponseFuture,
-         responseFuture,
-         profilingKeyId,
-         profilingConfig] {
+    wrappedRpcResponseFuture->addCallback(
+        at::wrapPropagateTLSState<void>([wrappedRpcResponseFuture,
+                                         responseFuture,
+                                         profilingKeyId,
+                                         profilingConfig] {
           std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents;
           // Defer consolidation of profiler events until async work has
           // completed (such as async UDF)
@@ -521,21 +535,23 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
           // they will be cleaned up by main thread, and consolidate all
           // events so we obtain asynchronously run events.
           torch::autograd::profiler::ProfilerDisableOptions opts(false, true);
-          auto event_lists = torch::autograd::profiler::disableProfilerLegacy(opts);
+          auto event_lists =
+              torch::autograd::profiler::disableProfilerLegacy(opts);
           if (wrappedRpcResponseFuture->hasError()) {
             // Propagate error
             // No need to propagate remote events in the case of an error.
-            responseFuture->setError(wrappedRpcResponseFuture->error()->what());
+            responseFuture->setError(wrappedRpcResponseFuture->exception_ptr());
           } else {
             populateRemoteProfiledEvents(
                 profiledEvents, profilingConfig, event_lists);
             auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
                 MessageType::RUN_WITH_PROFILING_RESP,
-                std::move(*wrappedRpcResponseFuture).moveValue(),
+                std::move(*wrappedRpcResponseFuture->value()
+                               .toCustomClass<Message>()),
                 profiledEvents,
                 profilingKeyId);
-            responseFuture->markCompleted(
-                std::move(*rpcWithProfilingResp).toMessage());
+            responseFuture->markCompleted(IValue(c10::make_intrusive<Message>(
+                std::move(*rpcWithProfilingResp).toMessage())));
           }
         }));
     // Exiting the scope will disable the profiler on this thread with the
@@ -546,7 +562,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
 void RequestCallbackNoPython::processRRefBackward(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -554,10 +570,11 @@ void RequestCallbackNoPython::processRpc(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture) const {
   auto markComplete = [messageId, &responseFuture](Message m) {
     m.setId(messageId);
-    responseFuture->markCompleted(std::move(m));
+    responseFuture->markCompleted(
+        IValue(c10::make_intrusive<Message>(std::move(m))));
   };
   // TODO: RpcCommandBase should have an abstract execute() method that we can
   // call here instead of having another switch statement here. Even better we
@@ -629,7 +646,7 @@ void RequestCallbackNoPython::processRpc(
   }
 }
 
-Message RequestCallbackNoPython::handleError(
+IValue RequestCallbackNoPython::handleError(
     const std::exception& e,
     const MessageType messageType,
     int64_t messageId) const {
@@ -642,7 +659,8 @@ Message RequestCallbackNoPython::handleError(
       DistAutogradContainer::getInstance().getWorkerId(),
       ": ",
       e.what());
-  return createExceptionResponse(errorMsg, messageId);
+  return IValue(c10::make_intrusive<Message>(
+      createExceptionResponse(errorMsg, messageId)));
 }
 
 bool RequestCallbackNoPython::cudaAvailable() const {

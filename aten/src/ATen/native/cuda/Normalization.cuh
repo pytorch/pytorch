@@ -104,7 +104,7 @@ static __device__ __forceinline__ Float2<scalar_t, accscalar_t> warpSum(Float2<s
 
 // Sum across (batch, x/y/z) applying Op() pointwise
 // this works by first having each thread sum it's part
-// of the data. Then there is a double-shuffeling reduction.
+// of the data. Then there is a double-shuffling reduction.
 // First each warp (of C10_WARP_SIZE threads) uses warpSum to reduce its
 // data to the "warp leader", who writes its value into shared memory.
 // Then a single warp reads the remaining (at most C10_WARP_SIZE) items

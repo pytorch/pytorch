@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
+
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -22,7 +23,7 @@ void fuseStaticSubgraphs(std::shared_ptr<Graph> graph) {
 Operation createStaticSubgraphRuntime(const Node* node) {
   auto g = torch::jit::PrepareForStaticRuntime(node->g(attr::Subgraph));
   auto runtime = std::make_shared<torch::jit::StaticRuntime>(g);
-  auto num_inputs = runtime->get_inference_module()->input_regs.size();
+  auto num_inputs = runtime->num_inputs();
   return [runtime, num_inputs](Stack* stack) {
     RECORD_FUNCTION("Static Runtime", std::vector<c10::IValue>());
     auto inps = torch::jit::last(stack, num_inputs);

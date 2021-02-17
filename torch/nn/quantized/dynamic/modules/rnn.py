@@ -239,8 +239,6 @@ class RNNBase(torch.nn.Module):
         _all_weight_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
-                layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
-
                 suffix = '_reverse' if direction == 1 else ''
 
                 def retrieve_weight_bias(ihhh):

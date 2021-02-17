@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import nn
 import unittest
 
-from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
 from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
@@ -1163,13 +1163,11 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_scalar(self):
         @torch.jit.script
-        def test_float(x, y, z, a, b):
-            # type: (Tensor, Tensor, Tensor, float, float) -> Tensor
+        def test_float(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: float, b: float) -> torch.Tensor:
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         @torch.jit.script
-        def test_int(x, y, z, a, b):
-            # type: (Tensor, Tensor, Tensor, int, int) -> Tensor
+        def test_int(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: int, b: int) -> torch.Tensor:
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         for test in (test_float, test_int):
@@ -1186,8 +1184,7 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_loop(self):
         @torch.jit.script
-        def test(x, y, z):
-            # type: (Tensor, Tensor, int) -> Tensor
+        def test(x: torch.Tensor, y: torch.Tensor, z: int) -> torch.Tensor:
             b = y
             for i in range(0, z):
                 a = x + y
@@ -1650,4 +1647,4 @@ class TestTensorExprFuser(BaseTestClass):
             self.assertEqual(ref, exp)
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

@@ -71,9 +71,25 @@ void allocate_command_buffers(
 
 Command::Buffer::Buffer(const VkCommandBuffer command_buffer)
   : command_buffer_(command_buffer) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "Invalid Vulkan command buffer!");
+}
+
+Command::Buffer::Buffer(Buffer&& buffer)
+  : command_buffer_(std::move(buffer.command_buffer_)),
+    bound_(std::move(buffer.bound_)),
+    barriers_(std::move(buffer.barriers_)) {
+  buffer.invalidate();
+}
+
+Command::Buffer& Command::Buffer::operator=(Buffer&& buffer) {
+  if (&buffer != this) {
+    command_buffer_ = std::move(buffer.command_buffer_);
+    bound_ = std::move(buffer.bound_);
+    barriers_ = std::move(buffer.barriers_);
+
+    buffer.invalidate();
+  };
+
+  return *this;
 }
 
 void Command::Buffer::Buffer::begin() {
@@ -105,69 +121,6 @@ void Command::Buffer::Buffer::end() {
       "Potential reason: This command buffer is moved from.");
 
   VK_CHECK(vkEndCommandBuffer(command_buffer_));
-}
-
-void Command::Buffer::barrier() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
-
-  if (barriers_.stage) {
-    c10::SmallVector<VkBufferMemoryBarrier, 4u> buffer_memory_barriers;
-
-    for (const Resource::Buffer::Barrier& barrier : barriers_.buffers) {
-      buffer_memory_barriers.push_back({
-            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-            nullptr,
-            barrier.memory.src,
-            barrier.memory.dst,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            barrier.object.handle,
-            barrier.object.offset,
-            barrier.object.range,
-          });
-    }
-
-    c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
-
-    for (const Resource::Image::Barrier& barrier : barriers_.images) {
-      image_memory_barriers.push_back({
-            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            nullptr,
-            barrier.memory.src,
-            barrier.memory.dst,
-            barrier.layout.src,
-            barrier.layout.dst,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            barrier.object.handle,
-            {
-              VK_IMAGE_ASPECT_COLOR_BIT,
-              0u,
-              VK_REMAINING_MIP_LEVELS,
-              0u,
-              VK_REMAINING_ARRAY_LAYERS,
-            },
-          });
-    }
-
-    vkCmdPipelineBarrier(
-        command_buffer_,
-        barriers_.stage.src,
-        barriers_.stage.dst,
-        0u,
-        0u,
-        nullptr,
-        buffer_memory_barriers.size(),
-        buffer_memory_barriers.data(),
-        image_memory_barriers.size(),
-        image_memory_barriers.data());
-  }
-
-  // Reset
-  barriers_.reset();
 }
 
 void Command::Buffer::barrier(const Pipeline::Barrier& barrier) {
@@ -291,31 +244,86 @@ void Command::Buffer::dispatch(
           bound_.pipeline.local_work_group.data[2u]));
 }
 
-void Command::Buffer::submit(
-    const VkQueue queue,
-    const Resource::Fence fence) {
+void Command::Buffer::barrier() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      queue,
-      "Invalid Vulkan queue!");
+  if (barriers_.stage) {
+    c10::SmallVector<VkBufferMemoryBarrier, 4u> buffer_memory_barriers;
 
-  const VkSubmitInfo submit_info{
-    VK_STRUCTURE_TYPE_SUBMIT_INFO,
-    nullptr,
-    0u,
-    nullptr,
-    nullptr,
-    1u,
-    &command_buffer_,
-    0u,
-    nullptr,
-  };
+    for (const Resource::Buffer::Barrier& barrier : barriers_.buffers) {
+      buffer_memory_barriers.push_back({
+            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            nullptr,
+            barrier.memory.src,
+            barrier.memory.dst,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            barrier.object.handle,
+            barrier.object.offset,
+            barrier.object.range,
+          });
+    }
 
-  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
+    c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
+
+    for (const Resource::Image::Barrier& barrier : barriers_.images) {
+      image_memory_barriers.push_back({
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            barrier.memory.src,
+            barrier.memory.dst,
+            barrier.layout.src,
+            barrier.layout.dst,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            barrier.object.handle,
+            {
+              VK_IMAGE_ASPECT_COLOR_BIT,
+              0u,
+              VK_REMAINING_MIP_LEVELS,
+              0u,
+              VK_REMAINING_ARRAY_LAYERS,
+            },
+          });
+    }
+
+    vkCmdPipelineBarrier(
+        command_buffer_,
+        barriers_.stage.src,
+        barriers_.stage.dst,
+        0u,
+        0u,
+        nullptr,
+        buffer_memory_barriers.size(),
+        buffer_memory_barriers.data(),
+        image_memory_barriers.size(),
+        image_memory_barriers.data());
+  }
+
+  // Reset
+  barriers_.reset();
+}
+
+void Command::Buffer::invalidate() {
+  command_buffer_ = VK_NULL_HANDLE;
+}
+
+inline void Command::Buffer::Bound::reset() {
+  pipeline = {};
+  descriptor_set = VK_NULL_HANDLE;
+}
+
+inline Command::Buffer::Barrier::Stage::operator bool() const {
+  return (0u != src) || (0u != dst);
+}
+
+inline void Command::Buffer::Barrier::reset() {
+  stage = {};
+  buffers.clear();
+  images.clear();
 }
 
 Command::Pool::Pool(const GPU& gpu)
@@ -338,8 +346,9 @@ Command::Pool::Pool(const GPU& gpu)
 Command::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     command_pool_(std::move(pool.command_pool_)),
-    buffer_(std::move(pool.buffer_)) {
-  pool.device_ = VK_NULL_HANDLE;
+    buffer_(std::move(pool.buffer_)),
+    stream_(std::move(pool.stream_)) {
+  pool.invalidate();
 }
 
 Command::Pool& Command::Pool::operator=(Pool&& pool) {
@@ -347,8 +356,9 @@ Command::Pool& Command::Pool::operator=(Pool&& pool) {
     device_ = std::move(pool.device_);
     command_pool_ = std::move(pool.command_pool_);
     buffer_ = std::move(pool.buffer_);
+    stream_ = std::move(pool.stream_);
 
-    pool.device_ = VK_NULL_HANDLE;
+    pool.invalidate();
   };
 
   return *this;
@@ -361,13 +371,14 @@ Command::Pool::~Pool() {
     }
   }
   catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Command pool destructor raised an exception!  Error: "
-        << e.what();
+    TORCH_WARN(
+        "Vulkan: Command pool destructor raised an exception! Error: ",
+        e.what());
   }
   catch (...) {
-    LOG(WARNING)
-        << "Vulkan: Command pool destructor raised an unknown exception!";
+    TORCH_WARN(
+        "Vulkan: Command pool destructor raised an exception! "
+        "Error: Unknown");
   }
 }
 
@@ -383,13 +394,23 @@ Command::Buffer Command::Pool::allocate() {
         Configuration::kQuantum);
 
     allocate_command_buffers(
-       device_,
-       command_pool_.get(),
-       buffer_.pool.data() + buffer_.in_use,
-       Configuration::kQuantum);
+        device_,
+        command_pool_.get(),
+        buffer_.pool.data() + buffer_.in_use,
+        Configuration::kQuantum);
   }
 
   return Buffer(buffer_.pool[buffer_.in_use++]);
+}
+
+Command::Buffer& Command::Pool::stream() {
+  if (!stream_.buffer) {
+    stream_.buffer = allocate();
+    stream_.buffer.begin();
+    stream_.counter = 0u;
+  }
+
+  return stream_.buffer;
 }
 
 void Command::Pool::purge() {
@@ -398,8 +419,82 @@ void Command::Pool::purge() {
       "This command pool is in an invalid state! "
       "Potential reason: This command pool is moved from.");
 
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !stream_.buffer,
+      "Pending command buffer detected.  Make sure all command buffers are "
+      "submitted to the queue for execution prior to reclaiming pool memory.");
+
   buffer_.in_use = 0u;
   VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
+}
+
+void Command::Pool::submit(
+    const VkQueue queue,
+    const c10::ArrayRef<const Buffer> buffers,
+    const Resource::Fence fence) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && command_pool_,
+      "This command pool is in an invalid state! "
+      "Potential reason: This command pool is moved from.");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      queue,
+      "Invalid Vulkan queue!");
+
+  c10::SmallVector<VkCommandBuffer, Configuration::kReserve> command_buffers;
+  command_buffers.reserve(buffers.size());
+
+  for (const Buffer& buffer : buffers) {
+    VkCommandBuffer command_buffer = buffer.handle();
+
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        command_buffer,
+        "Invalid Vulkan command buffer!");
+
+    // Are we submitting our one and only command stream, or a regular command
+    // buffer whose scope is manually maintained by the user?  Automatically
+    // maintain state and submission rate if the former.
+
+    if (stream_.buffer.handle() == command_buffer) {
+      // Hand the stream off to the driver if:
+      // - The user has implictly signaled interest in the results via a fence.
+      // - We are over the submission cutoff.  We don't want to starve the GPU.
+
+      if (fence || (stream_.counter++ > Configuration::kSubmit)) {
+        stream_.buffer.end();
+        stream_.buffer.invalidate();
+      }
+      // Skip - Accumulate more calls prior to submission.
+      else {
+        command_buffer = VK_NULL_HANDLE;
+      }
+    }
+
+    if (command_buffer) {
+      command_buffers.push_back(command_buffer);
+    }
+  }
+
+  if (!command_buffers.empty()) {
+    const VkSubmitInfo submit_info{
+      VK_STRUCTURE_TYPE_SUBMIT_INFO,
+      nullptr,
+      0u,
+      nullptr,
+      nullptr,
+      command_buffers.size(),
+      command_buffers.data(),
+      0u,
+      nullptr,
+    };
+
+    VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
+  }
+}
+
+void Command::Pool::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  command_pool_.reset();
 }
 
 } // namespace api

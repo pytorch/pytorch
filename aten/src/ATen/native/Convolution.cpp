@@ -1,13 +1,15 @@
-#include <limits>
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
+
+#include <limits>
 
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
@@ -177,10 +179,10 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
   int64_t outsize = 1;
   if (transposed) {
     std::vector<int64_t> o = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
-    outsize = prod_intlist(o.begin() + 1, o.end());
+    outsize = c10::multiply_integers(o.begin() + 1, o.end());
   } else {
     std::vector<int64_t> o = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
-    outsize = prod_intlist(o.begin() + 1, o.end());
+    outsize = c10::multiply_integers(o.begin() + 1, o.end());
   }
   return outsize > int_max;
 }
@@ -253,7 +255,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input, const at::Tensor& weight) c
          input.ndimension() == 4 && // must be in NCHW format
          weight.ndimension() == 4 &&
          (weight.size(2) < 17) && (weight.size(3) < 17) // NNPACK only supports kernels up to 16x16
-#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if !defined(C10_MOBILE)
          && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
      ;
@@ -289,7 +291,7 @@ auto ConvParams::is_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
   return input.is_cuda() &&
          !transposed &&
-         input.ndimension() == 4 &&
+         (input.ndimension() == 4 || input.ndimension() == 5) &&
          input.size(1) == groups &&
          groups > 1 && // no point if there is only a single group
          weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
@@ -418,6 +420,7 @@ auto ConvParams::use_cudnn_depthwise(
                          input.scalar_type() == kHalf && // only for FP16
                          weight.scalar_type() == kHalf &&
                          is_depthwise(input, weight) &&
+                         input.ndimension() == 4 &&
                          weight.size(2) == weight.size(3) && // only square kernels
                          input.size(2) >= 7 && // min width/height 7
                          !is_dilated() && // no dilation supported
@@ -588,7 +591,7 @@ at::Tensor convolution(
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   auto& ctx = at::globalContext();
   // See Note [Enabling Deterministic Operations]
-  bool deterministic = ctx.deterministicCuDNN() || ctx.deterministic();
+  bool deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
                           ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
@@ -684,7 +687,13 @@ at::Tensor _convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
-          output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+          if (input.ndimension() == 4) {
+              output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+          }
+          else {
+             TORCH_CHECK(input.ndimension() == 5);
+             output = at::conv_depthwise3d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+          }
       }
   } else if (params.use_cudnn(input, weight)) {
     TORCH_CHECK(input.options().type_equal(weight.options()),

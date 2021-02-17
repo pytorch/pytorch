@@ -11,7 +11,7 @@ from typing import Any
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
 from typing import List, Tuple, Iterable, Optional, Dict
@@ -55,8 +55,7 @@ class TestClassType(JitTestCase):
             def __init__(self):
                 pass
 
-            def __contains__(self, key):
-                # type: (str) -> bool
+            def __contains__(self, key: str) -> bool:
                 return key == 'hi'
 
         @torch.jit.script
@@ -68,17 +67,14 @@ class TestClassType(JitTestCase):
 
     def test_set_attr_in_method(self):
         class FooTest(object):
-            def __init__(self, x):
-                # type: (int) -> None
+            def __init__(self, x: int) -> None:
                 self.foo = x
 
-            def incFooTest(self, y):
-                # type: (int) -> None
+            def incFooTest(self, y: int) -> None:
                 self.foo = self.foo + y
 
         @torch.jit.script
-        def fn(x):
-            # type: (int) -> int
+        def fn(x: int) -> int:
             foo = FooTest(x)
             foo.incFooTest(2)
             return foo.foo
@@ -129,8 +125,7 @@ class TestClassType(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):  # noqa: B903
-                def __init__(self, x):
-                    # type: (bool) -> None
+                def __init__(self, x: bool) -> None:
                     self.foo = x
 
             @torch.jit.script
@@ -148,15 +143,14 @@ class TestClassType(JitTestCase):
                         self.attr = x
 
     def test_class_type_as_param(self):
-        global FooTest  # see [local resolution in python]
-
         class FooTest(object):  # noqa: B903
             def __init__(self, x):
                 self.attr = x
 
+        make_global(FooTest)  # see [local resolution in python]
+
         @torch.jit.script
-        def fn(foo):
-            # type: (FooTest) -> Tensor
+        def fn(foo: FooTest) -> torch.Tensor:
             return foo.attr
 
         @torch.jit.script
@@ -285,16 +279,15 @@ class TestClassType(JitTestCase):
         self.assertEqual(2 * input, output)
 
     def test_python_interop(self):
-        global Foo   # see [local resolution in python]
-
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
 
+        make_global(Foo)   # see [local resolution in python]
+
         @torch.jit.script
-        def use_foo(foo):
-            # type: (Foo) -> Foo
+        def use_foo(foo: Foo) -> Foo:
             return foo
 
         # create from python
@@ -312,15 +305,14 @@ class TestClassType(JitTestCase):
         self.assertEqual(y, f2.y)
 
     def test_class_specialization(self):
-        global Foo  # see [local resolution in python]
-
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
 
-        def use_foo(foo, foo2, tup):
-            # type: (Foo, Foo, Tuple[Foo, Foo]) -> Tensor
+        make_global(Foo)  # see [local resolution in python]
+
+        def use_foo(foo: Foo, foo2: Foo, tup: Tuple[Foo, Foo]) -> torch.Tensor:
             a, b = tup
             return foo.x + foo2.y + a.x + b.y
 
@@ -337,22 +329,20 @@ class TestClassType(JitTestCase):
         FileCheck().check_count("prim::GetAttr", 4).run(graphstr)
 
     def test_class_sorting(self):
-        global Foo  # see [local resolution in python]
-
         class Foo(object):  # noqa: B903
-            def __init__(self, x):
-                # type: (int) -> None
+            def __init__(self, x: int) -> None:
                 self.x = x
 
-            def __lt__(self, other):
+            def __lt__(self, other) -> bool:
                 # type: (Foo) -> bool
                 return self.x < other.x
 
             def getVal(self):
                 return self.x
 
-        def test(li, reverse=False):
-            # type: (List[Foo], bool) -> Tuple[List[int], List[int]]
+        make_global(Foo)  # see [local resolution in python]
+
+        def test(li: List[Foo], reverse: bool = False) -> Tuple[List[int], List[int]]:
             li_sorted = sorted(li)
             ret_sorted = torch.jit.annotate(List[int], [])
             for foo in li_sorted:
@@ -510,8 +500,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(3 * input, output)
 
     def test_interface(self):
-        global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
-
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -536,36 +524,29 @@ class TestClassType(JitTestCase):
 
         @torch.jit.interface
         class OneTwo(object):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
-            def two(self, x):
-                # type: (Tensor) -> Tensor
+            def two(self, x: torch.Tensor) -> torch.Tensor:
                 pass
 
         @torch.jit.interface
         class OneTwoThree(object):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
-            def two(self, x):
-                # type: (Tensor) -> Tensor
+            def two(self, x: torch.Tensor) -> torch.Tensor:
                 pass
 
-            def three(self, x):
-                # type: (Tensor) -> Tensor
+            def three(self, x: torch.Tensor) -> torch.Tensor:
                 pass
 
         @torch.jit.interface
         class OneTwoWrong(object):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
-            def two(self, x):
-                # type: (int) -> int
+            def two(self, x: int) -> int:
                 pass
 
         @torch.jit.script
@@ -585,9 +566,10 @@ class TestClassType(JitTestCase):
             def one(self, x, y):
                 return x + y
 
-            def two(self, x):
-                # type: (int) -> int
+            def two(self, x: int) -> int:
                 return 3
+
+        make_global(Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2)
 
         def use_them(x):
             a = Foo()
@@ -600,13 +582,11 @@ class TestClassType(JitTestCase):
         self.checkScript(use_them, (torch.rand(3, 4),))
 
         @torch.jit.script
-        def as_interface(x):
-            # type: (OneTwo) -> OneTwo
+        def as_interface(x: OneTwo) -> OneTwo:
             return x
 
         @torch.jit.script
-        def inherit(x):
-            # type: (OneTwoThree) -> OneTwo
+        def inherit(x: OneTwoThree) -> OneTwo:
             return as_interface(x)
 
         with self.assertRaisesRegex(RuntimeError, "does not have method"):
@@ -627,8 +607,7 @@ class TestClassType(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
 
             @torch.jit.script
-            def wrong4(x):
-                # type: (OneTwoWrong) -> int
+            def wrong4(x: OneTwoWrong) -> int:
                 return as_interface(x)
 
         # Test interface/class python assignment
@@ -673,28 +652,26 @@ class TestClassType(JitTestCase):
         # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
-        global Foo, MyClass  # see [local resolution in python]
-
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
                 self.x = x
 
-            def __len__(self):
-                # type: () -> int
+            def __len__(self) -> int:
                 return len(self.x)
 
             def __neg__(self):
                 self.x = -self.x
                 return self
 
-            def __mul__(self, other):
-                # type: (Tensor) -> Tensor
+            def __mul__(self, other: torch.Tensor) -> torch.Tensor:
                 return self.x * other
 
         def test_overload():
             a = Foo(torch.ones([3, 3]))
             return len(a), -a * torch.zeros([3, 3])
+
+        make_global(Foo)  # see [local resolution in python]
 
         self.checkScript(test_overload, ())
         # unary ops tested above
@@ -702,82 +679,65 @@ class TestClassType(JitTestCase):
         # TODO - support compiling classes from strings in jit.CompilationUnit
         @torch.jit.script
         class MyClass(object):
-            def __init__(self, x):
-                # type: (int) -> None
+            def __init__(self, x: int) -> None:
                 self.x = x
 
-            def __add__(self, other):
-                # type: (int) -> int
+            def __add__(self, other: int) -> int:
                 return self.x + other
 
-            def __sub__(self, other):
-                # type: (int) -> int
+            def __sub__(self, other: int) -> int:
                 return self.x - other
 
-            def __mul__(self, other):
-                # type: (int) -> int
+            def __mul__(self, other: int) -> int:
                 return self.x * other
 
-            def __pow__(self, other):
-                # type: (int) -> int
+            def __pow__(self, other: int) -> int:
                 return int(self.x ** other)
 
-            def __truediv__(self, other):
-                # type: (int) -> float
+            def __truediv__(self, other: int) -> float:
                 return self.x / other
 
-            def __mod__(self, other):
-                # type: (int) -> int
+            def __mod__(self, other: int) -> int:
                 return self.x % other
 
-            def __ne__(self, other):  # noqa T484
-                # type: (int) -> bool
+            def __ne__(self, other: int) -> bool:  # noqa T484
                 return self.x != other
 
-            def __eq__(self, other):  # noqa T484
-                # type: (int) -> bool
+            def __eq__(self, other: int) -> bool:  # noqa T484
                 return self.x == other
 
-            def __lt__(self, other):
-                # type: (int) -> bool
+            def __lt__(self, other: int) -> bool:
                 return self.x < other
 
-            def __gt__(self, other):
-                # type: (int) -> bool
+            def __gt__(self, other: int) -> bool:
                 return self.x > other
 
-            def __le__(self, other):
-                # type: (int) -> bool
+            def __le__(self, other: int) -> bool:
                 return self.x <= other
 
-            def __ge__(self, other):
-                # type: (int) -> bool
+            def __ge__(self, other: int) -> bool:
                 return self.x >= other
 
-            def __and__(self, other):
-                # type: (int) -> int
+            def __and__(self, other: int) -> int:
                 return self.x & other
 
-            def __or__(self, other):
-                # type: (int) -> int
+            def __or__(self, other: int) -> int:
                 return self.x | other
 
-            def __xor__(self, other):
-                # type: (int) -> int
+            def __xor__(self, other: int) -> int:
                 return self.x ^ other
 
-            def __getitem__(self, other):
-                # type: (int) -> int
+            def __getitem__(self, other: int) -> int:
                 return other + 1
 
-            def __setitem__(self, idx, val):
-                # type: (int, int) -> None
+            def __setitem__(self, idx: int, val: int) -> None:
                 self.x = val * idx
 
-            def __call__(self, val):
-                # type: (int) -> int
+            def __call__(self, val: int) -> int:
                 return self.x * val * 3
 
+
+        make_global(Foo)  # see [local resolution in python]
 
         def add():
             return MyClass(4) + 3
@@ -829,12 +789,9 @@ class TestClassType(JitTestCase):
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
 
     def test_cast_overloads(self):
-        global Foo  # see [local resolution in python]
-
         @torch.jit.script
         class Foo(object):
-            def __init__(self, val):
-                # type: (float) -> None
+            def __init__(self, val: float) -> None:
                 self.val = val
 
             def __int__(self):
@@ -849,8 +806,9 @@ class TestClassType(JitTestCase):
             def __str__(self):
                 return str(self.val)
 
-        def test(foo):
-            # type: (Foo) -> Tuple[int, float, bool]
+        make_global(Foo)  # see [local resolution in python]
+
+        def test(foo: Foo) -> Tuple[int, float, bool]:
             if foo:
                 pass
             return int(foo), float(foo), bool(foo)
@@ -891,8 +849,7 @@ class TestClassType(JitTestCase):
     def test_class_constructs_itself(self):
         @torch.jit.script  # noqa: B903
         class LSTMStateStack(object):  # noqa: B903
-            def __init__(self, num_layers, hidden_size):
-                # type: (int, int) -> None
+            def __init__(self, num_layers: int, hidden_size: int) -> None:
                 self.num_layers = num_layers
                 self.hidden_size = hidden_size
                 self.last_state = (
@@ -919,8 +876,7 @@ class TestClassType(JitTestCase):
             def __init__(self):
                 self.child = torch.jit.annotate(Optional[Leaf], None)
 
-            def add_child(self, child):
-                # type: (Leaf) -> None
+            def add_child(self, child: Leaf) -> None:
                 self.child = child
 
     def test_recursive_class(self):
@@ -960,8 +916,6 @@ class TestClassType(JitTestCase):
             self.assertEqual(m.w, m_loaded.w)
 
     def test_py_class_to_ivalue_missing_attribute(self):
-        global Foo  # see [local resolution in python]
-
         class Foo(object):
             i : int
             f : float
@@ -969,6 +923,8 @@ class TestClassType(JitTestCase):
             def __init__(self, i : int, f : float):
                 self.i = i
                 self.f = f
+
+        make_global(Foo)  # see [local resolution in python]
 
         @torch.jit.script
         def test_fn(x : Foo) -> float:
@@ -1178,8 +1134,6 @@ class TestClassType(JitTestCase):
         """
         Test static methods on class types.
         """
-        global ClassWithStaticMethod
-
         @torch.jit.script
         class ClassWithStaticMethod:
             def __init__(self, a: int, b: int):
@@ -1210,7 +1164,35 @@ class TestClassType(JitTestCase):
         def test_function(a: int, b: int) -> 'ClassWithStaticMethod':
             return ClassWithStaticMethod.create_from(a, b)
 
+        make_global(ClassWithStaticMethod)
+
         self.checkScript(test_function, (1, 2))
+
+    def test_classmethod(self):
+        """
+        Test classmethods on class types.
+        """
+        @torch.jit.script
+        class ClassWithClassMethod:
+            def __init__(self, a: int):
+                self.a: int = a
+
+            def __eq__(self, other: 'ClassWithClassMethod'):
+                return self.a == other.a
+
+            @classmethod
+            def create(cls, a: int) -> 'ClassWithClassMethod':
+                return cls(a)
+
+        make_global(ClassWithClassMethod)
+
+        def test_function(a: int) -> 'ClassWithClassMethod':
+            x = ClassWithClassMethod(a)
+            # Support calling classmethod with an instance
+            # Calling with the class is not supported.
+            return x.create(a)
+
+        self.checkScript(test_function, (1,))
 
     def test_properties(self):
         """
@@ -1398,3 +1380,29 @@ class TestClassType(JitTestCase):
 
         scripted = torch.jit.script(A())
         self.getExportImportCopy(scripted)
+
+    def test_class_attribute_wrong_type(self):
+        """
+        Test that the error message displayed when convering a class type
+        to an IValue that has an attribute of the wrong type.
+        """
+        @torch.jit.script
+        class ValHolder(object):  # noqa: B903
+            def __init__(self, val):
+                self.val = val
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod1 = ValHolder(1)
+                self.mod2 = ValHolder(2)
+
+            def forward(self, cond: bool):
+                if cond:
+                    mod = self.mod1
+                else:
+                    mod = self.mod2
+                return mod.val
+
+        with self.assertRaisesRegex(RuntimeError, "Could not cast attribute 'val' to type Tensor"):
+            torch.jit.script(Mod())

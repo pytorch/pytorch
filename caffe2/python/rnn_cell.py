@@ -7,7 +7,6 @@
 
 import functools
 import inspect
-import itertools
 import logging
 import numpy as np
 import random

@@ -470,3 +470,16 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
     testReduceScatter(file.path, rank_, size_);
   }
 }
+
+TEST_F(ProcessGroupNCCLTest, testBackendName) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    auto test = NCCLTestBase(file.path);
+    test.initialize(rank_, size_);
+    EXPECT_EQ(
+      test.getProcessGroup().getBackendName(), std::string(c10d::NCCL_BACKEND_NAME));
+  }
+}

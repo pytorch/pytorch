@@ -35,19 +35,35 @@ enum MessageType {
   PYTHON_RET = 3 | MessageTypeFlags::RESPONSE_TYPE,
 
   // messages for dist.remote on builtin operators and Python UDF
-  SCRIPT_REMOTE_CALL = 4 | MessageTypeFlags::REQUEST_TYPE, // A remote call on a builtin operator
-  PYTHON_REMOTE_CALL = 5 | MessageTypeFlags::REQUEST_TYPE, // A remote call on a Python UDF
-  REMOTE_RET = 6 | MessageTypeFlags::RESPONSE_TYPE, // Response for remote calls for UDF, builtin, or script
+  SCRIPT_REMOTE_CALL =
+      4 | MessageTypeFlags::REQUEST_TYPE, // A remote call on a builtin operator
+  PYTHON_REMOTE_CALL =
+      5 | MessageTypeFlags::REQUEST_TYPE, // A remote call on a Python UDF
+  REMOTE_RET =
+      6 | MessageTypeFlags::RESPONSE_TYPE, // Response for remote calls for UDF,
+                                           // builtin, or script
 
   // RRef related internal messages
-  SCRIPT_RREF_FETCH_CALL = 7 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<IValue> fetches value from owner
-  PYTHON_RREF_FETCH_CALL = 8 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<py::object> fetches value from owner
-  SCRIPT_RREF_FETCH_RET = 9 | MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends ivalue to user
-  PYTHON_RREF_FETCH_RET = 10 | MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends py::object to user
-  RREF_USER_DELETE = 11 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef tells the owner to deref
-  RREF_FORK_REQUEST = 12 | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells the owner about itself
-  RREF_CHILD_ACCEPT = 13 | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells parent that owner knows it
-  RREF_ACK = 14 | MessageTypeFlags::RESPONSE_TYPE, // ACK to internal RRef messages
+  SCRIPT_RREF_FETCH_CALL =
+      7 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<IValue> fetches value
+                                          // from owner
+  PYTHON_RREF_FETCH_CALL =
+      8 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<py::object> fetches
+                                          // value from owner
+  SCRIPT_RREF_FETCH_RET =
+      9 | MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends ivalue to user
+  PYTHON_RREF_FETCH_RET = 10 |
+      MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends py::object to user
+  RREF_USER_DELETE = 11 |
+      MessageTypeFlags::REQUEST_TYPE, // A UserRRef tells the owner to deref
+  RREF_FORK_REQUEST =
+      12 | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells the owner
+                                           // about itself
+  RREF_CHILD_ACCEPT =
+      13 | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells parent that
+                                           // owner knows it
+  RREF_ACK =
+      14 | MessageTypeFlags::RESPONSE_TYPE, // ACK to internal RRef messages
 
   // Messages with autograd info
   FORWARD_AUTOGRAD_REQ = 15 | MessageTypeFlags::REQUEST_TYPE,
@@ -93,7 +109,7 @@ enum MessageType {
 // Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
 // and PythonResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
-class TORCH_API Message final {
+class TORCH_API Message final : public torch::CustomClassHolder {
  public:
   Message();
 
@@ -154,9 +170,6 @@ TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
 TORCH_API Message
 createExceptionResponse(const std::string& exceptionStr, int64_t id);
 
-// FutureMessage is an internal type used in the communication layer. All
-// user-facing surface APIs should use JitFuture instead.
-using FutureMessage = torch::utils::Future<Message>;
 using JitFuture = c10::ivalue::Future;
 
 } // namespace rpc

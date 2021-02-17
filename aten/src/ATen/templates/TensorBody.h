@@ -125,6 +125,10 @@ class TORCH_API Tensor {
     }
   }
 
+  bool is_complex() const {
+    return at::isComplexType(this->scalar_type());
+  }
+
   int64_t size(int64_t dim) const {
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
     dim = c10::maybe_wrap_dim(dim, this->dim(), false);
@@ -145,6 +149,10 @@ class TORCH_API Tensor {
   }
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr() const {
     return impl_;
+  }
+
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> unsafeReleaseIntrusivePtr()  {
+    return std::move(impl_);
   }
 
   bool defined() const {
@@ -207,10 +215,6 @@ class TORCH_API Tensor {
   Tensor& operator=(Scalar v) &&;
   Tensor& operator=(const Tensor&) &&;
   Tensor& operator=(Tensor&&) &&;
-
-  #ifdef _MSC_VER
-  #pragma warning( pop )
-  #endif
 
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;
@@ -335,13 +339,21 @@ class TORCH_API Tensor {
   caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
-  Device device() const;
+  inline Device device() const {
+    return impl_->device();
+  }
 
   /// Returns a `Tensor`'s device index.
   int64_t get_device() const;
 
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
+
+  /// Returns if a `Tensor` has XPU backend.
+  bool is_xpu() const;
+
+  /// Returns if a `Tensor` has XLA backend.
+  bool is_xla() const;
 
   /// Returns if a `Tensor` has HIP backend.
   bool is_hip() const;
@@ -760,6 +772,12 @@ protected:
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
+
+// For "multiple ... operators specified" warnings, closing brace of class
+// declaration must be included between pragma push & pop
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 
 int64_t get_device(Tensor self);
 

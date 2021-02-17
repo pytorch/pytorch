@@ -1,8 +1,7 @@
-import json
 import argparse
 import os
 import textwrap
-from common import dict_to_features, categories, topics, get_features, CommitDataCache
+from common import categories, topics, CommitDataCache
 from commitlist import CommitList
 
 class Categorizer:

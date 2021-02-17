@@ -610,6 +610,113 @@ Example::
     True
 """)
 
+add_docstr(torch.all,
+           r"""
+all(input) -> Tensor
+
+Tests if all elements in :attr:`input` evaluate to `True`.
+
+.. note:: This function matches the behaviour of NumPy in returning
+          output of dtype `bool` for all supported dtypes except `uint8`.
+          For `uint8` the dtype of output is `uint8` itself.
+
+Example::
+
+    >>> a = torch.rand(1, 2).bool()
+    >>> a
+    tensor([[False, True]], dtype=torch.bool)
+    >>> torch.all(a)
+    tensor(False, dtype=torch.bool)
+    >>> a = torch.arange(0, 3)
+    >>> a
+    tensor([0, 1, 2])
+    >>> torch.all(a)
+    tensor(False)
+
+.. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
+
+For each row of :attr:`input` in the given dimension :attr:`dim`,
+returns `True` if all elements in the row evaluate to `True` and `False` otherwise.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.rand(4, 2).bool()
+    >>> a
+    tensor([[True, True],
+            [True, False],
+            [True, True],
+            [True, True]], dtype=torch.bool)
+    >>> torch.all(a, dim=1)
+    tensor([ True, False,  True,  True], dtype=torch.bool)
+    >>> torch.all(a, dim=0)
+    tensor([ True, False], dtype=torch.bool)
+""".format(**single_dim_common))
+
+add_docstr(torch.any,
+           r"""
+any(input) -> Tensor
+
+Args:
+    {input}
+
+Tests if any element in :attr:`input` evaluates to `True`.
+
+.. note:: This function matches the behaviour of NumPy in returning
+          output of dtype `bool` for all supported dtypes except `uint8`.
+          For `uint8` the dtype of output is `uint8` itself.
+
+Example::
+
+    >>> a = torch.rand(1, 2).bool()
+    >>> a
+    tensor([[False, True]], dtype=torch.bool)
+    >>> torch.any(a)
+    tensor(True, dtype=torch.bool)
+    >>> a = torch.arange(0, 3)
+    >>> a
+    tensor([0, 1, 2])
+    >>> torch.any(a)
+    tensor(True)
+
+.. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
+
+For each row of :attr:`input` in the given dimension :attr:`dim`,
+returns `True` if any element in the row evaluate to `True` and `False` otherwise.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4, 2) < 0
+    >>> a
+    tensor([[ True,  True],
+            [False,  True],
+            [ True,  True],
+            [False, False]])
+    >>> torch.any(a, 1)
+    tensor([ True,  True,  True, False])
+    >>> torch.any(a, 0)
+    tensor([True, True])
+""".format(**single_dim_common))
+
 add_docstr(torch.angle,
            r"""
 angle(input, *, out=None) -> Tensor
@@ -1565,13 +1672,13 @@ reciprocal(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
+.. math::
+    \text{out}_{i} = \frac{1}{\text{input}_{i}}
+
 .. note::
     Unlike NumPy's reciprocal, torch.reciprocal supports integral inputs. Integral
     inputs to reciprocal are automatically :ref:`promoted <type-promotion-doc>` to
     the default scalar type.
-
-.. math::
-    \text{out}_{i} = \frac{1}{\text{input}_{i}}
 """ + r"""
 Args:
     {input}
@@ -1613,6 +1720,10 @@ matrices, then the returned tensor will be composed of upper-triangular Cholesky
 of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
+
+.. note:: :func:`torch.linalg.cholesky` should be used over ``torch.cholesky`` when possible.
+          Note however that :func:`torch.linalg.cholesky` does not yet support the :attr:`upper`
+          parameter and instead always returns the lower triangular matrix.
 
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
@@ -2531,6 +2642,45 @@ Examples::
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """.format(**common_args))
 
+add_docstr(torch.diff, r"""
+diff(input, n=1, dim=-1, prepend=None, append=None) -> Tensor
+
+Computes the n-th forward difference along the given dimension.
+
+The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
+differences are calculated by using :func:`torch.diff` recursively.
+
+.. note::  Only `n = 1` is currently supported
+
+Args:
+    input (Tensor): the tensor to compute the differences on
+    n (int, optional): the number of times to recursively compute the difference
+    dim (int, optional): the dimension to compute the difference along.
+        Default is the last dimension.
+    prepend, append (Tensor, optional): values to prepend or append to
+        :attr:`input` along :attr:`dim` before computing the difference.
+        Their dimensions must be equivalent to that of input, and their shapes
+        must match input's shape except on :attr:`dim`.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([1, 3, 2])
+    >>> torch.diff(a)
+    tensor([ 2, -1])
+    >>> b = torch.tensor([4, 5])
+    >>> torch.diff(a, append=b)
+    tensor([ 2, -1,  2,  1])
+    >>> c = torch.tensor([[1, 2, 3], [3, 4, 5]])
+    >>> torch.diff(c, dim=0)
+    tensor([[2, 2, 2]])
+    >>> torch.diff(c, dim=1)
+    tensor([[1, 1],
+            [1, 1]])
+""".format(**common_args))
+
 add_docstr(torch.digamma, r"""
 digamma(input, *, out=None) -> Tensor
 
@@ -2591,7 +2741,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.div, r"""
-div(input, other, *, out=None) -> Tensor
+div(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -2600,8 +2750,8 @@ Divides each element of the input ``input`` by the corresponding element of
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}_i}}
 
 .. note::
-    Performs a "true" division like Python 3. See :func:`torch.floor_divide`
-    for floor division.
+    By default, this performs a "true" division like Python 3.
+    See the :attr:`rounding_mode` argument for floor division.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
@@ -2612,33 +2762,51 @@ Args:
     other (Tensor or Number): the divisor
 
 Keyword args:
+    rounding_mode (str, optional): Type of rounding applied to the result:
+
+        * None - default behavior. Performs no rounding and, if both :attr:`input` and
+          :attr:`other` are integer types, promotes the inputs to the default scalar type.
+          Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
+        * ``"trunc"`` - rounds the results of the division towards zero.
+          Equivalent to C-style integer division.
+        * ``"floor"`` - rounds the results of the division down.
+          Equivalent to floor division in Python (the ``//`` operator) and NumPy's ``np.floor_divide``.
+
     {out}
 
 Examples::
 
-    >>> a = torch.randn(5)
-    >>> a
-    tensor([ 0.3810,  1.2774, -0.2972, -0.3719,  0.4637])
-    >>> torch.div(a, 0.5)
-    tensor([ 0.7620,  2.5548, -0.5944, -0.7439,  0.9275])
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-0.3711, -1.9353, -0.4605, -0.2917],
-            [ 0.1815, -1.0111,  0.9805, -1.5923],
-            [ 0.1062,  1.4581,  0.7759, -1.2344],
-            [-0.1830, -0.0313,  1.1908, -1.4757]])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([ 0.8032,  0.2930, -0.8113, -0.2308])
+    >>> x = torch.tensor([ 0.3810,  1.2774, -0.2972, -0.3719,  0.4637])
+    >>> torch.div(x, 0.5)
+    tensor([ 0.7620,  2.5548, -0.5944, -0.7438,  0.9274])
+
+    >>> a = torch.tensor([[-0.3711, -1.9353, -0.4605, -0.2917],
+    ...                   [ 0.1815, -1.0111,  0.9805, -1.5923],
+    ...                   [ 0.1062,  1.4581,  0.7759, -1.2344],
+    ...                   [-0.1830, -0.0313,  1.1908, -1.4757]])
+    >>> b = torch.tensor([ 0.8032,  0.2930, -0.8113, -0.2308])
     >>> torch.div(a, b)
-    tensor([[-0.4620, -6.6051,  0.5676,  1.2637],
-            [ 0.2260, -3.4507, -1.2086,  6.8988],
-            [ 0.1322,  4.9764, -0.9564,  5.3480],
-            [-0.2278, -0.1068, -1.4678,  6.3936]])
+    tensor([[-0.4620, -6.6051,  0.5676,  1.2639],
+            [ 0.2260, -3.4509, -1.2086,  6.8990],
+            [ 0.1322,  4.9764, -0.9564,  5.3484],
+            [-0.2278, -0.1068, -1.4678,  6.3938]])
+
+    >>> torch.div(a, b, rounding_mode='trunc')
+    tensor([[-0., -6.,  0.,  1.],
+            [ 0., -3., -1.,  6.],
+            [ 0.,  4., -0.,  5.],
+            [-0., -0., -1.,  6.]])
+
+    >>> torch.div(a, b, rounding_mode='floor')
+    tensor([[-1., -7.,  0.,  1.],
+            [ 0., -4., -2.,  6.],
+            [ 0.,  4., -1.,  5.],
+            [-1., -1., -2.,  6.]])
+
 """.format(**common_args))
 
 add_docstr(torch.divide, r"""
-divide(input, other, *, out=None) -> Tensor
+divide(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Alias for :func:`torch.div`.
 """)
@@ -2990,9 +3158,12 @@ add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
 .. warning::
-    This function's name is a misnomer. It actually rounds the
-    quotient towards zero instead of taking its floor. This behavior
-    will be deprecated in a future PyTorch release.
+
+    :func:`torch.floor_divide` is deprecated and will be removed in a future PyTorch
+    release. Its name is a misnomer because it actually rounds the quotient
+    towards zero instead of taking its floor. To keep the current behavior use
+    :func:`torch.div` with ``rounding_mode='trunc'``. To actually perform floor
+    division, use :func:`torch.div` with ``rounding_mode='floor'``.
 
 Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
 quotient towards zero. Equivalently, it truncates the quotient(s):
@@ -3030,12 +3201,18 @@ Computes the element-wise remainder of division.
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the dividend :attr:`input`.
 
-When :attr:`other` is a tensor, the shapes of :attr:`input` and
-:attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
+
+.. note::
+
+    When the divisor is zero, returns ``NaN`` for floating point dtypes
+    on both CPU and GPU; raises ``RuntimeError`` for integer division by
+    zero on CPU; Integer division by zero on GPU may return any value.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float): the divisor, which may be either a number or a tensor of the same shape as the dividend
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -3044,9 +3221,8 @@ Example::
 
     >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([-1., -0., -1.,  1.,  0.,  1.])
-    >>> torch.fmod(torch.tensor([1., 2, 3, 4, 5]), 1.5)
-    tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
-
+    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5)
+    tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
 """.format(**common_args))
 
@@ -3115,9 +3291,9 @@ Args:
 Example::
 
     >>> t = torch.tensor([[[1, 2],
-                           [3, 4]],
-                          [[5, 6],
-                           [7, 8]]])
+    ...                    [3, 4]],
+    ...                   [[5, 6],
+    ...                    [7, 8]]])
     >>> torch.flatten(t)
     tensor([1, 2, 3, 4, 5, 6, 7, 8])
     >>> torch.flatten(t, start_dim=1)
@@ -3379,13 +3555,13 @@ Keyword args:
 Example::
 
     >>> A = torch.tensor([[6.80, -2.11,  5.66,  5.97,  8.23],
-                          [-6.05, -3.30,  5.36, -4.44,  1.08],
-                          [-0.45,  2.58, -2.70,  0.27,  9.04],
-                          [8.32,  2.71,  4.35,  -7.17,  2.14],
-                          [-9.67, -5.14, -7.26,  6.08, -6.87]]).t()
+    ...                   [-6.05, -3.30,  5.36, -4.44,  1.08],
+    ...                   [-0.45,  2.58, -2.70,  0.27,  9.04],
+    ...                   [8.32,  2.71,  4.35,  -7.17,  2.14],
+    ...                   [-9.67, -5.14, -7.26,  6.08, -6.87]]).t()
     >>> B = torch.tensor([[4.02,  6.19, -8.22, -7.57, -3.03],
-                          [-1.56,  4.00, -8.67,  1.75,  2.86],
-                          [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
+    ...                   [-1.56,  4.00, -8.67,  1.75,  2.86],
+    ...                   [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
     >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, torch.mm(A, X))
     tensor(1.00000e-06 *
@@ -3677,8 +3853,7 @@ Example::
             [-1.1734,  0.7230]])
 """.format(**common_args))
 
-add_docstr(torch.inverse,
-           r"""
+add_docstr(torch.inverse, r"""
 inverse(input, *, out=None) -> Tensor
 
 Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batches
@@ -3686,6 +3861,8 @@ of 2D square tensors, in which case this function would return a tensor composed
 individual inverses.
 
 Supports real and complex input.
+
+.. note:: :func:`torch.inverse` is deprecated. Please use :func:`torch.linalg.inv` instead.
 
 .. note::
 
@@ -4683,15 +4860,15 @@ Returns:
 Example::
 
     >>> A = torch.tensor([[1., 1, 1],
-                          [2, 3, 4],
-                          [3, 5, 2],
-                          [4, 2, 5],
-                          [5, 4, 3]])
+    ...                   [2, 3, 4],
+    ...                   [3, 5, 2],
+    ...                   [4, 2, 5],
+    ...                   [5, 4, 3]])
     >>> B = torch.tensor([[-10., -3],
-                          [ 12, 14],
-                          [ 14, 12],
-                          [ 16, 16],
-                          [ 18, 16]])
+    ...                   [ 12, 14],
+    ...                   [ 14, 12],
+    ...                   [ 16, 16],
+    ...                   [ 18, 16]])
     >>> X, _ = torch.lstsq(B, A)
     >>> X
     tensor([[  2.0000,   1.0000],
@@ -4801,9 +4978,8 @@ Example::
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """.format(**common_args))
 
-add_docstr(torch.matrix_rank,
-           r"""
-matrix_rank(input, tol=None, symmetric=False) -> Tensor
+add_docstr(torch.matrix_rank, r"""
+matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
@@ -4816,11 +4992,17 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
+.. note:: :func:`torch.matrix_rank` is deprecated. Please use :func:`torch.linalg.matrix_rank` instead.
+          The parameter :attr:`symmetric` was renamed in :func:`torch.linalg.matrix_rank` to ``hermitian``.
+
 Args:
     input (Tensor): the input 2-D tensor
     tol (float, optional): the tolerance value. Default: ``None``
     symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
                                Default: ``False``
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -4831,7 +5013,7 @@ Example::
     >>> b[0, 0] = 0
     >>> torch.matrix_rank(b)
     tensor(9)
-""")
+""".format(**common_args))
 
 add_docstr(torch.matrix_power,
            r"""
@@ -4991,6 +5173,35 @@ Example::
     >>> b = torch.tensor((3, 0, 4))
     >>> torch.maximum(a, b)
     tensor([3, 2, 4])
+""".format(**common_args))
+
+add_docstr(torch.fmax, r"""
+fmax(input, other, *, out=None) -> Tensor
+
+Computes the element-wise maximum of :attr:`input` and :attr:`other`.
+
+This is like :func:`torch.maximum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum.
+Only if both elements are NaN is NaN propagated.
+
+This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([9.7, float('nan'), 3.1, float('nan')])
+    >>> b = torch.tensor([-2.2, 0.5, float('nan'), float('nan')])
+    >>> torch.fmax(a, b)
+    tensor([9.7000, 0.5000, 3.1000,    nan])
 """.format(**common_args))
 
 add_docstr(torch.amax,
@@ -5437,6 +5648,35 @@ Example::
     >>> b = torch.tensor((3, 0, 4))
     >>> torch.minimum(a, b)
     tensor([1, 0, -1])
+""".format(**common_args))
+
+add_docstr(torch.fmin, r"""
+fmin(input, other, *, out=None) -> Tensor
+
+Computes the element-wise minimum of :attr:`input` and :attr:`other`.
+
+This is like :func:`torch.minimum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum.
+Only if both elements are NaN is NaN propagated.
+
+This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([2.2, float('nan'), 2.1, float('nan')])
+    >>> b = torch.tensor([-9.3, 0.1, float('nan'), float('nan')])
+    >>> torch.fmin(a, b)
+    tensor([-9.3000, 0.1000, 2.1000,    nan])
 """.format(**common_args))
 
 add_docstr(torch.amin,
@@ -6202,9 +6442,9 @@ Example::
             [ 2],
             [ 4]])
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
-                                    [0.0, 0.4, 0.0, 0.0],
-                                    [0.0, 0.0, 1.2, 0.0],
-                                    [0.0, 0.0, 0.0,-0.4]]))
+    ...                             [0.0, 0.4, 0.0, 0.0],
+    ...                             [0.0, 0.0, 1.2, 0.0],
+    ...                             [0.0, 0.0, 0.0,-0.4]]))
     tensor([[ 0,  0],
             [ 1,  1],
             [ 2,  2],
@@ -6212,9 +6452,9 @@ Example::
     >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=True)
     (tensor([0, 1, 2, 4]),)
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
-                                    [0.0, 0.4, 0.0, 0.0],
-                                    [0.0, 0.0, 1.2, 0.0],
-                                    [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
+    ...                             [0.0, 0.4, 0.0, 0.0],
+    ...                             [0.0, 0.0, 1.2, 0.0],
+    ...                             [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
     (tensor([0, 1, 2, 3]), tensor([0, 1, 2, 3]))
     >>> torch.nonzero(torch.tensor(5), as_tuple=True)
     (tensor([0]),)
@@ -6658,7 +6898,7 @@ Args:
 
 Example::
 
-    >>> torch.promote_types(torch.int32, torch.float32))
+    >>> torch.promote_types(torch.int32, torch.float32)
     torch.float32
     >>> torch.promote_types(torch.uint8, torch.long)
     torch.long
@@ -6676,11 +6916,10 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
-.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :meth:`~torch.linalg.qr`
-             instead, which provides a better compatibility with
-             ``numpy.linalg.qr``.
+.. warning:: ``torch.qr`` is deprecated. Please use :func:`torch.linalg.qr`
+             instead.
 
-             **Differences with** ``torch.linalg.`` :meth:`~torch.linalg.qr`:
+             **Differences with** ``torch.linalg.qr``:
 
              * ``torch.linalg.qr`` takes a string parameter ``mode`` instead of ``some``:
 
@@ -6698,21 +6937,21 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
 
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
           and may produce different (valid) decompositions on different device types
-          and different platforms, depending on the precise version of the
-          underlying library.
+          or different platforms.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
                 batch dimensions consisting of matrices of dimension :math:`m \times n`.
     some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
-                complete QR decomposition.
+                complete QR decomposition. If `k = min(m, n)` then:
+
+                  * ``some=True`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
+
+                  * ``'some=False'``: returns `(Q, R)` with dimensions (m, m), (m, n)
 
 Keyword args:
-    out (tuple, optional): tuple of `Q` and `R` tensors
-                satisfying :code:`input = torch.matmul(Q, R)`.
-                The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
-                respectively, where :math:`k = \min(m, n)` if :attr:`some:` is ``True`` and
-                :math:`k = m` otherwise.
+    out (tuple, optional): tuple of `Q` and `R` tensors.
+                The dimensions of `Q` and `R` are detailed in the description of :attr:`some` above.
 
 Example::
 
@@ -6999,10 +7238,10 @@ Keyword args:
 """.format(**factory_like_common_args))
 
 add_docstr(torch.randperm,
-           r"""
-randperm(n, \*, generator=None, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False,
-    pin_memory=False) -> LongTensor
-
+           """
+randperm(n, *, generator=None, out=None, dtype=torch.int64,layout=torch.strided, \
+device=None, requires_grad=False, pin_memory=False) -> Tensor
+""" + r"""
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
@@ -7066,8 +7305,8 @@ Example::
     tensor([ 0,  1])
 
     >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
-                     dtype=torch.float64,
-                     device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
+    ...              dtype=torch.float64,
+    ...              device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
     tensor([[ 0.1111,  0.2222,  0.3333]], dtype=torch.float64, device='cuda:0')
 
     >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
@@ -7185,17 +7424,17 @@ Computes the element-wise remainder of division.
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the divisor :attr:`other`.
 
-When :attr:`other` is a tensor, the shapes of :attr:`input` and
-:attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
-Note:
+.. note::
     Complex inputs are not supported. In some cases, it is not mathematically
     possible to satisfy the definition of a modulo operation with complex numbers.
+    See :func:`torch.fmod` for how division by zero is handled.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float): the divisor that may be either a number or a
-                               Tensor of the same shape as the dividend
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -7204,7 +7443,7 @@ Example::
 
     >>> torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
-    >>> torch.remainder(torch.tensor([1., 2, 3, 4, 5]), 1.5)
+    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
     tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
 
 .. seealso::
@@ -7768,7 +8007,7 @@ Keyword args:
 Example::
 
     >>> i = torch.tensor([[0, 1, 1],
-                          [2, 0, 2]])
+    ...                   [2, 0, 2]])
     >>> v = torch.tensor([3, 4, 5], dtype=torch.float32)
     >>> torch.sparse_coo_tensor(i, v, [2, 4])
     tensor(indices=tensor([[0, 1, 1],
@@ -7783,8 +8022,8 @@ Example::
            size=(2, 3), nnz=3, layout=torch.sparse_coo)
 
     >>> torch.sparse_coo_tensor(i, v, [2, 4],
-                                dtype=torch.float64,
-                                device=torch.device('cuda:0'))
+    ...                         dtype=torch.float64,
+    ...                         device=torch.device('cuda:0'))
     tensor(indices=tensor([[0, 1, 1],
                            [2, 0, 2]]),
            values=tensor([3., 4., 5.]),
@@ -8142,53 +8381,80 @@ add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-This function returns a namedtuple ``(U, S, V)`` which is the singular value
-decomposition of a input matrix or batches of matrices :attr:`input` such that
-:math:`input = U \times diag(S) \times V^T`.
+Computes the singular value decomposition of either a matrix or batch of
+matrices :attr:`input`. The singular value decomposition is represented as a
+namedtuple (`U,S,V`), such that
+:attr:`input` = `U` diag(`S`) `Vᴴ`,
+where `Vᴴ` is the transpose of `V` for the real-valued inputs,
+or the conjugate transpose of `V` for the complex-valued inputs.
+If :attr:`input` is a batch of tensors, then `U`, `S`, and `V` are also
+batched with the same batch dimensions as :attr:`input`.
 
-If :attr:`some` is ``True`` (default), the method returns the reduced
-singular value decomposition i.e., if the last two dimensions of
-:attr:`input` are ``m`` and ``n``, then the returned `U` matrix will
-contain only :math:`min(n, m)` orthonormal columns and the size of `V`
-will be :math:`(*, n, n)`.
+If :attr:`some` is ``True`` (default), the method returns the reduced singular
+value decomposition i.e., if the last two dimensions of :attr:`input` are
+`m` and `n`, then the returned `U` and `V` matrices will contain only
+min(`n, m`) orthonormal columns.
 
-If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
-of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
+If :attr:`compute_uv` is ``False``, the returned `U` and `V` will be
+zero-filled matrices of shape `(m × m)` and `(n × n)`
+respectively, and the same device as :attr:`input`. The :attr:`some`
+argument has no effect when :attr:`compute_uv` is ``False``.
 
-Supports real-valued and complex-valued input.
+Supports input of float, double, cfloat and cdouble data types.
+The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
+always be real-valued, even if :attr:`input` is complex.
+
+.. warning:: :func:`torch.svd` is deprecated. Please use
+             :func:`torch.linalg.svd` instead, which is similar to NumPy's
+             ``numpy.linalg.svd``.
+
+.. note:: Differences with :func:`torch.linalg.svd`:
+
+             * :attr:`some` is the opposite of
+               :func:`torch.linalg.svd`'s :attr:`full_matricies`. Note that
+               default value for both is ``True``, so the default behavior is
+               effectively the opposite.
+
+             * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns `Vᴴ`.
+
+             * If :attr:`compute_uv=False`, :func:`torch.svd` returns zero-filled tensors for
+               ``U`` and ``Vh``, whereas :func:`torch.linalg.svd` returns
+               empty tensors.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
-          `gesdd` as well.
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
+          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
+          on earlier versions of CUDA.
 
-.. note:: Irrespective of the original strides, the returned matrix `U`
-          will be transposed, i.e. with strides :code:`U.contiguous().transpose(-2, -1).stride()`
+.. note:: The returned matrix `U` will be transposed, i.e. with strides
+          :code:`U.contiguous().transpose(-2, -1).stride()`.
 
-.. note:: Extra care needs to be taken when backward through `U` and `V`
-          outputs. Such operation is really only stable when :attr:`input` is
-          full rank with all distinct singular values. Otherwise, ``NaN`` can
-          appear as the gradients are not properly defined. Also, notice that
-          double backward will usually do an additional backward through `U` and
-          `V` even if the original backward is only on `S`.
+.. note:: Gradients computed using `U` and `V` may be unstable if
+          :attr:`input` is not full rank or has non-unique singular values.
 
 .. note:: When :attr:`some` = ``False``, the gradients on :code:`U[..., :, min(m, n):]`
           and :code:`V[..., :, min(m, n):]` will be ignored in backward as those vectors
           can be arbitrary bases of the subspaces.
 
-.. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
-          from the forward pass is required for the backward operation.
+.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
 
 .. note:: With the complex-valued input the backward operation works correctly only
           for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
 
+.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
+          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
+          Different platforms, like Numpy, or inputs on different device types, may produce different
+          `U` and `V` tensors.
+
 Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                    batch dimensions consisting of :math:`m \times n` matrices.
-    some (bool, optional): controls the shape of returned `U` and `V`
-    compute_uv (bool, optional): option whether to compute `U` and `V` or not
+    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of `(m × n)` matrices.
+    some (bool, optional): controls whether to compute the reduced or full decomposition, and
+                           consequently the shape of returned `U` and `V`. Defaults to True.
+    compute_uv (bool, optional): option whether to compute `U` and `V` or not. Defaults to True.
 
 Keyword args:
     out (tuple, optional): the output tuple of tensors
@@ -8225,8 +8491,7 @@ Example::
 .. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
-add_docstr(torch.symeig,
-           r"""
+add_docstr(torch.symeig, r"""
 symeig(input, eigenvectors=False, upper=True, *, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
@@ -8342,6 +8607,11 @@ flip(input, dims) -> Tensor
 
 Reverse the order of a n-D tensor along given axis in dims.
 
+.. note::
+    `torch.flip` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flip`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.flip` is expected to be slower than `np.flip`.
+
 Args:
     {input}
     dims (a list or tuple): axis to flip on
@@ -8367,13 +8637,18 @@ add_docstr(torch.fliplr,
            r"""
 fliplr(input) -> Tensor
 
-Flip array in the left/right direction, returning a new tensor.
+Flip tensor in the left/right direction, returning a new tensor.
 
 Flip the entries in each row in the left/right direction.
 Columns are preserved, but appear in a different order than before.
 
 Note:
-    Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
+    Requires the tensor to be at least 2-D.
+
+.. note::
+    `torch.fliplr` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.fliplr`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.fliplr` is expected to be slower than `np.fliplr`.
 
 Args:
     input (Tensor): Must be at least 2-dimensional.
@@ -8393,13 +8668,18 @@ add_docstr(torch.flipud,
            r"""
 flipud(input) -> Tensor
 
-Flip array in the up/down direction, returning a new tensor.
+Flip tensor in the up/down direction, returning a new tensor.
 
 Flip the entries in each column in the up/down direction.
 Rows are preserved, but appear in a different order than before.
 
 Note:
-    Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
+    Requires the tensor to be at least 1-D.
+
+.. note::
+    `torch.flipud` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flipud`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.flipud` is expected to be slower than `np.flipud`.
 
 Args:
     input (Tensor): Must be at least 1-dimensional.
@@ -8509,7 +8789,7 @@ Args:
 Example::
 
     >>> src = torch.tensor([[4, 3, 5],
-                            [6, 7, 8]])
+    ...                     [6, 7, 8]])
     >>> torch.take(src, torch.tensor([0, 2, 5]))
     tensor([ 4,  5,  8])
 """.format(**common_args))
@@ -8930,7 +9210,7 @@ Example::
 add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
-Alias for :func:`torch.div`.
+Alias for :func:`torch.div` with ``rounding_mode=None``.
 """.format(**common_args))
 
 add_docstr(torch.trunc,
@@ -8954,6 +9234,91 @@ Example::
     >>> torch.trunc(a)
     tensor([ 3.,  0., -0., -0.])
 """.format(**common_args))
+
+add_docstr(torch.fake_quantize_per_tensor_affine,
+           r"""
+fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+
+Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`scale`,
+:attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`.
+
+.. math::
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
+
+Args:
+    input (Tensor): the input value(s), in ``torch.float32``.
+    scale (double): quantization scale
+    zero_point (int64): quantization zero_point
+    quant_min (int64): lower bound of the quantized domain
+    quant_max (int64): upper bound of the quantized domain
+
+Returns:
+    Tensor: A newly fake_quantized tensor
+
+Example::
+
+    >>> x = torch.randn(4)
+    >>> x
+    tensor([ 0.0552,  0.9730,  0.3973, -1.0780])
+    >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
+    tensor([0.1000, 1.0000, 0.4000, 0.0000])
+""")
+
+add_docstr(torch.fake_quantize_per_channel_affine,
+           r"""
+fake_quantize_per_channel_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+
+Returns a new tensor with the data in :attr:`input` fake quantized per channel using :attr:`scale`,
+:attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`, across the channel specified by :attr:`axis`.
+
+.. math::
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
+
+Args:
+    input (Tensor): the input value(s), in ``torch.float32``.
+    scale (Tensor): quantization scale, per channel
+    zero_point (Tensor): quantization zero_point, per channel
+    axis (int32): channel axis
+    quant_min (int64): lower bound of the quantized domain
+    quant_max (int64): upper bound of the quantized domain
+
+Returns:
+    Tensor: A newly fake_quantized per channel tensor
+
+Example::
+
+    >>> x = torch.randn(2, 2, 2)
+    >>> x
+    tensor([[[-0.2525, -0.0466],
+             [ 0.3491, -0.2168]],
+
+            [[-0.5906,  1.6258],
+             [ 0.6444, -0.0542]]])
+    >>> scales = (torch.randn(2) + 1) * 0.05
+    >>> scales
+    tensor([0.0475, 0.0486])
+    >>> zero_points = torch.zeros(2).to(torch.long)
+    >>> zero_points
+    tensor([0, 0])
+    >>> torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
+    tensor([[[0.0000, 0.0000],
+             [0.3405, 0.0000]],
+
+            [[0.0000, 1.6134],
+            [0.6323, 0.0000]]])
+""")
 
 add_docstr(torch.fix,
            r"""
@@ -9289,21 +9654,22 @@ Keyword args:
     {memory_format}
 """.format(**factory_like_common_args))
 
-add_docstr(torch.det,
-           r"""
+add_docstr(torch.det, r"""
 det(input) -> Tensor
 
 Calculates determinant of a square matrix or batches of square matrices.
 
+.. note:: :func:`torch.det` is deprecated. Please use :func:`torch.linalg.det` instead.
+
 .. note::
-    Backward through :meth:`det` internally uses SVD results when :attr:`input` is
-    not invertible. In this case, double backward through :meth:`det` will be
-    unstable in when :attr:`input` doesn't have distinct singular values. See
-    :meth:`~torch.svd` for details.
+    Backward through :math:`det` internally uses SVD results when :attr:`input` is
+    not invertible. In this case, double backward through :math:`det` will be
+    unstable when :attr:`input` doesn't have distinct singular values. See
+    :math:`~torch.svd` for details.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
-                batch dimensions.
+                    batch dimensions.
 
 Example::
 
@@ -9429,11 +9795,12 @@ Example::
     tensor([ 0.1815, -0.8917, -0.3031])
 """)
 
-add_docstr(torch.slogdet,
-           r"""
+add_docstr(torch.slogdet, r"""
 slogdet(input) -> (Tensor, Tensor)
 
 Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
+
+.. note:: :func:`torch.slogdet` is deprecated. Please use :func:`torch.linalg.slogdet` instead.
 
 .. note::
     If ``input`` has zero determinant, this returns ``(0, -inf)``.
@@ -9467,12 +9834,14 @@ Example::
     torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
-add_docstr(torch.pinverse,
-           r"""
+add_docstr(torch.pinverse, r"""
 pinverse(input, rcond=1e-15) -> Tensor
 
 Calculates the pseudo-inverse (also known as the Moore-Penrose inverse) of a 2D tensor.
 Please look at `Moore-Penrose inverse`_ for more details
+
+.. note:: :func:`torch.pinverse` is deprecated. Please use :func:`torch.linalg.pinv` instead
+          which includes new parameters :attr:`hermitian` and :attr:`out`.
 
 .. note::
     This method is implemented using the Singular Value Decomposition.
@@ -9919,8 +10288,7 @@ Args:
         array.
 
 Returns:
-    Tensor: Repeated tensor which has the same shape as input, except along the
-     given axis.
+    Tensor: Repeated tensor which has the same shape as input, except along the given axis.
 
 Example::
 

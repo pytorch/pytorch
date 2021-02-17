@@ -3,6 +3,7 @@ import sys
 import errno
 import os
 import ctypes
+import faulthandler
 import torch
 import gc
 import time
@@ -29,18 +30,6 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_PYTORCH_CI:
-        raise ImportError(err_msg) from None
-    else:
-        warnings.warn(err_msg)
-
-try:
-    import faulthandler
-    HAS_FAULTHANDLER = True
-except ImportError:
-    HAS_FAULTHANDLER = False
-    err_msg = ("faulthandler not found. Some data loader tests use it for error "
-               "reporting (e.g., TestDataLoader.test_proper_exit).")
     if IS_PYTORCH_CI:
         raise ImportError(err_msg) from None
     else:
@@ -86,9 +75,7 @@ if not NO_MULTIPROCESSING_SPAWN:
 JOIN_TIMEOUT = 60.0  # seconds
 
 
-supported_multiprocessing_contexts = [None]
-if torch.multiprocessing._supports_context:
-    supported_multiprocessing_contexts += list(torch.multiprocessing.get_all_start_methods())
+supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
 
 
 @unittest.skipIf(
@@ -312,29 +299,25 @@ class TestConcatDataset(TestCase):
 
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
-    if HAS_FAULTHANDLER:
-        faulthandler.enable(sys.__stderr__)
-        if not IS_WINDOWS:
-            # windows does not have faulthandler.register
-            # chain=False prevents the default behavior of killing the process
-            faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
+    faulthandler.enable(sys.__stderr__)
+    if not IS_WINDOWS:
+        # windows does not have faulthandler.register
+        # chain=False prevents the default behavior of killing the process
+        faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
 
 
 set_faulthander_if_available()
 
 # Process `pid` must have called `set_faulthander_if_available`
 def print_traces_of_all_threads(pid):
-    if HAS_FAULTHANDLER:
-        if not IS_WINDOWS:
-            # use the custom signal if available
-            os.kill(pid, signal.SIGUSR1)
-        else:
-            # otherwise we can still use the handler given by faulthandler.enable()
-            # at the cost of killing the process.
-            os.kill(pid, signal.SIGSEGV)
+    if not IS_WINDOWS:
+        # use the custom signal if available
+        os.kill(pid, signal.SIGUSR1)
     else:
-        # if there is no faulthandler, use SIGINT otherwise and hope for the best
-        os.kill(pid, signal.SIGINT)
+        # otherwise we can still use the handler given by faulthandler.enable()
+        # at the cost of killing the process.
+        os.kill(pid, signal.SIGSEGV)
+
     # wait in parent process to give subprocess some time to print
     time.sleep(5)
 
@@ -1037,17 +1020,13 @@ except RuntimeError as e:
                                     "batch_size=None option disables auto-batching and is mutually exclusive"):
             self._get_data_loader(self.dataset, batch_size=None, drop_last=True)
 
-        if torch.multiprocessing._supports_context:
-            valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
-            with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
-                self._get_data_loader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
-            with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='bad')
-            with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context=object())
-        else:
-            with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='fork')
+        valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
+        with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
+            self._get_data_loader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
+        with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
+            self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='bad')
+        with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
+            self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context=object())
 
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
@@ -1115,7 +1094,7 @@ except RuntimeError as e:
         self.assertEqual(len(fetched), 20)
         for i, d in enumerate(fetched):
             # non-batched should not convert ints into tensors
-            self.assertIsInstance(d, torch._six.int_classes)
+            self.assertIsInstance(d, int)
             self.assertEqual(d, i)
         # DataLoader should match len of the iterable-style dataset (if implemented)
         self.assertEqual(len(dataloader), len(dataset))
@@ -1134,7 +1113,7 @@ except RuntimeError as e:
             fetched = sorted(dataloader_iter)
             for a, b in zip(fetched, expected):
                 # non-batched should not convert ints into tensors
-                self.assertIsInstance(a, torch._six.int_classes)
+                self.assertIsInstance(a, int)
                 self.assertEqual(a, b)
             # DataLoader should match len of the iterable-style dataset (if implemented)
             self.assertEqual(len(dataloader), len(dataset))
@@ -1504,7 +1483,7 @@ except RuntimeError as e:
     def test_sampler(self):
         self._test_sampler()
         self._test_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+        if not NO_MULTIPROCESSING_SPAWN:
             self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     def _test_batch_sampler(self, **kwargs):
@@ -1529,7 +1508,7 @@ except RuntimeError as e:
     def test_batch_sampler(self):
         self._test_batch_sampler()
         self._test_batch_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+        if not NO_MULTIPROCESSING_SPAWN:
             self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -2052,15 +2031,19 @@ except RuntimeError as e:
 
     def test_dataset_not_reset(self):
         dataset = DummyDataset()
-        dataloader = self._get_data_loader(dataset, num_workers=2)
-        dataset.start = 0
-        for i in range(10):
-            for x in dataloader:
-                pass
-            # Changing the start value here doesn't have any effect in the dataset
-            # cached by the workers. since they are not recreated between epochs
-            # and can cache values safely
-            dataset.start = i
+        pin_memory_configs = [False]
+        if TEST_CUDA:
+            pin_memory_configs.append(True)
+        for pin_memory in pin_memory_configs:
+            dataloader = self._get_data_loader(dataset, num_workers=2, pin_memory=pin_memory)
+            dataset.start = 0
+            for i in range(10):
+                for x in dataloader:
+                    pass
+                # Changing the start value here doesn't have any effect in the dataset
+                # cached by the workers. since they are not recreated between epochs
+                # and can cache values safely
+                dataset.start = i
 
 
 
