@@ -42,6 +42,7 @@ from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
+from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -750,6 +751,22 @@ class TestJit(JitTestCase):
 
         for m, inp in inputs:
             self.checkModule(m, (inp,))
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Not implemented for Simple or Legacy')
+    def test_debug_flush_compilation_cache(self):
+        def foo(x):
+            return x + 2
+        x = torch.rand(1, 10)
+        with enable_profiling_mode_for_profiling_tests():
+            jitted = self.checkScript(foo, (x,))
+            # shouldn't throw
+            states = jitted.get_debug_state()
+            # after flushing there shouldn't be
+            # no opt plan
+
+            jitted._debug_flush_compilation_cache()
+            with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
+                states = jitted.get_debug_state() # noqa
 
     def test_numel(self):
         @torch.jit.script
@@ -9077,11 +9094,16 @@ dedent """
         def fn(x):
             return torch.any(x)
 
+        def fn1(x, dim: int):
+            return torch.any(x, dim)
+
         self.checkScript(fn, (torch.randn(3, 4), ))
         self.checkScript(fn, (torch.empty(3), ))
         self.checkScript(fn, (torch.empty(1), ))
         self.checkScript(fn, (torch.ones(3, 4),))
         self.checkScript(fn, (torch.zeros(5, 7, 1),))
+        self.checkScript(fn1, (torch.empty(3, 4), -2))
+        self.checkScript(fn1, (torch.randn(3, 8), 1))
 
     def test_any(self):
         def fn(x: List[int]):
