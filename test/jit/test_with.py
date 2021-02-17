@@ -441,7 +441,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class BadEnter(object):
             """
-            This class is has an __enter__ method with an incorrect signature.
+            This class has an __enter__ method with an incorrect signature.
             """
 
             def __init__(self):
@@ -456,7 +456,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class BadExit(object):
             """
-            This class is has an __exit__ method with an incorrect signature.
+            This class has an __exit__ method with an incorrect signature.
             """
 
             def __init__(self):
@@ -471,7 +471,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class ExitIncorrectTypes(object):
             """
-            This class is has an __exit__ method with unsupported argument types.
+            This class has an __exit__ method with unsupported argument types.
             """
 
             def __init__(self):
@@ -482,6 +482,20 @@ class TestWith(JitTestCase):
 
             def __exit__(self, type: Any, value: int, tb: int):
                 pass
+
+        @torch.jit.script
+        class ExitIncorrectReturnType(object):
+            """
+            This class has an __exit__ method with an unsupported return type.
+            """
+            def __init__(self):
+                self.count = 1
+
+            def __enter__(self):
+                self.count += 1
+
+            def __exit__(self, type: Any, value: Any, tb: Any) -> int:
+                return 1
 
         def test_no_enter_no_exit(x: torch.Tensor, c: NoEnterNoExit) -> torch.Tensor:
             with c as _:
@@ -507,6 +521,12 @@ class TestWith(JitTestCase):
 
             return x
 
+        def test_exit_incorrect_return_type(x: torch.Tensor, c: ExitIncorrectReturnType) -> torch.Tensor:
+            with c as _:
+                pass
+
+            return x
+
         def test_enter_without_object():
             with "not_object" as obj:
                 pass
@@ -524,7 +544,7 @@ class TestWith(JitTestCase):
             self.checkScript(test_bad_enter, (test_tensor, BadEnter()))
 
         with self.assertRaisesRegex(
-            RuntimeError, r"__exit__ must have four arguments and no return value"
+            RuntimeError, r"__exit__ must have four arguments"
         ):
             self.checkScript(test_bad_exit, (test_tensor, BadExit()))
 
@@ -534,6 +554,12 @@ class TestWith(JitTestCase):
             self.checkScript(
                 test_exit_incorrect_types, (test_tensor, ExitIncorrectTypes())
             )
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"__exit__ must return Optional\[bool\]"
+        ):
+            self.checkScript(test_exit_incorrect_return_type, (test_tensor, ExitIncorrectReturnType()))
+
 
         with self.assertRaisesRegex(RuntimeError, r"must return an object"):
             self.checkScript(test_enter_without_object, ())
