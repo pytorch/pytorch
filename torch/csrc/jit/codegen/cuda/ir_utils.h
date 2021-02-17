@@ -65,7 +65,7 @@ class FilterIterator {
 
  private:
   Iterator current_;
-  const Iterator end_;
+  Iterator end_;
 };
 
 // An iterable view to a given container of Val pointers. Only returns
