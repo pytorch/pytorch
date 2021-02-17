@@ -626,6 +626,7 @@ def if_stmt(cond : Union[bool, Proxy], true_block : Callable, false_block : Call
         false_placeholders = [n for n in false_block_traced.graph.nodes if n.op == 'placeholder']
         if len(true_placeholders) != len(false_placeholders):
             raise RuntimeError('True and false block must have the same number of inputs')
+        assert isinstance(cond.tracer, Tracer)
         i = 0
         while hasattr(cond.tracer.root, f'_if_stmt_{i}'):
             i += 1
@@ -649,7 +650,8 @@ class ForLoop(torch.nn.Module):
 
 def for_loop(trip_count : Union[int, Proxy], body : Callable, *args):
     if isinstance(trip_count, Proxy):
-        body_block_traced = torch.fx.symbolic_trace(body)
+        body_block_traced = symbolic_trace(body)
+        assert isinstance(trip_count.tracer, Tracer)
         i = 0
         while hasattr(trip_count.tracer.root, f'_for_loop_{i}'):
             i += 1
