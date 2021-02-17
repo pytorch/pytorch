@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Tensor.h>
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -165,7 +166,7 @@ VkDeviceSize buffer_bytes(
     size *= extents.data[0u] * extents.data[1u] * (4u * extents.data[2u]);
   }
   else {
-    size *= prod_intlist(sizes);
+    size *= c10::multiply_integers(sizes);
   }
 
   return size;
@@ -794,6 +795,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
       },
       VK_KERNEL(nchw_to_image),
       extents,
+      view_.context_->gpu().adapter->local_work_group_size(),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
@@ -851,6 +853,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
       },
       VK_KERNEL(image_to_nchw),
       view_.extents(),
+      view_.context_->gpu().adapter->local_work_group_size(),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);

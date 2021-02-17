@@ -111,8 +111,13 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "index_put", [&] {
     if (accumulate) {
-      bool use_parallel_for = ((iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
-      if (iter.dtype() == ScalarType::Float && use_parallel_for) {
+      // See Note [Enabling Deterministic Operations]
+      // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
+      // must enable serial execution if deterministic algorithms are enabled.
+      bool is_deterministic = at::globalContext().deterministicAlgorithms();
+      bool use_parallel_for = (!is_deterministic) && (
+        (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
+      if (use_parallel_for && iter.dtype() == ScalarType::Float) {
         cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
           cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
         });
