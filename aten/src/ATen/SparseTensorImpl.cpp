@@ -50,6 +50,7 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   AT_ASSERT(values_.device() == device());
 
   is_non_overlapping_and_dense_ = false;
+  set_storage_access_should_throw();
 }
 
 IntArrayRef SparseTensorImpl::strides() const {
