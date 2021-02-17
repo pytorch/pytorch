@@ -70,7 +70,10 @@ void GpuLower::replaceSymbolicSizes() {
 
       // TODO(kir): consider a different implementation which doesn't
       //  hijack the kir_val_map_
-      if (kir_val_map_.find(orig_size) == kir_val_map_.end()) {
+      // Currently turn off this part for inputs of segmented fusion,
+      //  since FusionSegmentRuntime will provide these as integer inputs
+      if (kir_val_map_.find(orig_size) == kir_val_map_.end() &&
+          !orig_size->isFusionInput()) {
         std::stringstream ss;
         ss << "T" << tv->name() << ".size[" << dim++ << "]";
         kir_val_map_[orig_size] = ir_builder.create<kir::NamedScalar>(
