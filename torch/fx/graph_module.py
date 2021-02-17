@@ -6,7 +6,7 @@ from torch.package import PackageImporter, PackageExporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
 from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
-from torch.package import Importer, SysImporter
+from torch.package import Importer, sys_importer
 import copy
 import sys
 import traceback
@@ -399,7 +399,7 @@ class {module_name}(torch.nn.Module):
         """
         dict_without_graph = self.__dict__.copy()
         python_code = self.recompile()
-        import_block = _format_import_block(python_code.globals, SysImporter)
+        import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph['_graph']
         return (reduce_graph_module, (dict_without_graph, import_block))
 

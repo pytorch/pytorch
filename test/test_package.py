@@ -576,7 +576,7 @@ def load():
                 pe.save_pickle('model', 'model.pkl', traced)
 
         f2.seek(0)
-        with PackageExporter(f2, importer=OrderedImporter(pi, SysImporter), verbose=False) as pe:
+        with PackageExporter(f2, importer=(pi, sys_importer), verbose=False) as pe:
             # Make the package available to the exporter's environment.
             pe.save_pickle('model', 'model.pkl', traced)
         f2.seek(0)
