@@ -8,11 +8,23 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <THC/THCAtomics.cuh>
 
 namespace at {
 namespace native {
 namespace {
+
+__device__ __forceinline__ size_t
+idx_3d(
+    const size_t depth,
+    const size_t height,
+    const size_t width,
+    const size_t z,
+    const size_t y,
+    const size_t x) {
+  return (z * height + y) * width + x;
+}
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
@@ -107,7 +119,8 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 5> idata,
-    const PackedTensorAccessor64<scalar_t, 5> odata) {
+    const PackedTensorAccessor64<scalar_t, 5> odata,
+    scalar_t* idata_ptr_) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -118,6 +131,8 @@ __global__ void upsample_trilinear3d_backward_out_frame(
   const int depth2 = odata.size(2);
   const int height2 = odata.size(3);
   const int width2 = odata.size(4);
+
+  const size_t i_numel = batchsize * channels * depth1 * height1 * width1;
 
   if (index < n) {
     const int w2 = (index % (height2 * width2)) % width2; // 0:width2-1
@@ -161,31 +176,56 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     //
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
+        scalar_t* idata_ptr = idata_ptr_ + c * depth1 * height1 * width1;
         const scalar_t d2val = odata[n][c][t2][h2][w2];
-        gpuAtomicAdd(
-            &idata[n][c][t1][h1][w1],
-            static_cast<scalar_t>(t0lambda * h0lambda * w0lambda * d2val));
-        gpuAtomicAdd(
-            &idata[n][c][t1][h1][w1 + w1p],
-            static_cast<scalar_t>(t0lambda * h0lambda * w1lambda * d2val));
-        gpuAtomicAdd(
-            &idata[n][c][t1][h1 + h1p][w1],
-            static_cast<scalar_t>(t0lambda * h1lambda * w0lambda * d2val));
-        gpuAtomicAdd(
-            &idata[n][c][t1][h1 + h1p][w1 + w1p],
-            static_cast<scalar_t>(t0lambda * h1lambda * w1lambda * d2val));
-        gpuAtomicAdd(
-            &idata[n][c][t1 + t1p][h1][w1],
-            static_cast<scalar_t>(t1lambda * h0lambda * w0lambda * d2val));
-        gpuAtomicAdd(
-            &idata[n][c][t1 + t1p][h1][w1 + w1p],
-            static_cast<scalar_t>(t1lambda * h0lambda * w1lambda * d2val));
-        gpuAtomicAdd(
-            &idata[n][c][t1 + t1p][h1 + h1p][w1],
-            static_cast<scalar_t>(t1lambda * h1lambda * w0lambda * d2val));
-        gpuAtomicAdd(
-            &idata[n][c][t1 + t1p][h1 + h1p][w1 + w1p],
-            static_cast<scalar_t>(t1lambda * h1lambda * w1lambda * d2val));
+        fastAtomicAdd(
+          idata_ptr,
+          idx_3d(depth1, height1, width1, t1, h1, w1),
+          i_numel,
+          static_cast<scalar_t>(t0lambda * h0lambda * w0lambda * d2val),
+          true);
+        fastAtomicAdd(
+          idata_ptr,
+          idx_3d(depth1, height1, width1, t1, h1, w1 + w1p),
+          i_numel,
+          static_cast<scalar_t>(t0lambda * h0lambda * w1lambda * d2val),
+          true);
+        fastAtomicAdd(
+          idata_ptr,
+          idx_3d(depth1, height1, width1, t1, h1 + h1p, w1),
+          i_numel,
+          static_cast<scalar_t>(t0lambda * h1lambda * w0lambda * d2val),
+          true);
+        fastAtomicAdd(
+          idata_ptr,
+          idx_3d(depth1, height1, width1, t1, h1 + h1p, w1 + w1p),
+          i_numel,
+          static_cast<scalar_t>(t0lambda * h1lambda * w1lambda * d2val),
+          true);
+        fastAtomicAdd(
+          idata_ptr,
+          idx_3d(depth1, height1, width1, t1 + t1p, h1, w1),
+          i_numel,
+          static_cast<scalar_t>(t1lambda * h0lambda * w0lambda * d2val),
+          true);
+        fastAtomicAdd(
+          idata_ptr,
+          idx_3d(depth1, height1, width1, t1 + t1p, h1, w1 + w1p),
+          i_numel,
+          static_cast<scalar_t>(t1lambda * h0lambda * w1lambda * d2val),
+          true);
+        fastAtomicAdd(
+          idata_ptr,
+          idx_3d(depth1, height1, width1, t1 + t1p, h1 + h1p, w1),
+          i_numel,
+          static_cast<scalar_t>(t1lambda * h1lambda * w0lambda * d2val),
+          true);
+        fastAtomicAdd(
+          idata_ptr,
+          idx_3d(depth1, height1, width1, t1 + t1p, h1 + h1p, w1 + w1p),
+          i_numel,
+          static_cast<scalar_t>(t1lambda * h1lambda * w1lambda * d2val),
+          true);
       }
     }
   }
@@ -325,6 +365,10 @@ static void upsample_trilinear3d_backward_out_cuda_template(
 
   grad_input.resize_(
       {nbatch, channels, input_depth, input_height, input_width});
+  // A contiguous tensor is required for the kernel launch config
+  grad_input.contiguous();
+  // Numbers are added atomically to grad_input tensor from multiple threads,
+  // so it has to be initialized to zero.
   grad_input.zero_();
 
   const int num_kernels = output_depth * output_height * output_width;
@@ -340,6 +384,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
 
         auto idata = grad_input.packed_accessor64<scalar_t, 5>();
         auto odata = grad_output.packed_accessor64<scalar_t, 5>();
+        scalar_t* idata_ptr = grad_input.data_ptr<scalar_t>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
             input_depth, output_depth, align_corners, scales_d);
@@ -359,7 +404,8 @@ static void upsample_trilinear3d_backward_out_cuda_template(
                 rwidth,
                 align_corners,
                 idata,
-                odata);
+                odata,
+                idata_ptr);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
