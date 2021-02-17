@@ -52,6 +52,7 @@ enum class CPUCapability {
 #else
   AVX = 1,
   AVX2 = 2,
+  AVX2_FAST = 3,
 #endif
   NUM_OPTIONS
 };
@@ -95,6 +96,10 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
     auto capability = static_cast<int>(get_cpu_capability());
     (void)capability;
 #ifdef HAVE_AVX2_CPU_DEFINITION
+    if (capability >= static_cast<int>(CPUCapability::AVX2_FAST)) {
+      TORCH_INTERNAL_ASSERT(AVX2_FAST, "DispatchStub: missing AVX2_FAST kernel");
+      return AVX2_FAST;
+    }
     if (capability >= static_cast<int>(CPUCapability::AVX2)) {
       TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
       return AVX2;
@@ -133,6 +138,7 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   static FnPtr AVX2;
+  static FnPtr AVX2_FAST;
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
   static FnPtr VSX;
@@ -182,8 +188,10 @@ struct RegisterHIPDispatch {
 
 #ifdef HAVE_AVX2_CPU_DEFINITION
 #define REGISTER_AVX2_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX2, fn)
+#define REGISTER_AVX2_FAST_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX2_FAST, fn)
 #else
 #define REGISTER_AVX2_DISPATCH(name, fn)
+#define REGISTER_AVX2_FAST_DISPATCH(name, fn)
 #endif
 
 #ifdef HAVE_VSX_CPU_DEFINITION
@@ -195,7 +203,8 @@ struct RegisterHIPDispatch {
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
   REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
   REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
-  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))          \
+  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))                  \
+  REGISTER_AVX2_FAST_DISPATCH(name, static_cast<fn_type>(nullptr))             \
   REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
@@ -214,7 +223,13 @@ struct RegisterHIPDispatch {
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
-#define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define REGISTER_DISPATCH(name, fn) \
+  REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn);  \
+  REGISTER_ARCH_DISPATCH(name, AVX2_FAST, fn)
+
+#define REGISTER_FAST_DISPATCH(name, fn, fn_fast) \
+  REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn);  \
+  REGISTER_ARCH_DISPATCH(name, AVX2_FAST, fn_fast)
 #endif
 
 

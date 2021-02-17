@@ -597,6 +597,17 @@ static void rsqrt_kernel(TensorIterator& iter) {
   });
 }
 
+static void sqrt_accurate_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "sqrt_accurate_cpu", [&] {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t {
+          return std::sqrt(a);
+        },
+        [=](Vec256<scalar_t> a) { return a.map(std::sqrt); });
+  });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \

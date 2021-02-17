@@ -19,10 +19,13 @@ static CPUCapability compute_cpu_capability() {
     if (strcmp(envar, "avx2") == 0) {
       return CPUCapability::AVX2;
     }
+    if (strcmp(envar, "avx2-fast") == 0) {
+      return CPUCapability::AVX2_FAST;
+    }
     if (strcmp(envar, "avx") == 0) {
       return CPUCapability::AVX;
     }
-#endif     
+#endif
     if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
     }
