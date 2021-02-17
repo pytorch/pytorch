@@ -3080,13 +3080,107 @@ t2.start()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    def test_graph_shared_mempool(self):
-        pass
+    def test_graph_two_successive(self):
+        size = 1000
+        kSmallBuffer = 2097152
+
+        torch.cuda.empty_cache()
+
+        for share_mem in (False, True):
+            g0 = torch.cuda._Graph()
+            g1 = torch.cuda._Graph()
+
+            a = torch.ones((size,), device="cuda")
+
+            g0.capture_begin()
+            b = a.clone()
+            for _ in range(5):
+                b = b.clone() + 1
+            g0.capture_end()
+
+            args = (g0.pool(),) if share_mem else ()
+            g1.capture_begin(*args)
+            for _ in range(5):
+                b = b.clone() + 2
+            g1.capture_end()
+
+            g0.replay()
+            g1.replay()
+
+            self.assertEqual(b.sum().item(), size * 16)
+
+            if share_mem:
+                self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
+                                 kSmallBuffer)
+            else:
+                reserved_no_sharing = torch.cuda.memory_stats()["reserved_bytes.all.current"]
+
+            del a, b, g0, g1
+            torch.cuda.empty_cache()
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    def test_graph_different_mempools_concurrent_replay(self):
+    def test_graph_concurrent_replay(self):
+        size = 100000000  # needs to be largeish to expose race conditions
+
+        torch.cuda.empty_cache()
+
+        for share_mem in (False, True):
+            g0 = torch.cuda._Graph()
+            g1 = torch.cuda._Graph()
+
+            s0 = torch.cuda.Stream()
+            s1 = torch.cuda.Stream()
+
+            a = torch.ones((size,), device="cuda")
+
+            print("g0")
+            torch.cuda.nvtx.range_push("g0")
+            g0.capture_begin()
+            b = a.clone()
+            for _ in range(5):
+                b = b.clone() + 1
+            g0.capture_end()
+            torch.cuda.nvtx.range_pop()
+            print("end g0")
+
+            args = (g0.pool(),) if share_mem else ()
+
+            torch.cuda.nvtx.range_push("g1")
+            g1.capture_begin(*args)
+            c = a.clone()
+            for _ in range(5):
+                c = c.clone() + 2
+            g1.capture_end()
+            torch.cuda.nvtx.range_pop()
+
+            s0.wait_stream(torch.cuda.current_stream())
+            s1.wait_stream(torch.cuda.current_stream())
+            for _ in range(10):
+                # with torch.cuda.stream(s0):
+                g0.replay()
+                # with torch.cuda.stream(s1):
+                g1.replay()
+            torch.cuda.current_stream().wait_stream(s0)
+            torch.cuda.current_stream().wait_stream(s1)
+
+            # if share_mem:
+            #     # Confirms concurrent replays using the same mempool corrupted each other.
+            #     self.assertNotEqual(b.sum().item(), size * 6)
+            #     self.assertNotEqual(c.sum().item(), size * 11)
+            # else:
+            #     # Confirms concurrent replays using different mempools did not corrupt each other.
+            #     self.assertEqual(b.sum().item(), size * 6)
+            #     self.assertEqual(c.sum().item(), size * 11)
+
+            del a, b, c, g0, g1
+            torch.cuda.empty_cache()
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_three_successive(self):
         pass
 
     @unittest.skipIf((not TEST_CUDA) or
@@ -3184,12 +3278,6 @@ t2.start()
             del a
             del b
             torch.cuda.empty_cache()
-
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    def test_graph_triple(self):
-        pass
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
