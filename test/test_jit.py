@@ -11026,11 +11026,17 @@ dedent """
     def test_add_tuple_slice(self):
         def foo(input: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]):
             changed_input = input[0] + 1
-            y = input[1:]
-            x = (changed_input,)
-            return x, y
+            return (changed_input,) + input[1:]
         inp: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]] = (torch.rand(4),)
-        print(foo(inp))
+        self.checkScript(foo, (inp,))
+
+    def test_add_tuple_slice_non_optional(self):
+        def foo(input: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]):
+            changed_input = input[0] + 1
+            return (changed_input,) + input[1:]
+        inp: Tuple[torch.Tensor, torch.Tensor, torch.Tensor] = (torch.rand(4), torch.rand(4), torch.rand(4))
+        shit = torch.jit.script(foo)
+        print(shit.graph)
         self.checkScript(foo, (inp,))
 
     def test_method_no_self(self):
