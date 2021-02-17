@@ -595,6 +595,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       list(APPEND Caffe2_GPU_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
     endif()
+    set_source_files_properties(
+      ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
+      PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
+    )
   endif()
 
   if(USE_ROCM)
@@ -746,6 +750,10 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
 add_library(torch ${DUMMY_EMPTY_FILE})
+if(BUILD_SPLIT_CUDA)
+  # When we split torch_cuda, we want a dummy torch_cuda library that contains both parts
+  add_library(torch_cuda ${DUMMY_EMPTY_FILE})
+endif()
 if(HAVE_SOVERSION)
   set_target_properties(torch PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -1238,11 +1246,12 @@ endif()
 
 caffe2_interface_library(torch_cpu torch_cpu_library)
 
-if(BUILD_SPLIT_CUDA)
-  caffe2_interface_library(torch_cuda_cu torch_cuda_cu_library)
-  caffe2_interface_library(torch_cuda_cpp torch_cuda_cpp_library)
-elseif(USE_CUDA)
+if(USE_CUDA)
   caffe2_interface_library(torch_cuda torch_cuda_library)
+  if(BUILD_SPLIT_CUDA)
+    caffe2_interface_library(torch_cuda_cu torch_cuda_cu_library)
+    caffe2_interface_library(torch_cuda_cpp torch_cuda_cpp_library)
+  endif()
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
 endif()
@@ -1250,22 +1259,26 @@ endif()
 caffe2_interface_library(torch torch_library)
 
 install(TARGETS torch_cpu torch_cpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-if(BUILD_SPLIT_CUDA)
-  install(TARGETS torch_cuda_cu torch_cuda_cu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-  install(TARGETS torch_cuda_cpp torch_cuda_cpp_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-elseif(USE_CUDA)
+
+if(USE_CUDA)
   install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  if(BUILD_SPLIT_CUDA)
+    install(TARGETS torch_cuda_cu torch_cuda_cu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+    install(TARGETS torch_cuda_cpp torch_cuda_cpp_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 target_link_libraries(torch PUBLIC torch_cpu_library)
-if(BUILD_SPLIT_CUDA)
-  target_link_libraries(torch PUBLIC torch_cuda_cu_library)
-  target_link_libraries(torch PUBLIC torch_cuda_cpp_library)
-elseif(USE_CUDA)
+
+if(USE_CUDA)
   target_link_libraries(torch PUBLIC torch_cuda_library)
+  if(BUILD_SPLIT_CUDA)
+    target_link_libraries(torch_cuda PUBLIC torch_cuda_cu_library)
+    target_link_libraries(torch_cuda PUBLIC torch_cuda_cpp_library)
+  endif()
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
 endif()

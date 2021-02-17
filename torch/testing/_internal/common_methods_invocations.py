@@ -367,8 +367,10 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
 
     result = []
     for test_case in test_cases:
-        tensors = [make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
-                   for size in test_case]
+        tensors = []
+        for size in test_case:
+            t = make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
+            tensors.append(t)
         result.append(SampleInput(tuple(tensors)))
 
     return tuple(result)
