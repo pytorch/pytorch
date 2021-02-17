@@ -672,13 +672,15 @@ Example::
 A TCP-based distributed key-value store implementation. The server store holds
 the data, while the client stores can connect to the server store over TCP and
 perform actions such as :meth:`~torch.distributed.store.set` to insert a key-value
-pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc.
+pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There 
+should always be one server store initialized because the client store(s) will wait for 
+the server to establish a connection.
 
 Arguments:
     host_name (str): The hostname or IP Address the server store should run on.
     port (int): The port on which the server store should listen for incoming requests.
     world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
-    is_master (bool, optional): True when initializing the server store, False for client stores. Default is False.
+    is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
 
 Example::

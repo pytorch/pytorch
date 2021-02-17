@@ -394,7 +394,7 @@ void TCPStoreDaemon::run() {
 TCPStore::TCPStore(
     const std::string& masterAddr,
     PortType masterPort,
-    int numWorkers,
+    c10::optional<int> numWorkers,
     bool isServer,
     const std::chrono::milliseconds& timeout,
     bool waitWorkers)

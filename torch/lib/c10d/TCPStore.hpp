@@ -66,7 +66,7 @@ class TCPStore : public Store {
   explicit TCPStore(
       const std::string& masterAddr,
       PortType masterPort,
-      int numWorkers = -1,
+      c10::optional<int> numWorkers = -1,
       bool isServer = false,
       const std::chrono::milliseconds& timeout = kDefaultTimeout,
       bool waitWorkers = true);
@@ -116,7 +116,7 @@ class TCPStore : public Store {
   std::string tcpStoreAddr_;
   PortType tcpStorePort_;
 
-  int numWorkers_;
+  c10::optional<int> numWorkers_;
   const std::string initKey_;
   const std::string regularPrefix_;
 
