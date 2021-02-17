@@ -262,7 +262,9 @@ void gemm(
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-void THBlas_axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_t incy) {
+DEFINE_DISPATCH(axpy_stub);
+
+void axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -278,12 +280,12 @@ void THBlas_axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_
     return;
   }
   #endif 
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] += a*x[i*incx];
+  axpy_stub(
+      kCPU, at::kDouble,
+      n, a, x, incx, y, incy);
 }
 
-void THBlas_axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t incy) {
+void axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -299,12 +301,12 @@ void THBlas_axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t i
     return;
   }
   #endif 
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] += a*x[i*incx];
+  axpy_stub(
+      kCPU, at::kFloat,
+      n, a, x, incx, y, incy);
 }
 
-void THBlas_axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
+void axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -320,12 +322,12 @@ void THBlas_axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int
     return;
   }
   #endif 
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] += a*x[i*incx];
+  axpy_stub(
+      kCPU, at::kComplexDouble,
+      n, a, x, incx, y, incy);
 }
 
-void THBlas_axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy) {
+void axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -341,12 +343,14 @@ void THBlas_axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64
     return;
   }
   #endif 
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] += a*x[i*incx];
+  axpy_stub(
+      kCPU, at::kComplexFloat,
+      n, a, x, incx, y, incy);
 }
 
-void THBlas_copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy) {
+DEFINE_DISPATCH(copy_stub);
+
+void copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -358,12 +362,12 @@ void THBlas_copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy) {
     int i_incy = (int)incy;
     dcopy_(&i_n, x, &i_incx, y, &i_incy);
   }
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] = x[i*incx];
+  copy_stub(
+      kCPU, at::kDouble,
+      n, x, incx, y, incy);
 }
 
-void THBlas_copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy) {
+void copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -375,12 +379,12 @@ void THBlas_copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy) {
     int i_incy = (int)incy;
     scopy_(&i_n, x, &i_incx, y, &i_incy);
   }
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] = x[i*incx];
+  copy_stub(
+      kCPU, at::kFloat,
+      n, x, incx, y, incy);
 }
 
-void THBlas_copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
+void copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -392,12 +396,12 @@ void THBlas_copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<
     int i_incy = (int)incy;
     zcopy_(&i_n, x, &i_incx, y, &i_incy);
   }
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] = x[i*incx];
+  copy_stub(
+      kCPU, at::kComplexDouble,
+      n, x, incx, y, incy);
 }
 
-void THBlas_copy(int64_t n, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy){
+void copy(int64_t n, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy){
   if(n == 1)
   {
     incx = 1;
@@ -409,9 +413,9 @@ void THBlas_copy(int64_t n, c10::complex<float> *x, int64_t incx, c10::complex<f
     int i_incy = (int)incy;
     ccopy_(&i_n, x, &i_incx, y, &i_incy);
   }
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] = x[i*incx];
+  copy_stub(
+      kCPU, at::kComplexFloat,
+      n, x, incx, y, incy);
 }
  
 }}}  // namespace at::native::cpublas

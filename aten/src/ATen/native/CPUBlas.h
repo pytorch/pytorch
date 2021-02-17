@@ -94,38 +94,46 @@ void gemm(
     int64_t beta,
     int64_t *c, int64_t ldc);
 
-template<typename T>
-void THBlas_axpy(int64_t n, T a, T *x, int64_t incx, T *y, int64_t incy){
+using axpy_fn = void(*)(at::ScalarType type, int64_t n, Scalar a, void *x, int64_t incx, void *y, int64_t incy);
+
+DECLARE_DISPATCH(axpy_fn, axpy_stub);
+
+template<typename scalar_t>
+void axpy(int64_t n, scalar_t a, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy){
   if(n == 1)
   {
     incx = 1;
     incy = 1;
   }
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] += a*x[i*incx];
+  axpy_stub(
+      kCPU, c10::CppTypeToScalarType<scalar_t>::value,
+      n, a, x, incx, y, incy);
 }
 
-void THBlas_axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_t incy);
-void THBlas_axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t incy);
-void THBlas_axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
-void THBlas_axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
+void axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_t incy);
+void axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t incy);
+void axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
+void axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
-template<typename T>
-void THBlas_copy(int64_t n, T *x, int64_t incx, T *y, int64_t incy) {
+using copy_fn = void(*)(at::ScalarType type, int64_t n, void *x, int64_t incx, void *y, int64_t incy);
+
+DECLARE_DISPATCH(copy_fn, copy_stub);
+
+template<typename scalar_t>
+void copy(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
     incy = 1;
   }
-  int64_t i;
-  for(i = 0; i < n; i++)
-    y[i*incy] = x[i*incx];
+  copy_stub(
+      kCPU, c10::CppTypeToScalarType<scalar_t>::value,
+      n, x, incx, y, incy);
 }
 
-void THBlas_copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy);
-void THBlas_copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy);
-void THBlas_copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
-void THBlas_copy(int64_t n, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
+void copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy);
+void copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy);
+void copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
+void copy(int64_t n, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
 }}}  // namespace at::native::cpublas
