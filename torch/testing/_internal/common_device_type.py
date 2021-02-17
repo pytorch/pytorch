@@ -877,14 +877,14 @@ def skipCUDAIfRocm(fn):
 def skipCUDAIfNotRocm(fn):
     return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
 
-# Skips a test for specified CUDA version, given in [major, minor] form.
-def skipCUDAVersion(version : [int] = None):
+# Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
+def skipCUDAVersionIn(versions : List[List[int]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, device, *args, **kwargs):
             if self.device_type == 'cuda':
-                cuda_version = _get_torch_cuda_version()
-                if cuda_version == version:
+                version = _get_torch_cuda_version()
+                if version in versions:
                     reason = "test skipped for CUDA version {0}.{1}".format(version[0], version[1])
                     raise unittest.SkipTest(reason)
             return fn(self, device, *args, **kwargs)
