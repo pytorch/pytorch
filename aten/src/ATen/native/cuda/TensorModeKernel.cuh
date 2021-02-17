@@ -1,18 +1,11 @@
 #pragma once
 
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <THC/THCSortUtils.cuh>
 
-namespace at { namespace native {
-
-struct BinaryAddOp {
-  __host__ __device__ inline unsigned int operator()(
-      const unsigned int a,
-      const unsigned int b) {
-    return a + b;
-  }
-};
+namespace at {
+namespace native {
 
 // Used for a segmented reduction
 struct ModeUnsignedBoolPair {
@@ -27,19 +20,170 @@ struct ModeUnsignedPair {
   unsigned int index;
 };
 
+// Inclusive Scan via an upsweep/downsweep mechanism. Assumes:
+//
+// 1. Power2ScanSize is a power of 2. This code still works for collections that
+// do not exactly contain a power of 2 number of elements, simply round up to
+// the nearest power of 2 and then call.
+//
+// 2. That there are two-elements per thread, i.e. the size of the smem storage
+// is 2 * blockDim.x * sizeof(T).
+//
+// Consider a (+)-Scan on the following elements:
+//
+// Upsweep:
+//
+//    0  1  2  3  4  5  6  7
+//       1     5     9    13
+//             6          22
+//                        28
+//
+// Downsweep:
+//                  15
+//         3     10    21
+template <int Power2ScanSize, typename T, class BinaryOp>
+__device__ void inclusivePrefixScan(T* smem, BinaryOp binop) {
+  // Reduce step ("upsweep")
+#pragma unroll
+  for (int stride = 1; stride < Power2ScanSize; stride <<= 1) {
+    int index = (threadIdx.x + 1) * stride * 2 - 1;
+    if (index < Power2ScanSize) {
+      smem[index] = binop(smem[index], smem[index - stride]);
+    }
+    __syncthreads();
+  }
+
+  // Post-reduce step ("downsweep")
+#pragma unroll
+  for (int stride = Power2ScanSize / 4; stride > 0; stride >>= 1) {
+    int index = (threadIdx.x + 1) * stride * 2 - 1;
+    if ((index + stride) < Power2ScanSize) {
+      smem[index + stride] = binop(smem[index + stride], smem[index]);
+    }
+    __syncthreads();
+  }
+}
+
+// Block-wide reduction where each thread locally reduces N
+// values before letting a single warp take over - assumes
+// threadVals is in registers, not shared memory
+//
+// If smem is not used again, there is no need to __syncthreads before this
+// call. However, if smem will be used, e.g., this function is called in a loop,
+// then __syncthreads is needed either before or afterwards to prevent non-0
+// threads overriding smem in the next loop before num-0 thread reads from it.
+template <int N, typename T, typename ReduceOp>
+__device__ T reduceBlockWithNThreadLocalReductions(
+    T* smem,
+    T threadVals[N],
+    const unsigned int numVals,
+    ReduceOp reduceOp,
+    T init) {
+  int offset = threadIdx.x * N;
+  T local = offset < numVals ? threadVals[0] : init;
+
+#pragma unroll
+  for (int i = 1; i < N; ++i) {
+    ++offset;
+    T next = offset < numVals ? threadVals[i] : init;
+    local = reduceOp(local, next);
+  }
+
+  return reduceBlock<T, ReduceOp>(
+      smem, blockDim.x < numVals ? blockDim.x : numVals, local, reduceOp, init);
+}
+
 template <typename T>
-struct MaxReduceOp {
-  __host__ __device__ inline T operator()(const T& a, const T& b) {
-    return b.val > a.val ? b : a;
+__device__ inline void swapVars(T& t1, T& t2) {
+  T tmp = t1;
+  t1 = t2;
+  t2 = tmp;
+}
+
+template <typename Comparator, typename K, typename V>
+__device__ inline void bitonicSwap(
+    K& kA,
+    V& vA,
+    bool& validA,
+    K& kB,
+    V& vB,
+    bool& validB,
+    bool dir,
+    const Comparator& comp) {
+  // Invalid entries always sort to the end
+  bool swap = (comp(kA, kB) && validA) || !validB;
+  if (swap == dir) {
+    swapVars(kA, kB);
+    swapVars(vA, vB);
+    swapVars(validA, validB);
   }
 };
 
-template <typename T>
-struct MatchReduceOp {
-  __host__ __device__ inline T operator()(const T& a, const T& b) {
-    return b.flag ? b : a;
+template <typename Comparator, typename K>
+__device__ inline void bitonicSwapKeys(
+    K& kA,
+    bool& validA,
+    K& kB,
+    bool& validB,
+    bool dir,
+    const Comparator& comp) {
+  bool swap = (comp(kA, kB) && validA) || !validB;
+  if (swap == dir) {
+    swapVars(kA, kB);
+    swapVars(validA, validB);
   }
-};
+}
+
+template <
+    typename K,
+    typename IndexType,
+    int Power2SortSize,
+    typename Comparator>
+__device__ inline void bitonicSortKeys(
+    K keys[Power2SortSize],
+    bool valid[Power2SortSize],
+    const Comparator& comp) {
+#ifndef __HIP_PLATFORM_HCC__
+#pragma unroll
+#endif
+  for (unsigned int size = 2; size < Power2SortSize; size *= 2) {
+    bool flag = ((threadIdx.x & (size / 2)) != 0);
+
+#ifndef __HIP_PLATFORM_HCC__
+#pragma unroll
+#endif
+    for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
+      __syncthreads();
+
+      unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
+      bitonicSwapKeys<Comparator, K>(
+          keys[pos],
+          valid[pos],
+          keys[pos + stride],
+          valid[pos + stride],
+          flag,
+          comp);
+    }
+  }
+
+#ifndef __HIP_PLATFORM_HCC__
+#pragma unroll
+#endif
+  for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
+    __syncthreads();
+
+    unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
+    bitonicSwapKeys<Comparator, K>(
+        keys[pos],
+        valid[pos],
+        keys[pos + stride],
+        valid[pos + stride],
+        false,
+        comp);
+  }
+
+  __syncthreads();
+}
 
 // The mode kernel has the following characteristics: It uses internal shared
 // memory buffers of Power2Size, which must be greater than the number of
@@ -99,8 +243,10 @@ __global__ void compute_mode(
 
   // First, sort the input slice in ascending order. smem contains the input
   // elements, and bmem marks the valid indices
-  bitonicSortKeys<LTComp<T>, T, unsigned int, Power2Size>(
-      smem, bmem, LTComp<T>());
+  bitonicSortKeys<T, unsigned int, Power2Size>(
+      smem, bmem, [&] GPU_LAMBDA(const auto& a, const auto& b) {
+        return a < b;
+      });
   __syncthreads(); // make no assumptions that the sort syncs at end
 
   // The next step of our algorithm is performing a block-wide comparison of
@@ -133,12 +279,14 @@ __global__ void compute_mode(
   }
 
   // Compares elements (0, 1), (2, 3), ... and sets 1, 3, ...
-  ubpmem[tidx * 2 + 1].flag = smem[tidx * 2] != smem[tidx * 2 + 1]; // (0, 1), (1, 2), etc.
+  ubpmem[tidx * 2 + 1].flag =
+      smem[tidx * 2] != smem[tidx * 2 + 1]; // (0, 1), (1, 2), etc.
   ubpmem[tidx * 2 + 1].val = !ubpmem[tidx * 2 + 1].flag;
 
   // Compares elements (1, 2), (3, 4), ... and sets 2, 4, ...
   if (((tidx + 1) * 2) < Power2Size) {
-    ubpmem[(tidx + 1) * 2].flag = smem[((tidx + 1) * 2) - 1] != smem[(tidx + 1) * 2];
+    ubpmem[(tidx + 1) * 2].flag =
+        smem[((tidx + 1) * 2) - 1] != smem[(tidx + 1) * 2];
     ubpmem[(tidx + 1) * 2].val = !ubpmem[(tidx + 1) * 2].flag;
   }
   __syncthreads(); // barrier for ubpmem initialization
@@ -154,16 +302,13 @@ __global__ void compute_mode(
   // Afterwards, the (index) components of the ubpmem buffer contain the lengths
   // of the segments (minus 1), i.e. the counts of each element in the original
   // input.
-
-  inclusivePrefixScan<
-      struct ModeUnsignedBoolPair,
-      struct SegmentedScanOp<
-          struct ModeUnsignedBoolPair,
-          BinaryAddOp>,
-      Power2Size>(
-      ubpmem,
-      SegmentedScanOp<struct ModeUnsignedBoolPair, BinaryAddOp>(
-          BinaryAddOp()));
+  inclusivePrefixScan<Power2Size>(
+      ubpmem, [=] GPU_LAMBDA(const auto& a, const auto& b) {
+        ModeUnsignedBoolPair c;
+        c.val = a.flag ? a.val : a.val + b.val;
+        c.flag = a.flag | b.flag;
+        return c;
+      });
   // assumes scan syncs at the end
 
   // Next, we reinterpret the ubpmem buffer as pairs of unsigned integers (i.e.
@@ -203,10 +348,14 @@ __global__ void compute_mode(
 
   struct ModeUnsignedPair max = {0, 0};
 
-  max = reduceBlockWithNThreadLocalReductions<
-      struct ModeUnsignedPair,
-      MaxReduceOp<struct ModeUnsignedPair>,
-      2>(uupmem, uup, sliceSize, MaxReduceOp<struct ModeUnsignedPair>(), max);
+  max = reduceBlockWithNThreadLocalReductions<2>(
+      uupmem,
+      uup,
+      sliceSize,
+      [=] GPU_LAMBDA(const auto& a, const auto& b) {
+        return b.val > a.val ? b : a;
+      },
+      max);
 
   // Store the mode in shared memory for use in finding the mode in the input
   // slice
@@ -244,14 +393,11 @@ __global__ void compute_mode(
   // contain an index with the mode.
   struct ModeUnsignedBoolPair match = {0, false};
 
-  match = reduceBlockWithNThreadLocalReductions<
-      struct ModeUnsignedBoolPair,
-      MatchReduceOp<struct ModeUnsignedBoolPair>,
-      2>(
+  match = reduceBlockWithNThreadLocalReductions<2>(
       ubpmem,
       ubpp,
       sliceSize,
-      MatchReduceOp<struct ModeUnsignedBoolPair>(),
+      [=] GPU_LAMBDA(const auto& a, const auto& b) { return b.flag ? b : a; },
       match);
 
   // Finally, we have the mode, and an index where it occurs. We use a single
@@ -267,4 +413,5 @@ __global__ void compute_mode(
   }
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at
