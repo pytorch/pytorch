@@ -597,6 +597,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It can be expanded as needed in the future, e.g sparse Tensor.
    */
   inline bool support_as_strided() const {
+    if (key_set_.has(DispatchKey::Batched)) {
+      return false;
+    }
     return device().type() != at::kXLA;
   }
 

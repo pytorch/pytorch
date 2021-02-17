@@ -8,6 +8,10 @@ namespace at {
 // Initial autograd layer, because autograd is always "on"
 std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1) };
 
+bool gradLayerAtTop() {
+  return dynamicLayerStack.back().key() == DispatchKey::Autograd;
+}
+
 int64_t pushDynamicLayer(DispatchKey key) {
   TORCH_INTERNAL_ASSERT(key != DispatchKey::Undefined);
   auto layerId = 1 + dynamicLayerStack.size();
@@ -39,7 +43,7 @@ DynamicLayer popDynamicLayer() {
 
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   if (dynamicLayerStack.size() == 0) {
-    // std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " start terminal" << std::endl;
+    // std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " terminal" << std::endl;
     DispatchKeySet exclude;
     exclude = exclude.add(DispatchKey::DynamicLayerFront);
     exclude = exclude.add(DispatchKey::Batched);

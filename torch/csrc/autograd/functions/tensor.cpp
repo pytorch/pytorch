@@ -1,4 +1,5 @@
 #include <torch/csrc/autograd/functions/tensor.h>
+#include <ATen/BatchedTensorImpl.h>
 
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>

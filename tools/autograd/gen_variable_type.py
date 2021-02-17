@@ -47,6 +47,7 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union
 DONT_REQUIRE_DERIVATIVE = {
     # These only depend on the input Tensor's shape and device, not the data
     'ones_like', 'zeros_like', 'rand_like', 'randn_like',
+    'new_empty_strided',
     # These are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
     '__lshift__', '__or__', '__rshift__', '__xor__',

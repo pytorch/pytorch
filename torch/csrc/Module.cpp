@@ -592,6 +592,15 @@ static PyObject * THPModule_grad_decrement_nesting(PyObject* _unused, PyObject *
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPModule_grad_layer_at_top(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (at::gradLayerAtTop()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
 
 static PyObject * THPModule_set_display_vmap_fallback_warnings_mode(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
@@ -654,6 +663,7 @@ static PyMethodDef TorchMethods[] = {
   {"_vmapmode_decrement_nesting", THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
   {"_grad_increment_nesting", THPModule_grad_increment_nesting, METH_NOARGS, nullptr},
   {"_grad_decrement_nesting", THPModule_grad_decrement_nesting, METH_NOARGS, nullptr},
+  {"_grad_layer_at_top", THPModule_grad_layer_at_top, METH_NOARGS, nullptr},
   {"_debug_only_display_vmap_fallback_warnings", THPModule_set_display_vmap_fallback_warnings_mode, METH_O, nullptr},
   {"_debug_only_are_vmap_fallback_warnings_enabled", THPModule_are_vmap_fallback_warnings_enabled, METH_NOARGS, nullptr},
   {"_to_dlpack",      THPModule_toDLPack,          METH_O,       nullptr},

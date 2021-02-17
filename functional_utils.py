@@ -14,19 +14,35 @@ from make_functional import make_functional
 
 def _create_differentiable(tensor_or_tuple_of_tensors):
     if isinstance(tensor_or_tuple_of_tensors, torch.Tensor):
-        return tensor_or_tuple_of_tensors.detach().requires_grad_()
+        tensor = tensor_or_tuple_of_tensors
+        if tensor.requires_grad:
+            return tensor
+        return tensor.detach().requires_grad_()
     if isinstance(tensor_or_tuple_of_tensors, tuple):
         return tuple(map(_create_differentiable, tensor_or_tuple_of_tensors))
     if isinstance(tensor_or_tuple_of_tensors, list):
         return tuple(map(_create_differentiable, tensor_or_tuple_of_tensors))
     assert False
 
+def _any_differentiable(tensor_or_tuple_of_tensors):
+    if isinstance(tensor_or_tuple_of_tensors, torch.Tensor):
+        tensor = tensor_or_tuple_of_tensors
+        return tensor.requires_grad
+    if isinstance(tensor_or_tuple_of_tensors, tuple):
+        return any(tuple(map(_any_differentiable, tensor_or_tuple_of_tensors)))
+    if isinstance(tensor_or_tuple_of_tensors, list):
+        return any(tuple(map(_any_differentiable, tensor_or_tuple_of_tensors)))
+    return False
+
 
 def grad_with_value(f, diff_argnums=(0,)):
     def wrapper(*args):
-        torch._C._grad_increment_nesting()
+        should_increment_nesting = not torch._C._grad_layer_at_top()
+        if should_increment_nesting: 
+            torch._C._grad_increment_nesting()
         output = None
         try:
+            create_graph = _any_differentiable(args)
             args = [_create_differentiable(arg) if i in diff_argnums else arg.detach()
                     for i, arg in enumerate(args)]
             output = f(*args)
@@ -35,9 +51,10 @@ def grad_with_value(f, diff_argnums=(0,)):
             # TODO: quick hack...
             if len(diff_args) == 1 and isinstance(diff_args[0], tuple):
                 diff_args = diff_args[0]
-            grad_input = torch.autograd.grad(output, diff_args)
+            grad_input = torch.autograd.grad(output, diff_args, create_graph=create_graph)
         finally:
-            torch._C._grad_decrement_nesting()
+            if should_increment_nesting:
+                torch._C._grad_decrement_nesting()
         return grad_input, output
     return wrapper
 
@@ -114,11 +131,16 @@ targets = torch.randint(0, 1, (*batch_shape,))
 net = SampleNet(vocab_size)
 criterion = nn.CrossEntropyLoss()
 
+params = dict(net.named_parameters())
 weights, net_func = make_functional(net)
 
 def compute_loss(weights, data, target):
     output = net_func(weights, (data,))
-    return criterion(output, target)
+    result = criterion(output, target)
+    # import torchviz; import graphviz
+    # graph = torchviz.make_dot(result)
+    # graph.save("graph_single.dot")
+    return result
 
 expected = [grad(compute_loss)(weights, data[i], targets[i]) for i in range(64)]
 expected = zip(*expected)
@@ -127,3 +149,8 @@ expected = tuple(torch.stack(shards) for shards in expected)
 result = vmap(partial(grad(compute_loss), weights))(data, targets)
 for r, e in zip(result, expected):
     assert torch.allclose(r, e)
+
+# NB: Much nicer when create_graph is True
+x = torch.randn([]).requires_grad_()
+result = grad(lambda x: grad(torch.sin)(x)[0])(x)[0]
+assert torch.allclose(result, -torch.sin(x))

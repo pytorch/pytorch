@@ -79,7 +79,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   void set_storage_offset(int64_t storage_offset) override;
   bool has_storage() const override;
   const Storage& storage() const override;
-  int64_t storage_offset() const override;
+  // int64_t storage_offset() const override;
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,

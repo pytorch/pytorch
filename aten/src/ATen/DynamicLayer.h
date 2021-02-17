@@ -15,5 +15,6 @@ struct TORCH_API DynamicLayer {
 
 TORCH_API int64_t pushDynamicLayer(DispatchKey key);
 TORCH_API DynamicLayer popDynamicLayer();
+TORCH_API bool gradLayerAtTop();
 
 } // namespace at
