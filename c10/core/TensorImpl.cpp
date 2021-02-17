@@ -242,6 +242,10 @@ bool TensorImpl::has_storage() const {
 }
 #endif
 
+void TensorImpl::throw_storage_access_error() const {
+  TORCH_CHECK(false, "Cannot access storage of ", tensorimpl_type_name());
+}
+
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 #ifdef DEBUG
   AT_ASSERT(compute_contiguous() == is_contiguous_);
@@ -253,10 +257,6 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
       return is_channels_last_3d_contiguous_;
   }
   return is_contiguous_;
-}
-
-const Storage& TensorImpl::storage() const {
-  return storage_;
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
