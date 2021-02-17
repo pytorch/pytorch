@@ -606,19 +606,19 @@ class SoftplusTransform(Transform):
     Transform via the mapping :math:`\text{Softplus}(x) = \log(1 + \exp(x))`.
     """
     domain = constraints.real_vector
-    codomain = constraints.positive
+    codomain = constraints.independent(constraints.positive, 1)
 
     def __eq__(self, other):
         return isinstance(other, SoftplusTransform)
 
     def _call(self, x):
-        return (1 + x.exp()).log()
+        return x.exp().log1p()
 
     def _inverse(self, y):
         return y.expm1().log()
 
     def log_abs_det_jacobian(self, x, y):
-        return -(1 + (-x).exp()).log()
+        return -(-x).exp().log1p()
 
 
 class TanhTransform(Transform):
