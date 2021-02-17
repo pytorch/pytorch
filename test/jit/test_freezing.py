@@ -1508,7 +1508,7 @@ class TestFrozenOptimizations(JitTestCase):
         bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
         mod = torch.nn.Sequential(conv, bn)
         # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize_numerics=False)
         # inspect frozen mod
         FileCheck().check("batch_norm").run(frozen_mod.graph)
         torch.jit.optimize_frozen_module(frozen_mod)
