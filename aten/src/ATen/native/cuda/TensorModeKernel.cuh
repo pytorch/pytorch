@@ -1,19 +1,12 @@
 #pragma once
 
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <THC/THCNumerics.cuh>
-#include <THC/THCScanUtils.cuh>
+#include <ATen/native/cuda/SortingCommon.cuh>
 #include <THC/THCSortUtils.cuh>
 
-template <typename T>
-struct BinaryAddOp {
-  __host__ __device__ inline T operator()(const T a, const T b) {
-    return THCNumerics<T>::add(a, b);
-  }
-};
+namespace at { namespace native {
 
-template <>
-struct BinaryAddOp<unsigned int> {
+struct BinaryAddOp {
   __host__ __device__ inline unsigned int operator()(
       const unsigned int a,
       const unsigned int b) {
@@ -140,14 +133,12 @@ __global__ void compute_mode(
   }
 
   // Compares elements (0, 1), (2, 3), ... and sets 1, 3, ...
-  ubpmem[tidx * 2 + 1].flag = THCNumerics<T>::ne(
-      smem[tidx * 2], smem[tidx * 2 + 1]); // (0, 1), (1, 2), etc.
+  ubpmem[tidx * 2 + 1].flag = smem[tidx * 2] != smem[tidx * 2 + 1]; // (0, 1), (1, 2), etc.
   ubpmem[tidx * 2 + 1].val = !ubpmem[tidx * 2 + 1].flag;
 
   // Compares elements (1, 2), (3, 4), ... and sets 2, 4, ...
   if (((tidx + 1) * 2) < Power2Size) {
-    ubpmem[(tidx + 1) * 2].flag =
-        THCNumerics<T>::ne(smem[((tidx + 1) * 2) - 1], smem[(tidx + 1) * 2]);
+    ubpmem[(tidx + 1) * 2].flag = smem[((tidx + 1) * 2) - 1] != smem[(tidx + 1) * 2];
     ubpmem[(tidx + 1) * 2].val = !ubpmem[(tidx + 1) * 2].flag;
   }
   __syncthreads(); // barrier for ubpmem initialization
@@ -168,11 +159,11 @@ __global__ void compute_mode(
       struct ModeUnsignedBoolPair,
       struct SegmentedScanOp<
           struct ModeUnsignedBoolPair,
-          BinaryAddOp<unsigned int>>,
+          BinaryAddOp>,
       Power2Size>(
       ubpmem,
-      SegmentedScanOp<struct ModeUnsignedBoolPair, BinaryAddOp<unsigned int>>(
-          BinaryAddOp<unsigned int>()));
+      SegmentedScanOp<struct ModeUnsignedBoolPair, BinaryAddOp>(
+          BinaryAddOp()));
   // assumes scan syncs at the end
 
   // Next, we reinterpret the ubpmem buffer as pairs of unsigned integers (i.e.
@@ -239,12 +230,11 @@ __global__ void compute_mode(
   // block-wide reduction
   struct ModeUnsignedBoolPair ubpp[2];
   if (tidx * 2 < sliceSize) {
-    ubpp[0].flag = THCNumerics<T>::eq(input[linearOffset + (tidx * 2)], mode);
+    ubpp[0].flag = input[linearOffset + (tidx * 2)] == mode;
     ubpp[0].val = tidx * 2;
   }
   if (tidx * 2 + 1 < sliceSize) {
-    ubpp[1].flag =
-        THCNumerics<T>::eq(input[linearOffset + (tidx * 2 + 1)], mode);
+    ubpp[1].flag = input[linearOffset + (tidx * 2 + 1)] == mode;
     ubpp[1].val = tidx * 2 + 1;
   }
 
@@ -276,3 +266,5 @@ __global__ void compute_mode(
     indices.data[outputOffset] = index;
   }
 }
+
+}} // namespace at::native
