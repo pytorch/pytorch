@@ -12,6 +12,7 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <c10/util/accumulate.h>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -19,8 +20,10 @@
 #include <thrust/unique.h>
 #include <cufft.h>
 #include <cufftXt.h>
-#include <vector>
+
 #include <cmath>
+#include <vector>
+
 
 namespace at { namespace native {
 
@@ -116,7 +119,7 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
   HermitianSymmetryOffsetCalculator<int64_t> output_offset_calculator(
       signal_half_sizes, out_strides, mirror_dims, element_size);
 
-  const auto numel = at::prod_intlist(signal_half_sizes);
+  const auto numel = c10::multiply_integers(signal_half_sizes);
   AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
         using namespace cuda::detail;
         _fft_conjugate_copy_kernel<<<
@@ -253,7 +256,7 @@ static inline Tensor _run_cufft(
   // rescale if requested
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
   if (norm != fft_norm_mode::none) {
-    auto signal_numel = at::prod_intlist(checked_signal_sizes);
+    auto signal_numel = c10::multiply_integers(checked_signal_sizes);
     double scale_denom;
     if (norm == fft_norm_mode::by_root_n) {
       scale_denom = std::sqrt(static_cast<double>(signal_numel));

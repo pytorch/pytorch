@@ -65,6 +65,8 @@ Tensor upsample_nearest2d_vec(
 
 Tensor flatten_using_ints(const Tensor & input, int64_t start_dim, int64_t end_dim);
 
+Tensor cat(const TensorList tensors, int64_t dim);
+
 Tensor copy_to_host(const Tensor& input);
 
 } // namespace mpscnn

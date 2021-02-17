@@ -600,6 +600,35 @@ class TestAutograd(TestCase):
                                     "Set allow_unused=True"):
             grad_x, grad_y = torch.autograd.grad(x * 2, [x, y], allow_unused=False)
 
+    def test_grad_unreachable_discovery(self):
+        # Test that certain nodes are not erroneously executed when an input
+        # is unreachable. See #39784
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                self.fail("This node should not be executed!")
+
+        x = MyFunc.apply(torch.randn(1, requires_grad=True) * 2)
+        y = torch.randn(1, requires_grad=True)
+        (gY,) = torch.autograd.grad(x, (y, ), allow_unused=True)
+        self.assertIsNone(gY)
+
+        x = MyFunc.apply(torch.randn(1, requires_grad=True) * 2)
+        y = torch.randn(1, requires_grad=True)
+        z = torch.randn(1, requires_grad=True)
+        (gY, gZ) = torch.autograd.grad(x + z, (y, z), allow_unused=True)
+        self.assertIsNone(gY)
+        self.assertIsNotNone(gZ)
+
+        x = MyFunc.apply(torch.randn(1, requires_grad=True) * 2)
+        y = torch.randn(1, requires_grad=True)
+        torch.autograd.backward(x, inputs=(y, ))  # allow_unused is implicitly True!
+        self.assertIsNone(y.grad)
+
     def test_hooks(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = torch.ones(5, 5) * 4
@@ -4996,13 +5025,15 @@ separate_complex_tests = ['view_as_real', 'real', 'imag', 'div', 'pow', 'rsqrt',
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
 
+# TODO: Add back 'sgn' to complex_list; removed because of Windows test failure with 11.2
+# See: https://github.com/pytorch/pytorch/issues/51980
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
                 'repeat', 'expand', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'mul',
-                '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
+                '__rmul__', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
                 'mean', 'inverse', 'solve', 'addcmul',
                 'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
