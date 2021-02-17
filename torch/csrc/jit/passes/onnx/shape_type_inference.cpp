@@ -586,7 +586,8 @@ bool HasSequenceTypeOutput(Node* node) {
       node->kind() == ::c10::onnx::SequenceInsert ||
       node->kind() == ::c10::onnx::SequenceEmpty ||
       node->kind() == ::c10::onnx::SequenceErase ||
-      node->kind() == ::c10::onnx::SequenceConstruct)
+      node->kind() == ::c10::onnx::SequenceConstruct ||
+      node->kind() == ::c10::onnx::Loop || node->kind() == ::c10::onnx::If)
     return true;
   return false;
 }
@@ -618,7 +619,7 @@ void ONNXAssignOutputShape(
 
     if (PyList_Check(elem)) {
       size_t list_len = PyList_GET_SIZE(elem);
-      if (HasSequenceTypeOutput(graph->outputs()[outputs_index]->node())) {
+      if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
         if (list_len > 0) {
           auto& var =
               reinterpret_cast<THPVariable*>(PyList_GET_ITEM(elem, 0))->cdata;
@@ -630,15 +631,18 @@ void ONNXAssignOutputShape(
                 var.scalar_type() == new_var.scalar_type(),
                 "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");
           }
-          auto elem_type = graph->outputs()[outputs_index]
+          auto elem_type = graph->outputs()
+                               .at(outputs_index)
                                ->type()
                                ->castRaw<ListType>()
                                ->getElementType()
                                ->cast<TensorType>();
           elem_type = elem_type->withScalarType(var.scalar_type());
-          graph->outputs()[outputs_index]->setType(MergeInferredType(
-              graph->outputs()[outputs_index]->type(),
-              ListType::create(elem_type)));
+          graph->outputs()
+              .at(outputs_index)
+              ->setType(MergeInferredType(
+                  graph->outputs().at(outputs_index)->type(),
+                  ListType::create(elem_type)));
           outputs_index++;
           TORCH_INTERNAL_ASSERT(
               outputs_index <= graph->outputs().size(),
@@ -652,9 +656,11 @@ void ONNXAssignOutputShape(
             PyObject* list_elem = PyList_GET_ITEM(elem, j);
             TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
             auto& var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
-            graph->outputs()[outputs_index + j]->setType(MergeInferredType(
-                graph->outputs()[outputs_index + j]->type(),
-                TensorType::create(var)));
+            graph->outputs()
+                .at(outputs_index + j)
+                ->setType(MergeInferredType(
+                    graph->outputs().at(outputs_index + j)->type(),
+                    TensorType::create(var)));
           }
           outputs_index += list_len;
           TORCH_INTERNAL_ASSERT(
@@ -669,9 +675,11 @@ void ONNXAssignOutputShape(
           PyObject* tuple_elem = PyTuple_GET_ITEM(elem, j);
           TORCH_INTERNAL_ASSERT(THPVariable_Check(tuple_elem));
           auto& var = reinterpret_cast<THPVariable*>(tuple_elem)->cdata;
-          graph->outputs()[outputs_index + j]->setType(MergeInferredType(
-              graph->outputs()[outputs_index + j]->type(),
-              TensorType::create(var)));
+          graph->outputs()
+              .at(outputs_index + j)
+              ->setType(MergeInferredType(
+                  graph->outputs().at(outputs_index + j)->type(),
+                  TensorType::create(var)));
         }
         outputs_index += tuple_len;
         TORCH_INTERNAL_ASSERT(
@@ -681,7 +689,7 @@ void ONNXAssignOutputShape(
     } else if (THPVariable_Check(elem)) {
       at::Tensor var = reinterpret_cast<THPVariable*>(elem)->cdata;
       ONNXUpdateTypeFromTensor(
-          graph->outputs()[outputs_index], var, onnx_shape_inference);
+          graph->outputs().at(outputs_index), var, onnx_shape_inference);
       outputs_index++;
       TORCH_INTERNAL_ASSERT(
           outputs_index <= graph->outputs().size(),
@@ -700,9 +708,11 @@ void ONNXAssignOutputShape(
         auto& var =
             reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(tuple_elem, 1))
                 ->cdata;
-        graph->outputs()[outputs_index + j]->setType(MergeInferredType(
-            graph->outputs()[outputs_index + j]->type(),
-            TensorType::create(var)));
+        graph->outputs()
+            .at(outputs_index + j)
+            ->setType(MergeInferredType(
+                graph->outputs().at(outputs_index + j)->type(),
+                TensorType::create(var)));
       }
       outputs_index += unrolled_dict.size();
       TORCH_INTERNAL_ASSERT(

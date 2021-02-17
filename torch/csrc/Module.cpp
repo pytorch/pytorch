@@ -469,8 +469,26 @@ PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
 
 PyObject *THPModule_deterministicAlgorithms(PyObject *_unused, PyObject *noargs)
 {
-  if (at::globalContext().deterministicAlgorithms()) Py_RETURN_TRUE;
-  else Py_RETURN_FALSE;
+  if (at::globalContext().deterministicAlgorithms()) {
+        Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_setWarnAlways(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "setWarnOnlyOnce expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  c10::Warning::set_warnAlways(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_warnAlways(PyObject *_unused, PyObject *noargs)
+{
+  if (c10::Warning::get_warnAlways()) {
+    Py_RETURN_TRUE;
+  } 
+  Py_RETURN_FALSE;
 }
 
 PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
@@ -489,8 +507,10 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 
 PyObject *THPModule_benchmarkCuDNN(PyObject *_unused, PyObject *noargs)
 {
-  if (at::globalContext().benchmarkCuDNN()) Py_RETURN_TRUE;
-  else Py_RETURN_FALSE;
+  if (at::globalContext().benchmarkCuDNN()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
 }
 
 PyObject *THPModule_setAllowTF32CuBLAS(PyObject *_unused, PyObject *arg)
@@ -503,8 +523,10 @@ PyObject *THPModule_setAllowTF32CuBLAS(PyObject *_unused, PyObject *arg)
 
 PyObject *THPModule_allowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
 {
-  if (at::globalContext().allowTF32CuBLAS()) Py_RETURN_TRUE;
-  else Py_RETURN_FALSE;
+  if (at::globalContext().allowTF32CuBLAS()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
 }
 
 PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
@@ -634,6 +656,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_deterministic", THPModule_setDeterministicCuDNN, METH_O,  nullptr},
   {"_get_deterministic_algorithms", THPModule_deterministicAlgorithms, METH_NOARGS,     nullptr},
   {"_set_deterministic_algorithms", THPModule_setDeterministicAlgorithms, METH_O,  nullptr},
+  {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS,     nullptr},
+  {"_set_warnAlways", THPModule_setWarnAlways, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
