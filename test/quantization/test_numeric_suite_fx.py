@@ -573,6 +573,34 @@ class TestFXGraphMatcher(QuantizationTestCase):
         with self.assertRaises(GraphMatchingException) as ex:
             results = get_matching_subgraph_pairs(mp1, mp2)
 
+    @override_qengines
+    def test_nodes_before_cat(self):
+        # verify that nodes before cat get matched
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x0):
+                x1 = F.relu(x0)
+                y1 = F.relu(x0)
+                x2 = torch.cat([x1, y1])
+                return x2
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        results = get_matching_subgraph_pairs(mp, mq)
+
+        expected_types = {
+            'cat_1': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
+            'relu_1': ((F.relu, F.relu), (F.relu, F.relu)),
+            'relu_2': ((F.relu, F.relu), (F.relu, F.relu)),
+        }
+        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
+
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
 
