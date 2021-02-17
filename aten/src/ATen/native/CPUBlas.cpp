@@ -10,6 +10,18 @@ extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void 
 extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
 #endif  // AT_BUILD_WITH_BLAS()
 
+#if AT_BUILD_WITH_BLAS()
+extern "C" void cswap_(int *n, void *x, int *incx, void *y, int *incy); 
+extern "C" void dcopy_(int *n, double *x, int *incx, double *y, int *incy);
+extern "C" void scopy_(int *n, float *x, int *incx, float *y, int *incy);
+extern "C" void zcopy_(int *n, void *x, int *incx, void *y, int *incy); 
+extern "C" void ccopy_(int *n, void *x, int *incx, void *y, int *incy); 
+extern "C" void daxpy_(int *n, double *a, double *x, int *incx, double *y, int *incy);
+extern "C" void saxpy_(int *n, float *a, float *x, int *incx, float *y, int *incy);
+extern "C" void caxpy_(int *n, void *a, void *x, int *incx, void *y, int *incy);
+extern "C" void zaxpy_(int *n, void *a, void *x, int *incx, void *y, int *incy);
+#endif  // AT_BUILD_WITH_BLAS()
+
 #ifdef USE_FBGEMM
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
@@ -250,4 +262,156 @@ void gemm(
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
+void THBlas_axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    daxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif 
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] += a*x[i*incx];
+}
+
+void THBlas_axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    saxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif 
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] += a*x[i*incx];
+}
+
+void THBlas_axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    zaxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif 
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] += a*x[i*incx];
+}
+
+void THBlas_axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    caxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif 
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] += a*x[i*incx];
+}
+
+void THBlas_copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    dcopy_(&i_n, x, &i_incx, y, &i_incy);
+  }
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] = x[i*incx];
+}
+
+void THBlas_copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    scopy_(&i_n, x, &i_incx, y, &i_incy);
+  }
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] = x[i*incx];
+}
+
+void THBlas_copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    zcopy_(&i_n, x, &i_incx, y, &i_incy);
+  }
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] = x[i*incx];
+}
+
+void THBlas_copy(int64_t n, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy){
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    ccopy_(&i_n, x, &i_incx, y, &i_incy);
+  }
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] = x[i*incx];
+}
+ 
 }}}  // namespace at::native::cpublas

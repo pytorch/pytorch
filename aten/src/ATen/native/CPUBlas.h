@@ -94,4 +94,38 @@ void gemm(
     int64_t beta,
     int64_t *c, int64_t ldc);
 
+template<typename T>
+void THBlas_axpy(int64_t n, T a, T *x, int64_t incx, T *y, int64_t incy){
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] += a*x[i*incx];
+}
+
+void THBlas_axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_t incy);
+void THBlas_axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t incy);
+void THBlas_axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
+void THBlas_axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
+
+template<typename T>
+void THBlas_copy(int64_t n, T *x, int64_t incx, T *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  int64_t i;
+  for(i = 0; i < n; i++)
+    y[i*incy] = x[i*incx];
+}
+
+void THBlas_copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy);
+void THBlas_copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy);
+void THBlas_copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
+void THBlas_copy(int64_t n, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
+
 }}}  // namespace at::native::cpublas
