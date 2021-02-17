@@ -246,7 +246,6 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() == at::cuda::CaptureStatus::None) {
 #endif
-    std::cout << size << std::endl;
     return cudaMalloc(p, size);
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   } else {

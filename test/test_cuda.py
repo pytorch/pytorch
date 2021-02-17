@@ -3122,7 +3122,7 @@ t2.start()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_concurrent_replay(self):
-        size = 100000000  # needs to be largeish to expose race conditions
+        size = 1000000  # largeish to help expose race conditions
 
         torch.cuda.empty_cache()
 
@@ -3135,44 +3135,43 @@ t2.start()
 
             a = torch.ones((size,), device="cuda")
 
-            print("g0")
-            torch.cuda.nvtx.range_push("g0")
             g0.capture_begin()
             b = a.clone()
             for _ in range(5):
-                b = b.clone() + 1
+                x = b.clone() + 1
+                y = b.clone() + 1
+                b = x + y
             g0.capture_end()
-            torch.cuda.nvtx.range_pop()
-            print("end g0")
+            del x, y
 
             args = (g0.pool(),) if share_mem else ()
 
-            torch.cuda.nvtx.range_push("g1")
             g1.capture_begin(*args)
             c = a.clone()
             for _ in range(5):
-                c = c.clone() + 2
+                x = c.clone() + 2
+                y = c.clone() + 2
+                c = x + y
             g1.capture_end()
-            torch.cuda.nvtx.range_pop()
+            del x, y
 
             s0.wait_stream(torch.cuda.current_stream())
             s1.wait_stream(torch.cuda.current_stream())
-            for _ in range(10):
-                # with torch.cuda.stream(s0):
+            with torch.cuda.stream(s0):
                 g0.replay()
-                # with torch.cuda.stream(s1):
+            with torch.cuda.stream(s1):
                 g1.replay()
             torch.cuda.current_stream().wait_stream(s0)
             torch.cuda.current_stream().wait_stream(s1)
 
-            # if share_mem:
-            #     # Confirms concurrent replays using the same mempool corrupted each other.
-            #     self.assertNotEqual(b.sum().item(), size * 6)
-            #     self.assertNotEqual(c.sum().item(), size * 11)
-            # else:
-            #     # Confirms concurrent replays using different mempools did not corrupt each other.
-            #     self.assertEqual(b.sum().item(), size * 6)
-            #     self.assertEqual(c.sum().item(), size * 11)
+            if share_mem:
+                # Confirms concurrent replays using the same mempool corrupted each other.
+                self.assertNotEqual(b.sum().item(), size * 94)
+                self.assertNotEqual(c.sum().item(), size * 156)
+            else:
+                # Confirms concurrent replays using different mempools did not corrupt each other.
+                self.assertEqual(b.sum().item(), size * 94)
+                self.assertEqual(c.sum().item(), size * 156)
 
             del a, b, c, g0, g1
             torch.cuda.empty_cache()
