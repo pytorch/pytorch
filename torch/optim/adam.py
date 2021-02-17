@@ -1,5 +1,5 @@
 import torch
-from . import functional as F
+from . import _functional as F
 from .optimizer import Optimizer
 
 
@@ -105,16 +105,16 @@ class Adam(Optimizer):
                     state_steps.append(state['step'])
 
             beta1, beta2 = group['betas']
-            F._adam(params_with_grad,
-                    grads,
-                    exp_avgs,
-                    exp_avg_sqs,
-                    max_exp_avg_sqs,
-                    state_steps,
-                    group['amsgrad'],
-                    beta1,
-                    beta2,
-                    group['lr'],
-                    group['weight_decay'],
-                    group['eps'])
+            F.adam(params_with_grad,
+                   grads,
+                   exp_avgs,
+                   exp_avg_sqs,
+                   max_exp_avg_sqs,
+                   state_steps,
+                   group['amsgrad'],
+                   beta1,
+                   beta2,
+                   group['lr'],
+                   group['weight_decay'],
+                   group['eps'])
         return loss

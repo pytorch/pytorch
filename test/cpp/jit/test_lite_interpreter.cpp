@@ -3,6 +3,7 @@
 #include <c10/core/TensorOptions.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -347,6 +348,87 @@ class TorchBindLiteInterpreterTestStruct
     return ss.str();
   }
 };
+
+namespace {
+struct ClassNamespaceValue : public SugaredValue {
+  explicit ClassNamespaceValue(c10::QualifiedName name)
+      : basename_(std::move(name)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& name) override {
+    const auto fullName = c10::QualifiedName(basename_, name);
+
+    // Check to see if it is a custom class.
+    if (auto custom_class = getCustomClass(fullName.qualifiedName())) {
+      return std::make_shared<ClassValue>(custom_class);
+    }
+
+    // If it's not a custom class, assume it's another namespace
+    return std::make_shared<ClassNamespaceValue>(std::move(fullName));
+  }
+
+  std::string kind() const override {
+    return "Class Namespace";
+  }
+
+ private:
+  c10::QualifiedName basename_;
+};
+
+struct TestModuleResolver : public Resolver {
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) override {
+    if (name == "torch") {
+      return std::make_shared<BuiltinModule>("aten");
+    } else if (name == "__torch__") {
+      return std::make_shared<ClassNamespaceValue>(c10::QualifiedName(name));
+    }
+
+    return nullptr;
+  }
+
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      override {
+    return nullptr;
+  }
+};
+} // namespace
+
+TEST(LiteInterpreterTest, BuiltinClass) {
+  script::Module m("m");
+
+  auto cls = getCustomClass(
+      "__torch__.torch.classes._TorchScriptTesting._LiteInterpreterTest");
+  TORCH_INTERNAL_ASSERT(cls);
+  c10::intrusive_ptr<torch::CustomClassHolder> obj_holder;
+  m.register_attribute("my_obj", cls, IValue::make_capsule(obj_holder));
+
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(
+      R"(
+    def __getstate__(self):
+      return 1
+    def __setstate__(self, a):
+      self.my_obj = __torch__.torch.classes._TorchScriptTesting._LiteInterpreterTest()
+
+    def forward(self, x) -> str:
+      return self.my_obj.get(x)
+  )",
+      std::make_shared<TestModuleResolver>());
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  auto res =
+      bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
+  const auto& str = res.toStringRef();
+  std::string expected = "Hello! Your tensor has 12 elements!";
+  AT_ASSERT(str == expected);
+}
 
 TEST(LiteInterpreterTest, BuiltinFunction) {
   script::Module m("m");
@@ -828,6 +910,7 @@ static auto reg =
     torch::class_<TorchBindLiteInterpreterTestStruct>(
         "_TorchScriptTesting",
         "_LiteInterpreterTest")
+        .def(torch::init<>())
         .def("get", &TorchBindLiteInterpreterTestStruct::get)
         .def_pickle(
             // __getattr__

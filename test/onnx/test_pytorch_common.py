@@ -79,6 +79,18 @@ def disableScriptTest():
         return wrapper
     return script_dec
 
+
+# Disable tests for old jit passes.
+def disableOldJitPassesTest():
+    def script_dec(func):
+        def wrapper(self):
+            if not self.use_new_jit_passes:
+                raise unittest.SkipTest("Skip test for old jit API.")
+            return func(self)
+        return wrapper
+    return script_dec
+
+
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper
 # (for example, an op was modified but the change is not supported in caffe2)
