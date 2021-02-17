@@ -2704,7 +2704,7 @@ def method_tests():
         ('lerp', (), ((), 0.4), 'scalar', (True,)),
         ('lerp', (S, S, S), ((), 0.4), 'scalar_broadcast_rhs', (True,)),
         ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
-        ('lerp', (S, 1, S), ((S, S), (M, S, 1, S)), 'tensor_broadcast_all', (True,)),
+        ('lerp', (S, 1, S), ((S, S), (S, 1, 1, S)), 'tensor_broadcast_all', (True,)),
         ('max', (S, S, S), NO_ARGS),
         ('max', (S, S, S), (1,), 'dim', (), [0]),
         ('max', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
