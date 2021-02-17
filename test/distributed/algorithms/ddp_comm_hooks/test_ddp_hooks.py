@@ -98,7 +98,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_ddp_comm_hook_allreduce_hook(self):
         """
         This unit test verifies the ``allreduce`` hook registered case gives same result
@@ -116,7 +115,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_ddp_comm_hook_fp16compress_hook(self):
         """
         This unit test verifies the ``fp16 compress`` hook registered case
@@ -152,7 +150,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_ddp_comm_hook_quantize_per_channel_hook(self):
         """
         This unit test verifies the ``quantize per channel`` hook registered case
