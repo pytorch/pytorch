@@ -258,9 +258,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 conv_module.bias.data = b
 
         # Test members
-        print("module name", module_name)
-        print("qconv:", qconv_module._get_name())
-        self.assertTrue(module_name == qconv_module._get_name())
+        self.assertTrue(module_name == qconv_module._get_name(), module_name + " " + qconv_module._get_name())
         if not reference:
             self.assertTrue(hasattr(qconv_module, '_packed_params'))
         self.assertTrue(hasattr(qconv_module, 'scale'))
@@ -310,8 +308,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         loaded_qconv_module.load_state_dict(loaded_dict)
 
         self.assertTrue(dir(loaded_qconv_module) == dir(qconv_module))
-        self.assertTrue(module_name in str(loaded_qconv_module))
-        self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
+        self.assertTrue(module_name == loaded_qconv_module._get_name())
+        if not reference:
+            self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
         self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
 
         self.assertEqual(qconv_module.weight(), loaded_qconv_module.weight())
@@ -465,7 +464,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # (use_fused, reference) -> quantized class
         class_map = {
-            (True, True): (nniqr.ConvReLU2d, "QuantizedConvReLU2d(Referenc)"),
+            (True, True): (nniqr.ConvReLU2d, "QuantizedConvReLU2d(Reference)"),
             (True, False): (nniq.ConvReLU2d, "QuantizedConvReLU2d"),
             (False, True): (nnqr.Conv2d, "QuantizedConv2d(Reference)"),
             (False, False): (nnq.Conv2d, "QuantizedConv2d")
@@ -473,7 +472,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         qconv_cls, module_name = class_map[(use_fused, reference)]
         qconv_module = qconv_cls(
-            in_channels, out_channels, kernel, stride, pad,
+            in_channels, out_channels, kernel_size, stride, padding,
             dilation, groups, use_bias, padding_mode=pad_mode
         )
 

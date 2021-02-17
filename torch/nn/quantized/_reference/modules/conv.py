@@ -3,6 +3,7 @@ import torch.nn.quantized as nnq
 import torch.nn.functional as F
 from typing import Optional
 from torch.nn.common_types import _size_1_t
+from torch.nn.modules.utils import _single
 
 class _ConvNd(nnq._ConvNd):
     """ A reference version of nn.quantized.Conv2d
@@ -47,15 +48,19 @@ class Conv1d(_ConvNd, nnq.Conv1d):
         nnq.Conv1d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode)
-        print("stride:", self.stride)
+        # self.stride, self.padding, self.dilation are 2d tuple since
+        # current quantized conv1d is using Conv2dPackedParams
+        # TODO: we should fix this if we implemenet Conv1dPackedParams
+        self._conv1d_stride = _single(self.stride[0])
+        self._conv1d_padding = _single(self.padding[0])
+        self._conv1d_dilation = _single(self.dilation[0])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print("self.stride:", self.stride)
         x_dequant = x.dequantize()
         weight_dequant = self._qweight.dequantize()
         float_result = F.conv1d(
-            x_dequant, weight_dequant, self._bias, self.stride,
-            self.padding, self.dilation, self.groups)
+            x_dequant, weight_dequant, self._bias, self._conv1d_stride,
+            self._conv1d_padding, self._conv1d_dilation, self.groups)
         # NEEDFIX: we don't have dtype in the Linear module APIs right now!
         result = torch.quantize_per_tensor(
             float_result, self.scale, self.zero_point, torch.quint8)

@@ -7,8 +7,8 @@ class ConvReLU1d(nnqr.Conv1d):
         x_dequant = x.dequantize()
         weight_dequant = self._qweight.dequantize()
         float_result = F.conv1d(
-            x_dequant, weight_dequant, self._bias, self.stride,
-            self.padding, self.dilation, self.groups)
+            x_dequant, weight_dequant, self._bias, self._conv1d_stride,
+            self._conv1d_padding, self._conv1d_dilation, self.groups)
         float_result = F.relu(float_result, inplace=True)
         # NEEDFIX: we don't have dtype in the Linear module APIs right now!
         result = torch.quantize_per_tensor(
