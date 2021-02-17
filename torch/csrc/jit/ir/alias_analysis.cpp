@@ -983,8 +983,15 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
       return true;
   }
   auto op = use.user->maybeOperator();
-  if (op && op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
-    return true;
+  if (op) {
+    if (op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
+      return true;
+    } else if (op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA) {
+      const auto& schema = use.user->schema();
+      if (schema.aliasAnalysis() == AliasAnalysisKind::PURE_FUNCTION) {
+        return true;
+      }
+    }
   }
 
   return false;
