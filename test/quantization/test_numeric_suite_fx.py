@@ -474,7 +474,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w = nn.Parameter(torch.Tensor(1, 4))
-                self.b = nn.Parameter(torch.Tensor(1))
+                self.b = nn.Parameter(torch.zeros(1))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
@@ -598,7 +598,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w = nn.Parameter(torch.Tensor(4, 1))
-                self.b = nn.Parameter(torch.Tensor(4))
+                self.b = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
@@ -660,9 +660,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w1 = nn.Parameter(torch.Tensor(4, 4))
-                self.b1 = nn.Parameter(torch.Tensor(4))
+                self.b1 = nn.Parameter(torch.zeros(4))
                 self.w2 = nn.Parameter(torch.Tensor(4, 4))
-                self.b2 = nn.Parameter(torch.Tensor(4))
+                self.b2 = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
 
@@ -738,9 +738,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w1 = nn.Parameter(torch.Tensor(4, 4))
-                self.b1 = nn.Parameter(torch.Tensor(4))
+                self.b1 = nn.Parameter(torch.zeros(4))
                 self.w2 = nn.Parameter(torch.Tensor(4, 4))
-                self.b2 = nn.Parameter(torch.Tensor(4))
+                self.b2 = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
 
