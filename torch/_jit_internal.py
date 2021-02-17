@@ -903,6 +903,8 @@ def _qualified_name(obj):
     # Enum classes do not have `__name__` attr, instead they have `name`.
     elif isinstance(obj, enum.Enum):
         name = obj.name
+    elif hasattr(obj, '__str__'):
+        return obj.__str__()
     else:
         raise RuntimeError("Could not get name of python class object")
 
