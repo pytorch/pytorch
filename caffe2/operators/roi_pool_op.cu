@@ -163,6 +163,8 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
           R.data<float>(),
           Y->template mutable_data<float>(),
           argmax_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -198,6 +200,7 @@ C10_EXPORT bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
             pooled_width_,
             dX->template mutable_data<float>(),
             R.data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

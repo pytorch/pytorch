@@ -1294,6 +1294,11 @@ void initJitScriptBindings(PyObject* module, PyObject* parent) {
           [](const StrongFunctionPtr& self) {
             return self.function_->get_executor().getDebugState();
           })
+      .def(
+          "_debug_flush_compilation_cache",
+          [](const StrongFunctionPtr& self) {
+            return self.function_->get_executor().debugFlushCompilationCache();
+          })
       .def_property_readonly(
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })

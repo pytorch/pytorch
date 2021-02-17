@@ -279,7 +279,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_local_used_maps",
-          &::c10d::Reducer::get_local_used_maps_on_device);
+          &::c10d::Reducer::get_local_used_maps_on_device)
+      .def(
+          "save_thread_local_state",
+          &::c10d::Reducer::save_thread_local_state,
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
         .def(
