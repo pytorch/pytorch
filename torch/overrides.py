@@ -76,7 +76,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.save,
         torch.load,
         torch.set_printoptions,
-        torch._C._jit.fork,
         torch.get_default_dtype,
         torch.get_num_interop_threads,
         torch.get_num_threads,
