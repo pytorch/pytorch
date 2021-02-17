@@ -82,8 +82,39 @@ the_math = math
         self.assertEqual(package_a_i.result, 'package_a')
         self.assertIsNot(package_a_i, package_a)
 
-    def test_print_file_structure(self):
+    def test_file_structure(self):
         filename = self.temp()
+
+        export_plain = "─── " + filename.split('/')[-1] + """\n\
+    ├── main
+    │   └── main
+    ├── obj
+    │   └── obj.pkl
+    ├── package_a
+    │   ├── __init__.py
+    │   └── subpackage.py
+    └── module_a.py
+"""
+        export_include = "─── " + filename.split('/')[-1] + """\n\
+    ├── obj
+    │   └── obj.pkl
+    └── package_a
+        └── subpackage.py
+"""
+        import_exclude = "─── " + filename + """\n\
+    ├── .data
+    │   ├── extern_modules
+    │   └── version
+    ├── main
+    │   └── main
+    ├── obj
+    │   └── obj.pkl
+    ├── package_a
+    │   ├── __init__.py
+    │   └── subpackage.py
+    └── module_a.py
+"""
+
         with PackageExporter(filename, verbose=False) as he:
             import module_a
             import package_a
@@ -93,12 +124,15 @@ the_math = math
             he.save_module(package_a.__name__)
             he.save_pickle('obj', 'obj.pkl', obj)
             he.save_text('main', 'main', "my string")
-            export_file_structure = he.print_file_structure()
-            export_file_structure_i_e = he.print_file_structure("*.py", exclude="*module*")
+
+            export_file_structure = he.file_structure()
+            self.assertEqual(str(export_file_structure), export_plain)
+            export_file_structure = he.file_structure(include=["*subpackage.py", "*.pkl"])
+            self.assertEqual(str(export_file_structure), export_include)
 
         hi = PackageImporter(filename)
-        import_file_structure = hi.print_file_structure()
-        import_file_structure_i_e = hi.print_file_structure(".data/**", exclude="*extern*")
+        import_file_structure = hi.file_structure(exclude="*.storage")
+        self.assertEqual(str(import_file_structure), import_exclude)
 
     def test_save_module_binary(self):
         f = BytesIO()

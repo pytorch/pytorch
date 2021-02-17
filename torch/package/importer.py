@@ -13,7 +13,8 @@ import types
 import os.path
 from pathlib import Path
 
-from ._file_structure_printer import _print_file_structure
+from ._file_structure_representation import _create_folder_from_file_list
+from ._glob_group import GlobPattern
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
 from ._mock_zipreader import MockZipReader
@@ -90,8 +91,17 @@ class PackageImporter:
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
 
-    def print_file_structure(self, include: str = "**", *, exclude: str = "") -> str:
-        return _print_file_structure(self.filename, self.zip_reader.get_all_records(), include, exclude)
+    def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> str:
+        """Returns a file structure representation of package's zipfile. 
+
+        Args:
+            include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
+                for the names of the files to be inluded in the zipfile representation. This can also be 
+                a glob-style pattern, as described in exporter's :meth:`mock`
+
+            exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+        """
+        return _create_folder_from_file_list(self.filename, self.zip_reader.get_all_records(), include, exclude)
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
