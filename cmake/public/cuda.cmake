@@ -353,6 +353,7 @@ if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
         TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
     endif()
+    target_link_libraries(caffe2::cublas INTERFACE torch::cudart)
 else()
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
