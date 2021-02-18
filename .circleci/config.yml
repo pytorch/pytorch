@@ -7128,9 +7128,9 @@ workflows:
           name: pytorch_macos_10_13_py3_test
           requires:
             - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_py3_test:
+      - pytorch_macos_10_13_py3_test_build_lite_interpreter:
           build_lite_interpreter: "1"
-          name: pytorch_macos_10_13_py3_test
+          name: pytorch_macos_10_13_py3_test_build_lite_interpreter
           requires:
             - pytorch_macos_10_13_py3_build
       - pytorch_linux_build:
