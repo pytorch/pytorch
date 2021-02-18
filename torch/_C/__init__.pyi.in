@@ -142,8 +142,6 @@ class _LegacyVariableBase(object):
 
 # Defined in torch/csrc/jit/python/init.cpp
 def _jit_set_num_profiled_runs(num: _size) -> _size: ...
-
-
 def _jit_pass_optimize_frozen_graph(graph: _jit.Graph) -> None: ...
 def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule',
                                   optimization_blocklist: Set[_jit.MobileOptimizerType],
@@ -219,6 +217,7 @@ def _jit_pass_onnx_block(
     env: Dict[_jit.Value, _jit.Value]
 ) -> None: ...
 def _jit_pass_fixup_onnx_controlflow_node(n: _jit.Node, opset_version: _int) -> _jit.Node: ...
+def _get_tracing_state() -> TracingState: ...
 
 # Defined in torch/csrc/Module.cpp
 def _initExtension(shm_manager_path: str) -> None: ...  # THPModule_initExtension

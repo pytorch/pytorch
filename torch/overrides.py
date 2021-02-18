@@ -82,6 +82,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.init_num_threads,
         torch.is_anomaly_enabled,
         torch.is_grad_enabled,
+        torch.parse_schema,
         torch.set_anomaly_enabled,
         torch.set_flush_denormal,
         torch.set_num_interop_threads,
