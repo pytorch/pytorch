@@ -50,11 +50,6 @@ variable_list ${op}::apply(variable_list&& grads) {
 }
 """)
 
-PY_FUNCTION_DEFINITION = CodeTemplate("""\
-static PyTypeObject ${op}Class;
-addClass<${op}>(${op}Class, "${op}", ${op}_properties);
-""")
-
 GRAD_INPUT_MASK = CodeTemplate("""\
   auto grad_input_mask = std::array<bool, ${n}>{
     ${masks}
@@ -80,6 +75,80 @@ if (should_compute_output({ ${idx_ranges} })) {
   auto grad_result = ${derivative};
   ${copy_ranges}
 }
+""")
+
+# Generates python bindings
+#
+# This generates the definitions for:
+#   (1) The PyTypeObject for each backward grad_fn subclassing Node
+#   (2) The entry for PyTypeObject's tp_getset slot (an array of PyGetSetDef structs)
+#     We generate one PyGetSetDef struct for each of grad_fn's saved inputs and outputs
+#     Each PyGetSetDef has a function ptr to a getter, also defined here (3).
+#   (3) Getters for each of grad_fn's saved inputs and outputs.
+#
+PY_FUNCTION_DEFINITION = CodeTemplate("""\
+static PyTypeObject ${op}Class;
+addClass<${op}>(${op}Class, "${op}", ${op}_properties);
+""")
+
+PY_FUNCTION_PROPS_AND_GETTERS = CodeTemplate("""\
+${all_getter_definitions}
+
+static struct PyGetSetDef ${op}_properties[] = {
+  THP_FUNCTION_DEFAULT_PROPERTIES,
+  ${all_getsetdef_structs}
+  {nullptr} /* sentinel */
+};
+
+""")
+
+PY_GETSETDEF_STRUCT = CodeTemplate("""\
+{(char*)"${name}", (getter)THP${op}_${name}_getter, nullptr, nullptr, nullptr}""")
+
+GETTER_DEFINITION_ARRAYREF = CodeTemplate("""\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  ${get_prop}
+  PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+  for (int i = 0; i < prop.size(); i++) {
+    ${tuple_setitem}
+  }
+  return tup;
+}
+""")
+
+GETTER_DEFINITION_INT = CodeTemplate("""\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  auto prop = static_cast<${op}*>(self->cdata.get())->${name};
+  PyObject* ret = PyLong_FromUnsignedLong((uint64_t) prop);
+  return ret;
+}
+""")
+
+GETTER_DEFINITION_SAVEDVAR = CodeTemplate("""\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
+  return THPVariable_Wrap(prop.unpack());
+}
+""")
+
+TUPLE_SETITEM_LONG = """\
+PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong((uint64_t) prop[i]));
+"""
+
+TUPLE_SETITEM_DOUBLE = """\
+PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble((double) prop[i]));
+"""
+
+GET_PROP_OPTIONAL_ARRAY = CodeTemplate("""\
+auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
+if (!opt_prop.list.has_value()) {
+  Py_RETURN_NONE;
+}
+auto prop = opt_prop.list.value();
+""")
+
+GET_PROP = CodeTemplate("""\
+auto prop = static_cast<${op}*>(self->cdata.get())->${name};
 """)
 
 # These functions have backwards which cannot be traced, and so must have
@@ -121,7 +190,7 @@ def gen_autograd_functions(
     declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
     definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
     py_function_initializers = list(map(lambda f: process_function(f, PY_FUNCTION_DEFINITION), infos))
-    py_function_props_and_getters = list(map(emit_props_and_getters, infos))
+    py_function_props_and_getters = list(map(lambda f: process_function(f, PY_FUNCTION_PROPS_AND_GETTERS), infos))
 
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     for suffix in ['.h', '.cpp']:
@@ -141,6 +210,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     unpack: List[str] = []
     asserts: List[str] = []
     compute_index_ranges: List[str] = []
+    getter_definitions: List[str] = []
+    py_getsetdef_structs: List[str] = []
 
     for arg in info.args_with_derivatives:
         if arg.type == 'TensorList' or arg.type == 'const c10::List<c10::optional<Tensor>> &':
@@ -152,6 +223,10 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
 
     def save_var(var: SavedAttribute, is_output: bool) -> None:
         name = var.name
+        should_append_getsetdef = True
+
+        get_prop = GET_PROP.substitute(op=info.op, name=name)
+        get_prop_optionalarray = GET_PROP_OPTIONAL_ARRAY.substitute(op=info.op, name=name)
         if var.type == 'Tensor' or var.type == 'c10::optional<Tensor>' or var.type == 'c10::optional<Tensor>&' or \
                 (var.type == 'Scalar' and is_output):
             saved_variables.append(f'SavedVariable {name}_;')
@@ -159,7 +234,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_.reset_grad_function();')
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
+            getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(op=info.op, name=name))
         elif var.type == 'TensorList':
+            should_append_getsetdef = False
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -169,6 +246,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             unpack.append(f'auto {name} = unpack_list({name}_);')
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
         elif var.type == 'c10::List<c10::optional<Tensor>>':
+            should_append_getsetdef = False
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -179,14 +257,25 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
         elif var.type == 'IntArrayRef':
             saved_variables.append(f'std::vector<int64_t> {name};')
+            getter_definitions.append(GETTER_DEFINITION_ARRAYREF.substitute(
+                op=info.op, name=name, get_prop=get_prop, tuple_setitem=TUPLE_SETITEM_LONG))
         elif var.type == 'c10::optional<IntArrayRef>':
             saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
+            getter_definitions.append(GETTER_DEFINITION_ARRAYREF.substitute(
+                op=info.op, name=name, get_prop=get_prop_optionalarray, tuple_setitem=TUPLE_SETITEM_LONG))
         elif var.type == 'c10::optional<ArrayRef<double>>':
             saved_variables.append(f'c10::OptionalArray<double> {name};')
+            getter_definitions.append(GETTER_DEFINITION_ARRAYREF.substitute(
+                op=info.op, name=name, get_prop=get_prop_optionalarray, tuple_setitem=TUPLE_SETITEM_DOUBLE))
         elif var.type == 'int64_t':
             saved_variables.append(f'{var.type} {name} = 0;')
+            getter_definitions.append(GETTER_DEFINITION_INT.substitute(op=info.op, name=name))
         else:
+            should_append_getsetdef = False
             saved_variables.append(f'{var.type} {name};')
+
+        if should_append_getsetdef:
+            py_getsetdef_structs.append(PY_GETSETDEF_STRUCT.substitute(op=info.op, name=name))
 
     for var in info.all_saved_inputs:
         save_var(var, is_output=False)
@@ -262,6 +351,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     else:
         superclass = 'TraceableFunction'
 
+    all_getsetdef_structs = ",\n".join(py_getsetdef_structs) + "," if len(py_getsetdef_structs) != 0 else ""
+    all_getter_definitions = "\n".join(getter_definitions)
+
     return template.substitute(
         op=info.op,
         compute_index_ranges=compute_index_ranges,
@@ -273,6 +365,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         will_release_variables=will_release_variables,
         body=body,
         superclass=superclass,
+        all_getter_definitions=all_getter_definitions,
+        all_getsetdef_structs=all_getsetdef_structs
     )
 
 def uses_ident(info: Optional[DifferentiabilityInfo], ident: str) -> bool:
@@ -289,94 +383,3 @@ def uses_retain_variables(info: Optional[DifferentiabilityInfo]) -> bool:
 
 def uses_single_grad(info: Optional[DifferentiabilityInfo]) -> bool:
     return uses_ident(info, 'grad')
-
-# Generates the python bindings for saved_inputs and saved_outputs
-PY_FUNCTION_PROPS_AND_GETTERS = CodeTemplate("""\
-${all_getter_defs}
-
-${py_function_properties}
-
-""")
-
-PY_FUNCTION_PROPERTIES = CodeTemplate("""\
-static struct PyGetSetDef ${op}_properties[] = {
-  THP_FUNCTION_DEFAULT_PROPERTIES,
-  ${properties}
-  {nullptr} /* sentinel */
-};
-""")
-
-PY_GETSETDEF_PROPERTY = CodeTemplate("""\
-{(char*)"${prop}", (getter)THP${op}_${prop}_getter, nullptr, nullptr, nullptr}""")
-
-GETTER_DEFINITION_ARRAYREF = CodeTemplate("""\
-PyObject* THP${op}_${prop}_getter(THPCppFunction *self, void *_unused) {
-  ${get_prop}
-  PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-  for (int i = 0; i < prop.size(); i++) {
-    ${tuple_setitem}
-  }
-  return tup;
-}
-""")
-
-GETTER_DEFINITION_INT = CodeTemplate("""\
-PyObject* THP${op}_${prop}_getter(THPCppFunction *self, void *_unused) {
-  auto prop = static_cast<${op}*>(self->cdata.get())->${prop};
-  PyObject* ret = PyLong_FromUnsignedLong((uint64_t) prop);
-  return ret;
-}
-""")
-
-TUPLE_SETITEM_LONG = """\
-PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong((uint64_t) prop[i]));
-"""
-
-TUPLE_SETITEM_DOUBLE = """\
-PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble((double) prop[i]));
-"""
-
-def emit_props_and_getters(info: DifferentiabilityInfo) -> str:
-    properties: List[str] = []
-    getter_defs: List[str] = []
-    op = info.op
-
-    for var in info.all_saved_inputs:
-        prop = var.name
-        should_append_property = True
-
-        get_prop_optionalarray = f"""\
-auto opt_prop = static_cast<{op}*>(self->cdata.get())->{prop};
-if (!opt_prop.list.has_value()) {{
-  Py_RETURN_NONE;
-}}
-auto prop = opt_prop.list.value();\n"""
-        get_prop = f"""\
-auto prop = static_cast<{op}*>(self->cdata.get())->{prop};\n"""
-
-        if var.type == 'IntArrayRef':
-            getter_defs.append(GETTER_DEFINITION_ARRAYREF.substitute(
-                op=op, prop=prop, get_prop=get_prop, tuple_setitem=TUPLE_SETITEM_LONG))
-        elif var.type == 'c10::optional<IntArrayRef>':
-            getter_defs.append(GETTER_DEFINITION_ARRAYREF.substitute(
-                op=op, prop=prop, get_prop=get_prop_optionalarray, tuple_setitem=TUPLE_SETITEM_LONG))
-        elif var.type == 'c10::optional<ArrayRef<double>>':
-            getter_defs.append(GETTER_DEFINITION_ARRAYREF.substitute(
-                op=op, prop=prop, get_prop=get_prop_optionalarray, tuple_setitem=TUPLE_SETITEM_DOUBLE))
-        elif var.type == 'int64_t':
-            getter_defs.append(GETTER_DEFINITION_INT.substitute(
-                op=op, prop=prop))
-        else:
-            # Don't support tensors for now
-            should_append_property = False
-
-        if should_append_property:
-            properties.append(PY_GETSETDEF_PROPERTY.substitute(op=op, prop=prop))
-
-    props = PY_FUNCTION_PROPERTIES.substitute(
-        op=op, properties=",\n".join(properties) + "," if len(properties) != 0 else "")
-
-    all_getter_defs = "\n".join(getter_defs)
-
-    return PY_FUNCTION_PROPS_AND_GETTERS.substitute(
-        all_getter_defs=all_getter_defs, py_function_properties=props, op=op)

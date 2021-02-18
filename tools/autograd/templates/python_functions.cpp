@@ -7,6 +7,8 @@
 
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
+#include <torch/csrc/autograd/python_variable.h>
+
 
 namespace torch { namespace autograd { namespace generated {
 
