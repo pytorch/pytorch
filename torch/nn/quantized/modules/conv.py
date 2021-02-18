@@ -173,7 +173,6 @@ class _ConvNd(nn.Module):
         self.scale = state[12]
         self.zero_point = state[13]
         self.training = state[14]
-        super().__setstate__({})
 
     @classmethod
     def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
