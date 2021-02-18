@@ -9,8 +9,8 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform, Compo
                                             CorrCholeskyTransform, ExpTransform, IndependentTransform,
                                             LowerCholeskyTransform, PowerTransform, ReshapeTransform,
                                             SigmoidTransform, TanhTransform, SoftmaxTransform,
-                                            StickBreakingTransform, identity_transform, Transform,
-                                            _InverseTransform)
+                                            SoftplusTransform, StickBreakingTransform,
+                                            identity_transform, Transform, _InverseTransform)
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
 
 
@@ -35,6 +35,7 @@ def get_transforms(cache_size):
                         torch.randn(4, 5),
                         cache_size=cache_size),
         SoftmaxTransform(cache_size=cache_size),
+        SoftplusTransform(cache_size=cache_size),
         StickBreakingTransform(cache_size=cache_size),
         LowerCholeskyTransform(cache_size=cache_size),
         CorrCholeskyTransform(cache_size=cache_size),
