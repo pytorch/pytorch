@@ -294,6 +294,18 @@ class TestCheckpoint(TestCase):
         res[1].sum().backward()
         res[4].sum().backward()
         res[6].sum().backward()
+        t1_grad = t1.grad
+        t2_grad = t2.grad
+
+        # Rest grads, run without checkpoint and validate we receive same grads.
+        t1.grad = None
+        t2.grad = None
+        res = foo(t1, t2, scale, t3)
+        res[1].sum().backward()
+        res[4].sum().backward()
+        res[6].sum().backward()
+        self.assertEqual(t1.grad, t1_grad)
+        self.assertEqual(t2.grad, t2_grad)
 
 
     def test_checkpoint_partial_grad(self):
