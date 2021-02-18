@@ -396,7 +396,8 @@ std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
     tensorexpr::Tensor* out,
-    tensorexpr::VarHandle& dim) {
+    tensorexpr::VarHandle& dim,
+    int width = kVectorWidth) {
   return wrap;
 };
 
