@@ -125,7 +125,6 @@ class JitTestCase(JitCommonTestCase):
             return self
 
         def __exit__(self, *args):
-            print(self.stringio.getvalue())
             self.append(str(self.stringio.getvalue()))
             del self.stringio
             sys.stderr = self.sys_stderr
