@@ -6,18 +6,23 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<Scalar> scalars, bool promote_integer_float=false) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
+    std::vector<at::Tensor> temp_tensors;
+    temp_tensors.reserve(tensors.size());
+    tensor_lists.emplace_back(temp_tensors);
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(tensors.size());
-    for (const auto& t: tensors) {
-        vec_res.emplace_back(at::native::empty_like(t));
+
+    ScalarType result_type = get_result_type(tensors[0], scalars[0], promote_integer_float);
+    for (int i = 0; i < tensors.size(); i++) {
+        tensor_lists[0].emplace_back(tensors[i].to(result_type));
+        vec_res.emplace_back(at::native::empty_like(tensor_lists[0][i]));
     }
 
-    tensor_lists.emplace_back(tensors.vec());
     tensor_lists.emplace_back(vec_res);
 
-    AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, result_type, "foreach_binary_op_scalarlist_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<2, opmath_t>(tensor_lists,
                                         scalars,
@@ -87,7 +92,7 @@ std::vector<Tensor> foreach_tensor_div_scalarlist_kernel_cuda(TensorList tensors
         return at::native::foreach_tensor_div_scalarlist_kernel_slow(tensors, scalars);
     }
 
-    return foreach_binary_op<std::divides>(tensors, scalars);
+    return foreach_binary_op<std::divides>(tensors, scalars, /*promote_integer_float*/ true);
 }
 
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
@@ -118,3 +123,12 @@ std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(TensorList tensors
 }
 
 }} // namespace at::native
+
+
+// TODO: 
+// [] Test scalars of different dtype in scalarList
+// [] Cover this with tests
+// [] fix div issue
+// [] PR description - add benchmarks for all the cases. scalar, scalarlist, list of ts
+// [] add a test for 2 lists of tensors with different dtypes tensors in a list
+// [] test: t1 with dtype1, t2 with dtype2, scalar with dtype3

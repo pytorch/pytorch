@@ -5,6 +5,25 @@ namespace at {
 namespace native {
 namespace {
 
+// Get result dtype
+ScalarType get_result_type(const Tensor& tensor, Scalar scalar, bool promote_integer_float = false) {
+  ScalarType result_type = at::native::result_type(tensor, scalar);
+  std::cout << result_type << std::endl;
+  if (promote_integer_float && c10::isIntegralType(result_type, /*include_bool=*/true)) {
+      result_type = c10::typeMetaToScalarType(c10::get_default_dtype());
+  }
+  std::cout << result_type << std::endl;
+  return result_type;
+}
+
+ScalarType get_result_type(const Tensor& tensor1, const Tensor& tensor2, bool promote_integer_float = false) {
+  ScalarType result_type = at::native::result_type(tensor1, tensor2);
+  if (promote_integer_float && c10::isIntegralType(result_type, /*include_bool=*/true)) {
+      result_type = c10::typeMetaToScalarType(c10::get_default_dtype());
+  }
+  return result_type;
+}
+
 // Check if tensor list has a boolean tensor
 bool has_int_or_bool_tensor(TensorList tensors) {
     bool has_integral = false;
@@ -89,12 +108,10 @@ bool check_fast_path_restrictions(
   bool does_op_promote_integer_inputs_to_float = false) {
     auto expected_device = tensorLists[0][0].device();
     auto expected_strides = tensorLists[0][0].strides();
-    auto expected_dtype = tensorLists[0][0].dtype();
     auto expected_size = tensorLists[0][0].sizes();
 
     auto is_tensor_okay = [&](const Tensor& tensor) {
-      return tensor.dtype() == expected_dtype &&
-             tensor.device() == expected_device &&
+      return tensor.device() == expected_device &&
              tensor.layout() == at::kStrided &&
              tensor.strides() == expected_strides &&
              tensor.sizes() == expected_size &&
@@ -113,23 +130,9 @@ bool check_fast_path_restrictions(
     // checked by `check_foreach_api_restrictions`). This means we only need to check if
     // {tensorList[0][0], tensorList[0][1], tensorList[0][2], ...} do type promotion with scalarLIst.
     for (int i=0; i < tensorLists[0].size(); i++) {
-      if (does_op_promote_integer_inputs_to_float) {
-        if (at::isIntegralType(tensorLists[0][i].scalar_type(), /*includeBool*/ true)) {
-          return false;
-        }
-      }
-
-      if (scalarList.size() == 1) {
-        if (will_promote_tensor(tensorLists[0][i], scalarList[0])) {
-          return false;
-        }
-      } else if (scalarList.size() > 1) {
+      if (scalarList.size() > 1) {
         // Complex scalar list is not supported due to the limit for kernel launch argument (4KB)
         if (scalarList[i].isComplex()) {
-          return false;
-        }
-
-        if (will_promote_tensor(tensorLists[0][i], scalarList[i])) {
           return false;
         }
       }
