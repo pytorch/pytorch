@@ -60,6 +60,7 @@ TESTS = [
     'test_optim',
     'test_pytree',
     'test_mobile_optimizer',
+    'test_set_default_mobile_cpu_allocator',
     'test_xnnpack_integration',
     'test_vulkan',
     'test_sparse',
