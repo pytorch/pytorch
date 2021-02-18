@@ -18,4 +18,4 @@ function for details.
 Functions
 -----------------------
 
-.. autofunction:: lgamma
+.. autofunction:: gammaln
