@@ -12,7 +12,6 @@ import sys
 import tempfile
 
 import torch
-import torch._six
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
 import torch.distributed as dist
@@ -61,6 +60,7 @@ TESTS = [
     'test_optim',
     'test_pytree',
     'test_mobile_optimizer',
+    'test_set_default_mobile_cpu_allocator',
     'test_xnnpack_integration',
     'test_vulkan',
     'test_sparse',

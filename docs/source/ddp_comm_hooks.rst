@@ -20,8 +20,10 @@ How to Use a Communication Hook?
 --------------------------------
 
 To use a communication hook, the user just needs to let the DDP model register
-the hook before the training loop by calling
+the hook before the training loop as below.
+
 :func:`torch.nn.parallel.DistributedDataParallel.register_comm_hook`.
+    :noindex:
 
 Default Communication Hooks
 ---------------------------
@@ -37,7 +39,7 @@ PowerSGD Communication Hook
 
 PowerSGD (`Vogels et al., NeurIPS 2019 <https://arxiv.org/abs/1905.13727>`_)
 is a gradient compression algorithm, which can provide very high compression
-rates and accelerate bandiwth-bound distributed training.
+rates and accelerate bandwidth-bound distributed training.
 This algorithm needs to maintain both some hyperparameters and the internal
 state. Therefore, PowerSGD communication hook is a **stateful** hook,
 and the user needs to provide a state object defined as below.

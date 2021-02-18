@@ -44,9 +44,7 @@ using fake_quant_per_channel_cachemask_fn = void (*)(
 DECLARE_DISPATCH(fake_quant_per_channel_cachemask_fn, fake_quant_per_channel_cachemask_stub);
 
 using fake_quant_learnable_per_channel_fn = void (*)(
-    TensorIterator &iter_x,
-    TensorIterator &iter_scale,
-    TensorIterator &iter_zero_point,
+    TensorIterator &iter,
     int64_t quant_min,
     int64_t quant_max,
     float grad_factor);
