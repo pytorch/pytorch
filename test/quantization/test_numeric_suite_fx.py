@@ -36,7 +36,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import override_qengines
 from torch.quantization.ns.graph_matcher import (
-    get_matching_node_pairs,
+    get_matching_subgraph_pairs,
     GraphMatchingException,
 )
 from torch.quantization.ns.numeric_suite_core_apis_fx import (
@@ -464,10 +464,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
-        results = get_matching_node_pairs(mp, mq)
+        results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'0': (nn.Conv2d, nnq.Conv2d)}
-        self.assert_types_for_matched_node_pairs(results, expected_types, mp, mq)
+        expected_types = {'0': ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d))}
+        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
     def test_simple_fun(self):
@@ -487,10 +487,35 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
-        results = get_matching_node_pairs(mp, mq)
+        results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'linear_1': (F.linear, toq.linear)}
-        self.assert_types_for_matched_node_pairs(results, expected_types, mp, mq)
+        expected_types = {'linear_1': ((F.linear, F.linear), (toq.linear, toq.linear))}
+        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
+
+    @override_qengines
+    def test_simple_fusion(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.Tensor(4, 1))
+                self.b = nn.Parameter(torch.zeros(4))
+                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w, self.b)
+                x = F.relu(x)
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        results = get_matching_subgraph_pairs(mp, mq)
+
+        expected_types = {'linear_relu': ((F.linear, F.relu), (toq.linear_relu, toq.linear_relu))}
+        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
     def test_simple_mod_multi(self):
@@ -506,7 +531,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
-        results = get_matching_node_pairs(mp, mq)
+        results = get_matching_subgraph_pairs(mp, mq)
 
     @override_qengines
     def test_simple_tensor_ops(self):
@@ -525,7 +550,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
-        results = get_matching_node_pairs(mp, mq)
+        results = get_matching_subgraph_pairs(mp, mq)
 
     @override_qengines
     def test_matching_failure_node_count(self):
@@ -536,7 +561,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mp1 = prepare_fx(m1, {'': torch.quantization.default_qconfig})
         mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
         with self.assertRaises(GraphMatchingException) as ex:
-            results = get_matching_node_pairs(mp1, mp2)
+            results = get_matching_subgraph_pairs(mp1, mp2)
 
     @override_qengines
     def test_matching_failure_node_type(self):
@@ -546,7 +571,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mp1 = prepare_fx(m1, {'': torch.quantization.default_qconfig})
         mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
         with self.assertRaises(GraphMatchingException) as ex:
-            results = get_matching_node_pairs(mp1, mp2)
+            results = get_matching_subgraph_pairs(mp1, mp2)
 
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
@@ -563,7 +588,7 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
-        results = get_matching_node_pairs(mp, mq)
+        results = get_matching_subgraph_pairs(mp, mq)
 
     @override_qengines
     @skip_if_no_torchvision
@@ -577,7 +602,7 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
-        results = get_matching_node_pairs(mp, mq)
+        results = get_matching_subgraph_pairs(mp, mq)
 
 class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
 
@@ -670,6 +695,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             def forward(self, x):
                 x = F.linear(x, self.w1, self.b1)
                 x = F.linear(x, self.w2, self.b2)
+                x = F.relu(x)
                 return x
 
         m = M().eval()
@@ -748,6 +774,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             def forward(self, x):
                 x = F.linear(x, self.w1, self.b1)
                 x = F.linear(x, self.w2, self.b2)
+                x = F.relu(x)
                 return x
 
         m = M().eval()
