@@ -127,11 +127,11 @@ the_math = math
 
             export_file_structure = he.file_structure()
             self.assertEqual(str(export_file_structure), export_plain)
-            export_file_structure = he.file_structure(include=["*subpackage.py", "*.pkl"])
+            export_file_structure = he.file_structure(include=["**/subpackage.py", "**/*.pkl"])
             self.assertEqual(str(export_file_structure), export_include)
 
         hi = PackageImporter(filename)
-        import_file_structure = hi.file_structure(exclude="*.storage")
+        import_file_structure = hi.file_structure(exclude="**/*.storage")
         self.assertEqual(str(import_file_structure), import_exclude)
 
     def test_save_module_binary(self):

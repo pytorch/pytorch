@@ -81,7 +81,7 @@ def _create_folder_from_file_list(
     include: "GlobPattern" = "**",
     exclude: "GlobPattern" = (),
 ):
-    glob_pattern = _GlobGroup(include, exclude)
+    glob_pattern = _GlobGroup(include, exclude, "/")
 
     top_folder = Folder(filename, True)
     for file in file_list:
