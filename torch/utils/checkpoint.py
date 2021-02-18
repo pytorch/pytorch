@@ -70,7 +70,7 @@ class CheckpointFunction(torch.autograd.Function):
             if torch.cuda._initialized:
                 ctx.had_cuda_in_fwd = True
                 ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(*args)
-        ctx.save_for_backward(*args)
+        ctx.inputs = args
         with torch.no_grad():
             outputs = run_function(*args)
         return outputs
@@ -82,7 +82,7 @@ class CheckpointFunction(torch.autograd.Function):
                 "Checkpointing is not compatible with .grad() or when an `inputs` parameter"
                 " is passed to .backward(). Please use .backward() and do not pass its `inputs`"
                 " argument.")
-        inputs = ctx.saved_tensors
+        inputs = ctx.inputs
         # Stash the surrounding rng state, and mimic the state that was
         # present at this time during forward.  Restore the surrounding state
         # when we're done.
@@ -104,16 +104,18 @@ class CheckpointFunction(torch.autograd.Function):
         # run backward() with only tensor that requires grad
         outputs_with_grad = []
         args_with_grad = []
+        args_index = 0
         for i in range(len(outputs)):
-            if outputs[i].requires_grad:
+            if torch.is_tensor(outputs[i]) and outputs[i].requires_grad:
                 outputs_with_grad.append(outputs[i])
-                args_with_grad.append(args[i])
+                args_with_grad.append(args[args_index])
+                args_index += 1
         if len(outputs_with_grad) == 0:
             raise RuntimeError(
                 "none of output has requires_grad=True,"
                 " this checkpoint() is not necessary")
         torch.autograd.backward(outputs_with_grad, args_with_grad)
-        grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else inp
+        grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else None
                       for inp in detached_inputs)
         return (None, None) + grads
 

@@ -366,8 +366,8 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     if (THPVariable_Check(obj)) {
       return ((THPVariable*)obj)->cdata;
     }
-    throw TypeError("%s.forward: expected Tensor or tuple of Tensor (got %s) for return value %d",
-        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
+    // Return undefined variable as a placeholder.
+    return Variable();
   };
 
   auto non_differentiable = _parse_non_differentiable(self);
@@ -382,10 +382,15 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
 
   auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
   for (int i = 0; i < num_outputs; i++) {
-    if (is_executable) {
+    if (is_executable && wrapped_outputs[i].defined()) {
       self->output_info.emplace_back(wrapped_outputs[i]);
     }
-    PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(wrapped_outputs[i]));
+    // Keep the non-tensor outputs as is.
+    if (!wrapped_outputs[i].defined()) {
+      PyTuple_SET_ITEM(outputs, i, PyTuple_GET_ITEM(raw_output, i));
+    } else {
+      PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(wrapped_outputs[i]));
+    }
   }
 }
 
