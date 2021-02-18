@@ -367,7 +367,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 // to the output Variables if present.
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
-      : f(grad.f, "<foward op>"),
+      : f_ptr(std::make_shared<GraphExecutor>(grad.f, "<foward op>")),
         legacy_f(grad.f, "<foward op>"),
         grad(std::move(grad)),
         grad_executor(this->grad.df, "<backward op>"),
@@ -375,7 +375,7 @@ struct DifferentiableGraphOp {
         num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
-  void operator()(Stack* stack) {
+  void operator()(Stack* stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
@@ -395,7 +395,7 @@ struct DifferentiableGraphOp {
     detachVariables(*stack);
     if (IsNewExecutorEnabled()) {
       ExecutionPlan plan =
-          f.getPlanFor(*stack, GraphExecutor::getDefaultNumBailOuts());
+          f_ptr->getPlanFor(*stack, GraphExecutor::getDefaultNumBailOuts());
       InterpreterState(plan.code).run(*stack);
     } else {
       InterpreterState(legacy_f).run(*stack);
@@ -470,7 +470,7 @@ struct DifferentiableGraphOp {
     }
   }
 
-  GraphExecutor f;
+  std::shared_ptr<GraphExecutor> f_ptr;
   Code legacy_f;
   Gradient grad;
   GraphExecutor grad_executor;
@@ -512,8 +512,12 @@ GraphExecutor* getGradExecutor(Operation& op) {
 }
 
 GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op) {
+  TORCH_INTERNAL_ASSERT(
+      IsNewExecutorEnabled(),
+      __FUNCTION__,
+      " is only accessible under profiling executor\n");
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
-    return &diff_op->f;
+    return diff_op->f_ptr.get();
   }
   return nullptr;
 }
