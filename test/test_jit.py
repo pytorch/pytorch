@@ -10844,6 +10844,25 @@ dedent """
         self.run_pass('erase_number_types', graph)
         FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
 
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_cast_to_device(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight_0 = torch.nn.Parameter(torch.randn(1))
+                t = torch.randn(1)
+                self.register_buffer("buffer", t)
+
+            def forward(self, x: int):
+                t = torch.tensor([x], device="cpu")
+                return t
+
+        scripted = torch.jit.script(M())
+        graph = scripted.graph
+        FileCheck().check("Device = prim::Constant[value=\"cpu\"").run(str(graph))
+        torch._C._jit_pass_cast_to_device(scripted._c, "cuda:0")
+        FileCheck().check("Device = prim::Constant[value=\"cuda:0\"")
+
     def test_remove_dropout(self):
         weight_0_shape = (20, 5)
         weight_1_shape = (20, 20)
