@@ -23,8 +23,8 @@ class MacOsJob:
         # for the YAML output to work.
         props_dict = {"requires": job_dependencies, "name": full_job_name}
 
-        if self.extra_props:
-            props_dict.update(self.extra_props)
+        # if self.extra_props:
+        #     props_dict.update(self.extra_props)
 
         return [{full_job_name: props_dict}]
 
