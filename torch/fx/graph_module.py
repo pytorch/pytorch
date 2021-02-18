@@ -328,7 +328,7 @@ class {module_name}(torch.nn.Module):
         code of this ``GraphModule`` will be out of date.
         """
         python_code = self._graph.python_code(root_module='self')
-        self._code = python_code.fn_src
+        self._code = python_code.src
 
         cls = type(self)
         cls.forward = _forward_from_src(self._code, python_code.globals)

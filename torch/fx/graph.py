@@ -1,6 +1,6 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 
-from typing import Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
+from typing import Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Union
 from dataclasses import dataclass
 from contextlib import contextmanager
 import torch
@@ -90,10 +90,17 @@ class _Namespace:
     """
     def __init__(self):
         self._obj_to_name: Dict[Any, str] = {}
+        self._unassociated_names = set()
         self._used_names: Dict[str, int] = {}
 
-    def create_name(self, candidate: str, obj: Any) -> str:
-        if obj in self._obj_to_name:
+    def create_name(self, candidate: str, obj: Optional[Any]) -> str:
+        """Create a unique name.
+
+        Arguments:
+            candidate: used as the basis for the unique name, relevant to the user.
+            obj: If not None, an object that will be associated with the unique name.
+        """
+        if obj is not None and obj in self._obj_to_name:
             return self._obj_to_name[obj]
 
         # delete all characters that are illegal in a Python identifier
@@ -110,8 +117,21 @@ class _Namespace:
                 candidate = f'{base}_{int(num) + 1}'
 
         self._used_names.setdefault(candidate)
-        self._obj_to_name[obj] = candidate
+        if obj is None:
+            self._unassociated_names.add(candidate)
+        else:
+            self._obj_to_name[obj] = candidate
         return candidate
+
+    def associate_name_with_obj(self, name: str, obj: Any):
+        """Associate a unique name with an object.
+
+        Neither `name` nor `obj` should be associated already.
+        """
+        assert obj not in self._obj_to_name
+        assert name in self._unassociated_names
+        self._obj_to_name[obj] = name
+        self._unassociated_names.remove(name)
 
     def _is_illegal_name(self, name: str, obj: Any) -> bool:
         # 1. keywords are never allowed as names.
@@ -133,7 +153,7 @@ class _Namespace:
 class PythonCode:
     """Represents all the information necessary to exec or save a graph as Python code."""
     # Python source code for the forward function definition.
-    fn_src: str
+    src: str
     # Values in global scope during exection of `src_def`.
     globals: Dict[str, Any]
 
@@ -233,7 +253,7 @@ class Graph:
         """
         Construct an empty Graph.
         """
-        self._root : Node = Node(self, lambda _: '', 'root', '', (), {})
+        self._root : Node = Node(self, '', 'root', '', (), {})
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
@@ -330,11 +350,12 @@ class Graph:
         assert isinstance(args, tuple), "args must be a tuple"
         assert isinstance(kwargs, dict), "kwargs must be a dict"
 
-        def node_name_fn(node):
-            candidate = name if name is not None else self._target_to_str(target)
-            return self._graph_namespace.create_name(candidate, node)
+        candidate = name if name is not None else self._target_to_str(target)
+        name = self._graph_namespace.create_name(candidate, None)
+        n = Node(self, name, op, target, args, kwargs, type_expr)
 
-        n = Node(self, node_name_fn, op, target, args, kwargs, type_expr)
+        self._graph_namespace.associate_name_with_obj(name, n)
+
         self._insert(n)
         self._len += 1
         return n
@@ -633,39 +654,60 @@ class Graph:
 
         Returns:
 
-            The string source code generated from this ``Graph``.
+            A PythonCode object, consisting of two fields:
+                src: the Python source code representing the object
+                globals: a dictionary of global names in `src` -> the objects that they reference.
         """
-        # Create a new nameespace for this Python source.
-        namespace = _Namespace()
-
-        # HACK: Override Node's repr to generate a valid name within our
-        # namespace. Since repr() is designed to produce a valid Python
-        # expression, it makes sense to re-use it. This way, it's easy to print
-        # something like Tuple[Node, Node] by simply calling repr() on it.
+        # NOTE: [Graph Namespaces]
+        #
+        # There are two types of symbols in generated Python source code:
+        # locals and globals.
+        #   Locals are locally defined by the output of a node in the Graph.
+        #   Globals are references to external objects, like functions or types.
+        #
+        # When generating Python code, we need to make sure to name things
+        # appropriately. In particular:
+        # - All names should be unique, to avoid weird shadowing bugs.
+        # - These names need to be consistent, e.g. a object should always be
+        #   referenced by the same name.
+        #
+        # To do this, we create a new namespace just for this source. All names
+        # that get printed must come from this namespace.
         #
         # Why can't we re-use node.name? Because it was generated within the
         # namespace `self._graph_namespace`. In order to provide uniqueness
-        # guarantees within the Python code, we create a wholly new namespace
-        # to put all identifiers in.
-        def node_repr(self):
-            return namespace.create_name(self.name, self)
+        # over both locals (node.name) *and* globals, we create a completely
+        # new namespace to put all identifiers in.
+        namespace = _Namespace()
+
+        # Override Node's repr to generate a valid name within our namespace.
+        # Since repr() is designed to produce a valid Python expression, it
+        # makes sense to re-use it. This way, it's easy to print something like
+        # Tuple[Node, Node] by simply calling repr() on it. Node's __repr__ is
+        # implemented cooperatively to allow this.
+        def node_repr(n: Node):
+            return namespace.create_name(n.name, n)
 
         @contextmanager
-        def wrap_node_repr():
-            orig_repr = Node.__repr__
-            Node.__repr__ = node_repr  # type: ignore
+        def override_node_repr(graph: Graph):
+            orig_repr_fns = {}
+            for node in graph.nodes:
+                orig_repr_fns[node] = node._repr_fn
+                node._repr_fn = node_repr
             try:
                 yield None
             finally:
-                Node.__repr__ = orig_repr  # type: ignore
+                # restore the original repr functions
+                for node in graph.nodes:
+                    node._repr_fn = orig_repr_fns[node]
 
-        with wrap_node_repr():
+        with override_node_repr(self):
             return self._python_code(root_module, namespace)
 
     def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
-        globals: Dict[str, Any] = {}
+        globals_: Dict[str, Any] = {}
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -686,11 +728,11 @@ class Graph:
 
             # normalize the name hint to get a proper identifier
             global_name = namespace.create_name(name_hint, obj)
-            if global_name in globals:
-                assert globals[global_name] is obj
+            if global_name in globals_:
+                assert globals_[global_name] is obj
                 return global_name
 
-            globals[global_name] = obj
+            globals_[global_name] = obj
             return global_name
 
         # Pre-fill the globals table with registered builtins.
@@ -815,7 +857,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}"""
 
         return PythonCode(fn_code,
-                          globals)
+                          globals_)
 
     def __str__(self) -> str:
         """

@@ -27,6 +27,41 @@ void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
   LoopNest::unroll(inner, &unrolled);
 }
 
+static void relu_nnc(benchmark::State& state) {
+  KernelScope ks;
+  auto N = VarHandle("N", kInt);
+  Placeholder A("A", kFloat, {N});
+  auto clamp = 0;
+  torch::jit::tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i){
+    auto A_elem = [&]() {
+      auto elem = A.load(i);
+      auto min = FloatImm::make(clamp);
+      return CompareSelect::make(elem, min, min, elem, kLT);
+    }();
+    return A_elem;
+  });
+  LoopNest ln({B});
+  optimizePointwise(&ln, B);
+  ln.prepareForCodegen();
+  Stmt* s = ln.root_stmt();
+  s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
+  std::vector<CodeGen::BufferArg> args;
+  args.emplace_back(B);
+  args.emplace_back(A);
+  args.emplace_back(N);
+  LLVMCodeGen cg(s, args);
+  at::Tensor A_t = torch::randn({state.range(0)});
+  at::Tensor B_t = torch::randn(state.range(0));
+  auto B_ref = at::relu(A_t);
+  cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
+  TORCH_CHECK(at::allclose(B_t, B_ref));
+  for (auto _ : state){
+    cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
+  }
+  state.counters["log/s"] = benchmark::Counter(
+    uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+}
+
 static void log_nnc_sleef(benchmark::State& state) {
   KernelScope ks;
   auto N = VarHandle("N", kInt);
@@ -340,6 +375,11 @@ static void tanh_caffe2(benchmark::State& state) {
       uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
 }
 
+BENCHMARK(relu_nnc)
+  ->Args({2<<5})
+  ->Args({2<<8})
+  ->Args({2<<12})
+  ->Args({2<<14});
 BENCHMARK(log_nnc_sleef)
   ->Args({2<<5})
   ->Args({2<<8})
