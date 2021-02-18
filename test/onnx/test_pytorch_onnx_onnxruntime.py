@@ -6564,11 +6564,11 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Module(), (x, ))
 
     def test_set_attr_modules_2(self):
-        class InnerModule2(torch.nn.Module):
+        class InnerModule(torch.nn.Module):
             def __init__(self, embedding_dim):
                 super().__init__()
                 self.embedding_dim = embedding_dim
-                self.weights = InnerModule2.get_embedding(self.embedding_dim)
+                self.weights = InnerModule.get_embedding(self.embedding_dim)
                 self.register_buffer("_float_tensor", torch.FloatTensor(1))
 
             @staticmethod
@@ -6583,6 +6583,17 @@ class TestONNXRuntime(unittest.TestCase):
                 return (
                     self.weights.index_select(0, torch.ones((bsz * seq_len), dtype=torch.int64)).view(bsz, seq_len, -1)
                 )
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.module = InnerModule(embedding_dim=8)
+
+            def forward(self, x):
+                return self.module(x)
+
+        x = torch.randn(3, 256)
+        self.run_test(Module(), (x, ))
 
     def test_set_attr(self):
         class MyModule(torch.nn.Module):
