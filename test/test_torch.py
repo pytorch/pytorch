@@ -996,6 +996,16 @@ class AbstractTestCases:
             self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, [2, 2]), torch.tensor([[1, 2], [3, 4]]))
             self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, torch.Size([2, 2])), torch.tensor([[1, 2], [3, 4]]))
             self.assertEqual(torch.ones(2, 10).unflatten(1, (5, 2)), torch.ones(2, 5, 2))
+            self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, (-1, 2)),
+                             torch.tensor([[1, 2], [3, 4]]))
+            self.assertEqual(torch.ones(2, 10).unflatten(1, (5, -1)),
+                             torch.ones(2, 5, 2))
+            self.assertEqual(torch.ones(2, 10).unflatten(1, (-1,)),
+                             torch.ones(2, 10))
+            self.assertEqual(torch.ones(2, 3 * 4 * 5 * 6).unflatten(1, (3, 4, -1, 6)),
+                             torch.ones(2, 3, 4, 5, 6))
+            self.assertEqual(torch.ones(2, 0, 2).unflatten(1, (3, -1, 4, 5)),
+                             torch.ones(2, 3, 0, 4, 5, 2))
 
             # test invalid args: tensor, str, sizes
             with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
@@ -1012,6 +1022,14 @@ class AbstractTestCases:
                 torch.tensor([1]).unflatten(0, [2, 2])
             with self.assertRaisesRegex(IndexError, r"dimension specified as 0 but tensor has no dimensions"):
                 torch.tensor(1).unflatten(0, [0])
+            with self.assertRaisesRegex(RuntimeError, r"only one dimension can be inferred"):
+                torch.randn(5, 10).unflatten(1, (-1, -1))
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"Provided sizes \[-1, 4\] don't multiply up to the size of dim 1 \(10\)"):
+                torch.randn(5, 10).unflatten(1, (-1, 4))
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"the unspecified dimension size -1 can be any value and is ambiguous"):
+                torch.randn(2, 0).unflatten(1, (2, -1, 0))
 
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):
@@ -6200,7 +6218,7 @@ class TestTorchDeviceType(TestCase):
         try_lazy_inits = (True, False) if device.type == "cuda" else (False,)
         for lazy_init_scale in try_lazy_inits:
             a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
-            self.assertTrue(a.is_enabled() if torch.cuda.is_available() else not a.is_enabled())
+            self.assertTrue(not a.is_enabled() if torch.cuda.amp.common.amp_definitely_not_available() else a.is_enabled())
             if lazy_init_scale:
                 # Dummy a.scale() call lazy-inits a._scale Tensor.
                 a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
@@ -6344,6 +6362,8 @@ class TestTorchDeviceType(TestCase):
 
         self._test_where_scalar_template(device, dtype, checkRaises)
 
+    # See https://github.com/pytorch/pytorch/issues/51980
+    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA misaligned address error on Windows w/ 11.2')
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
@@ -7011,8 +7031,6 @@ tensor_op_tests = [
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('rad2deg', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('deg2rad', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
 ]
 

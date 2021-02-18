@@ -2741,7 +2741,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.div, r"""
-div(input, other, *, rounding_mode='true' out=None) -> Tensor
+div(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -2764,7 +2764,7 @@ Args:
 Keyword args:
     rounding_mode (str, optional): Type of rounding applied to the result:
 
-        * ``"true"`` - default behavior. Performs no rounding and, if both :attr:`input` and
+        * None - default behavior. Performs no rounding and, if both :attr:`input` and
           :attr:`other` are integer types, promotes the inputs to the default scalar type.
           Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
         * ``"trunc"`` - rounds the results of the division towards zero.
@@ -2806,7 +2806,7 @@ Examples::
 """.format(**common_args))
 
 add_docstr(torch.divide, r"""
-divide(input, other, *, rounding_mode='true', out=None) -> Tensor
+divide(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Alias for :func:`torch.div`.
 """)
@@ -8518,9 +8518,9 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 .. note:: Irrespective of the original strides, the returned matrix `V` will
           be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
 
-.. note:: Extra care needs to be taken when backward through outputs. Such
-          operation is really only stable when all eigenvalues are distinct.
-          Otherwise, ``NaN`` can appear as the gradients are not properly defined.
+.. warning:: Extra care needs to be taken when backward through outputs. Such
+             operation is only stable when all eigenvalues are distinct and becomes
+             less stable the smaller :math:`\min_{i \neq j} |\lambda_i - \lambda_j|` is.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
@@ -9210,7 +9210,7 @@ Example::
 add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
-Alias for :func:`torch.div` with ``rounding_mode='true'``.
+Alias for :func:`torch.div` with ``rounding_mode=None``.
 """.format(**common_args))
 
 add_docstr(torch.trunc,
