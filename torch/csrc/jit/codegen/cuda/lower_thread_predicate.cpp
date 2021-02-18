@@ -138,6 +138,15 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
       continue;
 
     auto tv_inp = inp->as<TensorView>();
+
+    // Change for welford Op, we want the users of all outputs of welfordOp
+    //  to use a single predicate name.
+    if (auto tv_def = tv_inp->definition()) {
+      if (auto wop = dynamic_cast<WelfordOp*>(tv_def)) {
+        tv_inp = wop->out()->as<TensorView>();
+      }
+    }
+
     TORCH_INTERNAL_ASSERT(
         thread_predicates_.find(tv_inp) != thread_predicates_.end(),
         "Thread predicate map was not initialized, couldn't find ",

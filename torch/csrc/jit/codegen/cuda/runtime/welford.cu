@@ -11,6 +11,9 @@ __inline__ __device__ void welfordCombine(
     const T& b_M2,
     const T& b_avg,
     TN b_N) {
+  if (b_N == 0) {
+    return;
+  }
   TN ab_N = a_N + b_N;
   T delta = b_avg - a_avg;
   a_avg += delta * b_N / ab_N;
@@ -352,11 +355,10 @@ __device__ bool gridWelford(
   const auto rblock_size =
       size_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(blockDim);
 
-  // advance to the offset for this segment
-  // index of reduction * size of the reduction * size of threads
-  shared_buf_M2 += seg_idx * seg_size * rblock_size;
-  shared_buf_avg += seg_idx * seg_size * rblock_size;
-  shared_buf_N += seg_idx * seg_size * rblock_size;
+  work_buf_M2 += seg_idx * seg_size * rblock_size;
+  work_buf_avg += seg_idx * seg_size * rblock_size;
+  work_buf_N += seg_idx * seg_size * rblock_size;
+
   if ((X_THREAD || threadIdx.x == 0) && (Y_THREAD || threadIdx.y == 0) &&
       (Z_THREAD || threadIdx.z == 0)) {
     auto rblock_offset = offset_in_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(

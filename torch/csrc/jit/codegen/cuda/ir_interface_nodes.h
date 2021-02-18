@@ -16,6 +16,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+class WelfordResult;
+
 //! A Bool value
 //!
 //! This value can be a symbolic value (defined after the kernel
@@ -265,6 +267,15 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //
   TensorView* rFactor(const std::vector<int>& axes);
 
+  //! Welford Version of rFactor, semantically similar with
+  //!  the reduction version except that the rfactor is done
+  //!  in a multi-output scan pattern
+  WelfordResult rFactor(
+      const std::vector<int>& axes,
+      TensorView* var,
+      TensorView* avg,
+      TensorView* n);
+
   // For all usages of this TensorView, create a new TensorView and
   // duplicate the origin expression.
   // A common use case is to handle the recompute ComputeAt exception that
@@ -335,6 +346,12 @@ class TORCH_CUDA_CU_API TensorView : public Val {
       Expr* expr,
       TensorView* current,
       TensorView* producer);
+
+  //! A helper function to maintain the consistency of welford output
+  //! schedules when doing rfactor on welford ops.
+  TensorView* welfordRfactorHelper(
+      TensorView* tv,
+      const std::vector<int>& axes);
 
  private:
   TensorDomain* domain_ = nullptr;

@@ -258,6 +258,64 @@ ReductionOp::ReductionOp(
   addInput(in);
 }
 
+WelfordOp::WelfordOp(
+    Passkey passkey,
+    Val* out_var,
+    Val* out_avg,
+    Val* out_N,
+    Val* init_var,
+    Val* init_avg,
+    Val* init_N,
+    Val* in_var,
+    Val* in_avg,
+    Val* in_N)
+    : Expr(passkey),
+      out_var_(out_var),
+      out_avg_(out_avg),
+      out_N_(out_N),
+      init_var_(init_var),
+      init_avg_(init_avg),
+      init_N_(init_N),
+      in_var_(in_var),
+      in_avg_(in_avg),
+      in_N_(in_N) {
+  addOutput(out_avg);
+  addOutput(out_var);
+  addOutput(out_N);
+
+  if (!in_N->isOneInt()) {
+    addInput(in_var);
+  }
+  addInput(in_avg);
+  addInput(in_N);
+}
+
+std::vector<IterDomain*> WelfordOp::getReductionDomains() const {
+  // out is a TensorIndex after lowering
+  const auto out_val = out()->as<kir::TensorIndex>()->view();
+
+  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
+
+  vec_domain.erase(
+      std::remove_if(
+          vec_domain.begin(),
+          vec_domain.end(),
+          [](IterDomain* id) { return !id->isReduction(); }),
+      vec_domain.end());
+  return vec_domain;
+}
+
+std::unordered_map<ParallelType, IterDomain*, TypeHash> WelfordOp::
+    getParallelReductionDomains() const {
+  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
+  for (auto d : getReductionDomains()) {
+    if (d->isThread()) {
+      parallel_domains.insert(std::make_pair(d->parallelType(), d));
+    }
+  }
+  return parallel_domains;
+}
+
 std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
   // out is a TensorIndex after lowering
   const auto out_val = out()->as<kir::TensorIndex>()->view();
@@ -448,6 +506,34 @@ std::string GridReduction::getPredicateFlagName(const TensorView* val) {
 
 // TODO(kir): remove this
 std::string GridReduction::getPredicateFlagName(
+    const fuser::cuda::TensorView* val) {
+  std::stringstream ss;
+  ss << "T" << val->name() << "_pred";
+  return ss.str();
+}
+
+GridWelford::GridWelford(
+    Passkey passkey,
+    WelfordOp* welford_op,
+    Allocate* var_buffer,
+    Allocate* avg_buffer,
+    Allocate* n_buffer,
+    Allocate* sync_buffer)
+    : Expr(passkey),
+      welford_op_(welford_op),
+      var_buffer_(var_buffer),
+      avg_buffer_(avg_buffer),
+      n_buffer_(n_buffer),
+      sync_buffer_(sync_buffer) {}
+
+std::string GridWelford::getPredicateFlagName(const TensorView* val) {
+  std::stringstream ss;
+  ss << "T" << val->name() << "_pred";
+  return ss.str();
+}
+
+// TODO(kir): remove this
+std::string GridWelford::getPredicateFlagName(
     const fuser::cuda::TensorView* val) {
   std::stringstream ss;
   ss << "T" << val->name() << "_pred";

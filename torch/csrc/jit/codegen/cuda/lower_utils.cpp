@@ -36,10 +36,10 @@ std::vector<kir::ForLoop*> getLoops(kir::Expr* scope) {
 void insertBefore(kir::Expr* scope, kir::Expr* ref, kir::Expr* expr) {
   if (auto ite = dynamic_cast<kir::IfThenElse*>(scope)) {
     ite->thenBody().insert_before(ref, expr);
-  } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
+  } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(scope)) {
     for_loop->body().insert_before(ref, expr);
   } else {
-    TORCH_INTERNAL_ASSERT("Unexpected scope expression");
+    TORCH_INTERNAL_ASSERT(false, "Unexpected scope expression");
   }
 }
 
@@ -100,12 +100,15 @@ bool isTVOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::TransposeOp)) {
     return true;
   }
+  if (expr->getExprType().value() == ExprType::WelfordOp) {
+    return true;
+  }
   return false;
 }
 
 bool isTVOp(const kir::Expr* expr) {
   const auto& outputs = expr->outputs();
-  return outputs.size() == 1 && outputs[0]->isA<kir::TensorView>();
+  return outputs.size() >= 1 && outputs[0]->isA<kir::TensorView>();
 }
 
 // TODO: why do we assume there's a single TV output?

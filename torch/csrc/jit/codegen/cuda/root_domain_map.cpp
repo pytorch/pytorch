@@ -604,7 +604,7 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
   // Broadcast is handled separately, so e should never be BroadcastOp.
   TORCH_INTERNAL_ASSERT(e->getExprType() != ExprType::BroadcastOp);
 
-  TORCH_INTERNAL_ASSERT(e->outputs().size() == 1);
+  TORCH_INTERNAL_ASSERT(e->outputs().size() >= 1);
   const TensorView* out_tv = e->output(0)->as<TensorView>();
   const TensorDomain* out_td = out_tv->domain();
   const auto& out_root = out_td->getRootDomain();
@@ -617,7 +617,18 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
         TensorDomain::noReductions(i->getMaybeRFactorDomain());
     TORCH_INTERNAL_ASSERT(in_root.size() == out_root.size());
     for (size_t it = 0; it < in_root.size(); it++) {
-      setMaybeMapped(in_td, in_root[it], out_td, out_root[it]);
+      if (e->outputs().size() > 1) {
+        TORCH_INTERNAL_ASSERT(
+            e->isA<WelfordOp>(), "Only supported multioutput op is welford");
+        for (auto o : e->outputs()) {
+          auto o_tv = o->as<TensorView>();
+          auto o_td = o_tv->domain();
+          auto o_root = o_td->getRootDomain();
+          setMaybeMapped(in_td, in_root[it], o_td, o_root[it]);
+        }
+      } else {
+        setMaybeMapped(in_td, in_root[it], out_td, out_root[it]);
+      }
     }
   }
 }

@@ -104,6 +104,8 @@ class TORCH_CUDA_CU_API LaunchParams {
 
   bool operator==(const LaunchParams& other) const;
 
+  void print() const;
+
  private:
   // Spell them out because I want signed ints to know if they were initialized
   // or not.
@@ -120,6 +122,7 @@ class TORCH_CUDA_CU_API LaunchParams {
   // TODO: Fill in output sizes
   std::vector<std::vector<int64_t>> output_sizes;
 };
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

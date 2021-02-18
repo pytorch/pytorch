@@ -47,6 +47,7 @@ namespace cuda {
 
 class Fusion;
 class TensorView;
+class WelfordResult;
 
 class SegmentCandidateFinder;
 class SegmentedFusion;
@@ -104,6 +105,10 @@ class TORCH_CUDA_CU_API Fusion final {
   //! Register output as an output of the fusion
   // TODO: Rename to register
   void addOutput(Val* output);
+
+  //! Register output as an output of the fusion
+  // TODO: Rename to register
+  void addOutput(WelfordResult& output);
 
   //! Deregister input as an input of the fusion
   // TODO: Rename to register

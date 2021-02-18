@@ -270,6 +270,150 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
   }
 }
 
+namespace {
+
+template <typename T>
+kir::Allocate* allocGlobalBuffer(
+    kir::IrBuilder& ir_builder,
+    const kir::TensorDomain* td,
+    T id_filter,
+    DataType dtype,
+    bool zero_init = false) {
+  auto buffer_ids = td->domain();
+  buffer_ids.erase(
+      std::remove_if(buffer_ids.begin(), buffer_ids.end(), id_filter),
+      buffer_ids.end());
+
+  kir::Val* buffer_size = buffer_ids.empty() ? ir_builder.create<kir::Int>(1)
+                                             : buffer_ids[0]->rawExtent();
+  for (size_t i = 1; i < buffer_ids.size(); i++) {
+    buffer_size = ir_builder.mulExpr(buffer_size, buffer_ids[i]->rawExtent());
+  }
+  const auto zero = ir_builder.create<kir::Int>(0);
+  const std::vector<kir::IterDomain*> new_buffer_ids = {
+      ir_builder.create<kir::IterDomain>(zero, buffer_size)};
+  const auto buffer_domain =
+      ir_builder.create<kir::TensorDomain>(new_buffer_ids);
+  const auto buffer_tv = ir_builder.create<kir::TensorView>(
+      dtype, buffer_domain, MemoryType::Global);
+  return ir_builder.create<kir::Allocate>(
+      buffer_tv, buffer_tv->memoryType(), nullptr, zero_init);
+}
+
+} // namespace
+
+void IndexLowering::visit(const kir::WelfordOp* wop) {
+  TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(wop));
+
+  const auto out_tv = wop->outAvg()->as<kir::TensorView>();
+  const auto out_domain = out_tv->domain();
+
+  const bool is_block_reduce = out_domain->hasBlockReduction();
+  const bool is_grid_reduce = out_domain->hasGridReduction();
+
+  // If we do a grid reduction we can't have a reduction axis that is not bound
+  // to a grid or block dim ()
+  if (is_grid_reduce) {
+    TORCH_INTERNAL_ASSERT(
+        std::none_of(
+            out_domain->domain().begin(),
+            out_domain->domain().end(),
+            [](kir::IterDomain* id) {
+              return !id->isThread() && id->isReduction();
+            }),
+        "Found a reduction stage that has both a non-parallelized ",
+        "reduction and a grid reduction.  This is not supported, ",
+        "please use rfactor to do the serialized reduction first, ",
+        "then the grid reduction.");
+  }
+
+  // lower IO tensors
+  const auto in_var =
+      wop->inVar() ? lowerSrcIndex(wop->inVar(), wop->outAvg()) : nullptr;
+  const auto in_avg = lowerSrcIndex(wop->inAvg(), wop->outAvg());
+  auto in_N = wop->inN();
+
+  // in Rfactor-ed case, the input N is actually a TV
+  if (!in_N->isScalar()) {
+    in_N = lowerSrcIndex(in_N, wop->outN());
+  }
+
+  auto out_avg = lowerDstIndex(wop->outAvg());
+  auto out_var = lowerDstIndex(wop->outVar());
+  auto out_N = lowerDstIndex(wop->outN());
+
+  kir::WelfordOp* welford_op = ir_builder_.create<kir::WelfordOp>(
+      out_var,
+      out_avg,
+      out_N,
+      wop->initVar(),
+      wop->initAvg(),
+      wop->initN(),
+      in_var,
+      in_avg,
+      in_N);
+
+  kir::WelfordOp* block_welford_op = nullptr;
+
+  if (is_block_reduce) {
+    block_welford_op = welford_op;
+    const auto pred = PredicateCompute::getInlinePredicate(
+        wop,
+        scope_utils::getLoops(active_scope_expr_),
+        thread_predicates_.getExpr(out_tv->fuserTv()),
+        false);
+    block_welford_op->setPredicate(pred);
+    pushBack(block_welford_op);
+  }
+
+  if (is_grid_reduce) {
+    // Allocate T_pred
+    allocateGridReductionFlag(out_tv, active_scope_expr_);
+
+    // Buffer allocation
+    auto buffer_filter = [](const kir::IterDomain* id) {
+      return id->isReduction() && !id->isBlockDim();
+    };
+    const auto out_var_buffer = allocGlobalBuffer(
+        ir_builder_, out_domain, buffer_filter, out_var->dtype());
+    const auto out_avg_buffer = allocGlobalBuffer(
+        ir_builder_, out_domain, buffer_filter, out_avg->dtype());
+    const auto out_N_buffer = allocGlobalBuffer(
+        ir_builder_, out_domain, buffer_filter, out_N->dtype());
+    const auto sync_buffer = allocGlobalBuffer(
+        ir_builder_, out_domain, buffer_filter, DataType::Int, true);
+
+    // Grid Welford instantiation
+    const auto grid_welford_op =
+        (block_welford_op == nullptr) ? welford_op : block_welford_op;
+
+    // The thread predicate for GridReduction needs to be set
+    // separately from the main predicate. Do not combine them like
+    // other expressions.
+    const auto& thread_pred = thread_predicates_.at(out_tv->fuserTv()).pred;
+    auto grid_welford = ir_builder_.create<kir::GridWelford>(
+        grid_welford_op,
+        out_var_buffer,
+        out_avg_buffer,
+        out_N_buffer,
+        sync_buffer);
+    grid_welford->setThreadPredicate(thread_pred);
+    const auto pred = PredicateCompute::getInlinePredicate(
+        wop, scope_utils::getLoops(active_scope_expr_), nullptr, false);
+    grid_welford->setPredicate(pred);
+
+    pushBack(out_var_buffer);
+    pushBack(out_avg_buffer);
+    pushBack(out_N_buffer);
+    pushBack(sync_buffer);
+    pushBack(grid_welford);
+  }
+
+  if (!is_block_reduce && !is_grid_reduce) {
+    pushBack(welford_op);
+  }
+}
+
 void IndexLowering::visit(const kir::BroadcastOp* bop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(bop));
   const auto out = lowerDstIndex(bop->out());

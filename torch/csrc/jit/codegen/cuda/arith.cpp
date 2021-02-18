@@ -491,7 +491,8 @@ TensorView* andOp(TensorView* v1, TensorView* v2) {
 // TODO: How do we adjust this so we can reduce to a single scalar value?
 static TensorView* newForReduction(
     TensorView* tv,
-    const std::vector<unsigned int>& axes) {
+    const std::vector<unsigned int>& axes,
+    DataType data_type = DataType::Null) {
   auto orig_domain = TensorDomain::noReductions(tv->getRootDomain());
   std::set<unsigned int> axes_set(axes.begin(), axes.end());
 
@@ -531,7 +532,10 @@ static TensorView* newForReduction(
 
   TensorDomain* td =
       new TensorDomain(new_domain, std::vector<bool>(new_domain.size(), true));
-  return new TensorView(td, tv->getDataType().value());
+
+  data_type =
+      data_type == DataType::Null ? tv->getDataType().value() : data_type;
+  return new TensorView(td, data_type);
 }
 
 TensorView* reductionOp(
@@ -711,6 +715,86 @@ TensorView* broadcast(
       inp->getDataType().value());
   new BroadcastOp(out_tensor, inp, is_broadcast_dim);
   return out_tensor;
+}
+
+WelfordResult Welford(
+    TensorView* tv,
+    const std::vector<int>& axes,
+    TensorView* init_var,
+    TensorView* init_avg,
+    Int* init_N) {
+  TORCH_CHECK(
+      TensorDomain::sameAs(tv->getRootDomain(), tv->domain()->domain()),
+      "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/computeAt.");
+
+  TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
+  TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  // Initial values for welford op are tensors, so their dims have to match the
+  // output dim,
+  // i.e. original_dims - dims_to_be_reduced
+  if (!init_N->isZeroInt()) {
+    TORCH_CHECK(
+        init_avg != nullptr && init_N != nullptr && init_var != nullptr,
+        "welford op: all init values need to be provided");
+    TORCH_CHECK(
+        (axes.size() + init_var->getRootDomain().size()) ==
+            tv->getRootDomain().size(),
+        "welford op: initial tensor mismatch");
+    TORCH_CHECK(
+        (axes.size() + init_avg->getRootDomain().size()) ==
+            tv->getRootDomain().size(),
+        "welford op: initial tensor mismatch");
+  }
+
+  // Check and collect reduction axes
+  std::vector<unsigned int> uint_axes;
+  for (int axis : axes) {
+    if (axis < 0)
+      axis += int(tv->nDims());
+
+    TORCH_CHECK(
+        axis >= 0 && (unsigned int)axis < tv->nDims(),
+        "Reduction on invalid axis, recieved: ",
+        axis,
+        " however tensor view only has ",
+        tv->nDims(),
+        " dims.");
+
+    uint_axes.push_back((unsigned int)axis);
+  }
+
+  // Create tensor outputs
+  TensorView* out_var = newForReduction(tv, uint_axes);
+  TensorView* out_avg = newForReduction(tv, uint_axes);
+  TensorView* out_N = newForReduction(tv, uint_axes, DataType::Int);
+
+  new WelfordOp(
+      out_var,
+      out_avg,
+      out_N, /*out var/avg/count */
+      init_var,
+      init_avg,
+      init_N, /*init var/avg/count */
+      nullptr,
+      tv,
+      new Int(1)); /*in var/avg/count */
+
+  return WelfordResult(out_var, out_avg, out_N);
+}
+
+WelfordResult::WelfordResult(
+    TensorView* in_var,
+    TensorView* in_avg,
+    TensorView* in_n)
+    : var(in_var), avg(in_avg), n(in_n) {
+  TORCH_INTERNAL_ASSERT(var->definition()->sameAs(avg->definition()));
+  TORCH_INTERNAL_ASSERT(var->definition()->sameAs(n->definition()));
+}
+
+WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
+  auto o_tv = var->definition()->as<WelfordOp>()->out()->as<TensorView>();
+  return o_tv->rFactor(axes, var, avg, n);
 }
 
 TensorView* transpose(

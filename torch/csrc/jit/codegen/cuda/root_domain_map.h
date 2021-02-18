@@ -365,6 +365,10 @@ class TORCH_CUDA_API ComputeAtRootDomainMapBuilder : private BackwardVisitor {
     mapPointwiseOrReductionOp(op);
   }
 
+  void handle(WelfordOp* wop) override {
+    mapPointwiseOrReductionOp(wop);
+  }
+
   void handle(BroadcastOp* op) override;
 
   void handle(TransposeOp* op) override;

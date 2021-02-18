@@ -86,6 +86,17 @@ bool LaunchParams::operator==(const LaunchParams& other) const {
       bdimx_ == other.bdimx_ && bdimy_ == other.bdimy_ && smem_ == other.smem_;
 }
 
+void LaunchParams::print() const {
+  std::cout << "Launch Parameters \n"
+            << "BlockDim.x = " << bdimx() << "\n"
+            << "BlockDim.y = " << bdimy() << "\n"
+            << "BlockDim.z = " << bdimz() << "\n"
+            << "GridDim.x = " << gdimx() << "\n"
+            << "GridDim.y = " << gdimy() << "\n"
+            << "GridDim.z = " << gdimz() << "\n"
+            << "Smem Size = " << smem() << "\n";
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

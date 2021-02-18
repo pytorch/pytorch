@@ -290,6 +290,22 @@ void IrPrinter::visit(const kir::ReductionOp* node) {
            << ", pred=" << use(node->predicate()) << ")\n";
 }
 
+void IrPrinter::visit(const kir::WelfordOp* node) {
+  indent() << gen(node->outVar()) << "," << gen(node->outAvg()) << ","
+           << gen(node->outN()) << " = "
+           << "Welford( inAvg=" << use(node->inAvg());
+  if (!node->inN()->isOneInt()) {
+    indent() << " inVar=" << use(node->inVar());
+  }
+  indent() << " inN=" << use(node->inN());
+  if (!node->initN()->isZeroInt()) {
+    indent() << ", initVar=" << use(node->initVar())
+             << " initAvg=" << use(node->initAvg())
+             << " initN=" << use(node->initN());
+  }
+  indent() << ", pred=" << use(node->predicate()) << ")\n";
+}
+
 void IrPrinter::visit(const kir::GridReduction* node) {
   const auto* reduction_op = node->reduction_op();
   indent() << gen(reduction_op->out()) << " = "
@@ -300,6 +316,31 @@ void IrPrinter::visit(const kir::GridReduction* node) {
   indent() << kTab << kTab
            << ".reduction_buffer=" << use(node->reduction_buffer()->buffer())
            << "\n";
+  indent() << kTab << kTab
+           << ".sync_buffer=" << use(node->sync_buffer()->buffer()) << "\n";
+  indent() << kTab << kTab << ".grid_pred=" << use(node->predicate()) << "\n";
+}
+
+void IrPrinter::visit(const kir::GridWelford* node) {
+  const auto* welford_op = node->welford_op();
+  indent() << gen(welford_op->outVar()) << "," << gen(welford_op->outAvg())
+           << "," << gen(welford_op->outN()) << " = "
+           << "GRID_WELFORD("
+           << "inAvg=" << use(welford_op->inAvg());
+  if (!welford_op->inN()->isOneInt()) {
+    indent() << ", inVar=" << use(welford_op->inVar());
+  }
+  indent() << ", inN=" << use(welford_op->inN());
+  if (!welford_op->initN()->isZeroInt()) {
+    indent() << ", initVar=" << use(welford_op->initVar())
+             << " initAvg=" << use(welford_op->initAvg())
+             << " initN=" << use(welford_op->initN());
+  }
+  indent() << ", pred=" << use(welford_op->predicate()) << ")\n";
+  indent() << kTab << kTab
+           << ".var_buffer=" << use(node->var_buffer()->buffer())
+           << ".avg_buffer=" << use(node->avg_buffer()->buffer())
+           << ".n_buffer=" << use(node->N_buffer()->buffer()) << "\n";
   indent() << kTab << kTab
            << ".sync_buffer=" << use(node->sync_buffer()->buffer()) << "\n";
   indent() << kTab << kTab << ".grid_pred=" << use(node->predicate()) << "\n";

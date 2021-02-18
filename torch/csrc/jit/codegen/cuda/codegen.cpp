@@ -116,8 +116,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
     const bool has_reductions = kernel_summary.has_block_reductions ||
         kernel_summary.number_of_grid_reductions > 0;
 
+    const bool has_parallel_welford =
+        kernel_summary.has_block_welford || kernel_summary.has_grid_welford;
+
     // Shared memory
-    if (has_dynamic_smem || has_reductions) {
+    if (has_dynamic_smem || has_reductions || has_parallel_welford) {
       indent() << "alignas("
 #ifndef __HIP_PLATFORM_HCC__
                << dataTypeSize(kernel_summary.largest_smem_data_type)
@@ -130,12 +133,31 @@ class CudaKernelGenerator : private kir::IrVisitor {
         indent() << "unsigned offset = 0;\n";
       }
 
-      if (has_reductions) {
+      if (has_reductions || has_parallel_welford) {
         indent() << "void* shared_mem = array;\n";
         if (has_dynamic_smem) {
-          indent() << "offset += "
-                   << "((blockDim.x * blockDim.y * blockDim.z) * sizeof("
-                   << kernel_summary.largest_smem_data_type << "));\n";
+          if (has_parallel_welford) {
+            indent() << "offset += "
+                     << "((blockDim.x * blockDim.y * blockDim.z) * 3 * sizeof("
+                     << kernel_summary.largest_smem_data_type << "));\n";
+          } else {
+            indent() << "offset += "
+                     << "((blockDim.x * blockDim.y * blockDim.z) * sizeof("
+                     << kernel_summary.largest_smem_data_type << "));\n";
+          }
+        }
+
+        if (has_parallel_welford) {
+          // Unpack shared mem pointer
+          auto space_type = kernel_summary.largest_smem_data_type;
+          indent() << "size_t block_size = blockDim.x*blockDim.y*blockDim.z;\n";
+          indent() << space_type << " *shared_mem_var = "
+                   << "static_cast<" << space_type << "*>("
+                   << "shared_mem);\n";
+          indent() << space_type
+                   << " *shared_mem_avg = shared_mem_var + block_size;\n";
+          indent() << space_type
+                   << " *shared_mem_n = shared_mem_avg + block_size;\n";
         }
       }
     }
@@ -208,7 +230,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     if (print_inline_ && def != nullptr) {
       code_ << "(" << gen(def) << ")";
     } else if (node->isConst()) {
-      code_ << *node->value();
+      code_ << (*node->value() ? "true" : "false");
     } else {
       code_ << varName(node);
     }
@@ -547,8 +569,105 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
+  void visit(const kir::WelfordOp* node) final {
+    TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
+
+    const auto out = node->out()->as<kir::TensorIndex>();
+    const auto domain = out->view()->domain();
+
+    const auto out_var = node->outVar();
+    const auto out_avg = node->outAvg();
+    const auto out_N = node->outN();
+
+    const auto in_var = node->inVar();
+    const auto in_avg = node->inAvg();
+    const auto in_N = node->inN();
+
+    const bool has_block_reduce = domain->hasBlockReduction();
+    const bool has_grid_reduce = domain->hasGridReduction();
+
+    // Serial WelfordOp generation
+    if (!has_block_reduce && !has_grid_reduce) {
+      indent() << "welfordCombine ("
+               << "\n";
+      indent() << " " << gen(out_var) << ",\n";
+      indent() << " " << gen(out_avg) << ",\n";
+      indent() << " " << gen(out_N) << ",\n";
+      if (in_var) {
+        indent() << " " << gen(in_var) << ",\n";
+      } else {
+        indent() << " (" << in_avg->dtype() << ") 0"
+                 << ",\n";
+      }
+      indent() << " " << gen(in_avg) << ",\n";
+      indent() << " (" << out_N->dtype() << ")" << gen(in_N) << ");\n";
+      return;
+    }
+
+    const auto par_domains = node->getParallelReductionDomains();
+    const bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
+    const bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
+    const bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
+
+    const auto data_type = node->out()->dtype();
+
+    if (has_block_reduce) {
+      if (has_grid_reduce) {
+        // allocate block result
+        indent() << data_type << " "
+                 << "block_result_var"
+                 << ";\n";
+        indent() << data_type << " "
+                 << "block_result_avg"
+                 << ";\n";
+        indent() << DataType::Int << " "
+                 << "block_result_n"
+                 << ";\n";
+      }
+      indent() << "blockWelford<" << (tidx ? "true" : "false") << ", "
+               << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
+               << ">(\n";
+      if (has_grid_reduce) {
+        indent() << kTab << "block_result_var"
+                 << ",\n"
+                 << kTab << "block_result_avg"
+                 << ",\n"
+                 << kTab << "block_result_n"
+                 << ",\n";
+      } else {
+        indent() << kTab << gen(node->outVar()) << ",\n";
+        indent() << kTab << gen(node->outAvg()) << ",\n";
+        indent() << kTab << gen(node->outN()) << ",\n";
+      }
+      if (in_var) {
+        indent() << " " << gen(in_var) << ",\n";
+      } else {
+        indent() << " (" << in_avg->dtype() << ") 0"
+                 << ",\n";
+      }
+      indent() << " " << gen(in_avg) << ",\n";
+      indent() << out_N->dtype() << "(" << gen(in_N) << "),\n";
+      indent() << kTab << "threadIdx,\n";
+      indent() << kTab << "blockDim,\n";
+      indent() << kTab << "reinterpret_cast<" << data_type
+               << "*>(shared_mem_var),\n";
+      indent() << kTab << "reinterpret_cast<" << data_type
+               << "*>(shared_mem_avg),\n";
+      indent() << kTab << "reinterpret_cast<" << DataType::Int
+               << "*>(shared_mem_n),\n";
+      if (node->predicate() == nullptr) {
+        indent() << kTab << "true,\n";
+      } else {
+        indent() << kTab << genInline(node->predicate()) << ",\n";
+      }
+      indent() << kTab << data_type << "(0));\n";
+    }
+  }
+
+  // Support ReductionOp and WelfordOp
+  template <typename REDUCTION_OP>
   std::string generateGridReduceTemplateFlags(
-      const kir::ReductionOp* rop,
+      const REDUCTION_OP* rop,
       const ParallelTypeBitmap& thread_pred) {
     const auto par_domains = rop->getParallelReductionDomains();
     const std::array<ParallelType, 6> ptypes{
@@ -628,6 +747,69 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
     indent() << kTab << data_type << "("
              << genInline(node->reduction_op()->init()) << "));\n";
+  }
+
+  void visit(const kir::GridWelford* node) final {
+    const auto wop = node->welford_op();
+    TORCH_INTERNAL_ASSERT(wop->outAvg()->isA<kir::TensorIndex>());
+
+    const auto out = wop->out()->as<kir::TensorIndex>();
+    const auto domain = out->view()->domain();
+    TORCH_INTERNAL_ASSERT(domain->hasGridReduction());
+
+    const auto data_type = out->dtype();
+
+    TORCH_INTERNAL_ASSERT(node->var_buffer()->buffer()->isA<kir::TensorView>());
+    TORCH_INTERNAL_ASSERT(
+        node->sync_buffer()->buffer()->isA<kir::TensorView>());
+
+    const auto var_buffer = node->var_buffer()->buffer()->as<kir::TensorView>();
+    const auto avg_buffer = node->avg_buffer()->buffer()->as<kir::TensorView>();
+    const auto n_buffer = node->N_buffer()->buffer()->as<kir::TensorView>();
+    const auto sync_buffer =
+        node->sync_buffer()->buffer()->as<kir::TensorView>();
+
+    const std::string flags_str =
+        generateGridReduceTemplateFlags(wop, node->threadPredicate());
+
+    // Since block-level reduction is already done, those dimensions
+    // with tidx/y/z being true do not participate in the grid reduction.
+    indent() << kir::GridWelford::getPredicateFlagName(out->view()) << " = "
+             << "welford::gridWelford<" << flags_str << ">(\n";
+    indent() << kTab << gen(wop->outVar()) << ",\n"
+             << kTab << gen(wop->outAvg()) << ",\n"
+             << kTab << gen(wop->outN()) << ",\n";
+    if (domain->hasBlockReduction()) {
+      indent() << kTab << "block_result_var,\n"
+               << kTab << "block_result_avg,\n"
+               << kTab << "block_result_n,\n";
+    } else {
+      if (wop->inVar() == nullptr) {
+        indent() << kTab << "(" << data_type << ") 0,\n";
+      } else {
+        indent() << kTab << gen(wop->inVar()) << ",\n";
+      }
+      indent() << kTab << gen(wop->inAvg()) << ",\n";
+      indent() << kTab << "(" << wop->outN()->dtype() << ")" << gen(wop->inN())
+               << ",\n";
+    }
+    indent() << kTab << "&" << varName(var_buffer) << "[0],\n";
+    indent() << kTab << "&" << varName(avg_buffer) << "[0],\n";
+    indent() << kTab << "&" << varName(n_buffer) << "[0],\n";
+    indent() << kTab << varName(sync_buffer) << ",\n";
+    indent() << kTab << "reinterpret_cast<" << data_type
+             << "*>(shared_mem_var),\n";
+    indent() << kTab << "reinterpret_cast<" << data_type
+             << "*>(shared_mem_avg),\n";
+    indent() << kTab << "reinterpret_cast<" << wop->outN()->dtype()
+             << "*>(shared_mem_n),\n";
+    if (node->predicate() == nullptr) {
+      indent() << kTab << "true,\n";
+    } else {
+      indent() << kTab << genInline(node->predicate()) << ",\n";
+    }
+    // TODO : init value support or remove.
+    indent() << kTab << data_type << "(0));\n";
   }
 
   void handleScope(const kir::Scope& scope) {

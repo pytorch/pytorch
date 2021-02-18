@@ -44,6 +44,15 @@ struct KernelSummary {
   //! Do we have any block broadcasts?
   bool has_block_broadcasts = false;
 
+  //! Do we have any welford op?
+  bool has_welford = false;
+
+  //! Do we have any welford op?
+  bool has_block_welford = false;
+
+  //! Do we have any welford op?
+  bool has_grid_welford = false;
+
   //! Largest shared memory buffer base type
   DataType largest_smem_data_type = DataType::Null;
 

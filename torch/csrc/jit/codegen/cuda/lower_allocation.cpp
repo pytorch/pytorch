@@ -236,6 +236,21 @@ class AllocationInserter : public kir::MutableIrVisitor {
       kir::Val* init = nullptr;
       if (expr->isA<kir::ReductionOp>() && out_tv->fuserTv()->hasReduction()) {
         init = expr->as<kir::ReductionOp>()->init();
+      } else if (expr->isA<kir::WelfordOp>()) {
+        const auto welford = expr->as<kir::WelfordOp>();
+        if (out->id() == welford->outVar()->id()) {
+          init = welford->initVar() == nullptr
+              ? ir_builder.create<kir::Double>(0)
+              : welford->initVar();
+        } else if (out->id() == welford->outAvg()->id()) {
+          init = welford->initAvg() == nullptr
+              ? ir_builder.create<kir::Double>(0)
+              : welford->initAvg();
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              out->id() == welford->outN()->id(), "Unreachable");
+          init = welford->initN();
+        }
       }
 
       const bool is_output = std::find(

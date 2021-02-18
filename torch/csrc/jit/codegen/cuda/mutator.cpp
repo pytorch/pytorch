@@ -141,6 +141,54 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
   return new ReductionOp(rop->getReductionOpType(), init, out, in);
 }
 
+namespace {
+__inline__ bool compareOptional(Val* a, Val* b) {
+  if (!a || !b) {
+    return (!a && !b);
+  }
+  return a->sameAs(b);
+}
+
+} // namespace
+
+Statement* OptOutMutator::mutate(WelfordOp* wop) {
+  Val* out_var = mutateAsVal(wop->outVar())->asVal();
+  Val* out_avg = mutateAsVal(wop->outAvg())->asVal();
+  Val* out_N = mutateAsVal(wop->outN())->asVal();
+
+  Val* in_var = wop->inVar() ? mutateAsVal(wop->inVar())->asVal() : nullptr;
+  Val* in_avg = mutateAsVal(wop->inAvg())->asVal();
+  Val* in_N = mutateAsVal(wop->inN())->asVal();
+
+  Val* init_var =
+      wop->initVar() ? mutateAsVal(wop->initVar())->asVal() : nullptr;
+  Val* init_avg =
+      wop->initAvg() ? mutateAsVal(wop->initAvg())->asVal() : nullptr;
+  Val* init_N = mutateAsVal(wop->initN())->asVal();
+
+  const bool out_compare = out_var->sameAs(wop->outVar()) &&
+      out_avg->sameAs(wop->outAvg()) && out_N->sameAs(wop->outN());
+  const bool in_compare = compareOptional(in_var, wop->inVar()) &&
+      in_avg->sameAs(wop->inAvg()) && in_N->sameAs(wop->inN());
+  const bool init_compare = compareOptional(init_var, wop->initVar()) &&
+      compareOptional(init_avg, wop->initAvg()) && init_N->sameAs(wop->initN());
+
+  if (out_compare && init_compare && in_compare) {
+    return wop;
+  } else {
+    return new WelfordOp(
+        out_var,
+        out_avg,
+        out_N,
+        init_var,
+        init_avg,
+        init_N,
+        in_var,
+        in_avg,
+        in_N);
+  }
+}
+
 Statement* OptOutMutator::mutate(BroadcastOp* bop) {
   return bop;
 }

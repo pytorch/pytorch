@@ -87,16 +87,44 @@ class KernelIrScanner : private kir::IrVisitor {
         summary_.largest_smem_data_type = data_type;
       }
     }
+
+    // Update Welford
+    if (tensor_index->definition() != nullptr &&
+        tensor_index->definition()->isA<kir::WelfordOp>()) {
+      summary_.has_welford = true;
+      summary_.has_block_welford =
+          summary_.has_block_welford || domain->hasBlockReduction();
+      summary_.has_grid_welford =
+          summary_.has_grid_welford || domain->hasGridReduction();
+    }
+  }
+
+  void visit(const kir::GridWelford* grid_welford) final {
+    const auto dom = grid_welford->welford_op()
+                         ->out()
+                         ->as<kir::TensorIndex>()
+                         ->view()
+                         ->domain();
+    updateGridReductionInLoop(dom);
   }
 
   void visit(const kir::GridReduction* grid_reduction) final {
-    ++summary_.number_of_grid_reductions;
-
     const auto dom = grid_reduction->reduction_op()
                          ->out()
                          ->as<kir::TensorIndex>()
                          ->view()
                          ->domain();
+    updateGridReductionInLoop(dom);
+  }
+
+ private:
+  size_t max_smem_type_size_ = 0;
+  KernelSummary summary_;
+
+ private:
+  void updateGridReductionInLoop(TensorDomain* dom) {
+    ++summary_.number_of_grid_reductions;
+
     const auto gpu_lower = GpuLower::current();
     for (size_t i = 0; i < dom->nDims(); ++i) {
       const auto id =
@@ -105,10 +133,6 @@ class KernelIrScanner : private kir::IrVisitor {
           summary_.has_grid_reduction_in_loop || !id->isThread();
     }
   }
-
- private:
-  size_t max_smem_type_size_ = 0;
-  KernelSummary summary_;
 };
 
 } // namespace

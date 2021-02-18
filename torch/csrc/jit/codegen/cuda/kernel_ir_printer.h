@@ -69,9 +69,11 @@ class TORCH_CUDA_CU_API IrPrinter : private kir::IrVisitor {
   void visit(const kir::BinaryOp*) final;
   void visit(const kir::TernaryOp*) final;
   void visit(const kir::ReductionOp*) final;
+  void visit(const kir::WelfordOp*) final;
   void visit(const kir::BroadcastOp*) final;
 
   void visit(const kir::GridReduction*) final;
+  void visit(const kir::GridWelford*) final;
   void visit(const kir::ForLoop*) final;
   void visit(const kir::IfThenElse*) final;
   void visit(const kir::Allocate*) final;
