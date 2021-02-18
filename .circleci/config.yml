@@ -7124,6 +7124,11 @@ workflows:
           name: pytorch_macos_10_13_py3_test
           requires:
             - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_py3_test:
+          build_lite_interpreter: "1"
+          name: pytorch_macos_10_13_py3_test
+          requires:
+            - pytorch_macos_10_13_py3_build
       - pytorch_linux_build:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
