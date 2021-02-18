@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3  # type: ignore[import]
+import botocore  # type: ignore[import]
 
 
 def get_git_commit_history(
@@ -224,7 +225,7 @@ if __name__ == "__main__":
 
     commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
 
-    s3 = boto3.resource("s3")
+    s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
     bucket = s3.Bucket('ossci-metrics')
 
     display_history(

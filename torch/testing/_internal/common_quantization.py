@@ -609,20 +609,20 @@ class QuantizationTestCase(TestCase):
 
     if HAS_FX:
 
-        def assert_types_for_matched_node_pairs(
+        def assert_types_for_matched_subgraph_pairs(
             self,
-            matched_node_pairs: Dict[str, Tuple[Node, Node]],
-            expected_types: Dict[str, Tuple[Callable, Callable]],
+            matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
+            expected_types: Dict[str, Tuple[Tuple[Callable, Callable], Tuple[Callable, Callable]]],
             gm_a: GraphModule,
             gm_b: GraphModule,
         ) -> None:
             """
             Verifies that the types specified in expected_types match
-            the underlying objects pointed to by the nodes in matched_node_pairs.
+            the underlying objects pointed to by the nodes in matched_subgraph_pairs.
 
             An example successful test case:
 
-              matched_node_pairs = {'x0': (graph_a_conv_0_node, graph_b_conv_0_node)}
+              matched_subgraph_pairs = {'x0': (graph_a_conv_0_node, graph_b_conv_0_node)}
               expected_types = {'x0': (nn.Conv2d, nnq.Conv2d)}
 
             The function tests for key equivalence, and verifies types with
@@ -638,21 +638,31 @@ class QuantizationTestCase(TestCase):
                     return node.target
 
             self.assertTrue(
-                len(matched_node_pairs) == len(expected_types),
+                len(matched_subgraph_pairs) == len(expected_types),
                 'Expected length of results to match, but got %d and %d' %
-                (len(matched_node_pairs), len(expected_types))
+                (len(matched_subgraph_pairs), len(expected_types))
             )
             for k, v in expected_types.items():
-                expected_type_a, expected_type_b = v
-                node_a, node_b = matched_node_pairs[k]
-                actual_type_a = _get_underlying_op_type(node_a, gm_a)
-                actual_type_b = _get_underlying_op_type(node_b, gm_b)
-                types_match = (expected_type_a is actual_type_a) and \
-                    (expected_type_b is actual_type_b)
+                expected_types_a, expected_types_b = v
+                exp_type_start_a, exp_type_end_a = expected_types_a
+                exp_type_start_b, exp_type_end_b = expected_types_b
+                nodes_a, nodes_b = matched_subgraph_pairs[k]
+                node_start_a, node_end_a = nodes_a
+                node_start_b, node_end_b = nodes_b
+
+                act_type_start_a = _get_underlying_op_type(node_start_a, gm_a)
+                act_type_start_b = _get_underlying_op_type(node_start_b, gm_b)
+                act_type_end_a = _get_underlying_op_type(node_end_a, gm_a)
+                act_type_end_b = _get_underlying_op_type(node_end_b, gm_b)
+                types_match = (exp_type_start_a is act_type_start_a) and \
+                    (exp_type_end_a is act_type_end_a) and \
+                    (exp_type_start_b is act_type_start_b) and \
+                    (exp_type_end_b is act_type_end_b)
                 self.assertTrue(
                     types_match,
                     'Type mismatch at %s: expected %s, got %s' %
-                    (k, (expected_type_a, expected_type_b), (actual_type_a, actual_type_b))
+                    (k, (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
+                        (act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b))
                 )
 
         def assert_ns_weight_compare_dict_valid(
@@ -1601,3 +1611,66 @@ class EmbeddingWithLinear(torch.nn.Module):
 
     def forward(self, indices, linear_in):
         return self.emb(indices), self.fc(linear_in)
+
+class DenseTopMLP(nn.Module):
+
+    def __init__(self, dense_dim, dense_out, embedding_dim, top_out_in, top_out_out) -> None:
+        super(DenseTopMLP, self).__init__()
+
+        self.dense_mlp = nn.Sequential(
+            nn.Linear(dense_dim, dense_out),
+        )
+        self.top_mlp = nn.Sequential(
+            nn.Linear(dense_out + embedding_dim, top_out_in),
+            nn.Linear(top_out_in, top_out_out),
+        )
+
+    def forward(
+        self,
+        sparse_feature: torch.Tensor,
+        dense: torch.Tensor,
+    ) -> torch.Tensor:
+        dense_feature = self.dense_mlp(dense)
+        features = torch.cat([dense_feature] + [sparse_feature], dim=1)
+
+        out = self.top_mlp(features)
+        return out
+
+# thin wrapper around embedding bag, because tracing inside nn.Embedding
+# bag is not supported at the moment and this is top level
+class EmbBagWrapper(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim):
+        super().__init__()
+        self.emb_bag = nn.EmbeddingBag(num_embeddings, embedding_dim, mode='sum')
+
+    def forward(self, indices, offsets):
+        return self.emb_bag(indices, offsets)
+
+class SparseNNModel(nn.Module):
+    _NUM_EMBEDDINGS = 10
+    _EMBEDDING_DIM = 5
+    _DENSE_DIM = 4
+    _DENSE_OUTPUT = 2
+    _TOP_OUT_IN = 2
+    _TOP_OUT_OUT = 2
+    _TOP_MLP_DIM = 1
+
+    def __init__(self) -> None:
+        super(SparseNNModel, self).__init__()
+
+        self.model_sparse = EmbBagWrapper(self._NUM_EMBEDDINGS, self._EMBEDDING_DIM)
+        self.dense_top = DenseTopMLP(
+            self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN,
+            self._TOP_OUT_OUT)
+
+    def forward(
+        self,
+        sparse_indices: torch.Tensor,
+        sparse_offsets: torch.Tensor,
+        dense: torch.Tensor,
+    ) -> torch.Tensor:
+
+        sparse_feature = self.model_sparse(sparse_indices, sparse_offsets)
+        out = self.dense_top(sparse_feature, dense)
+
+        return out
