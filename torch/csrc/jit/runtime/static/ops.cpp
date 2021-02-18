@@ -331,6 +331,12 @@ REGISTER_OPERATOR_FUNCTOR(
 
 namespace {
 
+// Use the width of an AVX-512 vector by default; this happens to work OK for
+// AVX2 as well. Some ops benefit from using multiple AVX ports, in which case
+// they are vectorized by twice this constant.  An exception is logit, since it
+// contains FP divide, which is single-ported.
+static constexpr int kVectorWidth = 16;
+
 #ifdef TORCH_ENABLE_LLVM
 
 struct TEWrapper {
@@ -353,25 +359,27 @@ struct TEWrapper {
   }
 };
 
-void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
+void optimizePointwise(
+    tensorexpr::LoopNest* ln,
+    tensorexpr::Tensor* target,
+    int width) {
   using namespace torch::jit::tensorexpr;
   std::vector<For*> loops = ln->getLoopStmtsFor(target);
   For *outer, *inner, *tail;
-  ln->splitWithTail(loops[0], 16 * 8, &outer, &inner, &tail);
+  TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
+  ln->splitWithTail(loops[0], width, &outer, &inner, &tail);
   ln->vectorize(inner);
-  ln->splitWithTail(outer, 8, &outer, &inner, &tail);
-  Stmt* unrolled;
-  LoopNest::unroll(inner, &unrolled);
 }
 
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
     tensorexpr::Tensor* out,
-    tensorexpr::VarHandle& dim) {
+    tensorexpr::VarHandle& dim,
+    int width) {
   using namespace torch::jit::tensorexpr;
   LoopNest ln({out});
-  optimizePointwise(&ln, out);
+  optimizePointwise(&ln, out, width);
   ln.prepareForCodegen();
   Stmt* s = ln.root_stmt();
   s = tensorexpr::IRSimplifier::simplify(s);
@@ -402,7 +410,8 @@ std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
     tensorexpr::Tensor* out,
-    tensorexpr::VarHandle& dim) {
+    tensorexpr::VarHandle& dim,
+    int width) {
   return wrap;
 };
 
@@ -423,12 +432,13 @@ std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
         auto elem = A.load(i);
         auto min = FloatImm::make(*clamp);
         auto max = FloatImm::make(1.0f - *clamp);
-        return ifThenElse(elem < min, min, ifThenElse(elem > max, max, elem));
+        elem = CompareSelect::make(elem, min, min, elem, kLT);
+        return CompareSelect::make(elem, max, max, elem, kGT);
       }
     }();
-    return fast_log(A_elem / (FloatImm::make(1.0f) - A_elem));
+    return log_vml(A_elem / (FloatImm::make(1.0f) - A_elem));
   });
-  return wrapTECompute(wrap, A, B, N);
+  return wrapTECompute(wrap, A, B, N, kVectorWidth);
 }
 
 std::shared_ptr<TEWrapper> createRelu() {
@@ -441,7 +451,7 @@ std::shared_ptr<TEWrapper> createRelu() {
     auto a = A.load(i);
     return ifThenElse(a < zero, zero, a);
   });
-  return wrapTECompute(wrap, A, B, N);
+  return wrapTECompute(wrap, A, B, N, 2 * kVectorWidth);
 }
 
 std::shared_ptr<TEWrapper> createTanh() {
@@ -453,7 +463,7 @@ std::shared_ptr<TEWrapper> createTanh() {
     auto a = A.load(i);
     return fast_tanh(a);
   });
-  return wrapTECompute(wrap, A, B, N);
+  return wrapTECompute(wrap, A, B, N, 2 * kVectorWidth);
 }
 
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
