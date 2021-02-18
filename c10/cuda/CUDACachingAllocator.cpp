@@ -749,6 +749,7 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     // captures_underway is a conservative guess that the current stream may be capturing.
     // It's only > 0 if some thread has begun and not yet ended a capture, so it's usually 0,
     // and we can short-circuit cudaStreamCaptureStatus (which does a TLS lookup).
@@ -770,6 +771,7 @@ class DeviceCachingAllocator {
         }
       }
     }
+#endif
     if (size <= kSmallSize) {
       return small_blocks;
     } else {
