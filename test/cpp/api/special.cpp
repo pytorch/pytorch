@@ -9,5 +9,5 @@
 //   properly in C++
 TEST(SpecialTest, special) {
     auto t = torch::randn(128, torch::kDouble);
-    torch::special::lgamma(t);
+    torch::special::gammaln(t);
 }
