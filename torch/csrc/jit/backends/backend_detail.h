@@ -13,20 +13,8 @@ namespace detail {
 
 constexpr static auto kBackendsNamespace = "__backends__";
 
-c10::FunctionSchema TORCH_API getPreprocessSchema();
 c10::FunctionSchema TORCH_API getCompileSchema();
 c10::FunctionSchema TORCH_API getExecuteSchema();
-
-template <typename TBackendInterface>
-std::function<void(Stack&)> getPreprocessFunc() {
-  return [](Stack& stack) {
-    auto method_compile_spec = pop(stack).toGenericDict();
-    auto mod = pop(stack);
-    auto self = pop(stack).toCustomClass<TBackendInterface>();
-    auto ret = self->preprocess(mod, method_compile_spec);
-    push(stack, ret);
-  };
-}
 
 template <typename TBackendInterface>
 std::function<void(Stack&)> getCompileFunc() {
