@@ -359,15 +359,12 @@ struct TEWrapper {
   }
 };
 
-void optimizePointwise(
-    tensorexpr::LoopNest* ln,
-    tensorexpr::Tensor* target,
-    int width) {
+void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
   using namespace torch::jit::tensorexpr;
   std::vector<For*> loops = ln->getLoopStmtsFor(target);
   For *outer, *inner, *tail;
   TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
-  ln->splitWithTail(loops[0], width, &outer, &inner, &tail);
+  ln->splitWithTail(loops[0], kVectorWidth, &outer, &inner, &tail);
   ln->vectorize(inner);
 }
 
@@ -375,11 +372,10 @@ std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
     tensorexpr::Tensor* out,
-    tensorexpr::VarHandle& dim,
-    int width) {
+    tensorexpr::VarHandle& dim) {
   using namespace torch::jit::tensorexpr;
   LoopNest ln({out});
-  optimizePointwise(&ln, out, width);
+  optimizePointwise(&ln, out);
   ln.prepareForCodegen();
   Stmt* s = ln.root_stmt();
   s = tensorexpr::IRSimplifier::simplify(s);
@@ -410,8 +406,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
     tensorexpr::Tensor* out,
-    tensorexpr::VarHandle& dim,
-    int width) {
+    tensorexpr::VarHandle& dim) {
   return wrap;
 };
 
@@ -438,7 +433,7 @@ std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
     }();
     return log_vml(A_elem / (FloatImm::make(1.0f) - A_elem));
   });
-  return wrapTECompute(wrap, A, B, N, kVectorWidth);
+  return wrapTECompute(wrap, A, B, N);
 }
 
 std::shared_ptr<TEWrapper> createRelu() {
@@ -451,7 +446,7 @@ std::shared_ptr<TEWrapper> createRelu() {
     auto a = A.load(i);
     return ifThenElse(a < zero, zero, a);
   });
-  return wrapTECompute(wrap, A, B, N, 2 * kVectorWidth);
+  return wrapTECompute(wrap, A, B, N);
 }
 
 std::shared_ptr<TEWrapper> createTanh() {
@@ -463,7 +458,7 @@ std::shared_ptr<TEWrapper> createTanh() {
     auto a = A.load(i);
     return fast_tanh(a);
   });
-  return wrapTECompute(wrap, A, B, N, 2 * kVectorWidth);
+  return wrapTECompute(wrap, A, B, N);
 }
 
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
