@@ -132,26 +132,8 @@ class ImageHandler:
         self.imagespec = imagespec.lower()
 
     def __call__(self, key, data):
-        try:
-            import numpy as np
-        except ImportError as e:
-            try:
-                import pip  # type: ignore
-                pip.main(['intall', '--user', 'numpy'])
-                import numpy as np
-            except ImportError:
-                raise e
-
-        try:
-            import PIL.Image
-        except ImportError as e:
-            try:
-                import pip  # type: ignore
-                pip.main(['install', '--user', 'Pillow'])
-                import PIL.Image
-            except ImportError:
-                raise e
-
+        import numpy as np
+        import PIL.Image
         extension = re.sub(r".*[.]", "", key)
         if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
             return None
