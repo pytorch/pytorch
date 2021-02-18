@@ -5,18 +5,23 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
+std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar, bool promote_integer_float = false) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
+    std::vector<at::Tensor> temp_tensors;
+    temp_tensors.reserve(tensors.size());
+    tensor_lists.emplace_back(temp_tensors);
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(tensors.size());
-    for (const auto& t: tensors) {
-        vec_res.emplace_back(at::native::empty_like(t));
+
+    auto result_type = get_result_type(tensors[0], scalar, promote_integer_float);
+    for (int i = 0; i < tensors.size(); i++) {
+        tensor_lists[0].emplace_back(tensors[i].to(result_type));
+        vec_res.emplace_back(at::native::empty_like(tensor_lists[0][i]));
     }
 
-    tensor_lists.emplace_back(tensors.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, result_type, "foreach_binary_op_scalar_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<2>(tensor_lists,
                               BinaryOpScalarFunctor<scalar_t, 
@@ -62,7 +67,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensor
         return at::native::foreach_tensor_##NAME##_scalar_kernel_slow(tensors, scalar);             \
     }                                                                                               \
                                                                                                     \
-    return foreach_binary_op<OP>(tensors, scalar);                                                  \
+    return foreach_binary_op<OP>(tensors, scalar, DIVISION_OP);                                     \
 }
 
 FOREACH_BINARY_OP_SCALAR(add, std::plus, false);

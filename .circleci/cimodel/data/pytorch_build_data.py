@@ -67,6 +67,16 @@ CONFIG_TREE_DATA = [
                     ]),
                 ]),
             ]),
+            ("11.2", [
+                ("3.8", [
+                    X(True),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [XImportant(True)]),
+                        ]),
+                    ]),
+                ]),
+            ]),
         ]),
     ]),
     ("bionic", [

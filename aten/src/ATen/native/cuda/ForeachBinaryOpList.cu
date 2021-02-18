@@ -5,19 +5,30 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tensors2, Scalar alpha = 1) {
+std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, 
+                                           TensorList tensors2, 
+                                           Scalar alpha = 1, 
+                                           bool promote_integer_float = false) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
-    std::vector<at::Tensor> vec_res;
+    auto result_type = get_result_type(tensors1[0], tensors2[0], promote_integer_float);
+
+    std::vector<at::Tensor> vec_res, temp_tensors1, temp_tensors2;
     vec_res.reserve(tensors1.size());
-    for (const auto& t: tensors1) {
-        vec_res.emplace_back(at::native::empty_like(t));
+    temp_tensors1.reserve(tensors1.size());
+    temp_tensors2.reserve(tensors2.size());
+    tensor_lists.emplace_back(temp_tensors1);
+    tensor_lists.emplace_back(temp_tensors2);
+
+
+    for (int i = 0; i < tensors1.size(); i++) {
+        tensor_lists[0].emplace_back(tensors1[i].to(result_type));
+        tensor_lists[1].emplace_back(tensors2[i].to(result_type));
+        vec_res.emplace_back(at::native::empty_like(tensor_lists[0][i]));
     }
 
-    tensor_lists.emplace_back(tensors1.vec());
-    tensor_lists.emplace_back(tensors2.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, result_type, "foreach_binary_op_list_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<3>(tensor_lists,
                               BinaryOpListAlphaFunctor<scalar_t, 

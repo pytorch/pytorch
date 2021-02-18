@@ -4245,7 +4245,7 @@ def triplet_margin_with_distance_loss(
         return output
 
 
-def normalize(input: Tensor, p: float = 2, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
+def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
     For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
@@ -4623,7 +4623,11 @@ def multi_head_attention_forward(
     # allow MHA to have different sizes for the feature dimension
     assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
-    head_dim = embed_dim // num_heads
+    if isinstance(embed_dim, torch.Tensor):
+        # embed_dim can be a tensor when JIT tracing
+        head_dim = embed_dim.div(num_heads, rounding_mode='trunc')
+    else:
+        head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 

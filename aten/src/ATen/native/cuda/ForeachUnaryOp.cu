@@ -53,6 +53,20 @@ void floating_complex_half_(TensorList tensors) {
 }
 
 template <template<class> class Op>
+std::vector<Tensor> all_types_complex_bfloat16_half_bool(TensorList tensors) {
+    return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
+        return foreach_unary_op<scalar_t, Op>(tensors);
+    });
+}
+
+template <template<class> class Op>
+void all_types_complex_bfloat16_half_bool_(TensorList tensors) {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
+        foreach_unary_op_<scalar_t, Op>(tensors);
+    });
+}
+
+template <template<class> class Op>
 std::vector<Tensor> floating_complex_half_bfloat16(TensorList tensors) {
     return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         return foreach_unary_op<scalar_t, Op>(tensors);
@@ -170,6 +184,7 @@ OP(floating_half_bfloat16, erf, Erf);
 
 //
 // Special cases
+// These functions must be special cased as they can't be written as std::functor_name in OP macro
 //
 template<typename T>
 struct Sigmoid {
@@ -224,9 +239,9 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
     all_types_half_complex_bfloat16_<std::negate>(tensors);
 }
 
-// Abs have to go via slow path in case of a complex  or integer type.
+// Abs have to go via slow path in case of a complex type.
 // This is because foreach kernels can't return a different dtype than passed, while 
-// abs with complex or integer inputs will produce float output.
+// abs with complex inputs will produce float output.
 template<typename T>
 struct Abs {
     __device__ T operator()(T t) const { return std::abs(t); }
@@ -246,7 +261,7 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
         return at::native::foreach_tensor_abs_slow(tensors);
     }
 
-    return floating_complex_half_bfloat16<Abs>(tensors);
+    return all_types_complex_bfloat16_half_bool<Abs>(tensors);
 }
 
 void foreach_tensor_abs_cuda_(TensorList tensors) {
@@ -263,7 +278,7 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
         return at::native::foreach_tensor_abs_slow_(tensors);
     }
 
-    floating_complex_half_bfloat16_<Abs>(tensors);
+    all_types_complex_bfloat16_half_bool_<Abs>(tensors);
 }
 
 void foreach_tensor_zero_cuda_(TensorList tensors) {
