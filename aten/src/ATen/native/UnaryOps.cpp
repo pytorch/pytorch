@@ -482,9 +482,9 @@ Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
 Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
 // Alias for trunc
-Tensor& fix_out(Tensor& result, const Tensor& self) { return at::native::trunc_out(result, self); }
-Tensor fix(const Tensor& self) { return at::native::trunc(self); }
-Tensor& fix_(Tensor& self) { return at::native::trunc_(self); }
+Tensor& fix_out(Tensor& result, const Tensor& self) { return at::trunc_out(result, self); }
+Tensor fix(const Tensor& self) { return self.trunc(); }
+Tensor& fix_(Tensor& self) { return self.trunc_(); }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,

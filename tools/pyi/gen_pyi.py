@@ -350,8 +350,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'saddmm': ['def saddmm(input: Tensor, mat1: Tensor, mat2: Tensor, *, beta: Number=1, '
                    'alpha: Number=1, out: Optional[Tensor]=None) -> Tensor: ...'],
         'spmm': ['def spmm(input: Tensor, mat2: Tensor) -> Tensor: ...'],
-        'div': ['def div(input: Union[Tensor, Number], other: Union[Tensor, Number], '
-                'rounding_mode: str = "true", *, out: Optional[Tensor]=None) -> Tensor: ...'],
+        'div': ['def div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, '
+                'rounding_mode: Optional[str] = None, out: Optional[Tensor]=None) -> Tensor: ...'],
     })
     for binop in ['mul', 'true_divide', 'floor_divide']:
         unsorted_function_hints[binop].append(
@@ -463,9 +463,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  'def set_(self, storage: Storage) -> Tensor: ...'],
         'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
                   'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
-        'div': ['def div(self, other: Union[Tensor, Number], '
-                'rounding_mode: str = "true", *, out: Optional[Tensor]=None) -> Tensor: ...'],
-        'div_': ['def div_(self, other: Union[Tensor, Number], rounding_mode: str = "true") -> Tensor: ...'],
+        'div': ['def div(self, other: Union[Tensor, Number], *, '
+                'rounding_mode: Optional[str] = None, out: Optional[Tensor]=None) -> Tensor: ...'],
+        'div_': ['def div_(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
     })
     for binop in ['mul', 'true_divide', 'floor_divide']:
         for inplace in [False, True]:

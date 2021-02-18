@@ -599,6 +599,34 @@ class TestForeach(TestCase):
                     self.assertEqual(tensors, res)
 
     @dtypes(*torch.testing.get_all_dtypes())
+    def test_mixed_scalarlist(self, device, dtype):
+        for N in N_values:
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
+                tensors = self._get_test_data(device, dtype, N)
+                scalars = [True for _ in range(N)]
+                scalars[0] = 1
+                scalars[1] = 1.1
+                scalars[2] = 3 + 5j
+
+                if foreach_bin_op == torch._foreach_sub:
+                    with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
+                        expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
+
+                    with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
+                        foreach_bin_op(tensors, scalars)
+
+                    # There are a two types of different errors that will be thrown.
+                    # - Sub with bool is not allowed. 
+                    # - Result type can't be cast to the desired output type
+                    with self.assertRaises(RuntimeError):
+                        foreach_bin_op_(tensors, scalars)
+                    continue
+
+                expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
+                res = foreach_bin_op(tensors, scalars)
+                self.assertEqual(expected, res)
+
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_add_with_different_size_tensors(self, device, dtype):
         if dtype == torch.bool:
             return
