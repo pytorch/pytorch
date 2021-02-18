@@ -599,7 +599,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 // TODO: Disable cont. branch to test more risky code
 
-#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \
+#define IMPLEMENT_FLOAT_KERNEL(op)                                            \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {            \
@@ -630,7 +630,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
   }                                                                           \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
-#define IMPLEMENT_COMPLEX_KERNEL(dispatchtypes, op)                             \
+#define IMPLEMENT_COMPLEX_KERNEL(op)                                          \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {\
@@ -707,29 +707,29 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
 
 
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, asin)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, atan)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, ceil)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, cos)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, erfinv)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, exp)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, log)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, log10)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, log2)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, i0)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, round)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, tan)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, tanh)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, lgamma)
+IMPLEMENT_COMPLEX_KERNEL(acos)
+IMPLEMENT_COMPLEX_KERNEL(asin)
+IMPLEMENT_COMPLEX_KERNEL(atan)
+IMPLEMENT_FLOAT_KERNEL(ceil)
+IMPLEMENT_COMPLEX_KERNEL(cos)
+IMPLEMENT_FLOAT_KERNEL(erf)
+IMPLEMENT_FLOAT_KERNEL(erfc)
+IMPLEMENT_FLOAT_KERNEL(erfinv)
+IMPLEMENT_COMPLEX_KERNEL(exp)
+IMPLEMENT_FLOAT_KERNEL(expm1)
+IMPLEMENT_FLOAT_KERNEL(floor)
+IMPLEMENT_COMPLEX_KERNEL(log)
+IMPLEMENT_COMPLEX_KERNEL(log10)
+IMPLEMENT_FLOAT_KERNEL(log1p)
+IMPLEMENT_COMPLEX_KERNEL(log2)
+IMPLEMENT_FLOAT_KERNEL(i0)
+IMPLEMENT_FLOAT_KERNEL(round)
+IMPLEMENT_COMPLEX_KERNEL(sin)
+IMPLEMENT_COMPLEX_KERNEL(sqrt)
+IMPLEMENT_COMPLEX_KERNEL(tan)
+IMPLEMENT_COMPLEX_KERNEL(tanh)
+IMPLEMENT_FLOAT_KERNEL(trunc)
+IMPLEMENT_FLOAT_KERNEL(lgamma)
 
 } // namespace native
 } // namespace at
