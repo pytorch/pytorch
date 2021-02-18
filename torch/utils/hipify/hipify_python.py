@@ -174,7 +174,7 @@ def preprocess_file_and_save_result(
     result = preprocessor(output_directory, filepath, all_files, includes, stats,
                           hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
-    fin_path = os.path.join(output_directory, filepath)
+    fin_path = os.path.abspath(os.path.join(output_directory, filepath))
     # Show what happened
     if show_progress:
         print(
@@ -711,7 +711,7 @@ def preprocessor(
         clean_ctx: GeneratedFileCleaner,
         show_progress: bool) -> HipifyResult:
     """ Executes the CUDA -> HIP conversion on the specified file. """
-    fin_path = os.path.join(output_directory, filepath)
+    fin_path = os.path.abspath(os.path.join(output_directory, filepath))
 
     with open(fin_path, 'r', encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
