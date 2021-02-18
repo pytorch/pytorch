@@ -31,7 +31,7 @@ from torch.testing._internal.te_utils import CudaCodeGenExecuted
 from jit.test_fuser_common import TestFuserCommon  # noqa: F401
 
 FUSION_GROUP = 'prim::TensorExprGroup'
-LLVM_ENABLED = torch._C._llvm_enabled()
+LLVM_ENABLED = torch._C._jit._llvm_enabled()
 
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])

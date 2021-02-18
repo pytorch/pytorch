@@ -1,12 +1,12 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch._C._jit import parse_schema
+from torch._C import parse_schema
 
 
 class TestFunctionSchema(TestCase):
     def test_serialize_and_deserialize(self):
-        schemas = torch._C._jit.get_all_schemas()
+        schemas = torch._C._jit_get_all_schemas()
         # so far we have around 1700 registered schemas
         self.assertGreater(len(schemas), 1000)
         for schema in schemas:
