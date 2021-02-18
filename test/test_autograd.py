@@ -5040,7 +5040,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
 
 # TODO: Add back 'sgn' to complex_list; removed because of Windows test failure with 11.2
 # See: https://github.com/pytorch/pytorch/issues/51980
-if _get_torch_cuda_version() != [11, 2]:
+if _get_torch_cuda_version() != (11, 2):
     complex_list.append('sgn')
     print(complex_list)
 
