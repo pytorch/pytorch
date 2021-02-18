@@ -93,7 +93,9 @@ std::vector<Tensor> foreach_tensor_div_scalarlist_kernel_cuda(TensorList tensors
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
 void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     check_foreach_api_restrictions(tensors, scalars);
-    sub_check(tensors[0], scalars[0]);
+    for (int i = 0; i < tensors.size(); i++) {
+        sub_check(tensors[i], scalars[i]);
+    }
 
     if (!can_use_fast_route({tensors}, scalars)) {
         return at::native::foreach_tensor_sub_scalarlist_kernel_slow_(tensors, scalars);
@@ -104,7 +106,9 @@ void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef
 
 std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     check_foreach_api_restrictions(tensors, scalars);
-    sub_check(tensors[0], scalars[0]);
+    for (int i = 0; i < tensors.size(); i++) {
+        sub_check(tensors[i], scalars[i]);
+    }
 
     if (!can_use_fast_route({tensors}, scalars)) {
         return at::native::foreach_tensor_sub_scalarlist_kernel_slow(tensors, scalars);

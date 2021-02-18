@@ -199,6 +199,9 @@ class TORCH_API Context {
   void setDisplayVmapFallbackWarnings(bool enabled);
   bool areVmapFallbackWarningsEnabled() const;
 
+  void setDefaultMobileCPUAllocator();
+  void unsetDefaultMobileCPUAllocator();
+
  private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
@@ -229,6 +232,8 @@ class TORCH_API Context {
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
+
+  Allocator* prev_allocator_ptr_{nullptr};
 };
 
 TORCH_API Context& globalContext();
