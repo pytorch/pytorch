@@ -262,6 +262,10 @@ static void mode_kernel_impl(
             idxs.begin(), idxs.end(), elements.begin(), [=](int64_t i) {
                 return std::make_pair(self_data[i * self_dim_stride], i);
             });
+        // Even though, theoretically, we don't need to specify this lambda
+        // (it's basically the same as std::less), doing so degrades
+        // performance. That is because its implementation for std::pair uses 3
+        // comparisons.
         std::sort(
             elements.begin(),
             elements.end(),

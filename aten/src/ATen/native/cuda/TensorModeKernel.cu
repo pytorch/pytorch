@@ -48,7 +48,7 @@ void calculate_mode(
   int64_t n_element = ensure_nonempty_size(self, ndim - 1);
   THCThrustAllocator thrust_allocator(state);
 
-  // Wrap input data, sort_buffer, in Thrust device vectors
+  // Wrap input data in Thrust device vector
   thrust::device_ptr<scalar_t> vec_ptr = thrust::device_pointer_cast(data);
   thrust::device_vector<scalar_t> iter(vec_ptr, vec_ptr + n_element);
 
