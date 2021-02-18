@@ -8714,7 +8714,7 @@ class TestNN(NNTestCase):
             kwargs = dict(mode='bicubic', align_corners=align_corners)
             # test float scale factor up & downsampling
             for device in device_list:
-                for scale_factor in [0.5, 1.5, 2]:
+                for scale_factor in [0.5, 1, 1.5, 2]:
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
                     out_size = int(math.floor(in_t.shape[-1] * scale_factor))
@@ -14425,11 +14425,13 @@ class TestLazyModules(TestCase):
     def test_linear(self):
         module = nn.LazyLinear(10)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
         module(input)
         self.assertIsInstance(module, nn.Linear)
         self.assertNotIsInstance(module, nn.LazyLinear)
         self.assertTrue(module.weight.shape == (10, 5))
+        self.assertTrue(module.bias.shape == (10,))
         y = module(input)
         self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
 
@@ -14437,9 +14439,11 @@ class TestLazyModules(TestCase):
     def test_lazy_linear_pickle(self):
         module = nn.LazyLinear(10)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         module = pickle.loads(pickle.dumps(module))
         self.assertIsInstance(module, nn.LazyLinear)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
         module(input)  # fully materialized
         new_module = pickle.loads(pickle.dumps(module))
@@ -14447,6 +14451,8 @@ class TestLazyModules(TestCase):
         self.assertNotIsInstance(new_module, nn.LazyLinear)
         self.assertTrue(new_module.weight.shape == (10, 5))
         self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+        self.assertTrue(new_module.bias.shape == (10,))
+        self.assertNotIsInstance(new_module.bias, UninitializedParameter)
 
     @suppress_warnings
     def test_linear_state(self):
@@ -14458,29 +14464,40 @@ class TestLazyModules(TestCase):
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertTrue(lazy_module.weight.shape == (10, 5))
+        self.assertTrue(lazy_module.bias.shape == (10,))
 
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
 
-    def _check_lazy_conv(self, cls, lazy_cls, func, init_args, input_shape, expected_weight_shape):
+    def _check_lazy_conv(self, cls, lazy_cls, func, init_args, input_shape,
+                         expected_weight_shape, expected_bias_shape):
         module = lazy_cls(*init_args)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(*input_shape)
         module(input)
         self.assertIsInstance(module, cls)
         self.assertNotIsInstance(module, lazy_cls)
         self.assertEqual(module.weight.shape, expected_weight_shape)
+        if module.bias is not None:
+            self.assertEqual(module.bias.shape, expected_bias_shape)
         y = module(input)
         self.assertTrue(torch.equal(func(input, module.weight, module.bias), y))
 
-    def _check_lazy_conv_pickle(self, cls, lazy_cls, init_args, input_shape, expected_weight_shape):
+    def _check_lazy_conv_pickle(self, cls, lazy_cls, init_args, input_shape,
+                                expected_weight_shape, expected_bias_shape):
         module = lazy_cls(*init_args)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         module = pickle.loads(pickle.dumps(module))
         self.assertIsInstance(module, lazy_cls)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(*input_shape)
         module(input)  # fully materialized
         new_module = pickle.loads(pickle.dumps(module))
@@ -14488,8 +14505,12 @@ class TestLazyModules(TestCase):
         self.assertNotIsInstance(new_module, lazy_cls)
         self.assertEqual(new_module.weight.shape, expected_weight_shape)
         self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+        if new_module.bias is not None:
+            self.assertEqual(new_module.bias.shape, expected_bias_shape)
+            self.assertNotIsInstance(new_module.bias, UninitializedParameter)
 
-    def _check_lazy_conv_state(self, gen_module, gen_lazy_module, expected_weight_shape):
+    def _check_lazy_conv_state(self, gen_module, gen_lazy_module,
+                               expected_weight_shape, expected_bias_shape):
         module = gen_module()
         lazy_module = gen_lazy_module()
         lazy_module.load_state_dict(module.state_dict())
@@ -14498,6 +14519,8 @@ class TestLazyModules(TestCase):
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertEqual(lazy_module.weight.shape, expected_weight_shape)
+        if lazy_module.bias is not None:
+            self.assertEqual(lazy_module.bias.shape, expected_bias_shape)
 
         module = gen_module()
         lazy_module = gen_lazy_module()
@@ -14507,92 +14530,98 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv1d(self):
         self._check_lazy_conv(nn.Conv1d, nn.LazyConv1d, torch.nn.functional.conv1d,
-                              (32, 2), (192, 16, 50), (32, 16, 2))
+                              (32, 2), (192, 16, 50), (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv1d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv1d, nn.LazyConv1d, (32, 2), (192, 16, 50), (32, 16, 2))
+        self._check_lazy_conv_pickle(nn.Conv1d, nn.LazyConv1d, (32, 2), (192, 16, 50),
+                                     (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv1d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv1d(16, 32, 2),
                                     lambda: nn.LazyConv1d(32, 2),
-                                    (32, 16, 2))
+                                    (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d(self):
         self._check_lazy_conv(nn.Conv2d, nn.LazyConv2d, torch.nn.functional.conv2d,
-                              (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+                              (32, 2), (192, 16, 8, 6), (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv2d, nn.LazyConv2d, (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+        self._check_lazy_conv_pickle(nn.Conv2d, nn.LazyConv2d, (32, 2), (192, 16, 8, 6),
+                                     (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv2d(16, 32, 2),
                                     lambda: nn.LazyConv2d(32, 2),
-                                    (32, 16, 2, 2))
+                                    (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d(self):
         self._check_lazy_conv(nn.Conv3d, nn.LazyConv3d, torch.nn.functional.conv3d,
-                              (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+                              (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv3d, nn.LazyConv3d, (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+        self._check_lazy_conv_pickle(nn.Conv3d, nn.LazyConv3d, (32, 2), (192, 16, 8, 7, 6),
+                                     (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv3d(16, 32, 2),
                                     lambda: nn.LazyConv3d(32, 2),
-                                    (32, 16, 2, 2, 2))
+                                    (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transposed1d(self):
         self._check_lazy_conv(nn.ConvTranspose1d, nn.LazyConvTranspose1d, torch.nn.functional.conv_transpose1d,
-                              (32, 2), (192, 16, 50), (16, 32, 2))
+                              (32, 2), (192, 16, 50), (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose1d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose1d, nn.LazyConvTranspose1d, (32, 2), (192, 16, 50), (16, 32, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose1d, nn.LazyConvTranspose1d, (32, 2),
+                                     (192, 16, 50), (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose1d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose1d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose1d(32, 2),
-                                    (16, 32, 2))
+                                    (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d(self):
         self._check_lazy_conv(nn.ConvTranspose2d, nn.LazyConvTranspose2d, torch.nn.functional.conv_transpose2d,
-                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose2d, nn.LazyConvTranspose2d, (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose2d, nn.LazyConvTranspose2d, (32, 2),
+                                     (192, 16, 8, 6), (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose2d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose2d(32, 2),
-                                    (16, 32, 2, 2))
+                                    (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d(self):
         self._check_lazy_conv(nn.ConvTranspose3d, nn.LazyConvTranspose3d, torch.nn.functional.conv_transpose3d,
-                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose3d, nn.LazyConvTranspose3d, (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose3d, nn.LazyConvTranspose3d, (32, 2),
+                                     (192, 16, 8, 7, 6), (16, 32, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose3d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose3d(32, 2),
-                                    (16, 32, 2, 2, 2))
+                                    (16, 32, 2, 2, 2), (32,))
 
     def _check_lazy_batchnorm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
@@ -14748,7 +14777,9 @@ class TestLazyModules(TestCase):
         net = MyNetwork()
         net(torch.ones(5, 10))
         self.assertTrue(net.linear_1.weight.shape == (15, 10))
+        self.assertTrue(net.linear_1.bias.shape == (15,))
         self.assertTrue(net.linear_2.weight.shape == (10, 15))
+        self.assertTrue(net.linear_2.bias.shape == (10,))
 
     @suppress_warnings
     def test_optimizer_pass(self):
