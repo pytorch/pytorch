@@ -382,7 +382,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         for (i, p) in enumerate(processes):
             # This is the exit code processes exit with if they encountered an exception.
             self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
-                                "Process {} terminated with exit code {}. Check logs for exception stacktrace.".format(i, p.exitcode))
+                                "Process {} terminated with exit code {}. Check logs for exception stacktrace."
+                                .format(i, p.exitcode))
             p.join()
 
     def test_multi_worker_with_nonfixed_world_size(self):
@@ -399,7 +400,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         for (i, p) in enumerate(processes):
             # This is the exit code processes exit with if they encountered an exception.
             self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
-                                "Process {} terminated with exit code {}. Check logs for exception stacktrace.".format(i, p.exitcode))
+                                "Process {} terminated with exit code {}. Check logs for exception stacktrace."
+                                .format(i, p.exitcode))
             p.join()
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
