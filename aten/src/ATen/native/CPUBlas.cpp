@@ -11,15 +11,15 @@ extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void 
 #endif  // AT_BUILD_WITH_BLAS()
 
 #if AT_BUILD_WITH_BLAS()
-extern "C" void cswap_(int *n, void *x, int *incx, void *y, int *incy); 
-extern "C" void dcopy_(int *n, double *x, int *incx, double *y, int *incy);
-extern "C" void scopy_(int *n, float *x, int *incx, float *y, int *incy);
-extern "C" void zcopy_(int *n, void *x, int *incx, void *y, int *incy); 
-extern "C" void ccopy_(int *n, void *x, int *incx, void *y, int *incy); 
-extern "C" void daxpy_(int *n, double *a, double *x, int *incx, double *y, int *incy);
-extern "C" void saxpy_(int *n, float *a, float *x, int *incx, float *y, int *incy);
-extern "C" void caxpy_(int *n, void *a, void *x, int *incx, void *y, int *incy);
-extern "C" void zaxpy_(int *n, void *a, void *x, int *incx, void *y, int *incy);
+extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy); 
+extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy);
+extern "C" void scopy_(int *n, const float *x, int *incx, float *y, int *incy);
+extern "C" void zcopy_(int *n, const void *x, int *incx, void *y, int *incy); 
+extern "C" void ccopy_(int *n, const void *x, int *incx, void *y, int *incy); 
+extern "C" void daxpy_(int *n, double *a, const double *x, int *incx, double *y, int *incy);
+extern "C" void saxpy_(int *n, float *a, const float *x, int *incx, float *y, int *incy);
+extern "C" void caxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
+extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
 #endif  // AT_BUILD_WITH_BLAS()
 
 #ifdef USE_FBGEMM
@@ -264,7 +264,7 @@ void gemm(
 
 DEFINE_DISPATCH(axpy_stub);
 
-void axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_t incy) {
+void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -285,7 +285,7 @@ void axpy(int64_t n, double a, double *x, int64_t incx, double *y, int64_t incy)
       n, a, x, incx, y, incy);
 }
 
-void axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t incy) {
+void axpy(int64_t n, float a, const float *x, int64_t incx, float *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -306,7 +306,7 @@ void axpy(int64_t n, float a, float *x, int64_t incx, float *y, int64_t incy) {
       n, a, x, incx, y, incy);
 }
 
-void axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
+void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -327,7 +327,7 @@ void axpy(int64_t n, c10::complex<double> a, c10::complex<double> *x, int64_t in
       n, a, x, incx, y, incy);
 }
 
-void axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy) {
+void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -350,7 +350,7 @@ void axpy(int64_t n, c10::complex<float> a, c10::complex<float> *x, int64_t incx
 
 DEFINE_DISPATCH(copy_stub);
 
-void copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy) {
+void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -367,7 +367,7 @@ void copy(int64_t n, double *x, int64_t incx, double *y, int64_t incy) {
       n, x, incx, y, incy);
 }
 
-void copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy) {
+void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -384,7 +384,7 @@ void copy(int64_t n, float *x, int64_t incx, float *y, int64_t incy) {
       n, x, incx, y, incy);
 }
 
-void copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
+void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
   if(n == 1)
   {
     incx = 1;
@@ -401,7 +401,7 @@ void copy(int64_t n, c10::complex<double> *x, int64_t incx, c10::complex<double>
       n, x, incx, y, incy);
 }
 
-void copy(int64_t n, c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy){
+void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy){
   if(n == 1)
   {
     incx = 1;
