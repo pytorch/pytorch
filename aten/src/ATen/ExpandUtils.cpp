@@ -4,6 +4,7 @@ namespace at {
 
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
 std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
+  std::cout << "call into infer_size!" << std::endl;
   size_t dimsA = a.size();
   size_t dimsB = b.size();
   size_t ndim = dimsA > dimsB ? dimsA : dimsB;

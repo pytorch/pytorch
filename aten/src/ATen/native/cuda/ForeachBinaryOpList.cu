@@ -1,8 +1,15 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
+#include <ATen/ExpandUtils.h>
 
 namespace at { namespace native {
+
+void print_sizes(const Tensor& t1) {
+    std::cout << "\n" << t1 << std::endl;
+    std::cout << "t.size: " << t1.sizes() << std::endl;
+    std::cout << "t.stride: " << t1.strides() << std::endl;
+}
 
 template<template<class> class Op>
 std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, 
@@ -62,39 +69,19 @@ void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, Scalar al
 
 #define FOREACH_BINARY_OP_LIST(NAME, OP, DIVISION_OP)                                                       \
 void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {                  \
-    check_foreach_api_restrictions(tensors1, tensors2);                                                     \
-    if (!can_use_fast_route(tensors1, tensors2, DIVISION_OP)) {                                             \
-        return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2);                   \
-    }                                                                                                       \
-                                                                                                            \
     foreach_tensor_list_op_<OP>(tensors1, tensors2);                                                        \
 }                                                                                                           \
                                                                                                             \
 std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {    \
-    check_foreach_api_restrictions(tensors1, tensors2);                                                     \
-    if (!can_use_fast_route(tensors1, tensors2, DIVISION_OP)) {                                             \
-        return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2);                    \
-    }                                                                                                       \
-                                                                                                            \
     return foreach_tensor_list_op<OP>(tensors1, tensors2);                                                  \
 }
 
 #define FOREACH_BINARY_OP_LIST_ALPHA(NAME, OP)                                                                          \
 void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2, Scalar alpha) {                \
-    check_foreach_api_restrictions(tensors1, tensors2);                                                                 \
-    if (!can_use_fast_route({tensors1, tensors2}, alpha)) {                                                             \
-        return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2, alpha);                        \
-    }                                                                                                                   \
-                                                                                                                        \
     foreach_tensor_list_op_<OP>(tensors1, tensors2, alpha);                                                             \
 }                                                                                                                       \
                                                                                                                         \
 std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1, TensorList tensors2, Scalar alpha) {  \
-    check_foreach_api_restrictions(tensors1, tensors2);                                                                 \
-    if (!can_use_fast_route({tensors1, tensors2}, alpha)) {                                                             \
-        return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2, alpha);                         \
-    }                                                                                                                   \
-                                                                                                                        \
     return foreach_tensor_list_op<OP>(tensors1, tensors2, alpha);                                                       \
 }
 
@@ -104,3 +91,4 @@ FOREACH_BINARY_OP_LIST(mul, std::multiplies, /*division_op*/ false);
 FOREACH_BINARY_OP_LIST(div, std::divides, /*division_op*/ true);
 
 }} // namespace at::native
+
