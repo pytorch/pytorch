@@ -204,13 +204,18 @@ class TestForeach(TestCase):
 
     # Separate test for abs due to a lot of special cases
     # Absolute value of a complex number a + bj is defined as sqrt(a^2 + b^2), i.e. a floating point
-    @dtypes(*(torch.testing.floating_and_complex_types_and(torch.bfloat16, torch.half)))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_abs(self, device, dtype):
         for N in N_values:
             tensors1 = self._get_test_data(device, dtype, N)
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
             control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+
+            if dtype == torch.bool and self.device_type == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, r"not implemented for"):
+                    expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
+                continue
 
             expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = torch._foreach_abs(tensors1)
@@ -680,6 +685,34 @@ class TestForeach(TestCase):
                 else:
                     foreach_bin_op_(tensors, scalars)
                     self.assertEqual(tensors, res)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_mixed_scalarlist(self, device, dtype):
+        for N in N_values:
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
+                tensors = self._get_test_data(device, dtype, N)
+                scalars = [True for _ in range(N)]
+                scalars[0] = 1
+                scalars[1] = 1.1
+                scalars[2] = 3 + 5j
+
+                if foreach_bin_op == torch._foreach_sub:
+                    with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
+                        expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
+
+                    with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
+                        foreach_bin_op(tensors, scalars)
+
+                    # There are a two types of different errors that will be thrown.
+                    # - Sub with bool is not allowed. 
+                    # - Result type can't be cast to the desired output type
+                    with self.assertRaises(RuntimeError):
+                        foreach_bin_op_(tensors, scalars)
+                    continue
+
+                expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
+                res = foreach_bin_op(tensors, scalars)
+                self.assertEqual(expected, res)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_with_different_size_tensors(self, device, dtype):
