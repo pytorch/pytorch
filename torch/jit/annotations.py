@@ -2,6 +2,7 @@ import ast
 import enum
 import inspect
 import re
+import builtins
 import torch
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
@@ -14,7 +15,6 @@ from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
 
 
 from textwrap import dedent
-from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from typing import Type
 
@@ -170,13 +170,19 @@ def get_type_line(source):
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
     # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
     # to the hack in torch/_VF.py.
-    type_lines = list(filter(lambda line: not line[1].endswith("# type: ignore"),
+
+    # An ignore type line can be of following format:
+    #   1) # type: ignore
+    #   2) # type: ignore[rule-code]
+    # This ignore statement must be at the end of the line
+    type_pattern = re.compile("# type: ignore(\\[[a-zA-Z-]+\\])?$")
+    type_lines = list(filter(lambda line: not type_pattern.search(line[1]),
                              type_lines))
-    lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
 
     if len(type_lines) == 0:
-        type_pattern = re.compile('#[\t ]*type[\t ]*(?!: ignore$):')
-        wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
+        # Catch common typo patterns like extra spaces, typo in 'ignore', etc.
+        wrong_type_pattern = re.compile("#[\t ]*type[\t ]*(?!: ignore(\\[.*\\])?$):")
+        wrong_type_lines = list(filter(lambda line: wrong_type_pattern.search(line[1]), lines))
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
                                + " is probably invalid.\nIt must be '# type:'"
