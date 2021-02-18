@@ -7,7 +7,7 @@ Tensor = torch.Tensor
 
 lgamma = _add_docstr(_special.special_lgamma,
                      r"""
-lgamma(input, *, out=None) -> Tensor
+lgamma(input) -> Tensor
 
 Computes the logarithm of the gamma function on :attr:`input`.
 
@@ -15,8 +15,7 @@ Computes the logarithm of the gamma function on :attr:`input`.
     \text{out}_{i} = \log \Gamma(\text{input}_{i})
 """ + """
 Args:
-    {input}
-    {out}
+    input (Tensor): the input tensor.
 
 Example::
 
