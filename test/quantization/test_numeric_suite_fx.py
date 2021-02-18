@@ -847,10 +847,6 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             sparse_nn.dense_top,
             {'': torch.quantization.default_qconfig},
         )
-        sparse_nn.model_sparse = prepare_fx(
-            sparse_nn.model_sparse,
-            {'': torch.quantization.float_qparams_weight_only_qconfig},
-        )
 
         # calibrate
         idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
@@ -861,7 +857,6 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         # convert
         sparse_nn_q = copy.deepcopy(sparse_nn)
         sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
-        sparse_nn_q.model_sparse = convert_fx(sparse_nn_q.model_sparse)
 
         # test out compare activations API
         sparse_nn.dense_top, sparse_nn_q.dense_top = prepare_model_outputs(
@@ -886,10 +881,6 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             sparse_nn.dense_top,
             {'': torch.quantization.default_qconfig},
         )
-        sparse_nn.model_sparse = prepare_fx(
-            sparse_nn.model_sparse,
-            {'': torch.quantization.float_qparams_weight_only_qconfig},
-        )
 
         # calibrate
         idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
@@ -900,7 +891,6 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         # convert
         sparse_nn_q = copy.deepcopy(sparse_nn)
         sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
-        sparse_nn_q.model_sparse = convert_fx(sparse_nn_q.model_sparse)
 
         # test out compare shadow activations API
         sparse_nn_q.dense_top = prepare_model_with_stubs(
