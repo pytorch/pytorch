@@ -655,6 +655,7 @@ Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
 Tensor special_lgamma(const Tensor& self) { return self.lgamma(); }
+Tensor& special_lgamma_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);
