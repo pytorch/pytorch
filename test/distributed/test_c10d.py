@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
     TEST_WITH_TSAN,
+    IS_WINDOWS,
     slowTest,
 )
 
@@ -368,6 +369,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
                           .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
+    @unittest.skipIf(IS_WINDOWS, "Skip test for windows because it cannot serialize logger instance")
     def test_multi_worker_with_fixed_world_size(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
@@ -386,6 +388,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
                                 .format(i, p.exitcode))
             p.join()
 
+    @unittest.skipIf(IS_WINDOWS, "Skip test for windows because it cannot serialize logger instance")
     def test_multi_worker_with_nonfixed_world_size(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
