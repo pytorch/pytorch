@@ -1,4 +1,5 @@
 import cimodel.lib.miniutils as miniutils
+import cimodel.data.simple.ios_definitions.ArchVariant
 
 class MacOsJob:
     def __init__(self, os_version, is_test=False, extra_props=None):
@@ -11,7 +12,7 @@ class MacOsJob:
 
         phase_name = "test" if self.is_test else "build"
 
-        full_job_name = "_".join(non_phase_parts + [phase_name])
+        full_job_name = "_".join(non_phase_parts + [phase_name] + list(self.extra_props.keys))
 
         test_build_dependency = "_".join(non_phase_parts + ["build"])
         extra_dependencies = [test_build_dependency] if self.is_test else []
@@ -31,7 +32,12 @@ WORKFLOW_DATA = [
     MacOsJob("10_15"),
     MacOsJob("10_13"),
     MacOsJob("10_13", True),
-    MacOsJob("10_13", True, extra_props={"build_lite_interpreter": miniutils.quote(str(int(True)))})]
+    MacOsJob(
+        "10_13",
+        True,
+        extra_props={"build_lite_interpreter": miniutils.quote(str(int(True)))}
+    )
+]
 
 
 def get_workflow_jobs():
