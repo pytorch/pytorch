@@ -6,9 +6,13 @@ the Deep Learning Matrix Collection (DLMC), which were used in recent studies [1
 Performance benchmarks scripts for matrix-matrix and matrix-vector ops 
 (dense-sparse, sparse-sparse, and compare to dense-dense) are implemented here.
 
-- `spmm.py` this benchmarks is for  Sparse matrix-matrix multiplication (SPMM) performance test, for both `sparse @ sparse` and `sparse @ dense` operations. Both can run in forward and backward mode, on CPU or CUDA, using different datasets from the dataset collection DLMC.  
+- `matmul_bench.py` with `--operation sparse@sparse|sparse@dense` is for  
+  Sparse matrix-matrix multiplication (SPMM) performance test. 
+  It can run in forward and backward mode with `--backward_test`, on CPU or CUDA with `--with_cuda`, 
+  using different datasets from the dataset collection DLMC. 
+  For more details see `test.sh` file.  
 
-- `spmv.py`  this benchmark is for Sparse matrix-vector multiplication (SPMV) performance test.  
+- `matmul_bench.py` with `--operation sparse@vector` is for Sparse matrix-vector multiplication (SPMV) performance test.
 
 References:
 

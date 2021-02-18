@@ -7,10 +7,10 @@ DATASET_ROOT_DIR=$HOME/datasets/
 
 echo "!! SPARSE SPMS TIME BENCHMARK!! " 
 
-python -m dlmc.spmm  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation matmul --spmm_type=sparse-dense --output /tmp/sspmm_bench.pkl
-python -m dlmc.spmm  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation backward --spmm_type=sparse-dense --output /tmp/sspmm_backward_bench.pkl
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@sparse
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@sparse --backward_test
 
-python -m dlmc.spmm  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation matmul --spmm_type=sparse-sparse --output /tmp/spmm_bench.pkl
-python -m dlmc.spmm  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation backward --spmm_type=sparse-sparse --output /tmp/spmm_backward_bench.pkl
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@dense
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@dense --backward_test
 
-python -m dlmc.spmv  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation matmul --output /tmp/spmv_bench.pkl
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@vector 

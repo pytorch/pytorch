@@ -1,9 +1,8 @@
 import torch
 from pathlib import Path
-import sys
 from scipy import sparse
-import math 
-from scipy.sparse import isspmatrix
+import math
+
 
 def to_coo_scipy(x):
     indices_1 = x._indices().numpy()
@@ -11,19 +10,22 @@ def to_coo_scipy(x):
     return sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])),
                              shape=x.shape)
 
-def scipy_coo_matmul(mat1, mat2):
-    if isspmatrix(mat1) and isspmatrix(mat2):
-        result = mat1.dot(mat2).tocoo()
-        return torch.sparse_coo_tensor([result.row, result.col], result.data,
-                                       result.shape)
+
+def sparse_grad_output(a, b):
+    c = torch.sparse.mm(a, b)
+    if c.is_sparse:
+        c2 = torch.rand_like(c.to_dense())
+        return c2.sparse_mask(c.coalesce())
     else:
-        return mat1.dot(mat2)
+        return torch.rand_like(c)
 
 
 def read_matrix_params(path):
-    sys.stdin = open(path)
-    nrows, ncols, nnz = map(lambda el: int(el), input().split(', '))
-    return (nrows, ncols), nnz
+    with open(path, 'r') as file:
+        line = file.readline()
+        nrows, ncols, nnz = map(lambda el: int(el), line.split(', '))
+        return (nrows, ncols), nnz
+
 
 def csr_to_coo(indices, indptr, shape):
     n_rows, n_cols = shape
@@ -34,33 +36,34 @@ def csr_to_coo(indices, indptr, shape):
             rows[j] = i
     return torch.tensor([rows, cols], dtype=torch.long)
 
+
 def load_sparse_matrix(path, device):
-    sys.stdin = open(path)
-    nrows, ncols, nnz = map(lambda el: int(el), input().split(', '))
-    index_pointers = map(lambda el: int(el), input().split())
-    indices = map(lambda el: int(el), input().split())
+    with open(path, 'r') as file:
+        nrows, ncols, nnz = map(lambda el: int(el), file.readline().split(', '))
+        index_pointers = map(lambda el: int(el), file.readline().split())
+        indices = map(lambda el: int(el), file.readline().split())
 
     index_pointers = list(index_pointers)
     indices = list(indices)
     data = torch.randn(nnz, dtype=torch.double)
     shape = (nrows, ncols)
-    return torch.sparse_coo_tensor(csr_to_coo(indices, index_pointers, shape), data, shape).to(device=device)
+    return torch.sparse_coo_tensor(csr_to_coo(indices, index_pointers, shape), data, shape, device=device)
 
 
 def gen_vector(path, device):
-    sys.stdin = open(path)
-    nrows, ncols, nnz = map(lambda el: int(el), input().split(', '))
-    index_pointers = map(lambda el: int(el), input().split())
-    indices = map(lambda el: int(el), input().split())
-    return torch.randn(nrows, dtype=torch.double, device=device)
+    with open(path, 'r') as file:
+        nrows, ncols, nnz = map(lambda el: int(el), file.readline().split(', '))
+        index_pointers = map(lambda el: int(el), file.readline().split())
+        indices = map(lambda el: int(el), file.readline().split())
+        return torch.randn(nrows, dtype=torch.double, device=device)
 
 
 def gen_matrix(path, device):
-    sys.stdin = open(path)
-    nrows, ncols, nnz = map(lambda el: int(el), input().split(', '))
-    index_pointers = map(lambda el: int(el), input().split())
-    indices = map(lambda el: int(el), input().split())
-    return torch.randn(nrows, ncols, dtype=torch.double, device=device)
+    with open(path, 'r') as file:
+        nrows, ncols, nnz = map(lambda el: int(el), file.readline().split(', '))
+        index_pointers = map(lambda el: int(el), file.readline().split())
+        indices = map(lambda el: int(el), file.readline().split())
+        return torch.randn(nrows, ncols, dtype=torch.double, device=device)
 
 
 def load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit=math.inf):
@@ -111,7 +114,7 @@ def load_spmm_dataset(dataset_path, hidden_size, sparsity, spmm_type, device, n_
         sparsity:
             This value allows tensors of varying sparsities.
         spmm_type:
-            This value allows tensors for `sparse @ sparse` or `sparse @ dense` operations.
+            This value allows tensors for `sparse@sparse` or `sparse@dense` operations.
         device:
             Whether to place the Tensor on a GPU or CPU.
         n_limit:
@@ -137,5 +140,60 @@ def load_spmm_dataset(dataset_path, hidden_size, sparsity, spmm_type, device, n_
 
     for fx, fy in zip(x_files, y_files):
         x = load_sparse_matrix(fx, device)
-        y = gen_matrix(fy, device) if spmm_type == 'sparse-dense' else load_sparse_matrix(fy, device)
+        y = gen_matrix(fy, device) if spmm_type == 'sparse@dense' else load_sparse_matrix(fy, device)
         yield (x, y)
+
+
+def load_dlmc_dataset(dataset_path, operation, hidden_size, sparsity, device, requires_grad, n_limit=math.inf):
+    """load_dlmc_dataset loads a DLMC dataset for a matmul performance test.
+    Args:
+        dataset_path:
+            path of the dataset from DLMC collection.
+        operation:
+            This value allows tensors for `sparse@sparse`|`sparse@dense`|`sparse@vector` operations.
+        hidden_size
+            This value allows tensors of varying sizes.
+        sparsity:
+            This value allows tensors of varying sparsities.
+        device:
+            Whether to place the Tensor on a GPU or CPU.
+        requires_grad:
+            Loads the dataset for backward test.
+        n_limit:
+            This value allows a dataset with some limit size.
+    """
+    if operation == 'sparse@sparse' or operation == "sparse@dense":
+        collection = load_spmm_dataset(dataset_path, hidden_size, sparsity, operation, device, n_limit)
+    elif operation == 'sparse@vector':
+        collection = load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit)
+    scipy_vars = {}
+    backward_vars = {}
+    for x, y in collection:
+        if device == 'cpu':
+            scipy_vars = {
+                "sx": to_coo_scipy(x) if x.is_sparse else x.numpy(),
+                "sy": to_coo_scipy(y) if y.is_sparse else y.numpy(),
+            }
+        if not requires_grad:
+            dx = x.to_dense() if x.is_sparse else x
+            dy = y.to_dense() if y.is_sparse else y
+        else:
+            c = sparse_grad_output(x, y)
+            backward_vars = {
+                "sparse_grad_output": c,
+                "grad_output": c.to_dense() if c.is_sparse else c,
+            }
+            x.requires_grad_(True)
+            y.requires_grad_(True)
+            dx = x.to_dense().detach() if x.is_sparse else x.clone().detach()
+            dy = y.to_dense().detach() if y.is_sparse else y.clone().detach()
+            dx.requires_grad_(True)
+            dy.requires_grad_(True)
+        yield {
+            "x": x,
+            "y": y,
+            "dx": dx,
+            "dy": dy,
+            **scipy_vars,
+            **backward_vars
+        }
