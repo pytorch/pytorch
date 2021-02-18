@@ -1372,7 +1372,7 @@ void initJITBindings(PyObject* module) {
   initJitScriptBindings(m.ptr(), top.ptr());
   initJitBackendBindings(m.ptr());
   initStaticRuntimeBindings(m.ptr());
-  initTensorExprBindings(m.ptr());
+  initTensorExprBindings(top.ptr());
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
