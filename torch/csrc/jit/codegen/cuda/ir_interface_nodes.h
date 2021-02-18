@@ -194,8 +194,14 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return this_compute_at_axis_;
   }
 
-  // Compute this TensorView relative to another tensor at axis
-  TensorView* computeAt(TensorView* consumer, int axis);
+  // Compute this TensorView relative to a consumer relative to consumer
+  // position, -1 will compute tensors inline with eachother, 0 doesn't share
+  // any loop nests between the tensors
+  TensorView* computeAt(TensorView* consumer, int position);
+
+  // Compute this tensor to consumer, at local position, -1 will compute tensors
+  // inline with eachother, 0 doesn't share any loop nests between the tensors
+  TensorView* computeWith(TensorView* consumer, int position);
 
   void clearComputeAt() {
     this_compute_at_axis_ = 0;

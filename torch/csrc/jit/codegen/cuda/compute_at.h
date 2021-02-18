@@ -98,15 +98,25 @@ class ComputeAtData {
 
 class ComputeAt {
  public:
-  static void run(
-      TensorView* _producer,
-      TensorView* _consumer,
-      unsigned int _consumer_position);
+  // Runs the compute at pass making producer look like consumer, computing
+  // producer relative to consumer
+  static void runAt(
+      TensorView* producer,
+      TensorView* consumer,
+      unsigned int consumer_position);
+
+  // Runs the compute with pass making consumer look like producer, computing
+  // producer relative to consumer
+  static void runWith(
+      TensorView* producer,
+      TensorView* consumer,
+      unsigned int producer_position);
 
  private:
   TensorView* producer_;
   TensorView* consumer_;
-  unsigned int consumer_position_;
+  TensorView* reference_;
+  unsigned int reference_position_;
   ComputeAtRootDomainMap root_map_;
 
   // Runs replayPasC and sets producer computeAt settings. Returns
@@ -154,7 +164,8 @@ class ComputeAt {
   ComputeAt(
       TensorView* _producer,
       TensorView* _consumer,
-      unsigned int _consumer_position);
+      TensorView* _reference,
+      unsigned int _reference_position);
 
   ComputeAt() = delete;
   ~ComputeAt() = default;

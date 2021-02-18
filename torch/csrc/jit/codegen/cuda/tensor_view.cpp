@@ -177,20 +177,38 @@ void TensorView::setComputeAt(unsigned int this_pos) {
   this_compute_at_axis_ = this_pos;
 }
 
-TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
+TensorView* TensorView::computeAt(TensorView* consumer, int position) {
   // Make sure this and consumer are not the same tensor, that's illegal
   TORCH_CHECK(!sameAs(consumer), "Cannot call this->computeAt(this, ...)");
 
   // We support negative axes, so increment it by consumer->nDims() + 1 and make
   // sure the result is within consumer->nDims() + 1. being at consumer->nDims()
   // means producer will be computed inline with consumer, hence the +1.
-  if (axis < 0)
-    axis += int(consumer->nDims()) + 1;
+  if (position < 0)
+    position += int(consumer->nDims()) + 1;
   TORCH_CHECK(
-      axis >= 0 && (unsigned int)axis < consumer->nDims() + 1,
-      "Compute at called on an axis outside valid range.");
+      position >= 0 && (unsigned int)position < consumer->nDims() + 1,
+      "Compute at called on an position outside valid range.");
 
-  ComputeAt::run(this, consumer, (unsigned int)axis);
+  ComputeAt::runAt(this, consumer, (unsigned int)position);
+
+  return this;
+}
+
+TensorView* TensorView::computeWith(TensorView* consumer, int position) {
+  // Make sure this and consumer are not the same tensor, that's illegal
+  TORCH_CHECK(!sameAs(consumer), "Cannot call this->computeAt(this, ...)");
+
+  // We support negative axes, so increment it by this->nDims() + 1 and make
+  // sure the result is within this->nDims() + 1. being at this->nDims()
+  // means producer will be computed inline with this, hence the +1.
+  if (position < 0)
+    position += int(this->nDims()) + 1;
+  TORCH_CHECK(
+      position >= 0 && (unsigned int)position < this->nDims() + 1,
+      "Compute at called on an position outside valid range.");
+
+  ComputeAt::runWith(this, consumer, (unsigned int)position);
 
   return this;
 }
