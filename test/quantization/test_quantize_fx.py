@@ -2107,7 +2107,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """ quantization of the output of cat will be depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
-        class QuantizedInput(torch.nn.Module):
+        class QuantizedCat(torch.nn.Module):
             def __init__(self):
                 super(QuantizedCat, self).__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
