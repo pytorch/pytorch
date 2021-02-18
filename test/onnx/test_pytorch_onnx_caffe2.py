@@ -1429,6 +1429,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    # ConstantFill is a deprecated experimental op (used in opsets < 9).
+    # Shape inference does not cover this op.
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_arithmetic(self):
         class Arithmetic(torch.jit.ScriptModule):
             @torch.jit.script_method
