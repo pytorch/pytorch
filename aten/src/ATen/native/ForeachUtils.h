@@ -29,10 +29,6 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
-
-  for (int i = 0; i < tensors1.size(); i++) {
-    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
-  }
 }
 
 void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3) {
@@ -41,11 +37,6 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
   TORCH_CHECK(tensors3.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
   TORCH_CHECK(tensors1.size() == tensors3.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors3.size());
-
-  for (int i = 0; i < tensors1.size(); i++) {
-    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
-    TORCH_CHECK(tensors1[i].sizes() == tensors3[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors3[i].sizes());
-  }
 }
 
 void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
@@ -99,12 +90,14 @@ bool check_fast_path_restrictions(
     auto expected_device = tensorLists[0][0].device();
     auto expected_strides = tensorLists[0][0].strides();
     auto expected_dtype = tensorLists[0][0].dtype();
+    auto expected_size = tensorLists[0][0].sizes();
 
     auto is_tensor_okay = [&](const Tensor& tensor) {
       return tensor.dtype() == expected_dtype &&
              tensor.device() == expected_device &&
              tensor.layout() == at::kStrided &&
              tensor.strides() == expected_strides &&
+             tensor.sizes() == expected_size &&
              tensor.is_non_overlapping_and_dense();
     };
 

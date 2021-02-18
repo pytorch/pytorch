@@ -544,9 +544,9 @@ class TestForeach(TestCase):
             # Corresponding tensors with different sizes
             tensors1 = [torch.zeros(10, 10, device=device) for _ in range(10)]
             tensors2 = [torch.ones(11, 11, device=device) for _ in range(10)]
-            with self.assertRaisesRegex(RuntimeError, "Corresponding tensors in lists must have the same size"):
+            with self.assertRaisesRegex(RuntimeError, r"must match the size of tensor b"):
                 bin_op(tensors1, tensors2)
-            with self.assertRaisesRegex(RuntimeError, r", got \[10, 10\] and \[11, 11\]"):
+            with self.assertRaisesRegex(RuntimeError, r"must match the size of tensor b"):
                 bin_op_(tensors1, tensors2)
 
     @dtypes(*torch.testing.get_all_dtypes())
@@ -579,6 +579,36 @@ class TestForeach(TestCase):
         res = torch._foreach_add([tensor1], [tensor2])
         torch._foreach_add_([tensor1], [tensor2])
         self.assertEqual(res, [tensor1])
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_broadcasting(self, device, dtype):
+        a = [torch.rand(1, 2, 2, 4, 1, device=device) for _ in N_values]
+        b = [torch.rand(4, 1, device=device) for _ in N_values]
+        c = [torch.rand(2, 1, 2, 1, 5, device=device) for _ in N_values]
+
+        for pair in [(a, b), (a, c), (c, a)]:
+            expected = [t1.add(t2) for t1, t2 in zip(pair[0], pair[1])]
+            actual = torch._foreach_add(pair[0], pair[1])
+            self.assertEqual(expected, actual)
+
+        a = torch.rand(1, 2, device=device)
+        b = torch.rand(4, 2, device=device)
+
+        # Test error case
+        foreach_exeption = False
+        torch_exeption = False
+
+        try:
+            actual = torch._foreach_add([a], [b])
+        except Exception:
+            foreach_exeption = True
+
+        try:
+            a.add(b)
+        except Exception:
+            torch_exeption = True
+
+        self.assertEqual(foreach_exeption, torch_exeption)
 
 instantiate_device_type_tests(TestForeach, globals())
 
