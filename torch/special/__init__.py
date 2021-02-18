@@ -6,7 +6,7 @@ from torch._C import _add_docstr, _special  # type: ignore
 Tensor = torch.Tensor
 
 gammaln = _add_docstr(_special.special_gammaln,
-                     r"""
+                      r"""
 gammaln(input) -> Tensor
 
 Computes the logarithm of the gamma function on :attr:`input`.
