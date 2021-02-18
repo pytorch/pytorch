@@ -29,6 +29,7 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearDynamicModel,
     SingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
+    SparseNNModel,
     skip_if_no_torchvision,
     test_only_eval_fn,
 )
@@ -770,4 +771,76 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         act_compare_dict = get_matching_activations_a_shadows_b(
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
+        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+
+class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
+    """
+    Tests numeric suite core APIs on non-toy models.
+    """
+
+    @override_qengines
+    def test_sparsenn_compare_activations(self):
+        sparse_nn = SparseNNModel().eval()
+
+        # quantize the embeddings and the dense part separately, using FX graph mode
+        sparse_nn.dense_top = prepare_fx(
+            sparse_nn.dense_top,
+            {'': torch.quantization.default_qconfig},
+        )
+
+        # calibrate
+        idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.LongTensor([0, 4])
+        x = torch.randn(2, 4)
+        sparse_nn(idx, offsets, x)
+
+        # convert
+        sparse_nn_q = copy.deepcopy(sparse_nn)
+        sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
+
+        # test out compare activations API
+        sparse_nn.dense_top, sparse_nn_q.dense_top = prepare_model_outputs(
+            'fp32_prepared', sparse_nn.dense_top, 'int8', sparse_nn_q.dense_top, OutputLogger)
+
+        # calibrate
+        sparse_nn(idx, offsets, x)
+        sparse_nn_q(idx, offsets, x)
+
+        # inspect results
+        act_compare_dict = get_matching_activations(sparse_nn, sparse_nn_q, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 3)
+        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+
+    @override_qengines
+    def test_sparsenn_shadow(self):
+        sparse_nn = SparseNNModel().eval()
+
+        # quantize the embeddings and the dense part separately, using FX graph mode
+        sparse_nn.dense_top = prepare_fx(
+            sparse_nn.dense_top,
+            {'': torch.quantization.default_qconfig},
+        )
+
+        # calibrate
+        idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.LongTensor([0, 4])
+        x = torch.randn(2, 4)
+        sparse_nn(idx, offsets, x)
+
+        # convert
+        sparse_nn_q = copy.deepcopy(sparse_nn)
+        sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
+
+        # test out compare shadow activations API
+        sparse_nn_q.dense_top = prepare_model_with_stubs(
+            'fp32_prepared', sparse_nn.dense_top,
+            'int8', sparse_nn_q.dense_top, OutputLogger)
+
+        # calibrate
+        sparse_nn_q(idx, offsets, x)
+
+        # check activation result correctness
+        act_compare_dict = get_matching_activations_a_shadows_b(
+            sparse_nn_q, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 3)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)

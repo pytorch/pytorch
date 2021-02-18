@@ -49,6 +49,11 @@ def get_type_a_related_to_b() -> Set[Tuple[Callable, Callable]]:
             toq.add,
             operator.add,  # x + y
         ]),
+        # cat
+        set([
+            torch.cat,
+            toq.cat,
+        ]),
     ]
 
     type_a_related_to_b: Set[Tuple[Callable, Callable]] = set()

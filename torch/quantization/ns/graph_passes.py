@@ -5,14 +5,14 @@ from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 
 from .utils import (
-    get_node_io_type,
+    get_node_input_type,
     getattr_from_fqn,
     print_node,
-    NodeIOType,
+    NodeInputType,
     return_first_non_observer_node,
 )
 
-from typing import Dict, Tuple, Callable, List, Any, Optional
+from typing import Dict, Tuple, Callable, List, Any, Optional, Union
 
 def _insert_logger_after_node(
     node: Node,
@@ -87,9 +87,10 @@ def remove_observers_add_loggers(
 def _insert_dtype_cast_after_node(
     node_a: Node,
     node_c: Node,
-    prev_node_c: Node,
+    prev_node_c: Union[Node, List[Node]],
     gm_a: GraphModule,
     gm_b: GraphModule,
+    graph_c: Graph,
     node_name_prefix: str,
 ) -> Node:
     """
@@ -109,18 +110,19 @@ def _insert_dtype_cast_after_node(
     will insert a dequant.
     """
     dtype_cast_op = None
-    node_io_type_a = get_node_io_type(node_a, gm_a)
-    node_io_type_c = get_node_io_type(node_c, gm_b)
+    node_input_type_a = get_node_input_type(node_a, gm_a)
+    node_input_type_c = get_node_input_type(node_c, gm_b)
 
-    if node_io_type_a == NodeIOType.FP32 and node_io_type_c == NodeIOType.INT8:
+    if node_input_type_a == NodeInputType.FP32 and node_input_type_c == NodeInputType.INT8:
         dtype_cast_op = torch.dequantize
     else:
         raise AssertionError(
-            f"dtype cast from {node_io_type_c} to {node_io_type_a} needs to be implemented")
+            f"dtype cast from {node_input_type_c} to {node_input_type_a} needs to be implemented")
 
     new_dtype_cast_name = \
         get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
-    return prev_node_c.graph.create_node(
+
+    return graph_c.create_node(
         'call_function', dtype_cast_op, (prev_node_c,), {},
         new_dtype_cast_name)
 
@@ -186,15 +188,18 @@ def _insert_copy_of_node_a_after_input_node_c(
             raise AssertionError(
                 f"handling for arg of type {type(node_a_arg)} is not implemented")
 
-    new_kwargs = {}
+    new_kwargs: Dict[str, Any] = {}
     for node_a_k, node_a_kwarg in node_a.kwargs.items():
-        kwarg_a_copy_name = \
-            get_new_attr_name_with_prefix(node_a_kwarg.name + '_shadow_copy_')(gm_b)  # type: ignore
-        kwarg_a_obj = getattr_from_fqn(gm_a, node_a_kwarg.target)  # type: ignore
-        setattr(gm_b, kwarg_a_copy_name, kwarg_a_obj.detach())
-        node_a_kwarg_copy = graph_c.create_node(
-            'get_attr', kwarg_a_copy_name, (), {}, kwarg_a_copy_name)
-        new_kwargs[node_a_k] = node_a_kwarg_copy
+        if isinstance(node_a_kwarg, Node):
+            kwarg_a_copy_name = \
+                get_new_attr_name_with_prefix(node_a_kwarg.name + '_shadow_copy_')(gm_b)  # type: ignore
+            kwarg_a_obj = getattr_from_fqn(gm_a, node_a_kwarg.target)  # type: ignore
+            setattr(gm_b, kwarg_a_copy_name, kwarg_a_obj.detach())
+            node_a_kwarg_copy = graph_c.create_node(
+                'get_attr', kwarg_a_copy_name, (), {}, kwarg_a_copy_name)
+            new_kwargs[node_a_k] = node_a_kwarg_copy
+        else:
+            new_kwargs[node_a_k] = node_a_kwarg
 
     node_a_shadows_c_name = \
         get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
@@ -299,7 +304,8 @@ def create_a_shadows_b(
             # cast dtype from the dtype of node_c's input to the dtype of
             # node_a's input (dequant, etc)
             dtype_cast_node = _insert_dtype_cast_after_node(
-                node_a, node_c, node_c.args[0], gm_a, gm_b, node_b.name + '_dtype_cast_')
+                node_a, node_c, node_c.args[0], gm_a, gm_b, graph_c,
+                node_b.name + '_dtype_cast_')
             env_c[dtype_cast_node.name] = dtype_cast_node
             # subgraph so far:
             #
