@@ -126,7 +126,7 @@ void Logger::calculate_avg_gpu_time(
   if (milliseconds < 0) {
     return;
   }
-  avg_time = (int(milliseconds * kMilliSecondToNanosSecond) +
+  avg_time = (int64_t(milliseconds * kMilliSecondToNanosSecond) +
               avg_time * (num_iterations_stats_recorded_ - 1)) /
       num_iterations_stats_recorded_;
 }
@@ -135,7 +135,7 @@ void Logger::calculate_avg_gpu_time(
 void Logger::set_runtime_stats() {
   // Sync with reducer's data
   std::lock_guard<std::mutex> lock(reducer_->mutex_);
-  // set runtime stats after 1st iteration is complete.
+  // Set runtime stats at the sampling iterations.
   if (!reducer_->should_collect_runtime_stats()) {
     return;
   }
@@ -168,7 +168,7 @@ void Logger::set_runtime_stats() {
       return;
     }
     // Check events on the replicas_[0][0].device().
-    at::cuda::set_device(reducer_->replicas_[0][0].device().index());
+    at::DeviceGuard g(reducer_->replicas_[0][0].device());
     // It is possible users did not call backward or run codes in
     // no-sync mode, in this case, some cudaEvents like "backward_compute_end"
     // or "backward_comm_start" or "backward_comm_end" will not be recorded.
