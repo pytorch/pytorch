@@ -835,19 +835,32 @@ inline bool is_valid_python_id_char(char c) {
 std::string Unpickler::readString() {
   std::string ss;
   while (true) {
-    char c = read<char>();
-    if (c == '\n') {
+    auto* const bufferStart = buffer_.data() + buffer_pos_;
+    const auto bufferLeft = buffer_.size() - buffer_pos_;
+    char* const newlinePtr =
+        static_cast<char*>(memchr(bufferStart, '\n', bufferLeft));
+    if (newlinePtr) {
+      // read up to newline and we are done.
+      auto const charsRead = newlinePtr - bufferStart;
+      ss.append(bufferStart, charsRead);
+      buffer_remaining_ -= charsRead + 1;
+      buffer_pos_ += charsRead + 1;
       break;
+    } else {
+      // read whole buffer, refill
+      for (const char* p = bufferStart; p < bufferStart + bufferLeft; ++p) {
+        // Simple check just in case there is no terminating '\n'
+        TORCH_CHECK(
+            is_valid_python_id_char(*p),
+            "Found character '",
+            int(uint8_t(*p)),
+            "' in string, ",
+            "strings must be qualified Python identifiers");
+      }
+      ss.append(bufferStart, bufferLeft);
+      buffer_remaining_ = reader_(buffer_.data(), buffer_.size());
+      buffer_pos_ = 0;
     }
-    ss.push_back(c);
-
-    // Simple check just in case there is no terminating '\n'
-    TORCH_CHECK(
-        is_valid_python_id_char(c),
-        "Found character '",
-        int(uint8_t(c)),
-        "' in string, ",
-        "strings must be qualified Python identifiers");
   }
   return ss;
 }
