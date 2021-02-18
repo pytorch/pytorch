@@ -989,6 +989,9 @@ jobs:
         root: /Users/distiller/project
         paths: final_pkgs
 
+    - store_artifacts:
+        path: /Users/distiller/project/final_pkgs
+
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
