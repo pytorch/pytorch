@@ -15,6 +15,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   , bdims_(std::move(bdims))
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
+  set_storage_access_should_throw();
   checkInvariants();
 
   const auto public_dims = value_.dim() - bdims_.size();
@@ -80,10 +81,6 @@ bool BatchedTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   return is_contiguous_;
 }
 
-const Storage& BatchedTensorImpl::storage() const {
-  TORCH_CHECK(false, "Due to limitations, we cannot access the storage() of a tensor from inside of vmap.");
-}
-
 // The following are some internal inherited methods that we do not support.
 // They should never get called.
 void BatchedTensorImpl::set_size(int64_t dim, int64_t new_size) {
@@ -101,6 +98,10 @@ bool BatchedTensorImpl::has_storage() const {
   return false;
 }
 #endif
+
+const char* BatchedTensorImpl::tensorimpl_type_name() const {
+  return "BatchedTensorImpl";
+}
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
