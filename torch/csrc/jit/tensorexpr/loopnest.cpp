@@ -263,8 +263,8 @@ class Vectorizer : public IRMutator {
     std::vector<const Expr*> inputs = {v->body()};
 
     auto* out = try_vectorize(v, inputs, [&]() {
-      return ExprHandle(new ReduceOp(
-          v->accumulator(), inputs[0], v->reduce_args(), v->reducer()));
+      return ExprHandle(
+          new ReduceOp(inputs[0], v->reduce_args(), v->reducer()));
     });
     return out;
   }
@@ -1788,20 +1788,22 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     const Buf* producer,
     const std::string& name,
     Stmt* consumer) {
-  ReduceOp* reduceOp{nullptr};
-  auto reductions = NodeFinder<ReduceOp>::find(consumer);
-  for (auto* ro : reductions) {
-    if (ro->accumulator() != producer) {
-      continue;
-    }
+  const ReduceOp* reduceOp{nullptr};
+  auto stores = NodeFinder<Store>::find(consumer);
+  for (auto* store : stores) {
+    if (auto ro = dynamic_cast<const ReduceOp*>(store->value())) {
+      if (store->buf() != producer) {
+        continue;
+      }
 
-    if (reduceOp) {
-      throw std::runtime_error(
-          "can only cache accesses used by at most a single reduceOp");
-      return {nullptr, nullptr};
-    }
+      if (reduceOp) {
+        throw std::runtime_error(
+            "can only cache accesses used by at most a single reduceOp");
+        return {nullptr, nullptr};
+      }
 
-    reduceOp = ro;
+      reduceOp = ro;
+    }
   }
 
   // Check bounds but don't care about AccessKind.
@@ -2142,16 +2144,18 @@ class SwapReduce : public IRMutator {
   SwapReduce(
       const ReduceOp* old_reduce,
       ReduceOp* new_reduce,
+      const Buf* new_accumulator,
       std::vector<const Expr*> new_indices)
       : old_reduce_(old_reduce),
         new_reduce_(new_reduce),
+        new_accumulator_(new_accumulator),
         new_indices_(std::move(new_indices)) {}
 
   Stmt* mutate(const Store* v) override {
     if (const ReduceOp* op = dynamic_cast<const ReduceOp*>(v->value())) {
       if (op == old_reduce_) {
-        auto buf = new_reduce_->accumulator();
-        return new Store(buf, new_indices_, new_reduce_, new IntImm(1));
+        return new Store(
+            new_accumulator_, new_indices_, new_reduce_, new IntImm(1));
       }
     }
     return IRMutator::mutate(v);
@@ -2160,6 +2164,7 @@ class SwapReduce : public IRMutator {
  private:
   const ReduceOp* old_reduce_;
   ReduceOp* new_reduce_;
+  const Buf* new_accumulator_;
   const std::vector<const Expr*> new_indices_;
 };
 
@@ -2263,6 +2268,7 @@ void LoopNest::rfactor(
     return;
   }
 
+  auto old_acc = dynamic_cast<Store*>(st)->buf();
   auto old_outer = dynamic_cast<Store*>(st)->indices();
   auto new_outer = old_outer;
 
@@ -2319,11 +2325,11 @@ void LoopNest::rfactor(
   }
 
   std::vector<const Expr*> new_dims = {};
-  const Expr* init = reduce_op->accumulator()->initializer();
+  const Expr* init =
+      new Cast(reduce_op->dtype(), reduce_op->reducer().initializer());
   TORCH_INTERNAL_ASSERT(init);
   Buf* tmp_buf = new Buf("tmp_buf", new_dims, reduce_op->dtype(), init);
 
-  auto old_acc = reduce_op->accumulator();
   auto new_inner = reduce_op->reduce_args();
   bool found = false;
   for (size_t i = 0; i < new_inner.size(); ++i) {
@@ -2348,12 +2354,10 @@ void LoopNest::rfactor(
   }
   new_outer.emplace_back(reduction_var);
 
-  BufReplacer bufReplacer(
-      reduce_op->accumulator(), old_outer, tmp_buf, new_outer);
+  BufReplacer bufReplacer(old_acc, old_outer, tmp_buf, new_outer);
   const Expr* new_body = reduce_op->body()->accept_mutator(&bufReplacer);
 
-  auto first_reduce =
-      new ReduceOp(tmp_buf, new_body, new_inner, reduce_op->reducer());
+  auto first_reduce = new ReduceOp(new_body, new_inner, reduce_op->reducer());
 
   auto second_reduce_load_indices = old_outer;
   second_reduce_load_indices.emplace_back(reduction_var);
@@ -2370,7 +2374,7 @@ void LoopNest::rfactor(
   // variables) with a reduce over only its var by replacing the reduction op
   // buffer input with the temporary output buffer and removing other reductions
   // variables.
-  SwapReduce sr(reduce_op, first_reduce, new_outer);
+  SwapReduce sr(reduce_op, first_reduce, tmp_buf, new_outer);
   Block* parent_block = dynamic_cast<Block*>(root_for->get_parent());
   if (!parent_block) {
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
@@ -2405,7 +2409,7 @@ void LoopNest::rfactor(
     new_root_for->body()->prepend_stmt(init_stmt);
   }
 
-  auto second_buf = dynamic_cast<const Buf*>(second_reduce->accumulator());
+  auto second_buf = dynamic_cast<const Buf*>(old_acc);
   auto const& second_indices = old_outer;
   if (insertion_point &&
       dynamic_cast<For*>(insertion_point->get_parent())->var() ==

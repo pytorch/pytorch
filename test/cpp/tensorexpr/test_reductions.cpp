@@ -1761,12 +1761,13 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
   LoopNest loop({c});
+
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
   loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
 
-  reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
+  auto stores = NodeFinder<Store>::find(loop.root_stmt());
   std::vector<For*> loops = NodeFinder<For>::find(loop.root_stmt());
-  loop.cacheAccesses(reduces[0]->accumulator(), "tmp2", loops[2]);
+  loop.cacheAccesses(stores[1]->buf(), "tmp2", loops[2]);
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1823,9 +1824,9 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
   loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
 
-  reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
+  auto stores = NodeFinder<Store>::find(loop.root_stmt());
   std::vector<For*> loops = NodeFinder<For>::find(loop.root_stmt());
-  loop.cacheAccesses(reduces[0]->accumulator(), "tmp2", loops[3]);
+  loop.cacheAccesses(stores[1]->buf(), "tmp2", loops[3]);
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
