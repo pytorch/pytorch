@@ -8,12 +8,16 @@
 namespace torch {
 namespace jit {
 
-void OptimizeFrozenGraph(std::shared_ptr<Graph>& graph) {
+void OptimizeFrozenGraph(
+    std::shared_ptr<Graph>& graph,
+    bool optimize_numerics) {
   // run a couple times to capture Conv -> Mul -> Add etc
-  for (size_t i = 0; i < 2; i++) {
-    FoldFrozenConvBatchnorm(graph);
-    FoldFrozenConvAddOrSub(graph);
-    FoldFrozenConvMulOrDiv(graph);
+  if (optimize_numerics) {
+    for (size_t i = 0; i < 2; i++) {
+      FoldFrozenConvBatchnorm(graph);
+      FoldFrozenConvAddOrSub(graph);
+      FoldFrozenConvMulOrDiv(graph);
+    }
   }
 }
 
