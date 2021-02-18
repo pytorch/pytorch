@@ -162,7 +162,7 @@ endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
 # of type stub files to be omitted.
-# For comptability with older CMake versions, we omit it for now, but leave it as a comment in case comptability with the older
+# For compatibility with older CMake versions, we omit it for now, but leave it as a comment in case compatibility with the older
 # CMake versions is eventually dropped.
 # set(Modules
 #     __init__
@@ -216,7 +216,7 @@ add_custom_command(
 #          affect both torch_python and DEPLOY interpreter.
 if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
-  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB")
+  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
 
   target_compile_definitions(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
