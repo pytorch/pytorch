@@ -5,8 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 toq = torch.ops.quantized
 from torch.fx import GraphModule
+from torch.fx.graph import Node
 from torch.quantization.ns.graph_matcher import (
-    get_matching_node_pairs,
+    get_matching_subgraph_pairs,
     get_type_a_related_to_b,
 )
 
@@ -37,26 +38,28 @@ def compare_weights(
     gm_b: GraphModule,
 ) -> Dict[str, Dict[str, torch.Tensor]]:
     type_a_related_to_b = get_type_a_related_to_b()
-    matched_node_pairs = get_matching_node_pairs(gm_a, gm_b)
+    matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
 
     results = {}
 
-    for match_name, match in matched_node_pairs.items():
+    for match_name, match in matched_subgraph_pairs.items():
 
-        node_a, node_b = match
-        assert node_a.op == node_b.op and \
-            node_a.op in ('call_function', 'call_module')
+        (node_start_a, node_end_a), (node_start_b, node_end_b) = match
+        # Note: for matching weights we always use the start nodes,
+        # such as using linear in linear-relu
+        assert node_start_a.op == node_start_b.op and \
+            node_start_a.op in ('call_function', 'call_module')
 
-        if node_a.op == 'call_function':
+        if node_start_a.op == 'call_function':
 
             # linear
             # TODO(future PR): other function types
-            a_related_to_linear = node_a.target in (F.linear,) or \
-                (node_a.target, F.linear) in type_a_related_to_b
+            a_related_to_linear = node_start_a.target in (F.linear,) or \
+                (node_start_a.target, F.linear) in type_a_related_to_b
 
             if a_related_to_linear:
-                weight_a = get_linear_fun_weight(node_a, gm_a)
-                weight_b = get_linear_fun_weight(node_b, gm_b)
+                weight_a = get_linear_fun_weight(node_start_a, gm_a)
+                weight_b = get_linear_fun_weight(node_start_b, gm_b)
 
                 results[match_name] = {
                     name_a: weight_a,
@@ -65,10 +68,10 @@ def compare_weights(
 
         else:  # call_module
             # for call_module, we need to look up the modules to do the type check
-            assert isinstance(node_a.target, str)
-            mod_a = getattr_from_fqn(gm_a, node_a.target)
-            assert isinstance(node_b.target, str)
-            mod_b = getattr_from_fqn(gm_b, node_b.target)
+            assert isinstance(node_start_a.target, str)
+            mod_a = getattr_from_fqn(gm_a, node_start_a.target)
+            assert isinstance(node_start_b.target, str)
+            mod_b = getattr_from_fqn(gm_b, node_start_b.target)
 
             # check that A is one the modules we need
             # assume B is related (this is done by graph matcher)
@@ -125,18 +128,25 @@ def prepare_model_outputs(
     logger_cls: Callable,
 ) -> Tuple[GraphModule, GraphModule]:
 
-    matched_node_pairs = get_matching_node_pairs(gm_a, gm_b)
+    matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
 
-    nodes_to_instrument_a = []
-    nodes_to_instrument_b = []
-    for match_name, (node_a, node_b,) in matched_node_pairs.items():
+    node_to_instrument_to_other_node_name_a: Dict[Node, Optional[str]] = {}
+    node_to_instrument_to_other_node_name_b: Dict[Node, Optional[str]] = {}
+    for match_name, match in matched_subgraph_pairs.items():
+        (node_start_a, node_end_a), (node_start_b, node_end_b) = match
         # TODO(future PR): do not observe pairs of nodes we do not care
         #   about (both fp32, denylist, etc)
-        nodes_to_instrument_a.append(node_a)
-        nodes_to_instrument_b.append(node_b)
+        # Note: for matching activations we always use the end nodes,
+        # such as observing the output of relu in linear-relu
+        # Note: other_node_name is set to None in model B's loggers,
+        # and set to the corresponding model B's node in model A's loggers.
+        node_to_instrument_to_other_node_name_a[node_end_a] = node_end_b.name
+        node_to_instrument_to_other_node_name_b[node_end_b] = None
 
-    gm_a = remove_observers_add_loggers(gm_a, nodes_to_instrument_a, logger_cls, name_a)
-    gm_b = remove_observers_add_loggers(gm_b, nodes_to_instrument_b, logger_cls, name_b)
+    gm_a = remove_observers_add_loggers(
+        gm_a, node_to_instrument_to_other_node_name_a, logger_cls, name_a)
+    gm_b = remove_observers_add_loggers(
+        gm_b, node_to_instrument_to_other_node_name_b, logger_cls, name_b)
     return (gm_a, gm_b)
 
 # Note: this is not a user facing API
@@ -185,7 +195,12 @@ def get_matching_activations(
                 )
             )
             if is_logger:
-                results[mod.node_name + '.stats'][mod.model_name] = mod.stats
+                # If logger_obj.other_node_name is populated, then this logger
+                # is from model A, and other_node_name is the name from model B.
+                if mod.other_node_name is None:
+                    results[mod.node_name + '.stats'][mod.model_name] = mod.stats
+                else:
+                    results[mod.other_node_name + '.stats'][mod.model_name] = mod.stats
     return dict(results)
 
 # Note: this is not a user facing API
@@ -202,9 +217,9 @@ def prepare_model_with_stubs(
     Same thing as prepare_model_outputs, but for an `a_shadows_b` model.
     TODO(future PR): real docblock
     """
-    matched_node_pairs = get_matching_node_pairs(gm_a, gm_b)
+    matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
     gm_a_shadows_b = create_a_shadows_b(
-        name_a, gm_a, name_b, gm_b, matched_node_pairs, logger_cls)
+        name_a, gm_a, name_b, gm_b, matched_subgraph_pairs, logger_cls)
     return gm_a_shadows_b
 
 # Note: this is not a user facing API

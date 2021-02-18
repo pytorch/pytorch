@@ -45,7 +45,7 @@ def _insert_logger_after_node(
 
 def remove_observers_add_loggers(
     gm: GraphModule,
-    nodes_to_instrument: List[Node],
+    node_to_instrument_to_other_node_name: Dict[Node, Optional[str]],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
@@ -71,12 +71,14 @@ def remove_observers_add_loggers(
             # remove activation post process node
             env[node.name] = env[node.args[0].name]
 
-        elif node in nodes_to_instrument:
+        elif node in node_to_instrument_to_other_node_name:
+            other_node_name = node_to_instrument_to_other_node_name[node]
             # ensure env is populated with base node
             env[node.name] = new_graph.node_copy(node, load_arg)
             # add the logger after the base node
             env[node.name] = _insert_logger_after_node(
-                env[node.name], gm, logger_cls, '_ns_logger_', model_name)
+                env[node.name], gm, logger_cls, '_ns_logger_', model_name,
+                other_node_name)
 
         else:
             env[node.name] = new_graph.node_copy(node, load_arg)
@@ -125,6 +127,49 @@ def _insert_dtype_cast_after_node(
     return graph_c.create_node(
         'call_function', dtype_cast_op, (prev_node_c,), {},
         new_dtype_cast_name)
+
+def _insert_copy_of_subgraph_a_after_input_node_c(
+    input_node_c: Node,
+    node_start_a: Node,
+    node_end_a: Node,
+    gm_a: GraphModule,
+    gm_b: GraphModule,
+    node_name_prefix: str,
+) -> Node:
+    """
+    TODO(before land): real docblock
+    """
+    graph_c = input_node_c.graph
+
+    # create a sequential list of the subgraphs' nodes from start to end,
+    # because we need to add the nodes to graph C in non-reverse order
+    nodes_of_a = [node_end_a]
+    cur_node = node_end_a
+    while cur_node != node_start_a:
+        cur_node = cur_node.args[0]  # type: ignore
+        nodes_of_a.insert(0, cur_node)
+
+    # go through nodes of a in order, and insert them into the graph of c
+    # sequentially
+    cur_node_a = nodes_of_a[0]
+    cur_node_c = _insert_copy_of_node_a_after_input_node_c(
+        input_node_c,
+        cur_node_a,
+        gm_a,
+        gm_b,
+        node_name_prefix)
+    for cur_idx_a in range(1, len(nodes_of_a)):
+        cur_node_a = nodes_of_a[cur_idx_a]
+        prev_node_c = cur_node_c  # previous added node is the input to next node
+        cur_node_c = _insert_copy_of_node_a_after_input_node_c(
+            prev_node_c,
+            cur_node_a,
+            gm_a,
+            gm_b,
+            node_name_prefix)
+    # return the last inserted node
+    return cur_node_c
+
 
 def _insert_copy_of_node_a_after_input_node_c(
     input_node_c: Node,
@@ -228,7 +273,7 @@ def create_a_shadows_b(
     gm_a: GraphModule,
     name_b: str,
     gm_b: GraphModule,
-    matched_node_pairs: Dict[str, Tuple[Node, Node]],
+    matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
     logger_cls: Callable,
 ) -> GraphModule:
     """
@@ -266,9 +311,12 @@ def create_a_shadows_b(
     def load_arg(a):
         return map_arg(a, lambda node: env_c[node.name])
 
-    nodes_to_instrument_b_to_a = {}
-    for match_name, (node_a, node_b) in matched_node_pairs.items():
-        nodes_to_instrument_b_to_a[node_b] = node_a
+    node_b_to_matched_subgraph_a = {}
+    for match_name, match in matched_subgraph_pairs.items():
+        (node_start_a, node_end_a), (node_start_b, node_end_b) = match
+        assert node_start_b is node_end_b, \
+            "Shadowing subgraphs of B with multiple nodes is not yet handled."
+        node_b_to_matched_subgraph_a[node_end_b] = (node_start_a, node_end_a)
 
     for node_b in gm_b.graph.nodes:
         if node_b.op == 'output':
@@ -279,13 +327,14 @@ def create_a_shadows_b(
             # remove activation post process node
             env_c[node_b.name] = env_c[node_b.args[0].name]  # type: ignore
 
-        elif node_b in nodes_to_instrument_b_to_a:
-            node_a = nodes_to_instrument_b_to_a[node_b]
+        elif node_b in node_b_to_matched_subgraph_a:
+            node_start_a, node_end_a = node_b_to_matched_subgraph_a[node_b]
             if False:
                 print('b')
                 print_node(node_b)
                 print('a')
-                print_node(node_a)
+                print_node(node_start_a)
+                print_node(node_end_a)
 
             # ensure env_c is populated with base node
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
@@ -299,40 +348,40 @@ def create_a_shadows_b(
             #
             # subgraph so far:
             #
-            # node_c
+            # prev_node_c -> node_c
 
             # cast dtype from the dtype of node_c's input to the dtype of
             # node_a's input (dequant, etc)
             dtype_cast_node = _insert_dtype_cast_after_node(
-                node_a, node_c, node_c.args[0], gm_a, gm_b, graph_c,
+                node_start_a, node_c, node_c.args[0], gm_a, gm_b, graph_c,
                 node_b.name + '_dtype_cast_')
             env_c[dtype_cast_node.name] = dtype_cast_node
             # subgraph so far:
             #
             #       dtype_cast_node
             #      /
-            # node_c
+            # prev_node_c -> node_c
 
             # hook up the new mod_a copy to be in the graph, receiving the
             # same inputs as mod_b does, with dtype cast to match a
-            node_a_shadows_c = _insert_copy_of_node_a_after_input_node_c(
+            node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
                 env_c[dtype_cast_node.name],
-                node_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
+                node_start_a, node_end_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
             env_c[node_a_shadows_c.name] = node_a_shadows_c
             # subgraph so far:
             #
-            #       dtype_cast_node --> node_a_copy(args/kwargs not shown)
+            #       dtype_cast_node --> subgraph_a_copy(args/kwargs not shown)
             #      /
-            # node_c
+            # prev_node_c -> node_c
 
             # hook up a logger to the mod_b copy
             env_c[node_b.name] = _insert_logger_after_node(
                 env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_', name_b)
             # subgraph so far:
             #
-            #       dtype_cast_node --> node_a_copy
+            #       dtype_cast_node --> subgraph_a_copy
             #      /
-            # node_c --> logger_c
+            # prev_node_c -> node_c --> logger_c
 
             # hook up a logger to the mod_a copy
             # Note: we pass node_b.name to this logger, for easy matching later
@@ -341,9 +390,9 @@ def create_a_shadows_b(
                 node_b.name)
             # subgraph so far:
             #
-            #       dtype_cast_node --> node_a_copy --> logger_a
+            #       dtype_cast_node --> subgraph_a_copy --> logger_a
             #      /
-            # node_c --> logger_c
+            # prev_node_c -> node_c --> logger_c
 
         else:
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
