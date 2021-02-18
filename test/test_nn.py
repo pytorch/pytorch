@@ -13369,6 +13369,7 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn(2, 7, 7, requires_grad=True, device=device)
         self.assertEqual(func(x).shape, (2, 3, 3))
         if self.device_type != 'cuda':
+            # Reference: https://github.com/pytorch/pytorch/issues/52427
             # Raises -> RuntimeError: TensorAccessor expected 4 dims but tensor has 3
             # on CUDA in gradcheck
             gradcheck(func, [x])
