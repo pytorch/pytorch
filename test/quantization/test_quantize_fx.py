@@ -309,7 +309,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 inputs, quant_type,
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
-                reference=False)
+                output_a_reference_model=False)
 
     @skipIfNoFBGEMM
     def test_functional_reference(self):
@@ -327,7 +327,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
                 expected_node_occurrence=node_occurrence,
-                reference=True)
+                output_a_reference_model=True)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
@@ -346,7 +346,7 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'': qconfig}
         prepared = prepare_fx(m, qconfig_dict)
-        quantized = convert_fx(prepared, reference=True)
+        quantized = convert_fx(prepared, output_a_reference_model=True)
         qparams = (quantized._input_scale_0, quantized._input_zero_point_0)
         weight_obs = qconfig.weight()
         weight_obs(quantized.weight)
@@ -465,14 +465,14 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         for (ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
-            for reference in [True, False]:
+            for output_a_reference_model in [True, False]:
                 node_occurrence = dict()
                 if weight_prepack_node:
                     node_occurrence[weight_prepack_node] = 0
                 m = ModuleClass(*module_constructor_inputs).eval()
                 qconfig_dict = {"": float16_dynamic_qconfig}
                 m = prepare_fx(m, qconfig_dict)
-                m = convert_fx(m, reference=reference)
+                m = convert_fx(m, output_a_reference_model=output_a_reference_model)
                 self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 
