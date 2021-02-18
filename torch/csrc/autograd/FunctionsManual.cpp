@@ -2780,9 +2780,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> layernorm_double_backward(
   const auto input_ndim = input.dim();
   const int axis = input_ndim - normalized_ndim;
   const int64_t M =
-      at::prod_intlist(input_shape.cbegin(), input_shape.cbegin() + axis);
+      c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
   const int64_t N =
-      at::prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
+      c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
 
   // for half inputs, save_mean, save_invstd are float
   // (ideally, we would cast everything else, but not now)

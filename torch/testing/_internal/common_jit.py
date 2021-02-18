@@ -34,15 +34,6 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'binary_cross_entropy_size_average',
     'ctc_loss',
     'grid_sample',
-    'layer_norm',
-    'layer_norm_with_only_weight',
-    'layer_norm_with_only_bias',
-    'layer_norm_with_weight_and_bias',
-    'Transformer_multilayer_coder',
-    'TransformerDecoderLayer_gelu_activation',
-    'TransformerDecoderLayer_relu_activation',
-    'TransformerEncoderLayer_gelu_activation',
-    'TransformerEncoderLayer_relu_activation',
 ])
 
 def check_against_reference(self, func, reference_func, output_func, args, kwargs=None,
