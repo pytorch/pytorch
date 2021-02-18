@@ -1592,6 +1592,38 @@ class TestQuantizeFx(QuantizationTestCase):
         assert hasattr(m, "mods1_1_packed_weight_0")
         assert hasattr(m, "mods2_packed_weight_0")
 
+    def test_mul_add_fp16_config(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+
+            def forward(self, x):
+                x = x * 5
+                x = x + 5
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+        model = M().eval()
+        qconfig_dict = {"": float16_dynamic_qconfig}
+        m = prepare_fx(model, qconfig_dict)
+        m = convert_fx(m)
+        # make sure it runs
+        m(torch.randn(5, 5))
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
