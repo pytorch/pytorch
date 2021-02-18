@@ -1026,7 +1026,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        torch.linalg.norm: lambda self: -1
+        torch.linalg.norm: lambda self, ord=None, dim=None, keepdim=False, out=None, dtype=None: -1
     }
 
     ret2 = {}
