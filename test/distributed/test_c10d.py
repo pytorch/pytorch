@@ -363,7 +363,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             self.assertEqual(b"value", client_store.get("key"))
             client_store.set("new_key", "new_value0")
             client_store.compare_set("new_key", "new_value1", "new_value0")
-        except Exception as e:
+        except Exception:
             logging.error('Caught exception: \n{}exiting process with exit code: {}'
                           .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)

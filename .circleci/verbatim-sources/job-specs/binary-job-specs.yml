@@ -270,6 +270,8 @@
     - persist_to_workspace:
         root: "C:/w"
         paths: final_pkgs
+    - store_artifacts:
+        path: C:/w/final_pkgs
 
   binary_windows_test:
     <<: *binary_windows_params
@@ -352,4 +354,3 @@
           command: |
               ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
               scripts/release/anaconda-prune/run.sh
-
