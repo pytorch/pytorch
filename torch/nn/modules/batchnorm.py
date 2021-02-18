@@ -48,9 +48,9 @@ class _NormBase(Module):
             self.register_buffer('running_var', torch.ones(num_features))
             self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         else:
-            self.register_parameter('running_mean', None)
-            self.register_parameter('running_var', None)
-            self.register_parameter('num_batches_tracked', None)
+            self.register_buffer('running_mean', None)
+            self.register_buffer('running_var', None)
+            self.register_buffer('num_batches_tracked', None)
         self.reset_parameters()
 
     def reset_running_stats(self) -> None:
@@ -145,13 +145,18 @@ class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
 
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
         super(_LazyBatchNorm, self).__init__(
-            0, eps, momentum, affine, track_running_stats)
+            # affine and track_running_stats are hardcoded to False to
+            # avoid creating tensors that will soon be overwritten.
+            0, eps, momentum, False, False)
+        self.affine = affine
+        self.track_running_stats = track_running_stats
         if self.affine:
             self.weight = UninitializedParameter()
             self.bias = UninitializedParameter()
         if self.track_running_stats:
             self.running_mean = UninitializedBuffer()
             self.running_var = UninitializedBuffer()
+            self.num_batches_tracked = torch.tensor(0, dtype=torch.long)
 
     def reset_parameters(self) -> None:
         if not self.has_uninitialized_params() and self.num_features != 0:
@@ -248,6 +253,8 @@ class LazyBatchNorm1d(_LazyBatchNorm):
     r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm1d` that is inferred
     from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -350,6 +357,8 @@ class LazyBatchNorm2d(_LazyBatchNorm):
     r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm2d` that is inferred
     from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -453,6 +462,8 @@ class LazyBatchNorm3d(_LazyBatchNorm):
     r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm3d` that is inferred
     from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
 
     Args:
         eps: a value added to the denominator for numerical stability.
