@@ -157,7 +157,9 @@ class TestTypeHints(TestCase):
                     self.skipTest("Can't find PyTorch MyPy config file")
 
                 import numpy
-                if numpy.__version__.startswith('1.20.0.dev0'):
+                # Mypy thinks that NumPy has no attribute "__version__" even though it has
+                # Fixed in NumPy v1.20.1
+                if numpy.__version__.startswith('1.20.0.dev0'):  # type: ignore[attr-defined]
                     self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
 
                 # TODO: Would be better not to chdir here, this affects

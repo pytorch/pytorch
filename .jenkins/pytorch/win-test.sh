@@ -40,7 +40,7 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
-if [[ "${CIRCLE_JOB}" == *11.1* ]]; then
+if [[ "${CIRCLE_JOB}" == *11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 

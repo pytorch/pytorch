@@ -10,7 +10,7 @@ import torch.jit
 import torch.autograd
 import torch.serialization
 import re
-from torch._six import container_abcs
+import collections
 import contextlib
 import numbers
 import warnings
@@ -791,7 +791,7 @@ def _run_symbolic_method(op_name, symbolic_fn, args):
 def _is_onnx_list(value):
     if not isinstance(value, string_classes) and \
             not isinstance(value, torch.Tensor) and \
-            isinstance(value, container_abcs.Iterable):
+            isinstance(value, collections.abc.Iterable):
         return True
     return False
 
