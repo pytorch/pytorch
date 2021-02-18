@@ -16,40 +16,55 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
+static void releaseGraph(std::shared_ptr<Graph> graph){
+    if (graph == nullptr){
+        return;
+    }
+
+    for (auto node : graph->block()->nodes()) {
+        printf("\n------ NeZha_TryUpdateModule:appendNode %s, inputs: %ld, outputs: %ld------", node->kind().toQualString(), node->inputs().size(), node->outputs().size());
+    }
+
+    auto temporary_nodes = graph->block()->nodes();
+    for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
+            ++it) {
+        printf("\n------ NeZha_TryUpdateModule:removeAllInputs - %s------", it->kind().toQualString());
+        //it->removeAllInputs();
+    }
+
+    // for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
+    //         ++it) {
+    //     IValue ival(true);
+    //     auto new_constant = it->owningGraph()->insertConstant(ival);
+
+    //     it->output()->replaceAllUsesWith(new_constant);
+    //     it.destroyCurrent();
+    // }
+
+    printf("\n------ Release graph ------");
+} 
+
+void NeZha_TryMergeModule(
+    Module& dst_module,
+    std::shared_ptr<Graph>& src_graph_01,
+    std::shared_ptr<Graph>& src_graph_02) {
+
+    // Try to merge src_graph_01 and src_graph_02 together and return it into dst_module.
+    
+}
 
 void NeZha_TryUpdateModule(
     Module& dst_module,
     std::shared_ptr<Graph>& src_graph) {
 
     printf("\n------ Start NeZha_TryUpdateModule ------");
-    auto my_graph = dst_module.get_method("forward").graph();
-
-    for (auto node : my_graph->block()->nodes()) {
-        printf("\n------ NeZha_TryUpdateModule:appendNode %s------", node->kind().toQualString());
-    }
-
-    auto temporary_nodes = my_graph->block()->nodes();
-    for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
-            ++it) {
-        printf("\n------ NeZha_TryUpdateModule:removeAllInputs - %s------", it->kind().toQualString());
-        it->removeAllInputs();
-    }
-
-    for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
-            ++it) {
-
-        IValue ival(true);
-        auto new_constant = it->owningGraph()->insertConstant(ival);
-
-        it->output()->replaceAllUsesWith(new_constant);
-        it.destroyCurrent();
-    }
+    releaseGraph(dst_module.get_method("forward").graph());
 
     const auto method_name = QualifiedName(*dst_module.type()->name(), "forward");
     dst_module.type()->unsafeRemoveMethod("forward");
     dst_module._ivalue()->compilation_unit()->unsafeRemoveMethod(method_name);
     auto fn = dst_module._ivalue()->compilation_unit()->create_function(
-        method_name, my_graph);
+        method_name, src_graph);
     dst_module.type()->addMethod(fn);
 }
 

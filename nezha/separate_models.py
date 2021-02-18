@@ -22,6 +22,9 @@ class NeuralNet_All(nn.Module):
         out = self.fc1(x)
         out = self.relu(out)
         out = self.fc2(out)
+        out = self.relu(out)
+        out = self.relu(out)
+
         return out
 
 class NeuralNet_1st(nn.Module):
@@ -93,7 +96,7 @@ with torch.no_grad():
 
     result_2 = m_2(result_1)
 
-    [np.testing.assert_allclose(results_all, result_2, rtol=1e-03, atol=1e-05)]
+    # [np.testing.assert_allclose(results_all, result_2, rtol=1e-03, atol=1e-05)]
 
 print('----End normal model.')
 
@@ -133,11 +136,11 @@ with torch.no_grad():
     # trace_m_2.eval()
 
     trace_results_all = trace_m_all(dummy_input)
-    [np.testing.assert_allclose(trace_results_all, dummy_input, rtol=1e-03, atol=1e-05)]
-    [np.testing.assert_allclose(trace_results_all, trace_results_all_before, rtol=1e-03, atol=1e-05)]
+    # [np.testing.assert_allclose(trace_results_all, dummy_input, rtol=1e-03, atol=1e-05)]
+    # [np.testing.assert_allclose(trace_results_all, trace_results_all_before, rtol=1e-03, atol=1e-05)]
 
-    # trace_results_1 = trace_m_1(dummy_input)
-    # [np.testing.assert_allclose(result_1, trace_results_1, rtol=1e-03, atol=1e-05)]
+    trace_results_1 = trace_m_1(dummy_input)
+    [np.testing.assert_allclose(trace_results_all, trace_results_1, rtol=1e-03, atol=1e-05)]
 
     # trace_results_2 = trace_m_2(trace_results_1)
 
