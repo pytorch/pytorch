@@ -6,7 +6,9 @@ from torch.quantization import (
     QuantStub,
     convert,
     default_qconfig,
+    get_default_qat_qconfig,
     prepare,
+    prepare_qat,
     quantize,
     quantize_dynamic,
 )
@@ -17,6 +19,8 @@ from torch.quantization._numeric_suite import (
     compare_model_outputs,
     compare_model_stub,
     compare_weights,
+    prepare_qat_model_with_stubs,
+    get_logger_dict,
 )
 from torch.testing._internal.common_quantization import (
     AnnotatedConvBnReLUModel,
@@ -29,6 +33,17 @@ from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
 )
 from torch.testing._internal.common_quantized import override_qengines
+
+class TestTwoLayerQATModel(nn.Module):
+    def __init__(self):
+        super(TestTwoLayerQATModel, self).__init__()
+        self.quant = QuantStub()
+        self.linear1 = nn.Linear(5, 10)
+        self.linear2 = nn.Linear(10, 20)
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        return self.dequant(self.linear2(self.linear1(self.quant(x))))
 
 
 class SubModule(torch.nn.Module):
@@ -86,6 +101,24 @@ class ModelWithFunctionals(torch.nn.Module):
 
 
 class TestEagerModeNumericSuite(QuantizationTestCase):
+    @override_qengines
+    def test_prepare_qat_stubs(self):
+        qengine = torch.backends.quantized.engine
+        m = TestTwoLayerQATModel()
+        x = torch.rand(3, 5)
+        qconfig = get_default_qat_qconfig(qengine)
+        m.qconfig = qconfig
+        print(m)
+        prepared_m = prepare_qat(m)
+        print(prepared_m)
+        prepared_m(x)
+        prepare_qat_model_with_stubs(prepared_m, module_swap_list=[nn.qat.Linear])
+        print(prepared_m)
+        prepared_m(x)
+        ob_dict = get_logger_dict(prepared_m)
+        print(ob_dict)
+        return
+
     @override_qengines
     def test_compare_weights_conv_static(self):
         r"""Compare the weights of float and static quantized conv layer"""
