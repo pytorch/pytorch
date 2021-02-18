@@ -22,7 +22,7 @@ static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
-static bool te_must_use_llvm_on_cpu = false;
+static bool te_must_use_llvm_on_cpu = true;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
