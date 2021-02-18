@@ -54,6 +54,7 @@ class DataType:
     FLOAT16 = 12
     DOUBLE = 13
     ZERO_COLLISION_HASH = 14
+    REBATCHING_BUFFER = 15
 
 
 def _CheckDataType():
