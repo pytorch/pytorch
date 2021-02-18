@@ -676,6 +676,7 @@ class DistributedDataParallel(Module):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
+        self.reducer.save_thread_local_state()
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
             self.logger.set_runtime_stats_and_log()
             self.reducer.prepare_for_forward()
