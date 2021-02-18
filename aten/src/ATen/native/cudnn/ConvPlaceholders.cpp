@@ -93,6 +93,20 @@ void raw_cudnn_convolution_backward_weight_out(
   AT_ERROR("raw_cudnn_convolution_backward_weight_out: ATen not compiled with cuDNN support");
 }
 
+at::Tensor cudnn_convolution_bias_relu_forward(
+    const at::Tensor& input, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
+  AT_ERROR("cudnn_convolution_bias_relu_forward: ATen not compiled with cuDNN support");
+}
+
+void raw_cudnn_convolution_bias_relu_forward_out(
+    const Tensor& output, const Tensor& input, const Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32) {
+  AT_ERROR("raw_cudnn_convolution_bias_relu_forward_out: ATen not compiled with cuDNN support");
+}
+
 #endif  // AT_CUDNN_ENABLED
 
 // ---------------------------------------------------------------------

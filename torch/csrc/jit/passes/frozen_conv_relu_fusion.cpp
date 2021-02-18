@@ -8,6 +8,7 @@ namespace jit {
 
 namespace {
 void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
+#ifdef USE_CUDNN  
   SubgraphRewriter rewriter;
 
   std::string conv_relu = R"(
@@ -18,10 +19,12 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
   // TODO: add an operator for conv2d_relu
   std::string conv_relu_fused = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
-        %res = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        %res = aten::cudnn_convolution_bias_activation_forward(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
         return (%res))";
   rewriter.RegisterRewritePattern(conv_relu, conv_relu_fused);
+
   rewriter.runOnGraph(graph);
+#endif
 }
 }
 

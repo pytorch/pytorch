@@ -1568,6 +1568,7 @@ class TestFrozenOptimizations(JitTestCase):
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
 
+    #@unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_freeze_conv_relu_fusion(self):
         class Net(nn.Module):
             def __init__(self, num_classes: int = 1000) -> None:

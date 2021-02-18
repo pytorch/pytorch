@@ -491,6 +491,48 @@ Tensor cudnn_convolution_transpose_backward_weight(
       padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
+Tensor cudnn_convolution_bias_relu_forward(
+    CheckedFrom c,
+    const TensorArg& input, const TensorArg& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32)
+{
+  checkAllSameType(c, {input, weight});
+  checkAllSameGPU(c, {input, weight});
+
+  auto memory_format = cudnn_conv_use_channels_last(*input, *weight) ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  auto output_t = at::native::empty_cuda(
+                    conv_output_size(input->sizes(), weight->sizes(),
+                                     padding, stride, dilation),
+                    /*dtype=*/input->scalar_type(),
+                    /*layout=*/c10::nullopt,
+                    /*device=*/kCUDA,
+                    /*pin_memory=*/c10::nullopt,
+                    /*memory_format=*/memory_format);
+
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
+  // Avoid ambiguity of "output" when this is being used as backwards
+  TensorArg output{ output_t, "result", 0 };
+  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
+
+  // See #4500
+  Tensor weight_contig = weight->contiguous(memory_format);
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
+  Tensor input_contig = input->contiguous(memory_format);
+  input_contig.resize_(input_contig.sizes(), memory_format);
+
+  raw_cudnn_convolution_bias_relu_forward_out(
+      *output, input_contig, weight_contig,
+      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+
+  return *output;
+}
+
 }}
 
 #endif  // AT_CUDNN_ENABLED
