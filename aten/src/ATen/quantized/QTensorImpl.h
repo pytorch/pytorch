@@ -93,6 +93,8 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
  private:
   QuantizerPtr quantizer_;
 
+  const char* tensorimpl_type_name() const override;
+
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
    * from one TensorImpl to another TensorImpl.

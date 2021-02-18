@@ -105,6 +105,9 @@ class Reducer {
   // index has been used.
   std::vector<at::Tensor> get_local_used_maps_on_device() const;
 
+  // Saves thread local state to be used by autograd engine callbacks.
+  void save_thread_local_state();
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -358,7 +361,8 @@ class Reducer {
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
-
+  // Current thread local state
+  at::ThreadLocalState thread_local_state_;
   friend class Logger;
 };
 
