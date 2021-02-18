@@ -288,20 +288,6 @@ SROperator aten_stack(Node* n) {
 REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack);
 
 REGISTER_OPERATOR_FUNCTOR(
-    aten::sigmoid,
-    aten_sigmoid,
-    [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        auto& in0_t = p_node->Input(0).toTensor();
-        if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = create_empty_from(in0_t);
-        }
-        auto& out_t = p_node->Output(0).toTensor();
-        fastResizeToZero(out_t);
-        at::native::sigmoid_out(out_t, in0_t);
-      };
-    });
-REGISTER_OPERATOR_FUNCTOR(
     aten::leaky_relu,
     aten_leaky_relu,
     [](Node* n) -> SROperator {
@@ -466,6 +452,19 @@ std::shared_ptr<TEWrapper> createTanh() {
   return wrapTECompute(wrap, A, B, N, 2 * kVectorWidth);
 }
 
+std::shared_ptr<TEWrapper> createSigmoid() {
+  using namespace torch::jit::tensorexpr;
+  auto wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  Placeholder A("A", kFloat, {N});
+  Tensor* B =
+      Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
+  // TE vectorized exp uses 8-element float vectors (by calling into
+  // sleef_expf8), so we need to vectorize by 8 to properly vectorize.
+  constexpr int sleefWidth = 8;
+  return wrapTECompute(wrap, A, B, N, sleefWidth);
+}
+
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
   auto te = createRelu();
   return [te](ProcessedNode* p_node) {
@@ -501,6 +500,28 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     }
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::sigmoid,
+    aten_sigmoid,
+    [](Node* n) -> SROperator {
+      auto te = createSigmoid();
+      return [te](ProcessedNode* p_node) {
+        auto& in0_t = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = create_empty_from(in0_t);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        if (!te->supports(in0_t)) {
+          out_t.resize_({0});
+          at::native::sigmoid_out(out_t, in0_t);
+        } else {
+          out_t.resize_as_(in0_t);
+          (*te)(
+              out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+        }
+      };
+    });
 
 REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   c10::optional<float> clamp;
