@@ -590,6 +590,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       list(APPEND Caffe2_GPU_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
     endif()
+    set_source_files_properties(
+      ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
+      PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
+    )
   endif()
 
   if(USE_ROCM)
