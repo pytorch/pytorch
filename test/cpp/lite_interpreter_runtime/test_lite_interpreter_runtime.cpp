@@ -45,10 +45,11 @@ TEST(RunTimeTest, LoadAndForward) {
   Module bc = _load_for_mobile(testModelFile);
   auto forward_method = bc.find_method("forward");
   std::vector<c10::IValue> input{c10::IValue(at::tensor(1))};
-  auto result = bc.forward(input);
-  auto expected_result = c10::IValue(at::tensor(4));
+  const auto result = bc.forward(input);
+  const auto expected_result = c10::IValue(at::tensor(4));
   ASSERT_EQ(result, expected_result);
 }
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

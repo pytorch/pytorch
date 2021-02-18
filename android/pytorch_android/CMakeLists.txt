@@ -1,17 +1,11 @@
 cmake_minimum_required(VERSION 3.4.1)
 option(BUILD_LITE_INTERPRETER "Master flag to build pytorch_jni_lite" OFF)
-message(STATUS "BUILD_LITE_INTERPRETER: ${BUILD_LITE_INTERPRETER}")
+message(STATUS "BUILD_LITE_INTERPRETER (pytorch_jni_lite): ${BUILD_LITE_INTERPRETER}")
 
 if(BUILD_LITE_INTERPRETER)
   project(pytorch_jni_lite CXX)
 else()
   project(pytorch_jni CXX)
-endif()
-
-if(BUILD_LITE_INTERPRETER)
-  message(STATUS "yes BUILD_LITE_INTERPRETER: ${BUILD_LITE_INTERPRETER}")
-else()
-  message(STATUS "no BUILD_LITE_INTERPRETER: ${BUILD_LITE_INTERPRETER}")
 endif()
 
 include(GNUInstallDirs)
