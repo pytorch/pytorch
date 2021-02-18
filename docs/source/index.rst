@@ -65,6 +65,7 @@ Features described in this documentation are classified by release status:
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
+   torch.special <special>
    torch.overrides
    profiler
    nn.init
