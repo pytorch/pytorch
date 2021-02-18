@@ -14,7 +14,8 @@ class Logger {
       bool broadcast_buffers);
 
   // An Interface for users to get DDPLoggingData and log them
-  // in the applications.
+  // in the applications. Explanation of logging fields are in
+  // "struct DDPLoggingData" of "torch/c10/util/Logging.h".
   c10::DDPLoggingData get_ddp_logging_data();
 
   // Set environment variables.
@@ -37,7 +38,12 @@ class Logger {
       at::cuda::CUDAEvent& gpu_end);
 #endif
   // Set stats that can be collected only during
-  // training loop. It is called at beginning of forward call.
+  // training loop. It is called at the beginning of forward call
+  // to record the run time stats of sampled iterations that previouly ran.
+  // GPU performance stats are collected only for single process
+  // single device program and single device module right now.
+  // TODO to support single process multiple devices and multi device modules,
+  // events need to be created and recorded on multiple devices.
   void set_runtime_stats_and_log();
 
  private:

@@ -433,7 +433,7 @@ Example::
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value`` 
+performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value``
 will only be placed if ``old_value`` for the ``key`` already exists in the store.
 
 .. warning::

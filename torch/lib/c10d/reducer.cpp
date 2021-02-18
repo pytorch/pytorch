@@ -1516,9 +1516,9 @@ void Reducer::ensure_prior_reduction_finished() {
 }
 
 bool Reducer::should_collect_runtime_stats() {
-  if (num_iterations_ == 1 ||
-    (num_iterations_ > 0
-    && num_iterations_ % kDDPRuntimeLoggingSampleRate == 0)) {
+  if (num_iterations_ > 0 &&
+    (num_iterations_ <= 10 ||
+    num_iterations_ % kDDPRuntimeLoggingSampleRate == 0)) {
     return true;
   }
   return false;
@@ -1531,7 +1531,7 @@ void Reducer::record_forward_compute_start_time() {
     // and single device module.
     if (replicas_.size() == 1 && !is_multi_device_module_) {
       // Create and record event on the replicas_[0][0].device().
-      at::cuda::set_device(replicas_[0][0].device().index());
+      at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.forward_start.record();
     }
 #endif
@@ -1547,7 +1547,7 @@ void Reducer::record_backward_compute_start_time() {
     // and single device module.
     if (replicas_.size() == 1 && !is_multi_device_module_) {
       // Create and record event on the replicas_[0][0].device().
-      at::cuda::set_device(replicas_[0][0].device().index());
+      at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.backward_compute_start.record();
     }
 #endif
@@ -1559,9 +1559,8 @@ void Reducer::record_backward_compute_end_time() {
 #ifdef USE_CUDA
     // Record event only for single process single device
     // and single device module.
-    // No need to set_device() here, as autograd thread has already set
-    // it properly.
     if (replicas_.size() == 1 && !is_multi_device_module_) {
+      at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.backward_compute_end.record();
     }
 #endif
@@ -1574,9 +1573,9 @@ void Reducer::record_backward_comm_start_time() {
   if (replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
     // Record event only for single process single device
-    // and single device module. No need to set_device() here,
-    // as autograd thread has already set it properly.
+    // and single device module.
     if (replicas_.size() == 1 && !is_multi_device_module_) {
+      at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.backward_comm_start.record();
     }
 #endif
@@ -1590,9 +1589,8 @@ void Reducer::record_backward_comm_end_time() {
 #ifdef USE_CUDA
     // Record event only for single process single device
     // and single device module.
-    // No need to set_device() here, as autograd thread has already set
-    // it properly.
     if (replicas_.size() == 1 && !is_multi_device_module_) {
+      at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.backward_comm_end.record();
     }
 #endif
