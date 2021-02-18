@@ -183,9 +183,8 @@ void RegisterInplaceNodeInIfBlocks(
       next_block_node->addOutput()->setType(new_data->type());
     next_block = next_block_node->owningBlock();
   }
-
   orig_data->replaceAllUsesAfterNodeWith(
-      next_block_node->output(0)->node(),
+      next_block_node,
       next_block_node->outputs().at(next_block_node->outputs().size() - 1));
 }
 
@@ -545,7 +544,7 @@ Value* findArgumentAsInputParam(
     std::string& name,
     IValue& attr) {
   for (auto input : graph->inputs()) {
-    if ((input->debugName() == name))
+    if (input->debugName() == name)
       return input;
   }
   throw std::runtime_error(
@@ -609,13 +608,10 @@ void trackAndRegisterAttributesInBlocks(
 
   auto name = n->s(attr::name);
   auto attrModule = module_;
+  Value* paramConst = nullptr;
 
   auto moduleNames =
       findSubModuleAttr(n->inputs().at(0), name, attrModule, graph);
-  if (!attrModule.hasattr(name))
-    return;
-  auto attr = attrModule.attr(name);
-  Value* paramConst = nullptr;
 
   std::string fullName("");
   for (auto& name : moduleNames) {
@@ -623,16 +619,34 @@ void trackAndRegisterAttributesInBlocks(
   }
   fullName += name;
 
-  auto type = attrModule.type();
-  auto slot = *type->findAttributeSlot(name);
+  if (allAttrValues.find(fullName) != allAttrValues.end()) {
+    paramConst = allAttrValues[fullName];
+  } else if (attrModule.hasattr(name)) {
+    auto attr = attrModule.attr(name);
+    auto type = attrModule.type();
+    auto slot = *type->findAttributeSlot(name);
 
-  // Add model_parameters and model_buffers as model inputs. Order is
-  // preserved based on the appearance in the graph.
-  if (type->is_parameter(slot) || type->is_buffer(slot) ||
-      (attr.isObject() && !attr.toObjectRef().type()->is_module())) {
-    if (allAttrValues.find(fullName) == allAttrValues.end()) {
-      paramConst = findArgumentAsInputParam(graph, fullName, attr);
-      allAttrValues.insert({fullName, paramConst});
+    // Add model_parameters and model_buffers as model inputs. Order is
+    // preserved based on the appearance in the graph.
+    if (type->is_parameter(slot) || type->is_buffer(slot) ||
+        (attr.isObject() && !attr.toObjectRef().type()->is_module())) {
+      if (allAttrValues.find(fullName) == allAttrValues.end()) {
+        paramConst = findArgumentAsInputParam(graph, fullName, attr);
+        allAttrValues.insert({fullName, paramConst});
+      }
+    } else if (auto attrVal = tryInsertConstant(*graph, attr)) {
+      for (int i = 0; i < type->getAttributes().size(); i++) {
+        if (type->getAttributeName(i) == name) {
+          paramConst = *attrVal;
+          allAttrValues.insert({fullName, paramConst});
+        }
+      }
+    } else {
+      GRAPH_DEBUG(
+          attr.type()->cast<ClassType>() ? "" : "attribute: ",
+          name,
+          " is not materializable.");
+      return;
     }
   }
 
@@ -691,7 +705,7 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
 
     if (nullptr != module_ &&
         (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr)) {
-      Module moduleClone = module_->clone(true);
+      Module moduleClone = (*module_);
       trackAndRegisterAttributesInBlocks(
           n,
           graph,

@@ -6512,6 +6512,78 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
+    def test_set_attr_modules(self):
+        class InnerModule2(torch.nn.Module):
+            def __init__(self, embedding_dim):
+                super().__init__()
+                self.weights = InnerModule2.get_embedding(embedding_dim)
+                self.register_buffer("_float_tensor", torch.FloatTensor(1))
+
+            @staticmethod
+            def get_embedding(embedding_dim: int):
+                emb = 4 / ((embedding_dim // 2) - 1)
+                emb = torch.exp(torch.arange((embedding_dim // 2), dtype=torch.float) * -emb)
+                return emb
+
+            def forward(self, input, incremental_state: Optional[torch.Tensor] = None):
+                bsz, seq_len = input.shape[0], input.shape[1]
+                if self.weights is None:
+                    self.weights = InnerModule.get_embedding(self.embedding_dim)
+                self.weights = self.weights.to(self._float_tensor)
+                if incremental_state is not None:
+                    pos = seq_len
+                    return self.weights[1 + pos, :].expand(bsz, 1, -1)
+                return (
+                    self.weights.index_select(0, torch.ones((bsz * seq_len), dtype=torch.int64)).view(bsz, seq_len, -1)
+                )
+
+        class InnerModule(torch.nn.Module):
+            def __init__(self, embedding_dim):
+                super().__init__()
+                self.weights = InnerModule.get_embedding(embedding_dim)
+                self.module = InnerModule2(embedding_dim=8)
+
+            @staticmethod
+            def get_embedding(embedding_dim: int):
+                emb = 4 / ((embedding_dim // 2) - 1)
+                emb = torch.exp(torch.arange((embedding_dim // 2), dtype=torch.float) * -emb)
+                return emb
+
+            def forward(self, x):
+                return self.module(x) + self.weights
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.module = InnerModule(embedding_dim=8)
+
+            def forward(self, x):
+                return self.module(x)
+
+        x = torch.randn(3, 256)
+        self.run_test(Module(), (x, ))
+
+    def test_set_attr_modules_2(self):
+        class InnerModule2(torch.nn.Module):
+            def __init__(self, embedding_dim):
+                super().__init__()
+                self.embedding_dim = embedding_dim
+                self.weights = InnerModule2.get_embedding(self.embedding_dim)
+                self.register_buffer("_float_tensor", torch.FloatTensor(1))
+
+            @staticmethod
+            def get_embedding(embedding_dim: int):
+                emb = 4 / ((embedding_dim // 2) - 1)
+                emb = torch.exp(torch.arange((embedding_dim // 2), dtype=torch.float) * -emb)
+                return emb
+
+            def forward(self, input, incremental_state: Optional[torch.Tensor] = None):
+                bsz, seq_len = input.shape[0], input.shape[1]
+                self.weights = InnerModule.get_embedding(self.embedding_dim)
+                return (
+                    self.weights.index_select(0, torch.ones((bsz * seq_len), dtype=torch.int64)).view(bsz, seq_len, -1)
+                )
+
     def test_set_attr(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
