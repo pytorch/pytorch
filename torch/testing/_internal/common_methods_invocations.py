@@ -1538,7 +1538,7 @@ foreach_unary_op_db: List[OpInfo] = [
                          dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
                          dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
                          dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-                         skips = (
+                         skips=(
                              SkipInfo('TestForeach', 'test_unary', device_type='cpu', dtypes=[torch.bool]),
                          ),
                          safe_casts_outputs=False)
