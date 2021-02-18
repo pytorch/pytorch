@@ -619,9 +619,7 @@ void trackAndRegisterAttributesInBlocks(
   }
   fullName += name;
 
-  if (allAttrValues.find(fullName) != allAttrValues.end()) {
-    paramConst = allAttrValues[fullName];
-  } else if (attrModule.hasattr(name)) {
+  if (allAttrValues.find(fullName) == allAttrValues.end() && attrModule.hasattr(name)) {
     auto attr = attrModule.attr(name);
     auto type = attrModule.type();
     auto slot = *type->findAttributeSlot(name);
@@ -635,7 +633,7 @@ void trackAndRegisterAttributesInBlocks(
         allAttrValues.insert({fullName, paramConst});
       }
     } else if (auto attrVal = tryInsertConstant(*graph, attr)) {
-      for (int i = 0; i < type->getAttributes().size(); i++) {
+      for (size_t i = 0; i < type->getAttributes().size(); i++) {
         if (type->getAttributeName(i) == name) {
           paramConst = *attrVal;
           allAttrValues.insert({fullName, paramConst});
