@@ -15,6 +15,7 @@ void inlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
+    printf("\n--------inliner::inlineCalls(), kind: %s", cur->kind().toDisplayString());
     switch (cur->kind()) {
       case prim::CallFunction: {
         AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
@@ -32,6 +33,7 @@ void inlineCalls(Block* block) {
         inlineCallTo(cur, fun_type->function());
       } break;
       case prim::CallMethod: {
+        printf("\n--------inliner::inlineCalls(), CallMethod %s", attr::name.toDisplayString());
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           Function& function = class_type->getMethod(name);
