@@ -15,11 +15,15 @@ pytorch_params: &pytorch_params
     build_only:
       type: string
       default: ""
+    build_lite_interpreter:
+      type: string
+      default: "0"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     BUILD_ONLY: << parameters.build_only >>
+    BUILD_LITE_INTERPRETER: << parameters.build_lite_interpreter >>
   resource_class: << parameters.resource_class >>
 
 pytorch_ios_params: &pytorch_ios_params
