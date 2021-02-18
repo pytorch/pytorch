@@ -109,11 +109,11 @@ class Node:
     - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
       in the Graph printout.
     """
-    def __init__(self, graph: 'Graph', naming_fn: Callable, op: str, target: 'Target',
+    def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
                  args: Tuple['Argument', ...], kwargs: Dict[str, 'Argument'],
                  type : Optional[Any] = None) -> None:
         self.graph = graph
-        self.name = naming_fn(self)  # generate a unique name of value being created
+        self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
         if op in ['call_method', 'call_module']:
@@ -147,6 +147,9 @@ class Node:
         self._prev = self
         self._next = self
         self._erased = False
+
+        # If set, use this fn to print this node
+        self._repr_fn : Optional[Callable[[Node], str]] = None
 
     @property
     def next(self) -> 'Node':
@@ -278,6 +281,11 @@ class Node:
 
         for new_use in self._input_nodes.keys():
             new_use.users.setdefault(self)
+
+    def __repr__(self) -> str:
+        if self._repr_fn:
+            return self._repr_fn(self)
+        return super().__repr__()
 
     def _pretty_print_target(self, target):
         """
