@@ -300,6 +300,8 @@ if _enabled:
             if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
                 return super(ScriptObjectWrapper, self).__setattr__(attr, value)
             if attr in self._props:
+                if self._props[attr].fset is None:
+                    raise RuntimeError("Can't set a value when there is no setter given for attribute {}.".format(attr))
                 self._props[attr].fset(value)
                 return
             setattr(self._c, attr, value)

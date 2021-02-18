@@ -744,7 +744,6 @@ inline py::object toPyObject(IValue ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
-
   } else if (ivalue.isPyObject()) {
     // return borrowed reference to ensure it correctly incref the underlying
     // PyObject

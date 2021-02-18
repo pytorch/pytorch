@@ -11,6 +11,29 @@ using namespace torch::jit;
 
 namespace {
 
+struct DefaultArgs : torch::CustomClassHolder {
+  int x;
+  DefaultArgs(int64_t start = 3) : x(start) {}
+  int64_t increment(int64_t val = 1) {
+    x += val;
+    return x;
+  }
+  int64_t decrement(int64_t val = 1) {
+    x += val;
+    return x;
+  }
+  int64_t scale_add(int64_t add, int64_t scale = 1) {
+    x = scale * x + add;
+    return x;
+  }
+  int64_t divide(c10::optional<int64_t> factor) {
+    if (factor) {
+      x = x / *factor;
+    }
+    return x;
+  }
+};
+
 struct Foo : torch::CustomClassHolder {
   int x, y;
   Foo() : x(0), y(0) {}
@@ -28,7 +51,6 @@ struct Foo : torch::CustomClassHolder {
   int64_t combine(c10::intrusive_ptr<Foo> b) {
     return this->info() + b->info();
   }
-  ~Foo(){};
 };
 
 struct _StaticMethod : torch::CustomClassHolder {
@@ -56,8 +78,6 @@ struct FooGetterSetter : torch::CustomClassHolder {
     return y + 4;
   }
 
-  ~FooGetterSetter(){};
-
  private:
   int64_t x, y;
 };
@@ -66,7 +86,6 @@ struct FooGetterSetterLambda : torch::CustomClassHolder {
   int64_t x;
   FooGetterSetterLambda() : x(0) {}
   FooGetterSetterLambda(int64_t x_) : x(x_) {}
-  ~FooGetterSetterLambda(){};
 };
 
 struct FooReadWrite : torch::CustomClassHolder {
@@ -74,7 +93,6 @@ struct FooReadWrite : torch::CustomClassHolder {
   const int64_t y;
   FooReadWrite() : x(0), y(0) {}
   FooReadWrite(int64_t x_, int64_t y_) : x(x_), y(y_) {}
-  ~FooReadWrite(){};
 };
 
 struct LambdaInit : torch::CustomClassHolder {
@@ -249,6 +267,21 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<_StaticMethod>("_StaticMethod")
       .def(torch::init<>())
       .def_static("staticMethod", &_StaticMethod::staticMethod);
+
+  m.class_<DefaultArgs>("_DefaultArgs")
+      .def(torch::init<int64_t>(), "", {torch::arg("start") = 3})
+      .def("increment", &DefaultArgs::increment, "", {torch::arg("val") = 1})
+      .def("decrement", &DefaultArgs::decrement, "", {torch::arg("val") = 1})
+      .def(
+          "scale_add",
+          &DefaultArgs::scale_add,
+          "",
+          {torch::arg("add"), torch::arg("scale") = 1})
+      .def(
+          "divide",
+          &DefaultArgs::divide,
+          "",
+          {torch::arg("factor") = torch::arg::none()});
 
   m.class_<Foo>("_Foo")
       .def(torch::init<int64_t, int64_t>())

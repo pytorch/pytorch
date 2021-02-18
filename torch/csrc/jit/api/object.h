@@ -102,6 +102,8 @@ struct TORCH_API Object {
     });
   }
 
+  // In order to expose the custom class's properties to ScriptObjectWrapper
+  // we need a way to get all available properties as a list.
   using Property = std::tuple<std::string, Method, c10::optional<Method>>;
   const std::vector<Property> get_properties() const {
     return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
