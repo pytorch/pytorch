@@ -6773,9 +6773,9 @@ class TestNN(NNTestCase):
                               batch_first=batch_first,
                               proj_size=proj_size).to(dtype)
             if TEST_WITH_ROCM and dtype == torch.float:
-                    outputs_gpu = forward_backward(
-                        True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                        hx_val, grad_hy, cx_val, grad_cy)
+                outputs_gpu = forward_backward(
+                    True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                    hx_val, grad_hy, cx_val, grad_cy)
             else:
                 outputs_gpu = forward_backward(
                     True, rnn_gpu, input_val, grad_output, rnn.all_weights,
