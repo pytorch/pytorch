@@ -1363,15 +1363,15 @@ namespace ivalue {
 namespace detail {
 
 template <typename T>
-IValue from_(T x, std::true_type) {
+IValue from_(T&& x, std::true_type) {
   return IValue(std::move(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
-  return IValue(x);
+  return IValue(std::move(x));
 }
 template <typename T>
-IValue from_(T x, std::false_type) {
+IValue from_(T&& x, std::false_type) {
   static_assert(
       guts::false_t<T>::value,
       "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
@@ -1380,9 +1380,9 @@ IValue from_(T x, std::false_type) {
 } // namespace detail
 
 template <typename T>
-IValue from(T x) {
+IValue from(T&& x) {
   return detail::from_(
-      std::move(x), typename std::is_constructible<IValue, T>::type{});
+      std::forward<T>(x), typename std::is_constructible<IValue, T>::type{});
 }
 
 } // namespace ivalue
