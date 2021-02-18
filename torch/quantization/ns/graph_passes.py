@@ -45,7 +45,7 @@ def _insert_logger_after_node(
 
 def remove_observers_add_loggers(
     gm: GraphModule,
-    node_to_instrument_to_other_node_name: Dict[Node, Optional[str]],
+    node_to_instrument_to_ref_node_name: Dict[Node, Optional[str]],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
@@ -71,8 +71,8 @@ def remove_observers_add_loggers(
             # remove activation post process node
             env[node.name] = env[node.args[0].name]
 
-        elif node in node_to_instrument_to_other_node_name:
-            other_node_name = node_to_instrument_to_other_node_name[node]
+        elif node in node_to_instrument_to_ref_node_name:
+            other_node_name = node_to_instrument_to_ref_node_name[node]
             # ensure env is populated with base node
             env[node.name] = new_graph.node_copy(node, load_arg)
             # add the logger after the base node
