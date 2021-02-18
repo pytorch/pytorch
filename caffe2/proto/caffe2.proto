@@ -64,6 +64,7 @@ message TensorProto {
     DOUBLE = 13;   // double
 
     ZERO_COLLISION_HASH = 14;  // zero-collision hash state
+    REBATCHING_BUFFER= 15;     // rebatching buffer
   }
   optional DataType data_type = 2 [default = FLOAT];
 
