@@ -1,5 +1,5 @@
 node {
-  name: "input/input"
+  name: "input/x"
   op: "IO Node"
   attr {
     key: "_output_shapes"
@@ -111,7 +111,7 @@ node {
   name: "myLinear/Linear[l]/23"
   op: "aten::addmm"
   input: "myLinear/Linear[l]/bias/20"
-  input: "input/input"
+  input: "input/x"
   input: "myLinear/Linear[l]/22"
   input: "myLinear/Linear[l]/19"
   input: "myLinear/Linear[l]/19"

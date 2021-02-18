@@ -528,4 +528,62 @@ SparseTensor sparse_mask_cpu(const Tensor& t, const SparseTensor& mask) {
   return r;
 }
 
+Tensor sparse_mask_helper_cpu(
+  const SparseTensor& t,
+  const Tensor& mask_indices
+) {
+  /*
+    This is a helper function which filter values from `t._values()` using the `mask_indices`.
+    This CPU implementation uses a simple hash_map to filter values by matching the `mask_indices`
+    with the indices at tensor input `t`.
+
+    Inputs:
+      `t`             - coalesced sparse tensor input
+      `mask_indices`  - mask indices tensor
+
+    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will 
+    works independently if the mask is coalesced or not. 
+  */
+  TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
+  TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
+  TORCH_CHECK(mask_indices.dim() == t._indices().dim(), "mask_indices: operands have incompatible indices dim; self has dim ",
+      t._indices().dim(), " but mask has dim ", mask_indices.dim());
+  TORCH_CHECK(mask_indices.is_contiguous(), "mask_indices: mask is not contiguous");
+
+  int64_t r_nnz = mask_indices.size(1);
+  auto t_v = t._values();
+  auto vsize = t_v.sizes().vec();
+  vsize[0] = r_nnz;
+ 
+  Tensor r_values = at::zeros(vsize, t_v.options());
+  auto t_i = t._indices();
+  auto t_nnz = t._nnz();
+
+  std::unordered_map<int64_t, int64_t> t_flatten_indices = std::unordered_map<int64_t, int64_t>{};
+  auto full_size = t.sizes();
+  auto ti_flattened_indices = at::sparse::flatten_indices(t_i, full_size);
+
+  // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this flatten value `index` to the original position `i`
+  auto t_indices_accessor = t_i.accessor<int64_t, 2>();
+  for(int64_t i = 0; i < t_nnz; i++) {
+    int64_t index = ti_flattened_indices.data_ptr<int64_t>()[i];
+    t_flatten_indices[index] = i;
+  }
+
+  // Step 2: Filter `t._values()` values by matching the flatten `mask_indices` with the flatten `t._indices()` using the
+  // hash_map `t_flatten_indices`
+
+  auto flattened_mask_indices = at::sparse::flatten_indices(mask_indices, full_size);
+  at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      int64_t index = flattened_mask_indices.data_ptr<int64_t>()[i];
+      auto iter = t_flatten_indices.find(index);
+      if (iter != t_flatten_indices.end()) {
+        r_values[i] = t_v[ iter->second ];
+      }
+    }
+  });
+  return r_values; 
+}
+
 }} // namespace at::native
