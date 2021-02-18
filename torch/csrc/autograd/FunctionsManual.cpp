@@ -2718,6 +2718,146 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
+// Helper for layernorm_double_backward
+// sum across normalized_shape (inner dimensions)
+Tensor sum_inner(const Tensor& to_sum, int axis, bool keepdim=true) {
+  auto r = to_sum;
+  for (int64_t dim = r.dim() - 1; dim >= axis; dim--) {
+    r = r.sum(dim, keepdim);
+  }
+  return r;
+}
+
+// Helper for batchnorm_double_backward
+// sum across batch size (outer dimensions)
+Tensor sum_outer(const Tensor& to_sum, int axis, bool keepdim=true) {
+  auto r = to_sum;
+  for (int64_t pos = 0; pos < axis; pos++) {
+    r = r.sum((keepdim) ? pos : 0, keepdim);
+  }
+  return r;
+}
+
+// Helper for batchnorm_double_backward
+// sum across normalized_shape (inner dimensions)
+Tensor unsqueeze_inner(const Tensor& src, int ndim) {
+  auto src_expanded = src;
+  while (src_expanded.sizes().size() < ndim) {
+    src_expanded = src_expanded.unsqueeze(1);
+  }
+  return src_expanded;
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> layernorm_double_backward(
+    const Tensor& input,
+    const c10::optional<Tensor>& gamma,
+    const Tensor& ggI,
+    const Tensor& ggG,
+    const Tensor& ggB,
+    const Tensor& gO,
+    const c10::optional<Tensor>& save_mean,
+    const c10::optional<Tensor>& save_invstd,
+    IntArrayRef normalized_shape,
+    std::array<bool, 4> output_mask) {
+
+  bool affine = isDefined(gamma);
+  Tensor gamma_expanded;
+  Tensor ggG_expanded, ggB_expanded;
+  if (affine) {
+    gamma_expanded = gamma->expand_as(input);
+    if (ggG.defined()) {
+      ggG_expanded = ggG.expand_as(input);
+    }
+    if (ggB.defined()) {
+      ggB_expanded = ggB.expand_as(input);
+    }
+  } else {
+    gamma_expanded = at::ones({}, input.options());
+  }
+
+  const int normalized_ndim = normalized_shape.size();
+  const auto input_shape = input.sizes();
+  const auto input_ndim = input.dim();
+  const int axis = input_ndim - normalized_ndim;
+  const int64_t M =
+      at::prod_intlist(input_shape.cbegin(), input_shape.cbegin() + axis);
+  const int64_t N =
+      at::prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
+
+  // for half inputs, save_mean, save_invstd are float
+  // (ideally, we would cast everything else, but not now)
+  auto mu = unsqueeze_inner(toLegacyTensor(save_mean).to(input.scalar_type()), input_ndim);
+  auto input_sub_mu = input - mu;
+  auto sigma2_eps_neg_1_2 = unsqueeze_inner(toLegacyTensor(save_invstd).to(input.scalar_type()), input_ndim);
+  auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
+  auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
+
+  Tensor gI;
+  // calculate gI
+  auto input_mu_sigma2_neg_3_2 = input_sub_mu * sigma2_eps_neg_3_2;
+  auto gOinmu_sum = sum_inner(gO * input_sub_mu, axis);
+  auto gO_sum = sum_inner(gO, axis);
+
+  if (ggI.defined()) {
+    auto ggI_sum = sum_inner(ggI, axis);
+    auto ggIinmu_sum = sum_inner(ggI * input_sub_mu, axis);
+    auto all_sub = ((ggI_sum * gO_sum).div_(N)).sub_(sum_inner(gO * ggI, axis)).add_(
+                    (sigma2_eps_neg_1 * gOinmu_sum * ggIinmu_sum).mul_(3. / N));
+    auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
+    auto gI_1t = (ggIinmu_sum * sigma2_eps_neg_3_2).div_(N) * (gO_sum.div(N) - gO);
+    auto gI_2t = (gOinmu_sum * sigma2_eps_neg_3_2).div_(N) * (ggI_sum.div(N) - ggI);
+    gI = gamma_expanded * (gI_0t.add_(gI_1t).add_(gI_2t));
+  }
+
+  // add contribution of gamma term to gI
+  Tensor gI_G_term;
+  if (affine && ggG.defined()) {
+    auto t0 = gO * sigma2_eps_neg_1_2;
+    auto t1 = (sigma2_eps_neg_1_2 * gO_sum).div_(-N);
+    auto t2 = (input_mu_sigma2_neg_3_2 * sum_exclude_dim1(gO * input_sub_mu)).div_(-N);
+    gI_G_term = ggG_expanded * (t0.add_(t1).add_(t2));
+    gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
+  }
+
+  // this is the grad_input for the first backward function
+  auto first_bwd_fn_grad_input = [&](const Tensor& gO, const Tensor& gamma) -> Tensor {
+    auto h0 = (gamma * sigma2_eps_neg_1_2).div_(N);
+    auto h1 = (N * gO).sub_(sum_inner(gO, axis)).sub_(
+                input_sub_mu.mul(sigma2_eps_neg_1) * sum_inner(gO * input_sub_mu, axis));
+    return h0 * h1;
+  };
+
+  // calculate gG
+  Tensor gG;
+  if (affine && ggI.defined()) {
+    // gG is the first backward fn with the gamma term removed (then shaped properly)
+    gG = ggI * first_bwd_fn_grad_input(gO, at::ones({}, sigma2_eps_neg_1_2.options()));
+    gG = sum_outer(gG, axis, false);
+  }
+
+  // calculate ggO
+  Tensor ggO;
+  // contribution of input term
+  if (ggI.defined()) {
+    ggO = first_bwd_fn_grad_input(ggI, gamma_expanded);
+  }
+  if (ggG.defined()) {
+    auto ggO_G_term = ggG_expanded * input_sub_mu * sigma2_eps_neg_1_2;
+    ggO = ggO.defined() ? ggO.add_(ggO_G_term) : ggO_G_term;
+  }
+  if (ggB.defined()) {
+    auto ggO_B_term = ggB_expanded;
+    ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
+  }
+
+  if (output_mask[1] && !gG.defined()) {
+    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+  }
+
+  Tensor gB;
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>{gI, gG, gB, ggO};
+}
+
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_layer_norm_backward(
     const Tensor& dY,

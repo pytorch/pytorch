@@ -221,6 +221,17 @@ infinitely_differentiable_native_layer_norm_backward(
     IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask);
+std::tuple<Tensor, Tensor, Tensor, Tensor> layernorm_double_backward(
+    const Tensor & input,
+    const c10::optional<Tensor> & gamma,
+    const Tensor & ggI,
+    const Tensor & ggG,
+    const Tensor & ggB,
+    const Tensor & gO,
+    const c10::optional<Tensor> & save_mean,
+    const c10::optional<Tensor> & save_invstd,
+    IntArrayRef normalized_shape,
+    std::array<bool,4> output_mask);
 
 
 } // namespace details
