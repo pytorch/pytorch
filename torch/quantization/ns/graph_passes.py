@@ -348,7 +348,7 @@ def create_a_shadows_b(
             #
             # subgraph so far:
             #
-            # node_c
+            # prev_node_c -> node_c
 
             # cast dtype from the dtype of node_c's input to the dtype of
             # node_a's input (dequant, etc)
@@ -360,7 +360,7 @@ def create_a_shadows_b(
             #
             #       dtype_cast_node
             #      /
-            # node_c
+            # prev_node_c -> node_c
 
             # hook up the new mod_a copy to be in the graph, receiving the
             # same inputs as mod_b does, with dtype cast to match a
@@ -372,7 +372,7 @@ def create_a_shadows_b(
             #
             #       dtype_cast_node --> subgraph_a_copy(args/kwargs not shown)
             #      /
-            # node_c
+            # prev_node_c -> node_c
 
             # hook up a logger to the mod_b copy
             env_c[node_b.name] = _insert_logger_after_node(
@@ -381,7 +381,7 @@ def create_a_shadows_b(
             #
             #       dtype_cast_node --> subgraph_a_copy
             #      /
-            # node_c --> logger_c
+            # prev_node_c -> node_c --> logger_c
 
             # hook up a logger to the mod_a copy
             # Note: we pass node_b.name to this logger, for easy matching later
@@ -392,7 +392,7 @@ def create_a_shadows_b(
             #
             #       dtype_cast_node --> subgraph_a_copy --> logger_a
             #      /
-            # node_c --> logger_c
+            # prev_node_c -> node_c --> logger_c
 
         else:
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
