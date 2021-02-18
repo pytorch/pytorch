@@ -565,7 +565,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 else:
                     # choose linear dynamic or linear dynamic fp16 op based on weight dtype
                     qlinear_op = torch.ops.quantized.linear_dynamic \
-                        if weight_dtype == torch.int8 \
+                        if weight_dtype == torch.qint8 \
                         else torch.ops.quantized.linear_dynamic_fp16
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore

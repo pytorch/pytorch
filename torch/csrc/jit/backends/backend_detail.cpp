@@ -10,21 +10,6 @@
 namespace torch {
 namespace jit {
 namespace detail {
-c10::FunctionSchema getPreprocessSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument mod("mod", c10::AnyType::get());
-  c10::Argument method_compile_spec(
-      "method_compile_spec",
-      c10::DictType::create(c10::StringType::get(), c10::AnyType::get()));
-
-  c10::FunctionSchema preprocessor_schema(
-      "preprocess",
-      /*overload_name=*/"",
-      /*arguments=*/{self, mod, method_compile_spec},
-      /*returns=*/{mod});
-  return preprocessor_schema;
-}
-
 c10::FunctionSchema getCompileSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument mod("processed", c10::AnyType::get());
@@ -116,13 +101,12 @@ Module codegen_backend_module(
   // For backwards compatibility, for backends that implement preprocessing in
   // the backend interface rather than as a separate function, we just pass
   // the cloned original Module.
+
   loweredModule.register_attribute(
       "__processed_module",
       AnyType::get(),
-      detail::hasBackendPreprocessFunction(backend_name)
-          ? detail::getBackendPreprocessFunction(backend_name)(
-                cloned_module, method_compile_spec)
-          : cloned_module._ivalue(),
+      detail::getBackendPreprocessFunction(backend_name)(
+          cloned_module, method_compile_spec),
       /*is_param=*/false);
 
   // This is for the method_compile_spec passed in to to_<backend> or
@@ -181,29 +165,6 @@ Module codegen_backend_module(
                 self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
             )",
       loweredModuleResolver());
-
-  // Only add preprocess method to the LoweredModule if there is no
-  // standalone BackendPreprocessFunction for this backend.
-  // Kept for backwards compatibility for backends that implement
-  // preprocessing in the backend interface rather than as a separate
-  // function.
-  if (!detail::hasBackendPreprocessFunction(backend_name)) {
-    // This is never called during compilation or execution, but is
-    // needed to generate the LoweredModule because we don't have access
-    // to an instance of the backend as a C++ object with which to call
-    // preprocess.
-    loweredModule.define(
-        R"(
-                def __preprocess(self, mod: Any, method_compile_spec: Dict[str, Any]):
-                    self.__create_backend()
-                    self.__processed_module = self.__backend.preprocess(mod, method_compile_spec)
-              )",
-        loweredModuleResolver());
-    // Run preprocess so that __processed_module is set correctly before
-    // compilation.
-    loweredModule.run_method(
-        "__preprocess", cloned_module._ivalue(), method_compile_spec);
-  }
 
   // This loop generates one method on the LoweredModule for every key
   // in method_compile_spec.
