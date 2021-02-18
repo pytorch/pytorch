@@ -110,6 +110,11 @@ INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
+def get_profiling_event(postfix, profiler):
+    return [
+        event for event in profiler.function_events if event.name.endswith(postfix)
+    ]
+
 
 class _FC2(nn.Module):
     def __init__(self):
@@ -137,6 +142,17 @@ class Net(nn.Module):
         x = self.relu(self.fc2(x))
         x = self.fc3(x)
         return F.softmax(x, dim=1)
+
+class LargeNet(nn.Module):
+    def __init__(self):
+        super(LargeNet, self).__init__()
+        self.fc1 = nn.Linear(1000, 2000, bias=False)
+        self.fc2 = nn.Linear(2000, 500, bias=False)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
 
 class Task(nn.Module):
     def __init__(self):
@@ -851,23 +867,42 @@ class DistributedTest:
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
         def test_send_recv(self):
             rank = dist.get_rank()
-            tensor = _build_tensor(rank + 1)
+            send_size = rank + 1
+            tensor = _build_tensor(send_size)
+            with torch.autograd.profiler.profile(record_shapes=True) as prof:
+                for src in range(0, dist.get_world_size()):
+                    if src == rank:
+                        # Send mode
+                        for dst in range(0, dist.get_world_size()):
+                            if dst == rank:
+                                continue
+                            dist.send(tensor, dst)
+                    else:
+                        # Recv mode
+                        recv_size = src + 1
+                        expected_tensor = _build_tensor(recv_size)
+                        output_tensor = _build_tensor(recv_size, value=-1)
+                        dist.recv(output_tensor, src)
+                        self.assertEqual(output_tensor, expected_tensor)
 
-            for src in range(0, dist.get_world_size()):
-                if src == rank:
-                    # Send mode
-                    for dst in range(0, dist.get_world_size()):
-                        if dst == rank:
-                            continue
-                        dist.send(tensor, dst)
-                else:
-                    # Recv mode
-                    expected_tensor = _build_tensor(src + 1)
-                    output_tensor = _build_tensor(src + 1, value=-1)
-                    dist.recv(output_tensor, src)
-                    self.assertEqual(output_tensor, expected_tensor)
+                self._barrier()
 
-            self._barrier()
+            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
+            backend = dist.get_backend()
+            if backend == "gloo":
+                for event_name in [f"{backend}:send", f"{backend}:recv"]:
+                    events = get_profiling_event(event_name, prof)
+                    # Each rank sends/recvs from all other ranks.
+                    event_count = sum(e.count for e in events)
+                    expected_event_count = dist.get_world_size() - 1
+                    self.assertEqual(event_count, expected_event_count)
+                    # Event order is not deterministic, so simply assert their shape
+                    # is found in the following list.
+                    expected_shapes = [
+                        [[rank + 1] * 3] for rank in range(dist.get_world_size())
+                    ]
+                    for event in events:
+                        self.assertTrue(event.input_shapes in expected_shapes)
 
         # SEND RECV ANY SOURCE
         @unittest.skipIf(
@@ -875,37 +910,49 @@ class DistributedTest:
         )
         def test_send_recv_any_source(self):
             rank = dist.get_rank()
-            tensor = _build_tensor(10, value=rank)
+            send_recv_size = 10
+            tensor = _build_tensor(send_recv_size, value=rank)
             recv_ranks = list()
             irecv_ranks = list()
 
-            for dst in range(0, dist.get_world_size()):
-                if dst == rank:
-                    # Recv mode
-                    for dst in range(0, dist.get_world_size()):
-                        if dst == rank:
-                            continue
+            with torch.autograd.profiler.profile(record_shapes=True) as prof:
+                for dst in range(0, dist.get_world_size()):
+                    if dst == rank:
+                        # Recv mode
+                        for dst in range(0, dist.get_world_size()):
+                            if dst == rank:
+                                continue
 
-                        for recv in ["recv", "irecv"]:
-                            output_tensor = _build_tensor(10, value=-1)
+                            for recv in ["recv", "irecv"]:
+                                output_tensor = _build_tensor(send_recv_size, value=-1)
 
-                            if recv == "recv":
-                                sender = dist.recv(output_tensor)
-                                recv_ranks.append(sender)
-                            elif recv == "irecv":
-                                work = dist.irecv(output_tensor)
-                                work.wait()
-                                sender = work._source_rank()
-                                irecv_ranks.append(sender)
+                                if recv == "recv":
+                                    sender = dist.recv(output_tensor)
+                                    recv_ranks.append(sender)
+                                elif recv == "irecv":
+                                    work = dist.irecv(output_tensor)
+                                    work.wait()
+                                    sender = work._source_rank()
+                                    irecv_ranks.append(sender)
 
-                            # Assert the scalar value "sender" that should be
-                            # equal to the rank of the sender is equal to all
-                            # values in the received tensor.
-                            self.assertTrue(output_tensor.eq(sender).all())
-                else:
-                    # Send mode
-                    dist.send(tensor, dst)  # recv
-                    dist.send(tensor, dst)  # irecv
+                                # Assert the scalar value "sender" that should be
+                                # equal to the rank of the sender is equal to all
+                                # values in the received tensor.
+                                self.assertTrue(output_tensor.eq(sender).all())
+                    else:
+                        # Send mode
+                        dist.send(tensor, dst)  # recv
+                        dist.send(tensor, dst)  # irecv
+
+            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
+            backend = dist.get_backend()
+            if backend == "gloo":
+                for event_name in [f"{backend}:send", f"{backend}:recvAnySource"]:
+                    events = get_profiling_event(event_name, prof)
+                    # Each rank sends/recvs from other rank twice.
+                    self.assertEqual(sum(event.count for event in events), 2 * (dist.get_world_size() - 1))
+                    for event in events:
+                        self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
             # Each rank would have 2 * (world_size - 1) sends, verify that
             # globally we receive the same amount on the other end.
@@ -928,41 +975,75 @@ class DistributedTest:
         def test_send_recv_with_tag(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            tensor = _build_tensor(10, value=rank)
+            send_recv_size = 10
+            tensor = _build_tensor(send_recv_size, value=rank)
+            with torch.autograd.profiler.profile(record_shapes=True) as prof:
+                for dst in range(0, world_size):
+                    if dst == rank:
+                        # Recv mode
+                        for src in range(0, world_size):
+                            if src == rank:
+                                continue
+                            output_tensor = _build_tensor(send_recv_size, value=-1)
+                            dist.recv(output_tensor, src, tag=src)
+                            self.assertTrue(output_tensor.eq(src).all())
+                    else:
+                        # Send mode
+                        dist.send(tensor, dst, tag=rank)
 
-            for dst in range(0, world_size):
-                if dst == rank:
-                    # Recv mode
-                    for src in range(0, world_size):
-                        if src == rank:
-                            continue
-                        output_tensor = _build_tensor(10, value=-1)
-                        dist.recv(output_tensor, src, tag=src)
-                        self.assertTrue(output_tensor.eq(src).all())
-                else:
-                    # Send mode
-                    dist.send(tensor, dst, tag=rank)
+            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
+            backend = dist.get_backend()
+            if backend == "gloo":
+                for event_name in [f"{backend}:send", f"{backend}:recv"]:
+                    events = get_profiling_event(event_name, prof)
+                    # Each rank sends/recvs from all other ranks
+                    event_count = sum(e.count for e in events)
+                    expected_event_count = dist.get_world_size() - 1
+                    self.assertEqual(event_count, expected_event_count)
+                    for event in events:
+                        self.assertEqual(event.name, event_name)
+                        self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
         # ISEND
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
         def test_isend(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
+            with torch.autograd.profiler.profile(record_shapes=True) as prof:
+                if rank == 0:
+                    requests = [
+                        dist.isend(_build_tensor(dest, 10), dest)
+                        for dest in range(1, world_size)
+                    ]
+                    for request in requests:
+                        request.wait()
+                        self.assertTrue(request.is_completed())
+                else:
+                    tensor = _build_tensor(rank, -1)
+                    dist.recv(tensor, 0)
+                    self.assertEqual(tensor, _build_tensor(rank, 10))
 
-            if rank == 0:
-                requests = [
-                    dist.isend(_build_tensor(dest, 10), dest)
-                    for dest in range(1, world_size)
-                ]
-                for request in requests:
-                    request.wait()
-                    self.assertTrue(request.is_completed())
-            else:
-                tensor = _build_tensor(rank, -1)
-                dist.recv(tensor, 0)
-                self.assertEqual(tensor, _build_tensor(rank, 10))
+                self._barrier()
 
-            self._barrier()
+            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
+            backend = dist.get_backend()
+            if backend == "gloo":
+                expected_event_name = f"{backend}:send" if rank == 0 else f"{backend}:recv"
+                events = get_profiling_event(expected_event_name, prof)
+                event_count = sum(e.count for e in events)
+                expected_count = dist.get_world_size() - 1 if rank == 0 else 1
+                self.assertEqual(expected_count, event_count)
+                # Event ordering is not guaranteed, so simply ensure the shapes are
+                # found in the following map.
+                expected_shapes = {
+                    r: [[r] * 3] for r in range(1, dist.get_world_size())
+                }
+                for event in events:
+                    self.assertEqual(event.name, expected_event_name)
+                    if rank == 0:
+                        self.assertTrue(event.input_shapes in expected_shapes.values())
+                    else:
+                        self.assertEqual(event.input_shapes, expected_shapes[rank])
 
         # IRECV
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support irecv")
@@ -1094,7 +1175,7 @@ class DistributedTest:
                 tensor = _build_tensor(src + 1).fill_(master_value if rank == src else worker_value)
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":reduce", False, dist.reduce, tensor, src, op, group_id)
+                self.call_dist_op(":reduce", False, dist.reduce, tensor, src, op, group_id, tensor_shapes=[tensor.shape])
                 if rank == src:
                     self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
 
@@ -1247,8 +1328,17 @@ class DistributedTest:
                 if cuda:
                     for i in range(2):
                         tensors[i] = tensors[i].cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":reduce", False, dist.reduce, tensors[0], src, op, group_id,
-                                  secondary_op_call=lambda: dist.reduce(tensors[1], src, op, group_id))
+                self.call_dist_op(
+                    ":reduce",
+                    False,
+                    dist.reduce,
+                    tensors[0],
+                    src,
+                    op,
+                    group_id,
+                    secondary_op_call=lambda: dist.reduce(tensors[1], src, op, group_id),
+                    tensor_shapes=[tensors[0].shape]
+                )
                 if rank == src:
                     for tensor in tensors:
                         self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
@@ -1341,13 +1431,16 @@ class DistributedTest:
             expect_event=True,
             secondary_op_call=None,
             profile_cuda=False,
+            tensor_shapes=None,
             **kwargs,
         ):
             op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
-            with torch.autograd.profiler.profile(use_cuda=profile_cuda) as prof:
+            with torch.autograd.profiler.profile(
+                use_cuda=profile_cuda, record_shapes=True
+            ) as prof:
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
@@ -1362,6 +1455,9 @@ class DistributedTest:
                 for e in events:
                     self.assertEqual(e.count, 1)
                     self.assertGreaterEqual(e.cpu_time, 0)
+                    # Verify tensor shapes if given
+                    if tensor_shapes is not None:
+                        self.assertEqual(e.input_shapes, tensor_shapes, f"event shape: {e.input_shapes} vs tensor {tensor_shapes}")
 
         # ALL REDUCE
         def _test_all_reduce_helper(
@@ -1384,7 +1480,20 @@ class DistributedTest:
                 tensor = _build_tensor(src + 1, dtype=dtype).fill_(curr_value)
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":all_reduce", async_op, dist.all_reduce, tensor, op, group_id, async_op=async_op)
+                if tensor.dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(tensor).shape]
+                else:
+                    tensor_shapes = [tensor.shape]
+                self.call_dist_op(
+                    ":all_reduce",
+                    async_op,
+                    dist.all_reduce,
+                    tensor,
+                    op,
+                    group_id,
+                    async_op=async_op,
+                    tensor_shapes=tensor_shapes
+                )
                 # Currently, only Gloo backend has profiling tested with CUDA enabled.
                 # Only run cuda profiling test for one rank to speed up since
                 # running with different src_rank does not affect the correctness.
@@ -1402,6 +1511,7 @@ class DistributedTest:
                         group_id,
                         async_op=async_op,
                         profile_cuda=True,
+                        tensor_shapes=tensor_shapes,
                     )
 
             self._barrier()
@@ -1720,7 +1830,21 @@ class DistributedTest:
                 ]
                 if cuda:
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
-                self.call_dist_op(":all_reduce", False, dist.all_reduce_coalesced, tensors, op, group_id)
+                tensor_shapes = []
+                for tensor in tensors:
+                    if tensor.dtype == torch.complex64:
+                        tensor_shapes.append(torch.view_as_real(tensor).shape)
+                    else:
+                        tensor_shapes.append(tensor.shape)
+                self.call_dist_op(
+                    ":all_reduce",
+                    False,
+                    dist.all_reduce_coalesced,
+                    tensors,
+                    op,
+                    group_id,
+                    tensor_shapes=tensor_shapes
+                )
                 expected_tensors = [
                     _build_tensor(src + 1, expected_value, dtype=dtype)
                     for dtype, expected_value in zip(dtypes, expected_values)
@@ -1888,7 +2012,16 @@ class DistributedTest:
                 tensors = (
                     [_build_tensor(dest + 1, i) for i in group] if rank == dest else []
                 )
-                self.call_dist_op(":scatter", False, dist.scatter, tensor, src=dest, scatter_list=tensors, group=group_id)
+                self.call_dist_op(
+                    ":scatter",
+                    False,
+                    dist.scatter,
+                    tensor,
+                    src=dest,
+                    scatter_list=tensors,
+                    group=group_id,
+                    tensor_shapes=[t.shape for t in tensors]
+                )
                 self.assertEqual(tensor, expected_tensor)
 
             self._barrier()
@@ -1939,7 +2072,16 @@ class DistributedTest:
                 tensors = (
                     [_build_tensor(dest + 1, -1) for i in group] if rank == dest else []
                 )
-                self.call_dist_op(":gather", False, dist.gather, tensor, dst=dest, gather_list=tensors, group=group_id)
+                self.call_dist_op(
+                    ":gather",
+                    False,
+                    dist.gather,
+                    tensor,
+                    dst=dest,
+                    gather_list=tensors,
+                    group=group_id,
+                    tensor_shapes=[tensors[0].shape] if len(tensors) > 0 else None
+                )
                 if rank == dest:
                     expected_tensors = [_build_tensor(dest + 1, i) for i in group]
                     for t1, t2 in zip(tensors, expected_tensors):
@@ -1990,14 +2132,17 @@ class DistributedTest:
         def _test_all_gather_helper(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
         ):
-
             for dest in group:
                 tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
-                self.call_dist_op(":all_gather", False, dist.all_gather, tensors, tensor, group_id)
+                if tensors[0].dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(tensors[0]).shape]
+                else:
+                    tensor_shapes = [tensors[0].shape]
+                self.call_dist_op(":all_gather", False, dist.all_gather, tensors, tensor, group_id, tensor_shapes=tensor_shapes)
 
                 expected_tensors = [_build_tensor(dest + 1, i, dtype=dtype) for i in group]
                 for t1, t2 in zip(tensors, expected_tensors):
@@ -2049,8 +2194,14 @@ class DistributedTest:
             Helper that runs all_gather_coalesced and returns true if output
             matches expectations.
             """
+            tensor_shapes = []
+            for input_tensor in input_tensors:
+                if input_tensor.dtype == torch.complex64:
+                    tensor_shapes.append(torch.view_as_real(input_tensor).shape)
+                else:
+                    tensor_shapes.append(input_tensor.shape)
             self.call_dist_op(":all_gather", False, dist.all_gather_coalesced,
-                              output_tensor_lists, input_tensors, group_id)
+                              output_tensor_lists, input_tensors, group_id, tensor_shapes=tensor_shapes)
 
             for l1, l2 in zip(output_tensor_lists, expected_tensors):
                 for t1, t2 in zip(l1, l2):
@@ -2175,7 +2326,15 @@ class DistributedTest:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":all_to_all", False, dist.all_to_all_single, out_tensor, in_tensor, group=group_id)
+                self.call_dist_op(
+                    ":all_to_all",
+                    False,
+                    dist.all_to_all_single,
+                    out_tensor,
+                    in_tensor,
+                    group=group_id,
+                    tensor_shapes=[in_tensor.shape]
+                )
                 self.assertEqual(out_tensor, expected_tensor)
             self._barrier()
 
@@ -2579,7 +2738,7 @@ class DistributedTest:
                 ]
                 self.call_dist_op(
                     "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                    expect_event=len(tensors) == 1)
+                    expect_event=len(tensors) == 1, tensor_shapes=[tensors[0].shape])
                 if rank == src:
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)
@@ -3219,10 +3378,13 @@ class DistributedTest:
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
         def test_ddp_logging_data_cpu(self):
+            def parse_env(var):
+                return os.environ[var] if var in os.environ else "N/A"
+
             group, group_id, rank = self._init_global_test()
             model_DDP = copy.deepcopy(DDP_NET)
-            model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, bucket_cap_mb=0.001)
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
             self.assertEqual(ddp_logging_data.module_name, 'Net')
@@ -3231,10 +3393,40 @@ class DistributedTest:
             # output_device of CPU training is -1.
             self.assertEqual(ddp_logging_data.output_device, -1)
             self.assertEqual(ddp_logging_data.broadcast_buffers, True)
-            self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 0.001)
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
             self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
+            self.assertEqual(ddp_logging_data.iteration, 0)
+            params = list(model_DDP.parameters())
+            num_params = 0
+            param_size = 0
+            params = list(parameter for parameter in filter(lambda parameter: parameter.requires_grad, params))
+            for p in params:
+                num_params += 1
+                param_size += p.numel() * p.element_size()
+            self.assertEqual(ddp_logging_data.dtype, "float")
+            self.assertEqual(ddp_logging_data.total_parameter_size_bytes, param_size)
+            self.assertEqual(ddp_logging_data.num_parameter_tensors, num_params)
+            self.assertEqual(ddp_logging_data.bucket_sizes, [param_size])
+            self.assertEqual(ddp_logging_data.master_port, parse_env("MASTER_PORT"))
+            self.assertEqual(ddp_logging_data.master_addr, parse_env("MASTER_ADDR"))
+            self.assertEqual(ddp_logging_data.cuda_visible_devices, parse_env("CUDA_VISIBLE_DEVICES"))
+            self.assertEqual(ddp_logging_data.gloo_socket_ifname, parse_env("GLOO_SOCKET_IFNAME"))
+            self.assertEqual(ddp_logging_data.gloo_device_transport, parse_env("GLOO_DEVICE_TRANSPORT"))
+            self.assertEqual(ddp_logging_data.nccl_socket_ifname, parse_env("NCCL_SOCKET_IFNAME"))
+            self.assertEqual(ddp_logging_data.nccl_blocking_wait, parse_env("NCCL_BLOCKING_WAIT"))
+            self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
+            self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
+            self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
+            # test larger net and verify multiple bucket sizes
+            model = LargeNet()
+            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1)
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
+            params = list(model_DDP.parameters())
+            self.assertEqual(
+                ddp_logging_data.bucket_sizes,
+                [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()])
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -3244,7 +3436,7 @@ class DistributedTest:
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP.cuda(rank)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=[rank])
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.device_ids, [rank])
             self.assertEqual(ddp_logging_data.output_device, rank)
 
@@ -3653,6 +3845,51 @@ class DistributedTest:
                     # Avoid accumulating grad so that it's the same every iteration.
                     net.zero_grad()
                     torch.cuda.synchronize(device=self.rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_profiling(self):
+            batch = 3
+            dim = 10
+            num_iters = 6
+            torch.cuda.set_device(self.rank)
+            model = nn.Linear(dim, dim, bias=False)
+            inp = torch.rand(batch, dim, device=self.rank)
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank), device_ids=[self.rank]
+            )
+            with torch.autograd.profiler.profile() as prof:
+                for i in range(num_iters):
+                    # Enable profiling on even iterations
+                    loss = net(inp).sum()
+                    loss.backward()
+
+            all_reduce_event_name = f"{dist.get_backend()}:all_reduce"
+            events = get_profiling_event(all_reduce_event_name, prof)
+            event_count = sum(e.count for e in events)
+            self.assertEqual(event_count, num_iters)
+            for event in events:
+                self.assertEqual(event.name, all_reduce_event_name)
+
+            # Run DDP with profiling for a few iterations, then enable profiling
+            # for a single pass, and ensure it is recorded. This tests that the
+            # thread local state is correctly updated.
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank), device_ids=[self.rank]
+            )
+            for i in range(3):
+                loss = net(inp).sum()
+                loss.backward()
+            # Now enable the profiler.
+            with torch.autograd.profiler.profile() as prof:
+                loss = net(inp).sum()
+                loss.backward()
+
+            events = get_profiling_event(all_reduce_event_name, prof)
+            self.assertEqual(1, len(events))
+            self.assertEqual(1, events[0].count)
+            self.assertEqual(events[0].name, all_reduce_event_name)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})

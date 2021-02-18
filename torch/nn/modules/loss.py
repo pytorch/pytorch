@@ -1316,7 +1316,9 @@ class TripletMarginLoss(_Loss):
     Shape:
         - Input: :math:`(N, D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
-            otherwise.
+          otherwise.
+
+    Examples::
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
     >>> anchor = torch.randn(100, 128, requires_grad=True)

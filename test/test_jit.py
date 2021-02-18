@@ -41,11 +41,13 @@ from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
+from jit.test_jit_utils import TestJitUtils  # noqa: F401
+from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch._six import PY37, StringIO
+from torch._six import PY37
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
@@ -750,6 +752,22 @@ class TestJit(JitTestCase):
         for m, inp in inputs:
             self.checkModule(m, (inp,))
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Not implemented for Simple or Legacy')
+    def test_debug_flush_compilation_cache(self):
+        def foo(x):
+            return x + 2
+        x = torch.rand(1, 10)
+        with enable_profiling_mode_for_profiling_tests():
+            jitted = self.checkScript(foo, (x,))
+            # shouldn't throw
+            states = jitted.get_debug_state()
+            # after flushing there shouldn't be
+            # no opt plan
+
+            jitted._debug_flush_compilation_cache()
+            with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
+                states = jitted.get_debug_state() # noqa
+
     def test_numel(self):
         @torch.jit.script
         def get_numel_script(x):
@@ -1274,6 +1292,15 @@ graph(%Ra, %Rb):
         graph = parse_ir(input_str)
         torch._C._jit_pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
         FileCheck().run(input_str, graph)
+
+    def test_script_tensor_type(self):
+        def foo(x, t: torch.dtype):
+            return x.type(t)
+        scr = torch.jit.script(foo)
+        x = torch.rand(3, 4)
+        for t in [torch.int8, torch.float64, torch.float32,
+                  torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
+            self.assertEqual(scr(x, t), foo(x, t))
 
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
@@ -5510,7 +5537,7 @@ a")
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
-            return a // a
+            return a * a
         ''')
         inputs = [torch.ones(10, 10, dtype=torch.long)]
         outputs = torch.ones(10, 10)
@@ -7007,6 +7034,26 @@ a")
 
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
+
+    def test_compare_two_bool_inputs(self):
+        def compare_eq(a: bool, b: bool):
+            return a == b
+
+        def compare_ne(a: bool, b: bool):
+            return a != b
+
+        scripted_fn_eq = torch.jit.script(compare_eq)
+        scripted_fn_ne = torch.jit.script(compare_ne)
+        self.assertEqual(scripted_fn_eq(True, False), compare_eq(True, False))
+        self.assertEqual(scripted_fn_eq(False, True), compare_eq(False, True))
+        self.assertEqual(scripted_fn_eq(True, True), compare_eq(True, True))
+        self.assertEqual(scripted_fn_eq(False, False), compare_eq(False, False))
+
+        self.assertEqual(scripted_fn_ne(True, False), compare_ne(True, False))
+        self.assertEqual(scripted_fn_ne(False, True), compare_ne(False, True))
+        self.assertEqual(scripted_fn_ne(True, True), compare_ne(True, True))
+        self.assertEqual(scripted_fn_ne(False, False), compare_ne(False, False))
+
 
     def _test_tensor_number_math(self, device='cpu'):
         template = dedent('''
@@ -11946,7 +11993,8 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                self.assertEqual(f_script(), f())
+                with self.maybeWarnsRegex(UserWarning, "floor_divide"):
+                    self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
         @torch.jit.ignore
@@ -12488,20 +12536,6 @@ dedent """
             test_str.append(str(tm.foo.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
-    # Helper function to eval Python3 code without causing a syntax error for
-    # this file under py2
-    def _get_py3_code(self, code, fn_name):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            script_path = os.path.join(tmp_dir, 'script.py')
-            with open(script_path, 'w') as f:
-                f.write(code)
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(fn_name, script_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            fn = getattr(module, fn_name)
-            return fn
-
     #  Python AST Frontend , Python 3-style type annotations , Script function
     def test_annot_ast_py3_fn(self):
         code = dedent('''
@@ -12515,7 +12549,7 @@ dedent """
         ''')
         test_str = []
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'foo')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'foo')
             test_str.append(str(fn.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
@@ -12535,7 +12569,7 @@ dedent """
         test_str = []
 
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'foo')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'foo')
             args = fn.schema.arguments
             returns = fn.schema.returns
             self.assertEqual(str(args[0].type), pair[1])
@@ -12590,7 +12624,7 @@ dedent """
 
         test_str = []
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'instance')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
@@ -12606,7 +12640,7 @@ dedent """
 
         test_str = []
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'foo')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'foo')
             test_str.append(str(fn.schema))
         self.assertExpected("\n".join(test_str))
 
@@ -12624,9 +12658,20 @@ dedent """
 
         test_str = []
         for pair in self.type_input_return_pairs():
-            fn = self._get_py3_code(self.format_code(code, pair), 'instance')
+            fn = jit_utils._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
+
+    # Tests that "# type: ignore[*]" is supported in type lines and is
+    # properly ignored.
+    def test_mypy_type_ignore(self):
+        @torch.jit.script
+        def foo(x):  # type: ignore
+            return x
+
+        @torch.jit.script
+        def bar(x):  # type: ignore[no-redef]
+            return x
 
     def test_method_casts_script(self):
         cast_types = [
@@ -14987,7 +15032,7 @@ dedent """
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
 
-            out = StringIO()
+            out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
 
