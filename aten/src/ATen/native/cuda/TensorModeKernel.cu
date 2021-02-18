@@ -145,16 +145,21 @@ void apply_mode(
   }
 }
 
-#define HANDLE_MODE(SIZE)                                                  \
-  {                                                                        \
-    const dim3 block(SIZE / 2);                                            \
-    const auto memsize =                                                   \
-        (sizeof(scalar_t) * SIZE) + (2 * SIZE * sizeof(unsigned int));     \
-    compute_mode<scalar_t, SIZE>                                           \
-        <<<grid, block, memsize, at::cuda::getCurrentCUDAStream()>>>(      \
-            self.data_ptr<scalar_t>(), ti_values, ti_indices, slice_size); \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
-  }
+template <int64_t size, typename scalar_t>
+void handle_fused_mode(
+    dim3 grid,
+    const Tensor& self,
+    cuda::detail::TensorInfo<scalar_t, unsigned int>& ti_values,
+    cuda::detail::TensorInfo<int64_t, unsigned int>& ti_indices,
+    int64_t slice_size) {
+  const dim3 block(size / 2);
+  const auto memsize =
+      (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
+  compute_mode<scalar_t, size>
+      <<<grid, block, memsize, at::cuda::getCurrentCUDAStream()>>>(
+          self.data_ptr<scalar_t>(), ti_values, ti_indices, slice_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
 
 template <typename scalar_t>
 void fused_mode(
@@ -177,26 +182,30 @@ void fused_mode(
   auto ceilPowerOf2 = nextHighestPowerOf2(slice_size);
 
   // Tradeoff between compilation time and the number of specializations.
-  // Ideally we would have one HANDLE_MODE for each power of 2
+  // Ideally we would have one handle_fused_mode for each power of 2
   switch (ceilPowerOf2) {
     case 2048:
-      HANDLE_MODE(2048)
+      handle_fused_mode<2048, scalar_t>(
+          grid, self, ti_values, ti_indices, slice_size);
       break;
     case 1024:
     case 512:
     case 256:
-      HANDLE_MODE(1024)
+      handle_fused_mode<1024, scalar_t>(
+          grid, self, ti_values, ti_indices, slice_size);
       break;
     case 128:
     case 64:
-      HANDLE_MODE(128)
+      handle_fused_mode<128, scalar_t>(
+          grid, self, ti_values, ti_indices, slice_size);
       break;
     case 32:
     case 16:
     case 8:
     case 4:
     case 2:
-      HANDLE_MODE(32)
+      handle_fused_mode<32, scalar_t>(
+          grid, self, ti_values, ti_indices, slice_size);
       break;
     case 1:
     default:
