@@ -1759,6 +1759,18 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients'),
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                SkipInfo('TestCommon', 'test_variant_consistency_eager'))),
+    OpInfo('linalg.eigvals',
+           aten_name='linalg_eigvals',
+           op=torch.linalg.eigvals,
+           dtypes=floating_and_complex_types(),
+           supports_tensor_out=True,
+           sample_inputs_func=sample_inputs_linalg_inv,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # torch.linalg.eigvals is not differentiable
+               SkipInfo('TestGradients'),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'))),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),

@@ -377,6 +377,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.dstack: lambda tensors, out=None: -1,
         torch.eig: lambda input, eigenvectors=False, out=None: -1,
         torch.linalg.eig: lambda input, out=None: -1,
+        torch.linalg.eigvals: lambda input, out=None: -1,
         torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
         torch.linalg.eigvalsh: lambda input, UPLO="L", out=None: -1,
         torch.einsum: lambda equation, *operands: -1,

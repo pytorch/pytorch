@@ -36,6 +36,14 @@ inline std::tuple<Tensor&, Tensor&> eig_out(Tensor& eigvals, Tensor& eigvecs, co
   return torch::linalg_eig_out(eigvals, eigvecs, self);
 }
 
+inline Tensor eigvals(const Tensor& self) {
+  return torch::linalg_eigvals(self);
+}
+
+inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
+  return torch::linalg_eigvals_out(result, self);
+}
+
 inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
   return torch::linalg_eigh(self, uplo);
 }
@@ -163,6 +171,17 @@ inline std::tuple<Tensor, Tensor> eig(const Tensor& self) {
 
 inline std::tuple<Tensor&, Tensor&> eig_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self) {
   return detail::eig_out(eigvals, eigvecs, self);
+}
+
+/// Computes eigenvalues of non-symmetric/non-hermitian matrices
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigvals
+inline Tensor eigvals(const Tensor& self) {
+  return detail::eigvals(self);
+}
+
+inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
+  return detail::eigvals_out(result, self);
 }
 
 /// Computes eigenvalues and eigenvectors

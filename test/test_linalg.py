@@ -1688,6 +1688,139 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
 
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
+    # NumPy computes only in float64 and complex128 precisions
+    # for float32 or complex64 results might be very different from float64 or complex128
+    @dtypes(torch.float64, torch.complex128)
+    def test_eigvals_numpy(self, device, dtype):
+        def run_test(shape, *, symmetric=False):
+            from torch.testing._internal.common_utils import random_symmetric_matrix
+
+            if not dtype.is_complex and symmetric:
+                # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
+                a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
+            else:
+                a = torch.randn(*shape, dtype=dtype, device=device)
+
+            actual = torch.linalg.eigvals(a)
+
+            # compare with NumPy
+            # the eigenvalues are not necessarily ordered
+            # so order of NumPy and PyTorch can be different
+            expected = np.linalg.eigvals(a.cpu().numpy())
+
+            # sort NumPy output
+            ind = np.argsort(expected, axis=-1)[::-1]
+            expected = np.take_along_axis(expected, ind, axis=-1)
+
+            # sort PyTorch output
+            # torch.argsort doesn't work well with complex inputs, NumPy sorting on CPU is used instead
+            # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
+            # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
+            ind = np.argsort(actual.cpu().numpy(), axis=-1)[::-1]
+            actual_np = actual.cpu().numpy()
+            sorted_actual = np.take_along_axis(actual_np, ind, axis=-1)
+
+            self.assertEqual(expected, sorted_actual)
+
+        shapes = [(0, 0), # Empty matrix
+                  (5, 5), # Single matrix
+                  (0, 0, 0), (0, 5, 5), # Zero batch dimension tensors
+                  (2, 5, 5), # 3-dim tensors
+                  (2, 1, 5, 5)]  # 4-dim tensors
+        for shape in shapes:
+            run_test(shape)
+            run_test(shape, symmetric=True)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
+    @dtypes(*floating_and_complex_types())
+    def test_eigvals_compare_backends(self, device, dtype):
+        def run_test(shape, *, symmetric=False):
+            from torch.testing._internal.common_utils import random_symmetric_matrix
+
+            if not dtype.is_complex and symmetric:
+                # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
+                a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
+            else:
+                a = torch.randn(*shape, dtype=dtype, device=device)
+
+            actual = torch.linalg.eigvals(a)
+
+            if torch.cuda.is_available():
+                complementary_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+
+                # compare with CPU if dtype=='cuda' else with CUDA
+                expected = torch.linalg.eigvals(a.to(complementary_device))
+                self.assertEqual(expected, actual)
+
+                # check out= variant
+                complex_dtype = dtype
+                if not dtype.is_complex and not symmetric:
+                    complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
+                out = torch.empty(0, dtype=complex_dtype, device=device)
+                ans = torch.linalg.eigvals(a, out=out)
+                self.assertEqual(ans, out)
+                self.assertEqual(expected.to(complex_dtype), out)
+
+                # check non-contiguous out
+                if a.numel() > 0:
+                    out = torch.empty(2*shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
+                    self.assertFalse(out.is_contiguous())
+                    ans = torch.linalg.eigvals(a, out=out)
+                    self.assertEqual(ans, out)
+                    self.assertEqual(expected.to(complex_dtype), out)
+
+        shapes = [(0, 0), # Empty matrix
+                  (5, 5), # Single matrix
+                  (0, 0, 0), (0, 5, 5), # Zero batch dimension tensors
+                  (2, 5, 5), # 3-dim tensors
+                  (2, 1, 5, 5)]  # 4-dim tensors
+        for shape in shapes:
+            run_test(shape)
+            run_test(shape, symmetric=True)
+
+    @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_eigvals_errors_and_warnings(self, device, dtype):
+        # eig requires the input to be at least 2 dimensional tensor
+        a = torch.randn(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            torch.linalg.eigvals(a)
+
+        # eig requires a square matrix
+        a = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.linalg.eigvals(a)
+
+        # if out tensor with floating dtype is passed for complex output an error is thrown
+        if not dtype.is_complex:
+            # The characteristic equation is p(λ) = λ^2 − 2λ + 5 = 0, with roots λ = 1±2i
+            a = torch.tensor([[3., -2.], [4., -1.]], dtype=dtype, device=device)
+            out = torch.empty(0, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "can't safely cast eigenvalues to non-complex dtype"):
+                torch.linalg.eigvals(a, out=out)
+
+        # dtypes should be safely castable
+        a = torch.randn(3, 3, device=device, dtype=dtype)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "but got eigenvalues with dtype Int"):
+            torch.linalg.eigvals(a, out=out)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        out = torch.empty(1, device=device, dtype=torch.complex128)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.eigvals(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_norm_old(self, device):

@@ -1847,6 +1847,83 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
   return std::tuple<Tensor, Tensor>(out_values, out_vectors);
 }
 
+Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
+  squareCheckInputs(input);
+  checkLinalgCompatibleDtype("linalg_eig", values, input, "eigenvalues");
+
+  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
+  auto options = input.options().device(at::kCPU);
+  auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, options.dtype(kInt));
+
+  // for NumPy compatibility we can't determine the dtype of eigenvalues before running the computation
+  // for real-valued inputs NumPy can return either real- or complex-valued output, we will create values_tmp of complex type
+  // for complex-valued inputs we can use values' storage directly if dtype matches
+  // bool values_input_same_type = input.is_complex() ? (values.scalar_type() == input.scalar_type()) : false;
+  bool values_expected_type = (values.scalar_type() == toComplexType(input.scalar_type()));
+
+  auto expected_values_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
+  bool values_equal_expected_shape = values.sizes().equals(expected_values_shape);
+
+  // if result is not empty and not in batched column major format
+  bool values_tmp_needed = (values.numel() != 0 && !values.is_contiguous());
+  // or result does not have the expected shape
+  values_tmp_needed |= (values.numel() != 0 && !values_equal_expected_shape);
+  // or result does not have the expected dtype
+  values_tmp_needed |= !values_expected_type;
+  // we will allocate a temporary tensor and do the copy
+
+  // "out=" variants shouldn't allow result and input to be on different devices
+  // however here if result tensors are on CPU while input is on GPU then additional copy is avoided
+  // because MAGMA's GEEV takes CPU inputs and returns CPU outputs
+  values_tmp_needed |= values.is_cuda();
+
+  // determine the appropriate scalar_type for the temporary tensors
+  ScalarType values_type = input.scalar_type();
+  if (!input.is_complex()) {
+    // for real-valued input we can have either real- or complex-valued output
+    ScalarType input_complex_dtype = toComplexType(input.scalar_type());
+    values_type = values.is_complex() ? input_complex_dtype : values_type;
+  }
+
+  Tensor vectors;
+  if (values_tmp_needed) {
+    Tensor values_tmp = at::empty({0}, options.dtype(values_type));
+    std::tie(values_tmp, std::ignore) = linalg_eig_out_info(input, values_tmp, vectors, infos, /*compute_eigenvectors=*/false);
+    at::native::resize_output(values, values_tmp.sizes());
+    values.copy_(values_tmp);
+  } else { // use 'values' storage directly
+    std::tie(values, std::ignore) = linalg_eig_out_info(input, values, vectors, infos, /*compute_eigenvectors=*/false);
+  }
+
+  // Now check LAPACK/MAGMA error codes
+  if (input.dim() > 2) {
+    batchCheckErrors(infos, "linalg_eigvals");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "linalg_eigvals");
+  }
+
+  return values;
+}
+
+Tensor linalg_eigvals(const Tensor& input) {
+  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
+  auto options = input.options().device(at::kCPU);
+
+  ScalarType complex_dtype = toComplexType(input.scalar_type());
+  Tensor values = at::empty({0}, options.dtype(complex_dtype));
+
+  at::linalg_eigvals_outf(input, values);
+
+  // if the imaginary part is zero we can transform the output to be real for NumPy compatibility
+  bool is_zero_imag = at::all(at::imag(values) == 0.0).item().toBool();
+  if (is_zero_imag && !input.is_complex()) {
+    values = at::real(values);
+  }
+
+  auto out_values = values.to(input.device());
+  return out_values;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 DEFINE_DISPATCH(eig_stub);

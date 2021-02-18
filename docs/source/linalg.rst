@@ -21,6 +21,7 @@ Functions
 .. autofunction:: det
 .. autofunction:: slogdet
 .. autofunction:: eig
+.. autofunction:: eigvals
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
 .. autofunction:: matrix_rank

@@ -1076,6 +1076,9 @@
 - name: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   self: non_differentiable
 
+- name: linalg_eigvals(Tensor self) -> Tensor
+  self: non_differentiable
+
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
 
