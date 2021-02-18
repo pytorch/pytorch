@@ -105,6 +105,24 @@ static struct PyGetSetDef ${op}_properties[] = {
 PY_GETSETDEF_STRUCT = CodeTemplate("""\
 {(char*)"${name}", (getter)THP${op}_${name}_getter, nullptr, nullptr, nullptr}""")
 
+GETTER_DEFINITION_SAVEDVAR = CodeTemplate("""\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
+  return THPVariable_Wrap(prop.unpack());
+}
+""")
+
+GETTER_DEFINITION_VEC_SAVEDVAR = CodeTemplate("""\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
+  PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+  for (int i = 0; i < prop.size(); i++) {
+    PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack()));
+  }
+  return tup;
+}
+""")
+
 GETTER_DEFINITION_ARRAYREF = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   ${get_prop}
@@ -113,21 +131,6 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     ${tuple_setitem}
   }
   return tup;
-}
-""")
-
-GETTER_DEFINITION_INT = CodeTemplate("""\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
-  auto prop = static_cast<${op}*>(self->cdata.get())->${name};
-  PyObject* ret = PyLong_FromUnsignedLong((uint64_t) prop);
-  return ret;
-}
-""")
-
-GETTER_DEFINITION_SAVEDVAR = CodeTemplate("""\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
-  const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
-  return THPVariable_Wrap(prop.unpack());
 }
 """)
 
@@ -149,6 +152,14 @@ auto prop = opt_prop.list.value();
 
 GET_PROP = CodeTemplate("""\
 auto prop = static_cast<${op}*>(self->cdata.get())->${name};
+""")
+
+GETTER_DEFINITION_INT = CodeTemplate("""\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  auto prop = static_cast<${op}*>(self->cdata.get())->${name};
+  PyObject* ret = PyLong_FromUnsignedLong((uint64_t) prop);
+  return ret;
+}
 """)
 
 # These functions have backwards which cannot be traced, and so must have
@@ -236,7 +247,6 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(op=info.op, name=name))
         elif var.type == 'TensorList':
-            should_append_getsetdef = False
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -245,8 +255,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_released_ = true;')
             unpack.append(f'auto {name} = unpack_list({name}_);')
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
+            getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(op=info.op, name=name))
         elif var.type == 'c10::List<c10::optional<Tensor>>':
-            should_append_getsetdef = False
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -255,6 +265,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_released_ = true;')
             unpack.append(f'auto {name} = unpack_opt_list({name}_);')
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
+            getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(op=info.op, name=name))
         elif var.type == 'IntArrayRef':
             saved_variables.append(f'std::vector<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION_ARRAYREF.substitute(
@@ -271,8 +282,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             saved_variables.append(f'{var.type} {name} = 0;')
             getter_definitions.append(GETTER_DEFINITION_INT.substitute(op=info.op, name=name))
         else:
-            should_append_getsetdef = False
             saved_variables.append(f'{var.type} {name};')
+            # We don't know how to wrap this into a PyObject
+            should_append_getsetdef = False
 
         if should_append_getsetdef:
             py_getsetdef_structs.append(PY_GETSETDEF_STRUCT.substitute(op=info.op, name=name))
