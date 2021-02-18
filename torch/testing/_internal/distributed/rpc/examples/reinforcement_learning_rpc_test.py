@@ -68,9 +68,8 @@ class DummyEnv:
     tests in this file. It is designed to run for a set max number of iterations,
     returning random states and rewards at each step.
     """
-    def __init__(self, state_dim=4, action_dim=2, num_iters=10, reward_threshold=475.0):
+    def __init__(self, state_dim=4, num_iters=10, reward_threshold=475.0):
         self.state_dim = state_dim
-        self.action_dim = action_dim
         self.num_iters = num_iters
         self.iter = 0
         self.reward_threshold = reward_threshold
@@ -248,6 +247,10 @@ class ReinforcementLearningRpcTest(RpcAgentTestFixture):
             )
             agent = Agent(self.world_size)
             run_agent(agent, n_steps=int(TOTAL_EPISODE_STEP / (self.world_size - 1)))
+
+            # Ensure training was run. We don't really care about whether the task was learned,
+            # since the purpose of the test is to check the API calls.
+            self.assertGreater(agent.running_reward, 0.0)
         else:
             # Other ranks are observers that passively wait for instructions from the agent.
             rpc.init_rpc(
