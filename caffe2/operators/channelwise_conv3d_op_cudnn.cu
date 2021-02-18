@@ -411,6 +411,7 @@ class ChannelwiseConv3dOp final : public ConvPoolOpBase<CUDAContext> {
             filter.data<float>(),
             Y->mutable_data<float>(),
             Y->size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     if (InputSize() == 3) {
       std::vector<int> bias_dims(X.ndim(), 1);
@@ -536,6 +537,8 @@ class ChannelwiseConv3dGradientOp final : public ConvPoolOpBase<CUDAContext> {
             X.data<float>(),
             dfilter->mutable_data<float>(),
             dY.size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     DepthwiseConv3dBackpropInputGPUKernelNCHW<float>
         <<<CAFFE_GET_BLOCKS(dX->size()),
            CAFFE_CUDA_NUM_THREADS,
@@ -546,6 +549,7 @@ class ChannelwiseConv3dGradientOp final : public ConvPoolOpBase<CUDAContext> {
             filter.data<float>(),
             dX->mutable_data<float>(),
             dX->size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     if (!no_bias_) {
       std::vector<int> bias_dims(X.ndim(), 1);

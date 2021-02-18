@@ -235,10 +235,10 @@ class IDP(IterDataPipe):
         return self.length
 
 
-def _fake_fn(self, data, *args, **kwargs):
+def _fake_fn(data, *args, **kwargs):
     return data
 
-def _fake_filter_fn(self, data, *args, **kwargs):
+def _fake_filter_fn(data, *args, **kwargs):
     return data >= 5
 
 class TestFunctionalIterDataPipe(TestCase):
@@ -261,8 +261,12 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Filter, IDP(arr), {'filter_fn': lambda x: x >= 5}),
         ]
         for dpipe, input_dp, kargs in unpicklable_datapipes:
-            with self.assertRaises(AttributeError):
-                p = pickle.dumps(dpipe(input_dp, **kargs))  # type: ignore
+            with warnings.catch_warnings(record=True) as wa:
+                datapipe = dpipe(input_dp, **kargs)
+                self.assertEqual(len(wa), 1)
+                self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
+                with self.assertRaises(AttributeError):
+                    p = pickle.dumps(datapipe)  # type: ignore
 
     def test_map_datapipe(self):
         arr = range(10)
@@ -418,21 +422,18 @@ class TestFunctionalIterDataPipe(TestCase):
             temp = list(d for d in filter_dp)
 
     def test_sampler_datapipe(self):
-        arrs = range(10)
-        input_dp = IDP(arrs)
+        input_dp = IDP(range(10))
         # Default SequentialSampler
         sampled_dp = dp.iter.Sampler(input_dp)  # type: ignore
         self.assertEqual(len(sampled_dp), 10)
-        i = 0
-        for x in sampled_dp:
+        for i, x in enumerate(sampled_dp):
             self.assertEqual(x, i)
-            i += 1
 
         # RandomSampler
-        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, replacement=True)  # type: ignore
+        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, sampler_kwargs={'replacement': True})  # type: ignore
 
-        # Requires `__len__` to build SamplerDataset
-        input_dp_nolen = IDP_NoLen(arrs)
+        # Requires `__len__` to build SamplerDataPipe
+        input_dp_nolen = IDP_NoLen(range(10))
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
 
