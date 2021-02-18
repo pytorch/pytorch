@@ -4,7 +4,7 @@ import sys
 from typing import Any, List
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
 # Make the helper files in test/ importable
@@ -29,8 +29,6 @@ class TestWith(JitTestCase):
         Check that with statements that use the 'as' keyword to bind expressions
         to targets work as expected.
         """
-        global Context
-
         @torch.jit.script
         class Context(object):
             """
@@ -49,6 +47,8 @@ class TestWith(JitTestCase):
 
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
+
+        make_global(Context)
 
         def test_basic(x: torch.Tensor) -> torch.Tensor:
             """Basic test with one with-statement."""
@@ -185,8 +185,6 @@ class TestWith(JitTestCase):
         Check that with statements that do not use the 'as' keyword to bind expressions
         to targets work as expected.
         """
-        global Context
-
         @torch.jit.script
         class Context(object):
             """
@@ -205,6 +203,8 @@ class TestWith(JitTestCase):
 
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
+
+        make_global(Context)
 
         def test_basic(x: torch.Tensor) -> torch.Tensor:
             """Basic test with one with-statement."""
@@ -341,8 +341,6 @@ class TestWith(JitTestCase):
         Check that exceptions thrown in the bodies of with-statements are
         handled correctly.
         """
-        global Context
-
         @torch.jit.script
         class Context(object):
             """
@@ -361,6 +359,8 @@ class TestWith(JitTestCase):
 
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
+
+        make_global(Context)
 
         @torch.jit.script
         def method_that_raises() -> torch.Tensor:

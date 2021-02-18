@@ -38,6 +38,8 @@ bool CosineEmbeddingCriterionOp<CUDAContext>::RunOnDevice() {
   CECKernel<<<CAFFE_GET_BLOCKS(S.numel()), CAFFE_CUDA_NUM_THREADS,
               0, context_.cuda_stream()>>>(
       S.numel(), Sdata, Ydata, margin_, output_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -57,6 +59,8 @@ bool CosineEmbeddingCriterionGradientOp<CUDAContext>::RunOnDevice() {
   CECGradientKernel<<<CAFFE_GET_BLOCKS(S.numel()), CAFFE_CUDA_NUM_THREADS,
                       0, context_.cuda_stream()>>>(
       S.numel(), Sdata, Ydata, dOutput_data, margin_, dSdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

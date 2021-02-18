@@ -627,7 +627,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('sub'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
-        with self.assertRaisesRegex(AttributeError, "TestModule does not have a field with name '_forward'"):
+        with self.assertRaisesRegex(AttributeError, "TestModule \(.*\) does not have a field with name '_forward'"):  # noqa: W605
             mf._forward(x)
 
     def test_freeze_module_with_inplace_mutable(self):
@@ -1508,7 +1508,7 @@ class TestFrozenOptimizations(JitTestCase):
         bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
         mod = torch.nn.Sequential(conv, bn)
         # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize_numerics=False)
         # inspect frozen mod
         FileCheck().check("batch_norm").run(frozen_mod.graph)
         torch.jit.optimize_frozen_module(frozen_mod)
@@ -1517,3 +1517,45 @@ class TestFrozenOptimizations(JitTestCase):
         # optimize_frozen_module should be run
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
+
+    def test_freeze_remove_dropout(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.dropout = nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        mod = torch.jit.script(Net())
+        # inspect mod
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::dropout").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod.eval())
+        FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
+
+        input = torch.randn(2)
+        output_s = mod.forward(input)
+        output_f = frozen_mod.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_remove_feature_dropout(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.dropout = nn.Dropout2d(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        mod = torch.jit.script(Net().eval())
+        # inspect mod
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::feature_dropout").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod)
+        FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
+
+        input = torch.randn(2, 2)
+        output_s = mod.forward(input)
+        output_f = frozen_mod.forward(input)
+        self.assertEqual(output_s, output_f)

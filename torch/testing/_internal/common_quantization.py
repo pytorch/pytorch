@@ -27,6 +27,8 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
+    from torch.fx.graph import Node
+    from torch.fx import GraphModule
     HAS_FX = True
 except ImportError:
     HAS_FX = False
@@ -40,6 +42,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
+from typing import Callable, Tuple, Dict, List
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -555,6 +558,7 @@ class QuantizationTestCase(TestCase):
                     nodes_in_graph[n] = 1
 
         if expected_node is not None:
+            print('expected_node', expected_node)
             self.assertTrue(expected_node in nodes_in_graph, 'node:' + str(expected_node) +
                             ' not found in the graph module')
 
@@ -604,6 +608,106 @@ class QuantizationTestCase(TestCase):
         return str_to_print
 
     if HAS_FX:
+
+        def assert_types_for_matched_subgraph_pairs(
+            self,
+            matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
+            expected_types: Dict[str, Tuple[Tuple[Callable, Callable], Tuple[Callable, Callable]]],
+            gm_a: GraphModule,
+            gm_b: GraphModule,
+        ) -> None:
+            """
+            Verifies that the types specified in expected_types match
+            the underlying objects pointed to by the nodes in matched_subgraph_pairs.
+
+            An example successful test case:
+
+              matched_subgraph_pairs = {'x0': (graph_a_conv_0_node, graph_b_conv_0_node)}
+              expected_types = {'x0': (nn.Conv2d, nnq.Conv2d)}
+
+            The function tests for key equivalence, and verifies types with
+            instance checks.
+            """
+
+            def _get_underlying_op_type(node: Node, gm: GraphModule) -> Callable:
+                if node.op == 'call_module':
+                    mod = getattr(gm, node.target)
+                    return type(mod)
+                else:
+                    assert node.op == 'call_function'
+                    return node.target
+
+            self.assertTrue(
+                len(matched_subgraph_pairs) == len(expected_types),
+                'Expected length of results to match, but got %d and %d' %
+                (len(matched_subgraph_pairs), len(expected_types))
+            )
+            for k, v in expected_types.items():
+                expected_types_a, expected_types_b = v
+                exp_type_start_a, exp_type_end_a = expected_types_a
+                exp_type_start_b, exp_type_end_b = expected_types_b
+                nodes_a, nodes_b = matched_subgraph_pairs[k]
+                node_start_a, node_end_a = nodes_a
+                node_start_b, node_end_b = nodes_b
+
+                act_type_start_a = _get_underlying_op_type(node_start_a, gm_a)
+                act_type_start_b = _get_underlying_op_type(node_start_b, gm_b)
+                act_type_end_a = _get_underlying_op_type(node_end_a, gm_a)
+                act_type_end_b = _get_underlying_op_type(node_end_b, gm_b)
+                types_match = (exp_type_start_a is act_type_start_a) and \
+                    (exp_type_end_a is act_type_end_a) and \
+                    (exp_type_start_b is act_type_start_b) and \
+                    (exp_type_end_b is act_type_end_b)
+                self.assertTrue(
+                    types_match,
+                    'Type mismatch at %s: expected %s, got %s' %
+                    (k, (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
+                        (act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b))
+                )
+
+        def assert_ns_weight_compare_dict_valid(
+            self,
+            weight_compare_dict: Dict[str, Dict[str, torch.Tensor]],
+        ) -> None:
+            """
+            Verifieds that the weight_compare dict (output of Numeric Suite
+            weight matching APIs) is valid:
+            1. for each layer, results are recorded for two models
+            2. shapes of each pair of weights match
+            """
+            for layer_name, layer_data in weight_compare_dict.items():
+                self.assertTrue(
+                    len(layer_data) == 2,
+                    f"Layer {layer_name} does not have exactly two model results.")
+                k0, k1 = layer_data.keys()
+                self.assertTrue(
+                    layer_data[k0].shape == layer_data[k1].shape,
+                    f"Layer {layer_name}, {k0} and {k1} have a shape mismatch.")
+
+        def assert_ns_logger_act_compare_dict_valid(
+            self,
+            act_compare_dict: Dict[str, Dict[str, List[torch.Tensor]]],
+        ) -> None:
+            """
+            Verifies that the act_compare_dict (output of Numeric Suite
+            activation matching APIs) is valid:
+            1. for each layer, results are recorded for two models
+            2. number of seen tensors match
+            3. shapes of each pair of seen tensors match
+            """
+            for layer_name, layer_data in act_compare_dict.items():
+                self.assertTrue(
+                    len(layer_data) == 2,
+                    f"Layer {layer_name} does not have exactly two model results.")
+                k0, k1 = layer_data.keys()
+                self.assertTrue(
+                    len(layer_data[k0]) == len(layer_data[k1]),
+                    f"Layer {layer_name}, {k0} and {k1} do not have the same number of seen Tensors.")
+                for idx in range(len(layer_data[k0])):
+                    self.assertTrue(
+                        layer_data[k0][idx].shape == layer_data[k1][idx].shape,
+                        f"Layer {layer_name}, {k0} and {k1} have a shape mismatch at idx {idx}.")
+
         def checkGraphModeFxOp(self, model, inputs, quant_type,
                                expected_node=None,
                                expected_node_occurrence=None,
@@ -908,6 +1012,19 @@ class AnnotatedConvBnModel(torch.nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         x = self.dequant(x)
+        return x
+
+class ConvBnReLUModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
         return x
 
 class AnnotatedConvBnReLUModel(torch.nn.Module):
@@ -1332,6 +1449,17 @@ class ModelForFusionWithBias(nn.Module):
         x = self.dequant(x)
         return x
 
+class ModelForLinearBNFusion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(20, 10)
+        self.bn = nn.BatchNorm1d(10)
+        nn.init.uniform_(self.bn.weight)
+        nn.init.uniform_(self.bn.bias)
+
+    def forward(self, x):
+        return self.bn(self.fc(x))
+
 class DummyObserver(torch.nn.Module):
     def calculate_qparams(self):
         return 1.0, 0
@@ -1483,3 +1611,66 @@ class EmbeddingWithLinear(torch.nn.Module):
 
     def forward(self, indices, linear_in):
         return self.emb(indices), self.fc(linear_in)
+
+class DenseTopMLP(nn.Module):
+
+    def __init__(self, dense_dim, dense_out, embedding_dim, top_out_in, top_out_out) -> None:
+        super(DenseTopMLP, self).__init__()
+
+        self.dense_mlp = nn.Sequential(
+            nn.Linear(dense_dim, dense_out),
+        )
+        self.top_mlp = nn.Sequential(
+            nn.Linear(dense_out + embedding_dim, top_out_in),
+            nn.Linear(top_out_in, top_out_out),
+        )
+
+    def forward(
+        self,
+        sparse_feature: torch.Tensor,
+        dense: torch.Tensor,
+    ) -> torch.Tensor:
+        dense_feature = self.dense_mlp(dense)
+        features = torch.cat([dense_feature] + [sparse_feature], dim=1)
+
+        out = self.top_mlp(features)
+        return out
+
+# thin wrapper around embedding bag, because tracing inside nn.Embedding
+# bag is not supported at the moment and this is top level
+class EmbBagWrapper(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim):
+        super().__init__()
+        self.emb_bag = nn.EmbeddingBag(num_embeddings, embedding_dim, mode='sum')
+
+    def forward(self, indices, offsets):
+        return self.emb_bag(indices, offsets)
+
+class SparseNNModel(nn.Module):
+    _NUM_EMBEDDINGS = 10
+    _EMBEDDING_DIM = 5
+    _DENSE_DIM = 4
+    _DENSE_OUTPUT = 2
+    _TOP_OUT_IN = 2
+    _TOP_OUT_OUT = 2
+    _TOP_MLP_DIM = 1
+
+    def __init__(self) -> None:
+        super(SparseNNModel, self).__init__()
+
+        self.model_sparse = EmbBagWrapper(self._NUM_EMBEDDINGS, self._EMBEDDING_DIM)
+        self.dense_top = DenseTopMLP(
+            self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN,
+            self._TOP_OUT_OUT)
+
+    def forward(
+        self,
+        sparse_indices: torch.Tensor,
+        sparse_offsets: torch.Tensor,
+        dense: torch.Tensor,
+    ) -> torch.Tensor:
+
+        sparse_feature = self.model_sparse(sparse_indices, sparse_offsets)
+        out = self.dense_top(sparse_feature, dense)
+
+        return out

@@ -110,6 +110,7 @@ namespace c10 {
   _(prim, MMTreeReduce)              \
   _(prim, MMBatchSide)               \
   _(prim, list)                      \
+  _(prim, dict)                      \
   _(prim, min)                       \
   _(prim, max)                       \
   _(prim, abs)                       \
@@ -141,7 +142,6 @@ namespace c10 {
   _(prim, GetAttr)                   \
   _(prim, HasAttr)                   \
   _(prim, profile)                   \
-  _(prim, profile_optional)          \
   _(prim, profile_ivalue)            \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
@@ -253,6 +253,7 @@ namespace c10 {
   _(aten, hash)                      \
   _(aten, len)                       \
   _(aten, list)                      \
+  _(aten, dict)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
   _(aten, sub)                       \

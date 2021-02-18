@@ -23,9 +23,10 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from torch._six import StringIO
+from io import StringIO
 from collections import defaultdict
 
+import importlib.util
 import inspect
 import io
 import math
@@ -34,6 +35,7 @@ import pickle
 import sys
 import tempfile
 import textwrap
+from importlib.abc import Loader
 from typing import Any, Dict, List
 
 RUN_CUDA = torch.cuda.is_available()
@@ -112,6 +114,21 @@ class JitTestCase(JitCommonTestCase):
             del self.stringio
             sys.stdout = self.sys_stdout
 
+    class capture_stderr(list):
+        """
+        Replace sys.stderr with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stderr = sys.stderr
+            self.stringio = StringIO()
+            sys.stderr = self.stringio
+            return self
+
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stderr = self.sys_stderr
+
     def setHooks(self):
         torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
 
@@ -146,7 +163,7 @@ class JitTestCase(JitCommonTestCase):
                 elif node.kind() == 'prim::DifferentiableGraph':
                     get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
                 elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or 
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or
                                                     node.inputs().__next__().node().kind() == 'prim::RequiresGradCheck'):
                     get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
                 else:
@@ -405,7 +422,9 @@ class JitTestCase(JitCommonTestCase):
                     inputs_requires_grad=False,
                     capture_output=False,
                     frames_up=1,
-                    profiling=ProfilingMode.PROFILING):
+                    profiling=ProfilingMode.PROFILING,
+                    atol=None,
+                    rtol=None):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
                 if isinstance(script, str):
@@ -455,7 +474,7 @@ class JitTestCase(JitCommonTestCase):
                         python_outputs = python_fn(*inputs)
                     if not IS_WINDOWS:
                         self.assertExpected(script_stdout[0], subname='stdout')
-                    self.assertEqual(python_outputs, opt_script_outputs)
+                    self.assertEqual(python_outputs, opt_script_outputs, atol=atol, rtol=rtol)
                 else:
                     # profiling run
                     script_outputs = scripted_fn(*recording_inputs)
@@ -464,8 +483,8 @@ class JitTestCase(JitCommonTestCase):
                     if TEST_BAILOUTS:
                         self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
                     python_outputs = python_fn(*inputs)
-                self.assertEqual(python_outputs, script_outputs)
-                self.assertEqual(script_outputs, opt_script_outputs)
+                self.assertEqual(python_outputs, script_outputs, atol=atol, rtol=rtol)
+                self.assertEqual(script_outputs, opt_script_outputs, atol=atol, rtol=rtol)
                 return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
@@ -643,10 +662,12 @@ def _trace(*args, **kwargs):
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
         torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
         try:
             fn(*args, **kwargs)
         finally:
             torch._C._jit_override_can_fuse_on_cpu(False)
+            torch._C._jit_set_te_must_use_llvm_cpu(True)
     return wrapper
 
 
@@ -684,3 +705,23 @@ def warmup_backward(f, *args):
             f.backward(retain_graph=True)
 
     return results
+
+# TODO: Remove me once https://bugs.python.org/issue42666 is resolved
+def make_global(*args):
+    for arg in args:
+        setattr(sys.modules[arg.__module__], arg.__name__, arg)
+
+# Helper function to eval Python3 code without causing a syntax error for
+# this file under py2
+def _get_py3_code(code, fn_name):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        script_path = os.path.join(tmp_dir, 'script.py')
+        with open(script_path, 'w') as f:
+            f.write(code)
+        spec = importlib.util.spec_from_file_location(fn_name, script_path)
+        module = importlib.util.module_from_spec(spec)
+        loader = spec.loader
+        assert isinstance(loader, Loader)  # Assert type to meet MyPy requriement
+        loader.exec_module(module)
+        fn = getattr(module, fn_name)
+        return fn

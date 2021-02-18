@@ -36,7 +36,7 @@ if args.aten_root:
     if not os.path.exists(args.aten_root):
         raise ValueError('aten_root ({}) does not exist'.format(
             args.aten_root))
-    sys.path.append(os.path.join(args.aten_root, '..'))  # TODO: fix this
+    sys.path.insert(0, os.path.join(args.aten_root, '..'))
     from tools.codegen.code_template import CodeTemplate as CT
 else:
     from tools.codegen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]

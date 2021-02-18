@@ -40,6 +40,14 @@ class TestE2EBase : public ::testing::Test {
     RpcAgent::setCurrentRpcAgent(rpcAgent);
     std::shared_ptr<TypeResolver> typeResolver =
         std::make_shared<TypeResolver>([&](const c10::QualifiedName& qn) {
+          // For Dict that is used for device map.
+          auto pos = qn.name().find("Dict");
+          if (pos != std::string::npos) {
+            return c10::StrongTypePtr(
+                nullptr,
+                c10::DictType::create(
+                    c10::IntType::create(), c10::IntType::create()));
+          }
           return c10::StrongTypePtr(
               nullptr, c10::TensorType::create(at::Tensor()));
         });

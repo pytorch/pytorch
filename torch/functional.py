@@ -713,14 +713,14 @@ def _unique_impl(input: Tensor, sorted: bool = True,
         tensor([ 2,  3,  1])
 
         >>> output, inverse_indices = torch.unique(
-                torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
+        ...     torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
         tensor([ 1,  2,  3])
         >>> inverse_indices
         tensor([ 0,  2,  1,  2])
 
         >>> output, inverse_indices = torch.unique(
-                torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
+        ...     torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
         tensor([ 1,  2,  3])
         >>> inverse_indices
@@ -1159,7 +1159,7 @@ def atleast_1d(*tensors):
 
 def atleast_2d(*tensors):
     r"""
-    Returns a 2-dimensional view of each each input tensor with zero dimensions.
+    Returns a 2-dimensional view of each input tensor with zero dimensions.
     Input tensors with two or more dimensions are returned as-is.
     Args:
         input (Tensor or list of Tensors)
@@ -1193,7 +1193,7 @@ def atleast_2d(*tensors):
 
 def atleast_3d(*tensors):
     r"""
-    Returns a 3-dimensional view of each each input tensor with zero dimensions.
+    Returns a 3-dimensional view of each input tensor with zero dimensions.
     Input tensors with three or more dimensions are returned as-is.
     Args:
         input (Tensor or list of Tensors)

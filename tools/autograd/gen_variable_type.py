@@ -36,7 +36,9 @@ from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
 import tools.codegen.api.cpp as cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
+from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import Callable, List, Optional, Sequence, Tuple, Union
@@ -72,19 +74,24 @@ DONT_REQUIRE_DERIVATIVE = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
-    'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
-    'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'eq_',
-    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh',
-    'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
+    'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril',
+    'triu', 'chunk', 'zero_', 'eq_', 'ne_', 'add', '__radd__', 'sum',
+    '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh', 'cosh', '__rmul__',
+    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
-    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
+    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
-    'l1_loss_backward'
+    'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr',
+    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d',
+    'reflection_pad1d_backward', 'reflection_pad2d_backward',
+    'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
+    'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
+    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -980,6 +987,17 @@ def match_differentiability_info(
     result: List[NativeFunctionWithDifferentiabilityInfo] = []
     for f in native_functions:
         info, is_exact_match = find_info(f)
+
+        # Currently, the '.strides()' to 'strides_or_error' replacement does not support
+        # 'self' derivatives of an inplace function, so we must check for this case.
+        if f.func.kind() == SchemaKind.inplace and (info is not None):
+            for derivative in info.derivatives:
+                if 'self' in derivative.var_names:
+                    for saved_input in derivative.saved_inputs:
+                        assert 'strides_or_error' not in saved_input.expr, (
+                            "Calling '.strides()' in the 'self' derivative formula of an "
+                            f"in-place function is not supported: {f.func}")
+
         result.append(NativeFunctionWithDifferentiabilityInfo(
             func=f,
             info=info,

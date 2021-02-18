@@ -10,8 +10,9 @@ import unittest
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, torch_to_numpy_dtype_dict, suppress_warnings,
-    IS_MACOS, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy)
+    TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
+    suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
+    gradcheck, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
 from torch.testing._internal.common_device_type import (
@@ -19,7 +20,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
     OpDTypes)
 from torch.testing import (
-    floating_types_and, integral_types, all_types_and_complex_and, floating_types)
+    floating_types_and, all_types_and_complex_and, floating_types)
 
 if TEST_SCIPY:
     import scipy
@@ -214,7 +215,7 @@ class TestUnaryUfuncs(TestCase):
             if alt is None:
                 continue
 
-            if inplace and op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
+            if inplace and not torch.can_cast(expected.dtype, dtype):
                 # Assert that RuntimeError is raised
                 # for inplace variant of Operators that
                 # promote integer input to floating dtype.
@@ -285,7 +286,7 @@ class TestUnaryUfuncs(TestCase):
                 msg = None
 
             exact_dtype = True
-            if op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
+            if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
                 exact_dtype = False
 
                 if dtype in [torch.uint8, torch.int8, torch.bool]:
@@ -402,53 +403,29 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
-    def _test_out_arg(self, op, input, output):
-        dtype = input.dtype
-        out_dtype = output.dtype
-        if dtype is out_dtype:
-            expected = op(input)
-            op(input, out=output)
-            self.assertEqual(output, expected)
+    def _test_out_arg(self, op, input, output, expected):
+        if op.safe_casts_outputs:
+            expect_fail = not torch.can_cast(expected.dtype, output.dtype)
         else:
+            expect_fail = output.dtype != expected.dtype
+
+        if expect_fail:
             with self.assertRaises(RuntimeError):
                 op(input, out=output)
-
-    def _test_out_promote_int_to_float_op(self, op, input, output):
-        def compare_out(op, input, out):
-            out_dtype = out.dtype
-            expected = op(input)
-            op(input, out=out)
-            self.assertEqual(out, expected.to(out_dtype))
-
-        dtype = input.dtype
-        out_dtype = output.dtype
-        if out_dtype.is_floating_point and not dtype.is_complex:
-            compare_out(op, input, output)
-        elif out_dtype.is_floating_point and dtype.is_complex:
-            if op.supports_complex_to_float:
-                compare_out(op, input, output)
-            else:
-                # Can't cast complex to float
-                with self.assertRaises(RuntimeError):
-                    op(input, out=output)
-        elif out_dtype.is_complex:
-            compare_out(op, input, output)
         else:
-            # Can't cast to Integral types
-            with self.assertRaises(RuntimeError):
-                op(input, out=output)
+            res = op(input, out=output)
+            self.assertTrue(res is output)
+            self.assertEqual(output, expected.to(output.dtype))
 
     @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
+        expected = op(input)
 
         for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
             out = torch.empty_like(input, dtype=out_dtype)
-            if op.promotes_integers_to_float:
-                self._test_out_promote_int_to_float_op(op, input, out)
-            else:
-                self._test_out_arg(op, input, out)
+            self._test_out_arg(op, input, out, expected)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
@@ -487,14 +464,18 @@ class TestUnaryUfuncs(TestCase):
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
 
-    @unittest.skipIf(IS_MACOS, "Skip Reference: https://github.com/pytorch/pytorch/issues/47500")
     @dtypes(torch.cfloat, torch.cdouble)
-    def test_sqrt_complex_edge_values(self, device, dtype):
-        # Test Reference: https://github.com/pytorch/pytorch/pull/47424
-        x = torch.tensor(0. - 1.0000e+20j, dtype=dtype, device=device)
+    def test_complex_edge_values(self, device, dtype):
+        # sqrt Test Reference: https://github.com/pytorch/pytorch/pull/47424
+        x = torch.tensor(0. - 1.0e+20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+        # acos test reference: https://github.com/pytorch/pytorch/issue/42952
+        # Skip on Windows, as CUDA acos  returns conjugate value
+        # see https://github.com/pytorch/pytorch/issues/52299
+        if not (IS_WINDOWS and dtype == torch.cdouble and "cuda" in device):
+            self.compare_with_numpy(torch.acos, np.arccos, x)
 
-        x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
+        x = torch.tensor((-1.0e+60 if dtype == torch.cdouble else -1.0e+20) - 4988429.2j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
     @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
@@ -878,6 +859,18 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
                          torch.tensor(expectedOutput, dtype=dtype, device=device))
 
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.float, torch.double)
+    def test_hardsigmoid_backward(self, device, dtype):
+        inputValues = [-3.0, 3.0, -2.0, 2.0, -6.0, 6.0]
+        expectedValues = [0.0, 0.0, 1.0 / 6.0, 1.0 / 6.0, 0.0, 0.0]
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device).requires_grad_()
+        expetedTensor = torch.tensor(expectedValues, dtype=dtype, device=device)
+        out = torch.nn.functional.hardsigmoid(inputTensor)
+        out.backward(torch.ones_like(inputTensor))
+        self.assertEqual(inputTensor.grad, expetedTensor)
+
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_silu(self, device, dtype):
@@ -954,7 +947,6 @@ class TestUnaryUfuncs(TestCase):
         self._helper_test_igamma(loglo, loghi, device, dtype,
                                  torch.igamma, scipy.special.gammainc)
 
-    @skipCUDAIfRocm
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
@@ -1138,8 +1130,7 @@ class TestUnaryUfuncs(TestCase):
 
         cpu_tensor.requires_grad = True
         for n in [0, 1, 2, 3, 4, 5]:
-            torch.autograd.gradcheck(lambda x: x.polygamma(n),
-                                     cpu_tensor)
+            gradcheck(lambda x: x.polygamma(n), cpu_tensor)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
@@ -1702,15 +1693,7 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('floor'),
-    _TorchMathTestMeta('ceil'),
-    _TorchMathTestMeta('rad2deg'),
-    _TorchMathTestMeta('deg2rad'),
     _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
-    _TorchMathTestMeta('trunc'),
-    _TorchMathTestMeta('round'),
-    # FIXME lgamma produces different result compared to scipy at -inf
-    _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy', replace_inf_with_nan=True),
     _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                        refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                        ref_backend='scipy'),
@@ -1719,10 +1702,7 @@ torch_op_tests = [
                        ref_backend='scipy', rtol=0.0008, atol=1e-5),
     _TorchMathTestMeta('polygamma', args=[2], substr='_2', reffn='polygamma',
                        refargs=lambda x: (2, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
-                       ref_backend='scipy', rtol=0.0008, atol=1e-5),
-    _TorchMathTestMeta('abs', input_fn=_medium_2d, dtypes=_types_no_half, rtol=0., atol=0.),
-    _TorchMathTestMeta('logit', ref_backend='scipy')]
-
+                       ref_backend='scipy', rtol=0.0008, atol=1e-5)]
 
 def generate_torch_test_functions(cls, testmeta, inplace):
     opstr = testmeta.opstr if not inplace else testmeta.opstr + "_"

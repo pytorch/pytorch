@@ -1,13 +1,17 @@
-from typing import List, Callable, Dict, Optional, Any, Union
+from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
 import builtins
 import importlib
+import inspect
+import io
 import linecache
-from torch.serialization import _load
+from weakref import WeakValueDictionary
 import pickle
 import torch
+from torch.serialization import _get_restore_location, _maybe_decode_ascii
 import _compat_pickle  # type: ignore
 import types
 import os.path
+from pathlib import Path
 
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
@@ -33,14 +37,14 @@ class PackageImporter:
     """
     modules : Dict[str, Optional[types.ModuleType]]
 
-    def __init__(self, filename: Union[str, torch._C.PyTorchFileReader],
+    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
                  module_allowed: Callable[[str], bool] = lambda module_name: True):
-        """Open `filename` for importing. This checks that the imported package only requires modules
+        """Open `file_or_buffer` for importing. This checks that the imported package only requires modules
         allowed by `module_allowed`
 
         Args:
-            filename (str): archive to load. Can also be a directory of the unzipped files in the archive
-                for easy debugging and editing.
+            file_or_buffer: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
+                or a string or os.PathLike object containing a file name.
             module_allowed (Callable[[str], bool], optional): A method to determine if a externally provided module
                 should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
                 does not support. Defaults to allowing anything.
@@ -49,15 +53,18 @@ class PackageImporter:
             ImportError: If the package will use a disallowed module.
         """
         self.zip_reader : Any
-        if isinstance(filename, torch._C.PyTorchFileReader):
+        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
             self.filename = '<pytorch_file_reader>'
-            self.zip_reader = filename
-        else:
-            self.filename = filename
+            self.zip_reader = file_or_buffer
+        elif isinstance(file_or_buffer, (Path, str)):
+            self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
                 self.zip_reader = MockZipReader(self.filename)
+        else:
+            self.filename = '<binary>'
+            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
 
         self.root = _PackageNode(None)
         self.modules = {}
@@ -65,7 +72,7 @@ class PackageImporter:
 
         for extern_module in self.extern_modules:
             if not module_allowed(extern_module):
-                raise ImportError(f"package '{filename}' needs the external module '{extern_module}' "
+                raise ImportError(f"package '{file_or_buffer}' needs the external module '{extern_module}' "
                                   f"but that module has been disallowed")
             self._add_extern(extern_module)
 
@@ -80,7 +87,7 @@ class PackageImporter:
         self._mangler = PackageMangler()
 
         # used for torch.serialization._load
-        self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
+        self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self.import_module, *args, **kwargs)
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
@@ -138,7 +145,42 @@ class PackageImporter:
             Any: the unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
-        return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
+        restore_location = _get_restore_location(map_location)
+        loaded_storages = {}
+
+        def load_tensor(data_type, size, key, location, restore_location):
+            name = f'.data/{key}.storage'
+            dtype = data_type(0).dtype
+
+            storage = self.zip_reader.get_storage_from_record(name, size, dtype).storage()
+            loaded_storages[key] = restore_location(storage, location)
+
+        def persistent_load(saved_id):
+            assert isinstance(saved_id, tuple)
+            typename = _maybe_decode_ascii(saved_id[0])
+            data = saved_id[1:]
+
+            assert typename == 'storage', \
+                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+            data_type, key, location, size = data
+            if key not in loaded_storages:
+                load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+            storage = loaded_storages[key]
+            return storage
+
+        # Load the data (which may in turn use `persistent_load` to load tensors)
+        data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
+        unpickler = self.Unpickler(data_file)
+        unpickler.persistent_load = persistent_load
+        result = unpickler.load()
+
+        # TODO from zdevito:
+        #   This stateful weird function will need to be removed in our efforts
+        #   to unify the format. It has a race condition if multiple python
+        #   threads try to read independent files
+        torch._utils._validate_loaded_sparse_tensors()
+
+        return result
 
     def id(self):
         """
@@ -149,7 +191,7 @@ class PackageImporter:
         return self._mangler.parent_name()
 
     def _read_extern(self):
-        return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
+        return self.zip_reader.get_record('.data/extern_modules').decode('utf-8').splitlines(keepends=False)
 
     def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
         mangled_filename = self._mangler.mangle(filename) if filename else None
@@ -163,6 +205,10 @@ class PackageImporter:
         ns['__file__'] = mangled_filename
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
+
+        # Add this module to our private global registry. It should be unique due to mangling.
+        assert module.__name__ not in _package_imported_modules
+        _package_imported_modules[module.__name__] = module
 
         # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
@@ -274,13 +320,14 @@ class PackageImporter:
         import implementation is desired.
 
         """
+        module_name = demangle(module.__name__)
         # The hell that is fromlist ...
         # If a package was imported, try to import stuff from fromlist.
         if hasattr(module, '__path__'):
             for x in fromlist:
                 if not isinstance(x, str):
                     if recursive:
-                        where = module.__name__ + '.__all__'
+                        where = module_name + '.__all__'
                     else:
                         where = "``from list''"
                     raise TypeError(f"Item in {where} must be str, "
@@ -290,7 +337,7 @@ class PackageImporter:
                         self._handle_fromlist(module, module.__all__,
                                               recursive=True)
                 elif not hasattr(module, x):
-                    from_name = '{}.{}'.format(module.__name__, x)
+                    from_name = '{}.{}'.format(module_name, x)
                     try:
                         self._gcd_import(from_name)
                     except ModuleNotFoundError as exc:
@@ -323,7 +370,8 @@ class PackageImporter:
                 cut_off = len(name) - len(name.partition('.')[0])
                 # Slice end needs to be positive to alleviate need to special-case
                 # when ``'.' not in name``.
-                return self.modules[module.__name__[:len(module.__name__) - cut_off]]
+                module_name = demangle(module.__name__)
+                return self.modules[module_name[:len(module_name) - cut_off]]
         else:
             return self._handle_fromlist(module, fromlist)
 
@@ -404,7 +452,7 @@ class _UnpicklerWrapper(pickle._Unpickler):  # type: ignore
                 module, name = _compat_pickle.NAME_MAPPING[(module, name)]
             elif module in _compat_pickle.IMPORT_MAPPING:
                 module = _compat_pickle.IMPORT_MAPPING[module]
-        mod = self._importer.import_module(module)
+        mod = self._importer(module)
         return getattr(mod, name)
 
 class _PathNode:
@@ -423,3 +471,16 @@ class _ModuleNode(_PathNode):
 
 class _ExternNode(_PathNode):
     pass
+
+# A private global registry of all modules that have been package-imported.
+_package_imported_modules: WeakValueDictionary = WeakValueDictionary()
+
+# `inspect` by default only looks in `sys.modules` to find source files for classes.
+# Patch it to check our private registry of package-imported modules as well.
+_orig_getfile = inspect.getfile
+def patched_getfile(object):
+    if inspect.isclass(object):
+        if object.__module__ in _package_imported_modules:
+            return _package_imported_modules[object.__module__].__file__
+    return _orig_getfile(object)
+inspect.getfile = patched_getfile

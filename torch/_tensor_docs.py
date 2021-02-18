@@ -983,6 +983,24 @@ Args:
     {memory_format}
 """.format(**common_args))
 
+add_docstr_all('xpu',
+               r"""
+xpu(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
+
+Returns a copy of this object in XPU memory.
+
+If this object is already in XPU memory and on the correct device,
+then no copy is performed and the original object is returned.
+
+Args:
+    device (:class:`torch.device`): The destination XPU device.
+        Defaults to the current XPU device.
+    non_blocking (bool): If ``True`` and the source is in pinned memory,
+        the copy will be asynchronous with respect to the host.
+        Otherwise, the argument has no effect. Default: ``False``.
+    {memory_format}
+""".format(**common_args))
+
 add_docstr_all('logcumsumexp',
                r"""
 logcumsumexp(dim) -> Tensor
@@ -1140,6 +1158,13 @@ floor_divide_(value) -> Tensor
 In-place version of :meth:`~Tensor.floor_divide`
 """)
 
+add_docstr_all('diff',
+               r"""
+diff(n=1, dim=-1, prepend=None, append=None) -> Tensor
+
+See :func:`torch.diff`
+""")
+
 add_docstr_all('digamma',
                r"""
 digamma() -> Tensor
@@ -1169,25 +1194,25 @@ See :func:`torch.dist`
 """)
 
 add_docstr_all('div', r"""
-div(value) -> Tensor
+div(value, *, rounding_mode=None) -> Tensor
 
 See :func:`torch.div`
 """)
 
 add_docstr_all('div_', r"""
-div_(value) -> Tensor
+div_(value, *, rounding_mode=None) -> Tensor
 
 In-place version of :meth:`~Tensor.div`
 """)
 
 add_docstr_all('divide', r"""
-divide(value) -> Tensor
+divide(value, *, rounding_mode=None) -> Tensor
 
 See :func:`torch.divide`
 """)
 
 add_docstr_all('divide_', r"""
-divide_(value) -> Tensor
+divide_(value, *, rounding_mode=None) -> Tensor
 
 In-place version of :meth:`~Tensor.divide`
 """)
@@ -1734,15 +1759,15 @@ Example::
 
 add_docstr_all('index_fill_',
                r"""
-index_fill_(dim, index, val) -> Tensor
+index_fill_(dim, index, value) -> Tensor
 
-Fills the elements of the :attr:`self` tensor with value :attr:`val` by
+Fills the elements of the :attr:`self` tensor with value :attr:`value` by
 selecting the indices in the order given in :attr:`index`.
 
 Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`self` tensor to fill in
-    val (float): the value to fill with
+    value (float): the value to fill with
 
 Example::
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
@@ -1811,7 +1836,7 @@ Example::
     >>> nse = 5
     >>> dims = (5, 5, 2, 2)
     >>> I = torch.cat([torch.randint(0, dims[0], size=(nse,)),
-                       torch.randint(0, dims[1], size=(nse,))], 0).reshape(2, nse)
+    ...                torch.randint(0, dims[1], size=(nse,))], 0).reshape(2, nse)
     >>> V = torch.randn(nse, dims[2], dims[3])
     >>> S = torch.sparse_coo_tensor(I, V, dims).coalesce()
     >>> D = torch.randn(dims)
@@ -2273,6 +2298,13 @@ maximum(other) -> Tensor
 See :func:`torch.maximum`
 """)
 
+add_docstr_all('fmax',
+               r"""
+fmax(other) -> Tensor
+
+See :func:`torch.fmax`
+""")
+
 add_docstr_all('argmax',
                r"""
 argmax(dim=None, keepdim=False) -> LongTensor
@@ -2320,6 +2352,13 @@ add_docstr_all('minimum',
 minimum(other) -> Tensor
 
 See :func:`torch.minimum`
+""")
+
+add_docstr_all('fmin',
+               r"""
+fmin(other) -> Tensor
+
+See :func:`torch.fmin`
 """)
 
 add_docstr_all('argmin',
@@ -2664,7 +2703,7 @@ Args:
 Example::
 
     >>> src = torch.tensor([[4, 3, 5],
-                            [6, 7, 8]])
+    ...                     [6, 7, 8]])
     >>> src.put_(torch.tensor([1, 3]), torch.tensor([9, 10]))
     tensor([[  4,   9,   5],
             [ 10,   7,   8]])
@@ -3524,7 +3563,7 @@ Example::
     >>> x = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
     >>> x.stride()
     (5, 1)
-    >>>x.stride(0)
+    >>> x.stride(0)
     5
     >>> x.stride(-1)
     1
@@ -3880,10 +3919,10 @@ Creates a strided copy of :attr:`self`.
 Example::
 
     >>> s = torch.sparse_coo_tensor(
-               torch.tensor([[1, 1],
-                             [0, 2]]),
-               torch.tensor([9, 10]),
-               size=(3, 3))
+    ...        torch.tensor([[1, 1],
+    ...                      [0, 2]]),
+    ...        torch.tensor([9, 10]),
+    ...        size=(3, 3))
     >>> s.to_dense()
     tensor([[ 0,  0,  0],
             [ 9,  0, 10],
@@ -4559,6 +4598,11 @@ Tensors may not have two named dimensions with the same name.
 add_docstr_all('is_cuda',
                r"""
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
+""")
+
+add_docstr_all('is_xpu',
+               r"""
+Is ``True`` if the Tensor is stored on the XPU, ``False`` otherwise.
 """)
 
 add_docstr_all('is_quantized',

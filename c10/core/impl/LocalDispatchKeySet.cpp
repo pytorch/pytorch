@@ -5,18 +5,8 @@
 namespace c10 {
 namespace impl {
 
-/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-/// thread_local is not supported.
-#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
-
 // NB: POD, zero initialized!
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
-
-#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-
-PODLocalDispatchKeySet raw_local_dispatch_key_set;
-
-#endif
 
 #if defined(_MSC_VER) || defined(C10_ANDROID)
 LocalDispatchKeySet tls_local_dispatch_key_set() {

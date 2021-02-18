@@ -359,7 +359,12 @@ Tensor select_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }
 
-Tensor slice_batching_rule(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+Tensor slice_batching_rule(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().slice(dim_physical, start, end, step);
@@ -1135,6 +1140,12 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE_VA(rsub, Scalar);
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
+  {
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, std::string);
+    using Unop = Tensor (*)(const Tensor&, Scalar, std::string);
+    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, std::string>);
+    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, Scalar, std::string>);
+  }
 
   // at::pow has three out-of-place overloads
   m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);

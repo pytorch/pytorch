@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <fstream>
+
 namespace torch {
 namespace jit {
 
@@ -51,12 +53,12 @@ class MutableTypePtrHelper {
         // == T
         return unshapedType(type);
       case TypeKind::OptionalType:
-        return getMutableType(type->cast<OptionalType>()->getElementType());
+        return getMutableType(type->castRaw<OptionalType>()->getElementType());
       case TypeKind::AnyType:
         return type;
       case TypeKind::FutureType: {
         if (auto elem =
-                getMutableType(type->cast<FutureType>()->getElementType())) {
+                getMutableType(type->castRaw<FutureType>()->getElementType())) {
           return FutureType::create(*elem);
         }
         return c10::nullopt;
@@ -390,6 +392,75 @@ std::string AliasDb::toString() const {
   return ss.str();
 }
 
+bool AliasDb::dumpToGraphvizFile(const char* filename) const {
+  std::ofstream dot_file(filename);
+  if (!dot_file.good()) {
+    std::cout << "Failed to create Graphviz file: '" << filename << "'\n";
+    return false;
+  }
+  dot_file << toGraphviz();
+  return true;
+}
+
+std::string AliasDb::toGraphviz() const {
+  std::stringstream dot;
+
+  // Local helper to generate a graphviz-friendly name encoding
+  // See also AliasDb::getElementName()
+  const auto name = [this](const Element* e) -> std::string {
+    if (e->values.empty()) {
+      for (const auto& ent : wildcardIndex_) {
+        if (ent.second == e) {
+          return std::string("\"WILDCARD for ") + ent.first->str() + "\"";
+        }
+      }
+      return "\"WILDCARD\"";
+    } else {
+      std::ostringstream ss;
+      if (e->values.size() == 1) {
+        ss << "\"\\%" << (*e->values.begin())->debugName() << "\"";
+        return ss.str();
+      }
+      ss << "\"(";
+      for (const Value* v : e->values) {
+        ss << "\\%" << v->debugName() << ", ";
+      }
+      ss << ")\"";
+      return ss.str();
+    }
+  };
+
+  // Include the textual representation for reference
+  dot << "/*\n";
+  dot << toString();
+  dot << "*/\n";
+
+  dot << "digraph fusion_ir {\n"
+      << "  rankdir=LR\n"
+      << "  node [shape=rect, color=gray];\n"
+      << "  edge [color=black];\n";
+
+  for (const auto& ptrPair : elementMap_) {
+    const auto element = ptrPair.second;
+    if (!element->pointsTo.empty()) {
+      for (const auto pointedTo : element->pointsTo) {
+        dot << "  " << name(element) << " -> "
+            << name(memoryDAG_->fromIndex(pointedTo)) << "\n";
+      }
+    }
+    if (!element->containedElements.empty()) {
+      for (const auto contained : element->containedElements) {
+        dot << "  " << name(element) << " -> "
+            << name(memoryDAG_->fromIndex(contained))
+            << " [style=dashed, color=blue]\n";
+      }
+    }
+  }
+
+  dot << "}\n";
+  return dot.str();
+}
+
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   for (auto input : graph->inputs()) {
     setWildcard(input);
@@ -524,7 +595,6 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeBroadcastingChunk(node);
     case prim::SetAttr:
       return analyzeSetAttr(node);
-    case prim::profile_optional:
     case prim::profile_ivalue:
     case prim::profile:
       makePointerTo(node->output(), node->inputs().at(0));
@@ -911,6 +981,10 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
     case aten::hstack:
     case aten::dstack:
       return true;
+  }
+  auto op = use.user->maybeOperator();
+  if (op && op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
+    return true;
   }
 
   return false;

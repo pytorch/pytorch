@@ -743,6 +743,9 @@ auto handle_torch_function_getter(THPVariable* self, const std::string& property
 // Used for setters of Tensor properties.
 auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int;
 
+// Used for __getitem__ and __setitem__
+auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* val=nullptr) -> PyObject*;
+
 /*
  * Check if the input obj is Tensor type, including its subclass, or overloaded
  * type. If the type defines __torch_function__, it also returns true.
