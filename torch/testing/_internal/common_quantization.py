@@ -42,7 +42,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Tuple, Dict
+from typing import Callable, Tuple, Dict, List
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -558,6 +558,7 @@ class QuantizationTestCase(TestCase):
                     nodes_in_graph[n] = 1
 
         if expected_node is not None:
+            print('expected_node', expected_node)
             self.assertTrue(expected_node in nodes_in_graph, 'node:' + str(expected_node) +
                             ' not found in the graph module')
 
@@ -653,6 +654,49 @@ class QuantizationTestCase(TestCase):
                     'Type mismatch at %s: expected %s, got %s' %
                     (k, (expected_type_a, expected_type_b), (actual_type_a, actual_type_b))
                 )
+
+        def assert_ns_weight_compare_dict_valid(
+            self,
+            weight_compare_dict: Dict[str, Dict[str, torch.Tensor]],
+        ) -> None:
+            """
+            Verifieds that the weight_compare dict (output of Numeric Suite
+            weight matching APIs) is valid:
+            1. for each layer, results are recorded for two models
+            2. shapes of each pair of weights match
+            """
+            for layer_name, layer_data in weight_compare_dict.items():
+                self.assertTrue(
+                    len(layer_data) == 2,
+                    f"Layer {layer_name} does not have exactly two model results.")
+                k0, k1 = layer_data.keys()
+                self.assertTrue(
+                    layer_data[k0].shape == layer_data[k1].shape,
+                    f"Layer {layer_name}, {k0} and {k1} have a shape mismatch.")
+
+        def assert_ns_logger_act_compare_dict_valid(
+            self,
+            act_compare_dict: Dict[str, Dict[str, List[torch.Tensor]]],
+        ) -> None:
+            """
+            Verifies that the act_compare_dict (output of Numeric Suite
+            activation matching APIs) is valid:
+            1. for each layer, results are recorded for two models
+            2. number of seen tensors match
+            3. shapes of each pair of seen tensors match
+            """
+            for layer_name, layer_data in act_compare_dict.items():
+                self.assertTrue(
+                    len(layer_data) == 2,
+                    f"Layer {layer_name} does not have exactly two model results.")
+                k0, k1 = layer_data.keys()
+                self.assertTrue(
+                    len(layer_data[k0]) == len(layer_data[k1]),
+                    f"Layer {layer_name}, {k0} and {k1} do not have the same number of seen Tensors.")
+                for idx in range(len(layer_data[k0])):
+                    self.assertTrue(
+                        layer_data[k0][idx].shape == layer_data[k1][idx].shape,
+                        f"Layer {layer_name}, {k0} and {k1} have a shape mismatch at idx {idx}.")
 
         def checkGraphModeFxOp(self, model, inputs, quant_type,
                                expected_node=None,
