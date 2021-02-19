@@ -397,11 +397,6 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
             ords = vector_ords if is_vector_norm else matrix_ords
 
             for ord in ords:
-                # TODO: remove this check when `max` is implemented for
-                #       float16 and bfloat16. Issue:
-                #       https://github.com/pytorch/pytorch/issues/50790
-                if is_vector_norm and is_dtype_half and ord in [inf, -inf]:
-                    continue
 
                 inputs.append(SampleInput(
                     make_tensor(
@@ -703,6 +698,51 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
             samples.append(SampleInput((tensor, d, -idx - 1, fill_val)))
             samples.append(SampleInput((tensor, d, idx_nonctg, fill_val)))
     return samples
+
+def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad):
+    inputs = []
+    args_for_binary_op = (
+        ((S, S, S), (S, S, S),),
+        ((S, S, S), (S,),),
+        ((S,), (S, S, S),),
+        ((S, 1, S), (S, S),),
+        ((), (),),
+        ((S, S, S), (),),
+        ((), (S, S, S),),
+    )
+    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                               args=(make_tensor(other_tensor, device, dtype,
+                                                 low=None, high=None,
+                                                 requires_grad=requires_grad),),))
+                  for input_tensor, other_tensor in args_for_binary_op)
+    return inputs
+
+def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad):
+    inputs = []
+    args_for_reduction_with_dim = (
+        ((S, S, S), (1,),),
+        ((S, S, S), (1, True, ),),
+        ((), (0,),),
+        ((), (0, True,),),
+    )
+    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                               args=args,))
+                  for input_tensor, args in args_for_reduction_with_dim)
+    return inputs
+
+def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad):
+    inputs = []
+    inputs.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                          low=None, high=None,
+                                          requires_grad=requires_grad),))
+    inputs.append(SampleInput(make_tensor((), device, dtype,
+                                          low=None, high=None,
+                                          requires_grad=requires_grad),))
+    return inputs
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((4, 3, 2, 1), device, dtype,
@@ -1161,13 +1201,13 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
 def sample_inputs_clamp(op_info, device, dtype, requires_grad):
     tensors = (
         make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad),        
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
     )
     if dtype is torch.uint8:
         min_max_vals = ((2, 5), (3, 7))
     else:
         min_max_vals = ((0, 1), (-1, 1))
-    output = [SampleInput(tensor, args=vals) for tensor, vals in product(tensors, min_max_vals)]    
+    output = [SampleInput(tensor, args=vals) for tensor, vals in product(tensors, min_max_vals)]
     output += [SampleInput(tensors[0], args=(0.5, None)), SampleInput(tensors[0], args=(None, 0.5))]
     empty_tensor = make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad)
     output += [SampleInput(empty_tensor, args=(0.0, 1.0)), ]
@@ -1816,6 +1856,68 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_masked_select,
            test_inplace_grad=False,
            supports_tensor_out=True),
+    OpInfo('max',
+           op=torch.max,
+           variant_test_name='binary',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_max_min_binary,
+           assert_autodiffed=True,),
+    OpInfo('max',
+           op=torch.max,
+           variant_test_name='reduction_with_dim',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
+           supports_tensor_out=False,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/51788#issuecomment-777625293
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu', dtypes=[torch.bfloat16]),)),
+    OpInfo('max',
+           op=torch.max,
+           variant_test_name='reduction_no_dim',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('min',
+           op=torch.min,
+           variant_test_name='binary',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_max_min_binary,
+           assert_autodiffed=True,),
+    OpInfo('min',
+           op=torch.min,
+           variant_test_name='reduction_with_dim',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/51788#issuecomment-777625293
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu', dtypes=[torch.bfloat16]),)),
+    OpInfo('min',
+           op=torch.min,
+           variant_test_name='reduction_no_dim',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -2698,39 +2800,14 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('lerp', (S, S, S), ((S, S, S), 0.4), 'scalar_no_broadcast', (True,)),
+        ('lerp', (S, S, S), ((S, S, S), 0.4), 'no_broadcast', (True,)),
         ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs', (True,)),
         ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs', (True,)),
         ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all', (True,)),
         ('lerp', (), ((), 0.4), 'scalar', (True,)),
         ('lerp', (S, S, S), ((), 0.4), 'scalar_broadcast_rhs', (True,)),
         ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
-        ('max', (S, S, S), NO_ARGS),
-        ('max', (S, S, S), (1,), 'dim', (), [0]),
-        ('max', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('max', (), NO_ARGS, 'scalar'),
-        ('max', (), (0,), 'scalar_dim', (), [0]),
-        ('max', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('max', (S, S, S), ((S, S, S),), 'elementwise', (True,)),
-        ('max', (S, S, S), ((S,),), 'elementwise_broadcast_rhs', (True,)),
-        ('max', (S,), ((S, S, S),), 'elementwise_broadcast_lhs', (True,)),
-        ('max', (S, 1, S), ((S, S),), 'elementwise_broadcast_all', (True,)),
-        ('max', (), ((),), 'scalar_elementwise', (True,)),
-        ('max', (S, S, S), ((),), 'scalar_elementwise_broadcast_rhs', (True,)),
-        ('max', (), ((S, S, S),), 'scalar_elementwise_broadcast_lhs', (True,)),
-        ('min', (S, S, S), NO_ARGS, ),
-        ('min', (S, S, S), (1,), 'dim', (), [0]),
-        ('min', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('min', (), NO_ARGS, 'scalar'),
-        ('min', (), (0,), 'scalar_dim', (), [0]),
-        ('min', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('min', (S, S, S), ((S, S, S),), 'elementwise', (True,)),
-        ('min', (S, S, S), ((S,),), 'elementwise_broadcast_rhs', (True,)),
-        ('min', (S,), ((S, S, S),), 'elementwise_broadcast_lhs', (True,)),
-        ('min', (S, 1, S), ((S, S),), 'elementwise_broadcast_all', (True,)),
-        ('min', (), ((),), 'scalar_elementwise', (True,)),
-        ('min', (S, S, S), ((),), 'scalar_elementwise_broadcast_rhs', (True,)),
-        ('min', (), ((S, S, S),), 'scalar_elementwise_broadcast_lhs', (True,)),
+        ('lerp', (S, 1, S), ((S, S), (S, 1, 1, S)), 'tensor_broadcast_all', (True,)),
         ('amax', (S, S, S), NO_ARGS),
         ('amax', (S, S, S), (1,), 'dim'),
         ('amax', (S, S, S), ([1, 2],), 'multiple_dim'),

@@ -590,6 +590,26 @@ PyObject *THPModule_isEnabledXNNPACK(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setDefaultMobileCPUAllocator(PyObject *_unused, PyObject *noargs)
+{
+  try {
+    at::globalContext().setDefaultMobileCPUAllocator();
+  } catch (c10::Error& e) {
+    THPUtils_setError(e.what());
+  }
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_unsetDefaultMobileCPUAllocator(PyObject *_unused, PyObject *noargs)
+{
+  try {
+    at::globalContext().unsetDefaultMobileCPUAllocator();
+  } catch (c10::Error& e) {
+    THPUtils_setError(e.what());
+  }
+  Py_RETURN_NONE;
+}
+
 static PyObject * THPModule_vmapmode_increment_nesting(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(at::impl::VmapMode::increment_nesting());
@@ -674,6 +694,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
   {"_supported_qengines", THPModule_supportedQEngines, METH_NOARGS, nullptr},
   {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
+  {"_set_default_mobile_cpu_allocator", THPModule_setDefaultMobileCPUAllocator, METH_NOARGS, nullptr},
+  {"_unset_default_mobile_cpu_allocator", THPModule_unsetDefaultMobileCPUAllocator, METH_NOARGS, nullptr},
   {"_is_torch_function_enabled", THPModule_isEnabledTorchFunction, METH_NOARGS, nullptr},
   {"_disabled_torch_function_impl", THPModule_disable_torch_function, METH_VARARGS, nullptr},
   {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
