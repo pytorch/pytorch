@@ -45,8 +45,9 @@ class TestWith(JitTestCase):
                 self.count.add_(0.3)
                 return self.count
 
-            def __exit__(self, type: Any, value: Any, tb: Any):
+            def __exit__(self, type: Any, value: Any, tb: Any) -> bool:
                 self.count.sub_(0.3)
+                return True
 
         make_global(Context)
 
@@ -441,7 +442,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class BadEnter(object):
             """
-            This class is has an __enter__ method with an incorrect signature.
+            This class has an __enter__ method with an incorrect signature.
             """
 
             def __init__(self):
@@ -456,7 +457,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class BadExit(object):
             """
-            This class is has an __exit__ method with an incorrect signature.
+            This class has an __exit__ method with an incorrect signature.
             """
 
             def __init__(self):
@@ -471,7 +472,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class ExitIncorrectTypes(object):
             """
-            This class is has an __exit__ method with unsupported argument types.
+            This class has an __exit__ method with unsupported argument types.
             """
 
             def __init__(self):
@@ -524,7 +525,7 @@ class TestWith(JitTestCase):
             self.checkScript(test_bad_enter, (test_tensor, BadEnter()))
 
         with self.assertRaisesRegex(
-            RuntimeError, r"__exit__ must have four arguments and no return value"
+            RuntimeError, r"__exit__ must have four arguments"
         ):
             self.checkScript(test_bad_exit, (test_tensor, BadExit()))
 
