@@ -619,7 +619,8 @@ void trackAndRegisterAttributesInBlocks(
   }
   fullName += name;
 
-  if (allAttrValues.find(fullName) == allAttrValues.end() && attrModule.hasattr(name)) {
+  if (allAttrValues.find(fullName) == allAttrValues.end() &&
+      attrModule.hasattr(name)) {
     auto attr = attrModule.attr(name);
     auto type = attrModule.type();
     auto slot = *type->findAttributeSlot(name);

@@ -6512,6 +6512,7 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_set_attr_modules(self):
         class InnerModule2(torch.nn.Module):
             def __init__(self, embedding_dim):
@@ -6563,6 +6564,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 256)
         self.run_test(Module(), (x, ))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_set_attr_modules_2(self):
         class InnerModule(torch.nn.Module):
             def __init__(self, embedding_dim):
