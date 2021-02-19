@@ -104,7 +104,7 @@ static inline void slow_conv_transpose2d_shape_check(
   int dimh = 1;
   int dimw = 2;
 
-   if (ndim == 4) {
+  if (ndim == 4) {
     dimf++;
     dimh++;
     dimw++;
