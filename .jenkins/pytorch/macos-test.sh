@@ -88,27 +88,9 @@ test_libtorch() {
     # without these paths being set
     export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
-      # Run Lite Interpreter run time tests
-      build/bin/test_lite_interpreter_runtime  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_lite_interpreter_runtime.xml
-    else
-      # Run JIT cpp tests
-      python test/cpp/jit/tests_setup.py setup
-      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-        build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
-      else
-        build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
-      fi
-      python test/cpp/jit/tests_setup.py shutdown
-      # Wait for background download to finish
-      wait
-      OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
-      build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
-    fi
+    TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
 
     assert_git_not_dirty
-    # TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
-    # assert_git_not_dirty
   fi
 }
 
@@ -173,7 +155,7 @@ test_jit_hooks() {
 
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
-  # test_python_all
+  test_python_all
   test_libtorch
   test_custom_script_ops
   test_jit_hooks

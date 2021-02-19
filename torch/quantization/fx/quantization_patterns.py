@@ -18,7 +18,6 @@ from ..utils import (
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
     weight_is_statically_quantized,
-    weight_dtype,
     get_qconfig_dtypes,
 )
 
@@ -95,6 +94,33 @@ class Add(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 debug: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        # Supported combinations are:
+        # quant_type | activation (compute_type) | weight
+        #  static       quint8                      qint8
+
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.quint8, torch.qint8, None),
+        ]
+
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by add/mul "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            if self.relu_node:
+                op_out = quantizer.quantized_graph.node_copy(self.add_node, load_arg(quantized=False))
+                relu_args = [op_out]
+                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                return quantizer.quantized_graph.create_node(
+                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+            else:
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
         if self.num_node_args == 1:
             # add scalar
             if self.relu_node is not None:
@@ -149,6 +175,33 @@ class Mul(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 debug: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        # Supported combinations are:
+        # quant_type | activation (compute_type) | weight
+        #  static       quint8                      qint8
+
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.quint8, torch.qint8, None),
+        ]
+
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by add/mul "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            if self.relu_node:
+                op_out = quantizer.quantized_graph.node_copy(self.mul_node, load_arg(quantized=False))
+                relu_args = [op_out]
+                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                return quantizer.quantized_graph.create_node(
+                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+            else:
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
         if self.num_node_args == 1:
             # mul scalar
             if self.relu_node is not None:
@@ -399,6 +452,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        weight_dtype = dtypes[1]
         # TODO: debug option for linear module
         if self.linear_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
@@ -486,7 +540,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     bias = kwargs['bias']
                     kwargs.pop('bias')
                 prepack_args = (linear_weight, bias)
-                prepack_op = get_linear_prepack_op_for_dtype(weight_dtype(qconfig))
+                prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
                 packed_weight = quantizer.quantized_graph.create_node(
                     'call_function', prepack_op, prepack_args, {})
                 # construct linear input
@@ -509,10 +563,14 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.linear_node.name]
                     return op
                 else:
+                    # choose linear dynamic or linear dynamic fp16 op based on weight dtype
+                    qlinear_op = torch.ops.quantized.linear_dynamic \
+                        if weight_dtype == torch.qint8 \
+                        else torch.ops.quantized.linear_dynamic_fp16
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore
                     op_out = quantizer.quantized_graph.create_node(
-                        "call_function", torch.ops.quantized.linear_dynamic, qlinear_args, kwargs)
+                        "call_function", qlinear_op, qlinear_args, kwargs)
                     # Store the name of the dynamic op to get the path of node after replacement as well.
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name

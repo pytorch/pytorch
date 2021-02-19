@@ -166,27 +166,19 @@ test_libtorch() {
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
 
-    # Create folder to store test results
+    # Run JIT cpp tests
     mkdir -p test/test-reports/cpp-unittest
-
-    if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
-      # Run Lite Interpreter run time tests
-      build/bin/test_lite_interpreter_runtime  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_lite_interpreter_runtime.xml
+    python test/cpp/jit/tests_setup.py setup
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     else
-      # Run JIT cpp tests
-      python test/cpp/jit/tests_setup.py setup
-      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-        build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
-      else
-        build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
-      fi
-      python test/cpp/jit/tests_setup.py shutdown
-      # Wait for background download to finish
-      wait
-      OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
-      build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
+      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     fi
-
+    python test/cpp/jit/tests_setup.py shutdown
+    # Wait for background download to finish
+    wait
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
+    build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
     assert_git_not_dirty
   fi
 }
@@ -367,7 +359,8 @@ test_vec256() {
 }
 
 test_torch_deploy() {
-  SIMPLE_MODEL_PATH=torch/csrc/deploy/example/simple.pt LIBINTERPRETER_PATH=build/lib/libinterpreter.so build/bin/interpreter_test
+  python torch/csrc/deploy/example/generate_examples.py
+  build/bin/test_deploy
   assert_git_not_dirty
 }
 
