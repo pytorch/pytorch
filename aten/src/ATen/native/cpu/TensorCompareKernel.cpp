@@ -245,8 +245,6 @@ static void mode_kernel_impl(
       const auto* self_data_bytes = data[2];
 
       std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
-      std::vector<int64_t> idxs(self_dim_size);
-      std::iota(idxs.begin(), idxs.end(), 0);
 
       for (int64_t k = 0; k < n; ++k) {
         scalar_t* values_data = (scalar_t*)values_data_bytes;
@@ -258,10 +256,10 @@ static void mode_kernel_impl(
         int64_t temp_freq = 0;
         int64_t max_freq = 0;
 
-        std::transform(
-            idxs.begin(), idxs.end(), elements.begin(), [=](int64_t i) {
-                return std::make_pair(self_data[i * self_dim_stride], i);
-            });
+        for (int64_t i = 0; i < self_dim_size; i++) {
+          elements[i] = std::make_pair(self_data[i * self_dim_stride], i);
+        }
+
         // Even though, theoretically, we don't need to specify this lambda
         // (it's basically the same as std::less), doing so degrades
         // performance. That is because its implementation for std::pair uses 3

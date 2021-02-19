@@ -120,6 +120,7 @@ void calculate_mode(
       values_data, &mode, sizeof(scalar_t), cudaMemcpyHostToDevice, stream));
   AT_CUDA_CHECK(cudaMemcpyAsync(
       indices_data, &index, sizeof(scalar_t), cudaMemcpyHostToDevice, stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
 template <typename scalar_t>
