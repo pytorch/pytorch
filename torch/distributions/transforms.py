@@ -607,6 +607,8 @@ class SoftplusTransform(Transform):
     """
     domain = constraints.real
     codomain = constraints.positive
+    bijective = True
+    sign = +1
 
     def __eq__(self, other):
         return isinstance(other, SoftplusTransform)
