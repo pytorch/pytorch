@@ -856,6 +856,8 @@ REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
     (TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>()),
     Int8ConvDNNLowpPackedWeightBlobShapeFunctions);
 
+REGISTER_CPU_OPERATOR(Int8FCPackWeight, FullyConnectedDNNLowPPackWeightOp);
+
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,
     DNNLOWP,

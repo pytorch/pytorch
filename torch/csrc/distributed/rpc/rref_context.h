@@ -192,7 +192,7 @@ class TORCH_API RRefContext {
   // because this Future is already captured in callbacks of the
   // PendingUserState. If there is no pending UserRRefs, this method returns a
   // completed future.
-  std::shared_ptr<Future<bool>> waitForThreadLocalPendingRRefs();
+  c10::intrusive_ptr<JitFuture> waitForThreadLocalPendingRRefs();
   // Only call this function when there are errors during a recording session,
   // and it is likely that waitForThreadLocalPendingRRefs() cannot be invoked
   // properly.
@@ -209,17 +209,20 @@ class TORCH_API RRefContext {
 
  private:
   struct PendingUserState {
-    PendingUserState(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {}
+    PendingUserState(c10::intrusive_ptr<RRef> rref)
+        : rref_(std::move(rref)),
+          confirmationFuture_(c10::make_intrusive<JitFuture>(BoolType::get())) {
+    }
 
     inline void confirm() {
       c10::static_intrusive_pointer_cast<UserRRef>(rref_)->confirm();
-      future_.markCompleted(true);
+      confirmationFuture_->markCompleted();
     }
 
     c10::intrusive_ptr<RRef> rref_;
     // Use Future.wait() and Future.markCompleted() to block and unblock user
     // functions. The bool value wrapped by the future_ is not used.
-    Future<bool> future_;
+    c10::intrusive_ptr<JitFuture> confirmationFuture_;
   };
 
   RRefContext(std::shared_ptr<RpcAgent>);

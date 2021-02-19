@@ -1,25 +1,28 @@
 #include <ATen/ATen.h>
-#include <ATen/ExpandUtils.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/LinearAlgebra.h>
-#include <ATen/native/IndexingUtils.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
-#include <ATen/core/grad_mode.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+#include <c10/util/variant.h>
+
 #include <functional>
+#include <limits>
 #include <numeric>
 #include <vector>
-#include <limits>
-#include <ATen/NamedTensorUtils.h>
 
-#include <c10/util/variant.h>
 
 namespace at {
 namespace native {
@@ -126,6 +129,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
+  NoTF32Guard disable_tf32;
   ScalarType t = input.scalar_type();
   TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
               && input.dim() >= 2,
@@ -147,16 +151,14 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
-    // until https://github.com/pytorch/pytorch/issues/45821 is resolved
-    // svd() returns conjugated V for complex-valued input
-    Tensor U, S, V_conj;
+    Tensor U, S, V;
     // TODO: replace input.svd with linalg_svd
-    std::tie(U, S, V_conj) = input.svd();
+    // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
+    std::tie(U, S, V) = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor S_pseudoinv = at::where(S > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
-    // computes V @ diag(S_pseudoinv) @ U.T.conj()
-    // TODO: replace V_conj.conj() -> V once https://github.com/pytorch/pytorch/issues/45821 is resolved
-    return at::matmul(V_conj.conj() * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+    // computes V @ diag(S_pseudoinv) @ U.conj().T
+    return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   } else {
     Tensor S, U;
     std::tie(S, U) = at::linalg_eigh(input);
@@ -953,7 +955,7 @@ Tensor matmul(
     tensor2_expand_size.insert(tensor2_expand_size.end(), {m2, p});
 
     const int64_t expand_batch_product =
-        prod_intlist(expand_batch_portion);
+        c10::multiply_integers(expand_batch_portion);
 
     std::vector<int64_t> tensor1_bmm_view({expand_batch_product});
     tensor1_bmm_view.insert(tensor1_bmm_view.end(), {n, m1});
@@ -2050,8 +2052,8 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   // self[:ind]
   std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
 
-  int64_t prod_ind_end = std::accumulate(shape_ind_end.cbegin(), shape_ind_end.cend(), int64_t{1}, std::multiplies<int64_t>());
-  int64_t prod_start_ind = std::accumulate(shape_start_ind.cbegin(), shape_start_ind.cend(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t prod_ind_end = c10::multiply_integers(shape_ind_end.cbegin(), shape_ind_end.cend());
+  int64_t prod_start_ind = c10::multiply_integers(shape_start_ind.cbegin(), shape_start_ind.cend());
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(prod_ind_end == prod_start_ind,
@@ -2107,8 +2109,8 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   // result_shape is self_.sizes[-(an-other.dim):]
   std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
 
-  int64_t result_product = std::accumulate(result_shape.begin(), result_shape.end(), int64_t{1}, std::multiplies<int64_t>());
-  int64_t other_product = std::accumulate(other.sizes().begin(), other.sizes().end(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t result_product = c10::multiply_integers(result_shape.begin(), result_shape.end());
+  int64_t other_product = c10::multiply_integers(other.sizes().begin(), other.sizes().end());
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(result_product == other_product,
@@ -2223,67 +2225,40 @@ Tensor chain_matmul(TensorList matrices) {
 /*
 Calculates the Kronecker product between two Tensors.
 */
-Tensor kron(const Tensor& self, const Tensor& other) {
-  /*
-  We can obtain the kron result using tensordot or einsum. The implementation below uses tensordot.
-  In einsum notation suppose we have `self` with dim 4 and `other` with dim 2
-  the result of below tensordot is in einsum 0123, 45 -> 012345.
-  To obtain the correct kron we need to permute and reshape the array.
-  The permutation rule is the following: going from right to left
-  take axes in turn to form the permutation
-  with our example the correct permutation is 012435 and
-  the kron shape is (shape_self[0], shape_self[1], shape_self[3]*shape_other[0],
-  shape_self[4]*shape_other[1])
-  */
-  std::vector<int64_t> self_sizes = self.sizes().vec();
-  std::vector<int64_t> other_sizes = other.sizes().vec();
-  int64_t self_ndim = self.dim();
-  int64_t other_ndim = other.dim();
-  int64_t min_ndim = std::min(self_ndim, other_ndim);
-  int64_t ndim_diff = std::abs(self_ndim - other_ndim);
-
-  std::vector<int64_t> a_axes(self_ndim);
-  std::vector<int64_t> b_axes(other_ndim);
-  std::iota(a_axes.begin(), a_axes.end(), 0);
-  std::iota(b_axes.begin(), b_axes.end(), 0 + self_ndim);
-
-  bool is_a_larger = self_ndim >= other_ndim;
-  std::vector<int64_t> kron_permutation(self_ndim + other_ndim);
-  for (int64_t i = 0; i < ndim_diff; i++) {
-    kron_permutation[i] = is_a_larger ? a_axes[i] : b_axes[i];
+Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  int64_t maxdim = std::max(self.dim(), other.dim());
+  int64_t pad_self = maxdim - self.dim();
+  int64_t pad_other = maxdim - other.dim();
+  c10::SmallVector<int64_t, 10> a_reshape(2 * maxdim);
+  c10::SmallVector<int64_t, 10> b_reshape(2 * maxdim);
+  c10::SmallVector<int64_t, 10> result_reshape(maxdim);
+  for (int64_t i = 0; i < maxdim; i++) {
+    a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
+    a_reshape[2 * i + 1] = 1;
+    b_reshape[2 * i] = 1;
+    b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
+    result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
   }
-  for (int64_t i = 0, j = 0; i < min_ndim; i++, j += 2) {
-    kron_permutation[self_ndim + other_ndim - 1 - j] = b_axes[other_ndim - 1 - i];
-    kron_permutation[self_ndim + other_ndim - 1 - j - 1] = a_axes[self_ndim - 1 - i];
+  auto self_view = at::_unsafe_view(self, a_reshape);
+  auto other_view = at::_unsafe_view(other, b_reshape);
+  if (!result.defined()) {
+    result = at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
+  } else {
+    c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
+    for (int64_t i = 0; i < maxdim; i++) {
+      mul_shape[2 * i] = a_reshape[2 * i];
+      mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
+    }
+    resize_output(result, result_reshape);
+    auto result_mul = at::_unsafe_view(result, mul_shape);
+    at::mul_out(result_mul, self_view, other_view);
   }
-
-  std::vector<int64_t> result_shape(std::max(self_ndim, other_ndim));
-  for (int64_t i = 0; i < ndim_diff; i++) {
-    result_shape[i] = is_a_larger ? self_sizes[i] : other_sizes[i];
-  }
-  for (int64_t i = 0; i < min_ndim; i++) {
-    result_shape[ndim_diff + i] = is_a_larger
-        ? self_sizes[ndim_diff + i] * other_sizes[i]
-        : other_sizes[ndim_diff + i] * self_sizes[i];
-  }
-
-  Tensor result = at::tensordot(self, other, {}, {});
-  // Step 2: now permute result
-  result = result.permute(kron_permutation);
-  // Step 3: reshape
-  result = result.reshape(result_shape);
-
   return result;
 }
 
-Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
-
-  Tensor result_tmp = at::kron(self, other);
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
-  return result;
+Tensor kron(const Tensor& self, const Tensor& other) {
+  at::Tensor result;
+  return at::kron_out(result, self, other);
 }
 
 } // namespace native

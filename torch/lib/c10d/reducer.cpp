@@ -48,7 +48,8 @@ Reducer::Reducer(
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       divFactor_(kUnsetDivFactor),
-      comm_hook_(nullptr) {
+      comm_hook_(nullptr),
+      thread_local_state_(at::ThreadLocalState()) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
@@ -515,6 +516,9 @@ void Reducer::push_rebuilt_params(const VariableIndex& index) {
 void Reducer::autograd_hook(VariableIndex index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
 
+  // Carry over thread local state from main thread. This allows for thread-local
+  // flags such as profiler enabled to be configure correctly.
+  at::ThreadLocalStateGuard g(thread_local_state_);
   // See Note [Skip allreducing local_used_maps_dev]
   if (find_unused_parameters_) {
     // Since it gets here, this param has been used for this iteration. We want
@@ -1040,14 +1044,13 @@ void Reducer::prepare_for_backward(
   // Warn user about unnecessary perf hit if all parameters were used.
   if (unused_parameters_.empty()) {
     TORCH_WARN_ONCE(
-      "find_unused_parameters=True was specified in DDP constructor, "
-      "but did not find any unused parameters. This flag results in an extra "
-      "traversal of the autograd graph every iteration, which can adversely "
-      "affect performance. If your model indeed never has any unused "
-      "parameters, consider turning this flag off. Note that this warning may "
-      "be a false positive your model has flow control causing later iterations "
-      "to have unused parameters."
-    );
+        "find_unused_parameters=True was specified in DDP constructor, "
+        "but did not find any unused parameters. This flag results in an extra "
+        "traversal of the autograd graph every iteration, which can adversely "
+        "affect performance. If your model indeed never has any unused "
+        "parameters, consider turning this flag off. Note that this warning may "
+        "be a false positive your model has flow control causing later iterations "
+        "to have unused parameters.");
   }
 }
 
@@ -1174,6 +1177,14 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       }
     }
   }
+}
+
+void Reducer::save_thread_local_state() {
+  std::lock_guard<std::mutex> guard(mutex_);
+  // Don't preserve grad_mode across thread boundaries, as we will be passing
+  // from forward pass to autograd engine hooks, and autograd engine takes care
+  // of grad mode.
+  thread_local_state_ = at::ThreadLocalState(/* keep_grad_mode */ false);
 }
 
 void Reducer::finalize_backward() {
@@ -1402,8 +1413,8 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_comm_hook or register_builtin_comm_hook can only be called once.");
-  // TODO(@sinannasir): Single-process multiple-device mode support for DDP
-  // communication hook. Related to GH Issue #42542.
+  // TODO(#42542): Single-process multiple-device mode support for DDP
+  // communication hook.
   TORCH_CHECK(
       replicas_.size() == 1,
       "Communication hook does not support single-process multiple-device mode.");
@@ -1420,6 +1431,11 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       replicas_.size() == 1,
       "Communication hook does not support single-process multiple-device mode.");
+  // TODO: Support GLOO and MPI backends for DDP communication hook.
+  TORCH_CHECK(
+      process_group_->getBackendName() == "nccl",
+      "register_builtin_comm_hook currently can only support NCCL backend, but the current backend is %s.",
+      process_group_->getBackendName());
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:

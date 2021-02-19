@@ -1,4 +1,5 @@
 from unittest import skipIf
+import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
@@ -7,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
 from sys import version_info
-from io import StringIO
+from io import StringIO, BytesIO
 import pickle
 
 try:
@@ -74,6 +75,22 @@ the_math = math
             he.save_module(module_a.__name__)
             he.save_module(package_a.__name__)
         hi = PackageImporter(filename)
+        module_a_i = hi.import_module('module_a')
+        self.assertEqual(module_a_i.result, 'module_a')
+        self.assertIsNot(module_a, module_a_i)
+        package_a_i = hi.import_module('package_a')
+        self.assertEqual(package_a_i.result, 'package_a')
+        self.assertIsNot(package_a_i, package_a)
+
+    def test_save_module_binary(self):
+        f = BytesIO()
+        with PackageExporter(f, verbose=False) as he:
+            import module_a
+            import package_a
+            he.save_module(module_a.__name__)
+            he.save_module(package_a.__name__)
+        f.seek(0)
+        hi = PackageImporter(f)
         module_a_i = hi.import_module('module_a')
         self.assertEqual(module_a_i.result, 'module_a')
         self.assertIsNot(module_a, module_a_i)
@@ -490,6 +507,24 @@ def load():
         hi = PackageImporter(filename)
         with self.assertRaises(NotImplementedError):
             hi.load_pickle('obj', 'obj.pkl')
+
+    def test_inspect_class(self):
+        """Should be able to retrieve source for a packaged class."""
+        import package_a.subpackage
+        buffer = BytesIO()
+        obj = package_a.subpackage.PackageASubpackageObject()
+
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_pickle('obj', 'obj.pkl', obj)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        packaged_class = pi.import_module('package_a.subpackage').PackageASubpackageObject
+        regular_class = package_a.subpackage.PackageASubpackageObject
+
+        packaged_src = inspect.getsourcelines(packaged_class)
+        regular_src = inspect.getsourcelines(regular_class)
+        self.assertEqual(packaged_src, regular_src)
 
 
 class ManglingTest(TestCase):

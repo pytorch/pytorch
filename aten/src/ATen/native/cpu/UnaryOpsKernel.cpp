@@ -16,11 +16,11 @@
 #include <ATen/cpu/vml.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
+#include <c10/util/MathConstants.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -310,7 +310,7 @@ static void sinc_kernel(TensorIterator& iter) {
           if (a == scalar_t(0)) {
             return scalar_t(1);
           } else {
-            scalar_t product = scalar_t(M_PI) * a;
+            scalar_t product = c10::pi<scalar_t> * a;
             return std::sin(product) / product;
           }
         });

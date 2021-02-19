@@ -12,7 +12,7 @@ from . import matmul         # noqa: F401
 # from . import normalization  # noqa: F401
 # from . import pooling        # noqa: F401
 from . import reduction      # noqa: F401
-# from . import softmax        # noqa: F401
+from . import softmax        # noqa: F401
 from . import rnn_eltwise    # noqa: F401
 from . import swish          # noqa: F401
 

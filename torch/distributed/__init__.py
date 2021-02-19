@@ -26,6 +26,7 @@ if is_available():
         TCPStore,
         ProcessGroup,
         Reducer,
+        Logger,
         BuiltinCommHookType,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _GradBucket,

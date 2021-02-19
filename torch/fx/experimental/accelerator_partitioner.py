@@ -2,7 +2,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, map_arg
 from typing import Dict, List, Set, NamedTuple, Tuple
 import torch
-from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.passes.split_module import split_module
 import operator
 from torch.fx.experimental.partitioner_utils import Partition, \
     Device, PartitionerConfig, get_partition_to_latency_mapping,\
