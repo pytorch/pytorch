@@ -94,6 +94,33 @@ class Add(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 debug: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        # Supported combinations are:
+        # quant_type | activation (compute_type) | weight
+        #  static       quint8                      qint8
+
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.quint8, torch.qint8, None),
+        ]
+
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by add/mul "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            if self.relu_node:
+                op_out = quantizer.quantized_graph.node_copy(self.add_node, load_arg(quantized=False))
+                relu_args = [op_out]
+                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                return quantizer.quantized_graph.create_node(
+                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+            else:
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
         if self.num_node_args == 1:
             # add scalar
             if self.relu_node is not None:
@@ -148,6 +175,33 @@ class Mul(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 debug: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        # Supported combinations are:
+        # quant_type | activation (compute_type) | weight
+        #  static       quint8                      qint8
+
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.quint8, torch.qint8, None),
+        ]
+
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by add/mul "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            if self.relu_node:
+                op_out = quantizer.quantized_graph.node_copy(self.mul_node, load_arg(quantized=False))
+                relu_args = [op_out]
+                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                return quantizer.quantized_graph.create_node(
+                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+            else:
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
         if self.num_node_args == 1:
             # mul scalar
             if self.relu_node is not None:
