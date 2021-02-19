@@ -2442,6 +2442,7 @@ op_db: List[OpInfo] = [
     OpInfo('unfold',
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
@@ -2461,6 +2462,9 @@ op_db: List[OpInfo] = [
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
            ),
 =======
+=======
+           op=lambda x, args: x.unfold(*args),
+>>>>>>> a331f040f9... fix by adding op for unfold
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
 <<<<<<< HEAD
 #           test_inplace_grad=False,
