@@ -1813,6 +1813,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/52437
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         device_type='cuda', dtypes=[torch.complex128]),
            )),
