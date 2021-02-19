@@ -1897,7 +1897,7 @@ def sample_inputs_unfold(op_info, device, dtype, requires_grad):
 
     sample_inputs = []
     for shape, arguments in test_cases:
-        sample_inputs += [SampleInput(make_tensor(dim, device, dtype,
+        sample_inputs += [SampleInput(make_tensor(shape, device, dtype,
                                       low=None, high=None,
                                       requires_grad=requires_grad),
                                       args=arguments)]
@@ -3528,8 +3528,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('unfold',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-#           test_inplace_grad=False,
-#           supports_tensor_out=False,
+           test_inplace_grad=False,
+           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('vstack',
            # gradcheck expects the input arguments as a flat list
