@@ -356,12 +356,15 @@ void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {
     incx = 1;
     incy = 1;
   }
+  #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
     int i_n = (int)n;
     int i_incx = (int)incx;
     int i_incy = (int)incy;
     dcopy_(&i_n, x, &i_incx, y, &i_incy);
+    return;
   }
+  #endif 
   copy_stub(
       kCPU, at::kDouble,
       n, x, incx, y, incy);
@@ -373,12 +376,15 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy) {
     incx = 1;
     incy = 1;
   }
+  #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
     int i_n = (int)n;
     int i_incx = (int)incx;
     int i_incy = (int)incy;
     scopy_(&i_n, x, &i_incx, y, &i_incy);
+    return;
   }
+  #endif 
   copy_stub(
       kCPU, at::kFloat,
       n, x, incx, y, incy);
@@ -390,12 +396,15 @@ void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<d
     incx = 1;
     incy = 1;
   }
+  #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
     int i_n = (int)n;
     int i_incx = (int)incx;
     int i_incy = (int)incy;
     zcopy_(&i_n, x, &i_incx, y, &i_incy);
+    return;
   }
+  #endif 
   copy_stub(
       kCPU, at::kComplexDouble,
       n, x, incx, y, incy);
@@ -407,12 +416,15 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
     incx = 1;
     incy = 1;
   }
+  #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
     int i_n = (int)n;
     int i_incx = (int)incx;
     int i_incy = (int)incy;
     ccopy_(&i_n, x, &i_incx, y, &i_incy);
+    return;
   }
+  #endif 
   copy_stub(
       kCPU, at::kComplexFloat,
       n, x, incx, y, incy);
