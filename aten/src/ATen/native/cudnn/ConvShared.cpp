@@ -225,8 +225,10 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto memory_format = cudnn_conv_use_channels_last(*input, *weight) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (cudnn_conv_use_channels_last(*input, *weight)) {
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
   auto output_t = at::native::empty_cuda(
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation),
@@ -330,8 +332,10 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto memory_format = cudnn_conv_use_channels_last(*grad_output, *weight) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (cudnn_conv_use_channels_last(*grad_output, *weight)){
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
   auto grad_input_t = at::native::empty_cuda(
                     input_size,
                     /*dtype=*/grad_output->scalar_type(),
@@ -436,8 +440,10 @@ Tensor cudnn_convolution_backward_weight(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32)
 {
-  auto layout = cudnn_conv_use_channels_last(input_t, grad_output_t) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  auto layout = at::MemoryFormat::Contiguous;
+  if (cudnn_conv_use_channels_last(input_t, grad_output_t)){
+    layout = (input_t.ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
 
   Tensor grad_output_contig_t = grad_output_t.contiguous(layout);
   // Make sure that NC11 strides follow formula
