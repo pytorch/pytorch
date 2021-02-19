@@ -165,9 +165,9 @@ TORCH_LIBRARY(cuda, m) {
   auto event_class = m.class_<torch::jit::CUDAEvent>("Event").def(
       torch::init<bool, bool, bool>(),
       "",
-      {torch::arg("enable_timing") = False,
-       torch::arg("blocking") = False,
-       torch::arg("interprocess") = False});
+      {torch::arg("enable_timing") = false,
+       torch::arg("blocking") = false,
+       torch::arg("interprocess") = false});
 
   stream_class.def("query", &CUDAStream::query)
       .def("record_event", &CUDAStream::recordEvent)
