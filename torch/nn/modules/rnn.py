@@ -1029,7 +1029,7 @@ class LSTMCell(RNNCellBase):
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
-        
+
         >>> rnn = nn.LSTMCell(10, 20) # (input_size, hidden_size)
         >>> input = torch.randn(2, 3, 10) # (time_steps, batch, input_size)
         >>> hx = torch.randn(3, 20) # (batch, hidden_size)
