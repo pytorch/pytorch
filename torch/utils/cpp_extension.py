@@ -34,8 +34,8 @@ _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
 
-BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or os.path.exists(os.path.join(
-    TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) or os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}'))
+BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or (os.path.exists(os.path.join(
+    TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) and os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}')))
 
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
