@@ -66,15 +66,18 @@ class WindowsJob:
 
         is_running_on_cuda = bool(self.cuda_version) and not self.force_on_cpu
 
-        props_dict = {
-            "build_environment": build_environment_string,
-            "python_version": miniutils.quote("3.6"),
-            "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
-            "vc_year": miniutils.quote(str(self.vscode_spec.year)),
-            "vc_product": self.vscode_spec.get_product(),
-            "use_cuda": miniutils.quote(str(int(is_running_on_cuda))),
-            "requires": prerequisite_jobs,
-        }
+        if self.multi_gpu:
+            props_dict = {"requires": prerequisite_jobs}
+        else:
+            props_dict = {
+                "build_environment": build_environment_string,
+                "python_version": miniutils.quote("3.6"),
+                "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
+                "vc_year": miniutils.quote(str(self.vscode_spec.year)),
+                "vc_product": self.vscode_spec.get_product(),
+                "use_cuda": miniutils.quote(str(int(is_running_on_cuda))),
+                "requires": prerequisite_jobs,
+            }
 
         if self.master_only_pred(self):
             props_dict[
@@ -83,18 +86,19 @@ class WindowsJob:
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [numbered_phase]
 
-        if base_phase == "test":
-            test_name = "-".join(["pytorch", "windows", numbered_phase])
-            props_dict["test_name"] = test_name
+        if not self.multi_gpu:
+            if base_phase == "test":
+                test_name = "-".join(["pytorch", "windows", numbered_phase])
+                props_dict["test_name"] = test_name
 
-            if is_running_on_cuda:
-                props_dict["executor"] = "windows-with-nvidia-gpu"
+                if is_running_on_cuda:
+                    props_dict["executor"] = "windows-with-nvidia-gpu"
 
-        props_dict["cuda_version"] = (
-            miniutils.quote(str(self.cuda_version))
-            if self.cuda_version
-            else "cpu"
-        )
+            props_dict["cuda_version"] = (
+                miniutils.quote(str(self.cuda_version))
+                if self.cuda_version
+                else "cpu"
+            )
 
         props_dict["name"] = "_".join(name_parts)
 

@@ -614,7 +614,6 @@
         path: bazel-testlogs
 
   pytorch_windows_test_multigpu:
-    <<: *binary_windows_params
     machine:
       image: ubuntu-1604:202007-01
     steps:
