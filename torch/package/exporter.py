@@ -4,7 +4,7 @@ import io
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
-from ._file_structure_representation import _create_folder_from_file_list
+from ._file_structure_representation import _create_folder_from_file_list, Folder
 from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
@@ -126,7 +126,7 @@ class PackageExporter:
             is_package = path.name == '__init__.py'
             self.save_source_string(module_name, _read_file(file_or_directory), is_package, dependencies, file_or_directory)
 
-    def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> str:
+    def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
         """Returns a file structure representation of package's zipfile. 
 
         Args:

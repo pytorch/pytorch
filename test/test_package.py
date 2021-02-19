@@ -84,8 +84,9 @@ the_math = math
 
     def test_file_structure(self):
         filename = self.temp()
+        filename_split = filename if IS_WINDOWS else filename.split('/')[-1]
 
-        export_plain = "─── " + filename.split('/')[-1] + """\n\
+        export_plain = "─── " + filename_split + """\n\
     ├── main
     │   └── main
     ├── obj
@@ -95,7 +96,7 @@ the_math = math
     │   └── subpackage.py
     └── module_a.py
 """
-        export_include = "─── " + filename.split('/')[-1] + """\n\
+        export_include = "─── " + filename_split + """\n\
     ├── obj
     │   └── obj.pkl
     └── package_a

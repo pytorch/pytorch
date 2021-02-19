@@ -13,7 +13,7 @@ import types
 import os.path
 from pathlib import Path
 
-from ._file_structure_representation import _create_folder_from_file_list
+from ._file_structure_representation import _create_folder_from_file_list, Folder
 from ._glob_group import GlobPattern
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
@@ -91,7 +91,7 @@ class PackageImporter:
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
 
-    def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> str:
+    def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
         """Returns a file structure representation of package's zipfile. 
 
         Args:

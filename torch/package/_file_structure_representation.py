@@ -1,7 +1,6 @@
 from ._glob_group import GlobPattern, _GlobGroup
 
 from typing import List, Dict
-import pathlib
 
 
 class Folder:
@@ -27,17 +26,6 @@ class Folder:
     def __str__(self):
         str_list: List[str] = []
         self.stringify_tree(str_list)
-        return "".join(str_list)
-
-        top_folder = Folder(filename, True)
-        for file in records:
-            if pathlib.PurePath(file).match(include) and (
-                exclude == "" or not pathlib.PurePath(file).match(exclude)
-            ):
-                top_folder.add_file(file)
-
-        str_list: List[str] = []
-        top_folder.stringify_tree(str_list)
         return "".join(str_list)
 
     def stringify_tree(
@@ -80,7 +68,7 @@ def _create_folder_from_file_list(
     file_list: List[str],
     include: "GlobPattern" = "**",
     exclude: "GlobPattern" = (),
-):
+) -> Folder:
     glob_pattern = _GlobGroup(include, exclude, "/")
 
     top_folder = Folder(filename, True)
