@@ -8,7 +8,6 @@ import re
 import tempfile
 
 import json
-import numpy as np
 import torch
 
 
@@ -136,6 +135,12 @@ class ImageHandler:
         extension = re.sub(r".*[.]", "", key)
         if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
             return None
+
+        try:
+            import numpy as np
+        except ImportError as e:
+            raise ModuleNotFoundError("Package `numpy` is required to be installed for default image decoder."
+                                      "Please use `pip install numpy` to install the package")
 
         try:
             import PIL.Image
