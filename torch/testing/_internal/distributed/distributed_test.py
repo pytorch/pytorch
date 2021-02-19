@@ -178,6 +178,18 @@ class BatchNormNet(nn.Module):
         x = self.fc2(x)
         return F.softmax(x, dim=1)
 
+class TwoLinLayerNet(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Linear(10, 10, bias=False)
+        self.b = nn.Linear(10, 10, bias=False)
+
+    def forward(self, x):
+        a = self.a(x)
+        b = self.b(x)
+        return (a, b)
+
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
@@ -2959,6 +2971,8 @@ class DistributedTest:
             )
             self._barrier()
 
+            return model_DDP
+
         @unittest.skipIf(
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
@@ -3382,8 +3396,8 @@ class DistributedTest:
                 return os.environ[var] if var in os.environ else "N/A"
 
             group, group_id, rank = self._init_global_test()
-            model_DDP = copy.deepcopy(DDP_NET)
-            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, bucket_cap_mb=0.001)
+            model_DDP = self._test_DistributedDataParallelCPU()
+
             ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
@@ -3393,11 +3407,11 @@ class DistributedTest:
             # output_device of CPU training is -1.
             self.assertEqual(ddp_logging_data.output_device, -1)
             self.assertEqual(ddp_logging_data.broadcast_buffers, True)
-            self.assertEqual(ddp_logging_data.bucket_cap_mb, 0.001)
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
             self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
-            self.assertEqual(ddp_logging_data.iteration, 0)
+            self.assertEqual(ddp_logging_data.iteration, 4)
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
@@ -3419,11 +3433,26 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
             self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
             self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
+            # test runtime logging fields
+            self.assertEqual(ddp_logging_data.unused_parameter_size, 0)
+            self.assertEqual(ddp_logging_data.has_rebuilt_buckets, True)
+            self.assertEqual(ddp_logging_data.rebuilt_bucket_sizes, [param_size])
+            # It is hard to test accurate latency, but it can test whether the latency is
+            # a valid value and in the expected range.
+            self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 1)
+            self.assertGreaterEqual(
+                ddp_logging_data.avg_backward_compute_time,
+                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+            self.assertGreaterEqual(
+                ddp_logging_data.avg_backward_comm_time,
+                ddp_logging_data.avg_backward_compute_comm_overlap_time)
             # test larger net and verify multiple bucket sizes
             model = LargeNet()
-            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1)
+            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1.5)
             ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             params = list(model_DDP.parameters())
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 1.5)
             self.assertEqual(
                 ddp_logging_data.bucket_sizes,
                 [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()])
@@ -4729,3 +4758,35 @@ class DistributedTest:
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_output_unused_in_loss(self):
+            model = TwoLinLayerNet()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            net_with_find_unused = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+            )
+
+            inp = torch.randn(10, 10)
+
+            for ddp in [net, net_with_find_unused]:
+                for i in range(2):
+                    ctx = (
+                        suppress()
+                        if i == 0
+                        else self.assertRaisesRegex(
+                            RuntimeError,
+                            "Expected to have finished reduction in the prior iteration",
+                        )
+                    )
+                    with ctx:
+                        a, b = ddp(inp)
+                        loss = b.sum()
+                        loss.backward()
