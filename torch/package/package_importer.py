@@ -17,8 +17,10 @@ from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _
     _normalize_path
 from ._mock_zipreader import MockZipReader
 from ._mangling import PackageMangler, demangle
+from .importer import Importer
 
-class PackageImporter:
+
+class PackageImporter(Importer):
     """Importers allow you to load code written to packages by PackageExporter.
     Code is loaded in a hermetic way, using files from the package
     rather than the normal python import system. This allows
