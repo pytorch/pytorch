@@ -495,16 +495,8 @@ private:
 
   // hard limit number of registered types
   // note: constexpr provokes Windows compilation error "member may not be initialized"
-  // static constexpr size_t MaxTypeIndex = 32;
-  //
-  // The reason for this to be 32 and not UINT8_MAX is that the array initialization
-  // takes space which is proportional to the size of the array. The compiler seems to
-  // add code (or data padding) to initialize the array with empty elements. In
-  // practice, this array doesn't hold more than 18 elements (on mobile), so 32 should
-  // be plenty for now. Please see https://github.com/pytorch/pytorch/pull/51881
-  // for details.
-  //
-  #define MaxTypeIndex 32
+  // static constexpr size_t MaxTypeIndex = UINT8_MAX;
+  #define MaxTypeIndex UINT8_MAX
 
   static std::atomic<uint16_t> nextTypeIndex;
 
