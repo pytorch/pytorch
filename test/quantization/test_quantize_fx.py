@@ -1896,18 +1896,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.op(y, x)
                 return x
 
-        # TODO: decide whether we want to quantize or not
-        # in this case
-        # class NonQuantizedOp(torch.nn.Module):
-        #     def __init__(self, is_inplace, is_scalar):
-        #         super(NonQuantizedOp, self).__init__()
-        #         self.is_scalar = is_scalar
-        #         self.op = ibinary_op if is_inplace else binary_op
+        # This tests the binary op should be quantized even when it is not feed with a
+        # quantized input
+        class NonQuantizedInput(torch.nn.Module):
+            def __init__(self, is_inplace, is_scalar):
+                super(NonQuantizedInput, self).__init__()
+                self.is_scalar = is_scalar
+                self.op = ibinary_op if is_inplace else binary_op
 
-        #     def forward(self, x, y):
-        #         y = 3 if self.is_scalar else y
-        #         x = self.op(x, y)
-        #         return x
+            def forward(self, x, y):
+                y = 3 if self.is_scalar else y
+                x = self.op(x, y)
+                return x
 
         data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
                 torch.randn(1, 1, 1, 1, dtype=torch.float))
@@ -1917,6 +1917,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for is_inplace, is_scalar in options:
             self.checkGraphModeFxOp(
                 Op(is_inplace, is_scalar), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(
+                NonQuantizedInput(is_inplace, is_scalar), data, quant_type, quantized_node, print_debug_info=True)
 
     def _test_quantized_binary_op_relu_impl(self, binary_op, ibinary_op, quantized_op):
         class OpRelu(torch.nn.Module):
