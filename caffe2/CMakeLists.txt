@@ -962,10 +962,16 @@ endif()
 
   if(BUILD_TEST)
     if(BUILD_LITE_INTERPRETER)
-      add_subdirectory(${TORCH_ROOT}/test/cpp/lite_interpreter_runtime ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime)
+      add_subdirectory(
+        ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
+        ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
-        add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
+        add_subdirectory(
+          ${TORCH_ROOT}/test/cpp/tensorexpr
+          ${CMAKE_BINARY_DIR}/test_tensorexpr
+        )
         if(USE_DISTRIBUTED AND NOT WIN32)
           add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
         endif()
