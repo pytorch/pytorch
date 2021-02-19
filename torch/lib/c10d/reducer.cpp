@@ -44,14 +44,31 @@ Reducer::Reducer(
       find_unused_parameters_(find_unused_parameters),
       gradient_as_bucket_view_(gradient_as_bucket_view),
       local_used_maps_reduced_(false),
-      backward_stats_base_(0),
+      num_iterations_(0),
+      num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       divFactor_(kUnsetDivFactor),
-      comm_hook_(nullptr) {
+      comm_hook_(nullptr),
+      thread_local_state_(at::ThreadLocalState()) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
+
+  // Check whether the module is multi_device_module
+  {
+    std::set<int> unique_devices;
+    for (const auto& v : replicas_[0]) {
+        auto device_idx = int(v.device().index());
+        if (unique_devices.find(device_idx) == unique_devices.end()) {
+          unique_devices.insert(device_idx);
+          if (unique_devices.size() > 1) {
+            is_multi_device_module_ = true;
+            break;
+          }
+        }
+    }
+  }
 
   // If `expect_sparse_gradients` is not specified, initialize it such that
   // we do not expect sparse gradients for any parameter.
@@ -515,6 +532,9 @@ void Reducer::push_rebuilt_params(const VariableIndex& index) {
 void Reducer::autograd_hook(VariableIndex index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
 
+  // Carry over thread local state from main thread. This allows for thread-local
+  // flags such as profiler enabled to be configure correctly.
+  at::ThreadLocalStateGuard g(thread_local_state_);
   // See Note [Skip allreducing local_used_maps_dev]
   if (find_unused_parameters_) {
     // Since it gets here, this param has been used for this iteration. We want
@@ -566,7 +586,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       variable_index < variable_locators_.size(),
       "Out of range variable index.");
   backward_stats_[replica_index][variable_index] =
-      current_time_in_nanos() - backward_stats_base_;
+      current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
 
   // Any time we mark a variable ready (be it in line due to unused parameters,
   // or via an autograd hook), we require a call to the finalize function. If
@@ -691,6 +711,10 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
   // - found a bucket that's not yet ready for reduction.
   for (; next_bucket_ < buckets_.size() && buckets_[next_bucket_].pending == 0;
        next_bucket_++) {
+    num_buckets_ready_++;
+    if (num_buckets_ready_ == 1 && should_collect_runtime_stats()) {
+      record_backward_comm_start_time();
+    }
     auto& bucket = buckets_[next_bucket_];
     std::vector<at::Tensor> tensors;
     tensors.reserve(bucket.replicas.size());
@@ -969,6 +993,14 @@ void Reducer::populate_bucket_views_out(
   }
 }
 
+void Reducer::prepare_for_forward() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  num_iterations_++;
+  if (should_collect_runtime_stats()) {
+    record_forward_compute_start_time();
+  }
+}
+
 // Traverse the autograd graph starting at the specified output.
 // All parameters for which we have a pointer to their gradient accumulation
 // functions, but don't show up in the autograd graph will be marked ready for
@@ -984,7 +1016,17 @@ void Reducer::prepare_for_backward(
   // Reset accounting.
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
-  backward_stats_base_ = current_time_in_nanos();
+
+  cpu_timer_.backward_compute_start_time = current_time_in_nanos();
+
+  if (should_collect_runtime_stats()) {
+    record_backward_compute_start_time();
+  }
+
+  // Reset num_buckets_ready_ at the beginning of backward computation
+  // in each iteration.
+  num_buckets_ready_ = 0;
+
   for (auto& bucket : buckets_) {
     for (auto& replica : bucket.replicas) {
       replica.pending = replica.variables.size();
@@ -1037,16 +1079,16 @@ void Reducer::prepare_for_backward(
     }
   }
 
-  // Warn user about unnecessary perf hit if all parameters were used.
+  // Warn user about unnecessary perf hit if all parameters were used in forward.
   if (unused_parameters_.empty()) {
     TORCH_WARN_ONCE(
         "find_unused_parameters=True was specified in DDP constructor, "
-        "but did not find any unused parameters. This flag results in an extra "
-        "traversal of the autograd graph every iteration, which can adversely "
-        "affect performance. If your model indeed never has any unused "
-        "parameters, consider turning this flag off. Note that this warning may "
-        "be a false positive your model has flow control causing later iterations "
-        "to have unused parameters.");
+        "but did not find any unused parameters in the forward pass. This flag "
+        "results in an extra traversal of the autograd graph every iteration, "
+        " which can adversely affect performance. If your model indeed never "
+        "has any unused parameters in the forward pass, consider turning this "
+        "flag off. Note that this warning may be a false positive your model "
+        "has flow control causing later iterations to have unused parameters.");
   }
 }
 
@@ -1175,7 +1217,19 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
   }
 }
 
+void Reducer::save_thread_local_state() {
+  std::lock_guard<std::mutex> guard(mutex_);
+  // Don't preserve grad_mode across thread boundaries, as we will be passing
+  // from forward pass to autograd engine hooks, and autograd engine takes care
+  // of grad mode.
+  thread_local_state_ = at::ThreadLocalState(/* keep_grad_mode */ false);
+}
+
 void Reducer::finalize_backward() {
+  if (should_collect_runtime_stats()) {
+    record_backward_compute_end_time();
+  }
+
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
@@ -1245,6 +1299,10 @@ void Reducer::finalize_backward() {
       local_used_work_->wait();
     }
     local_used_maps_reduced_ = false;
+  }
+
+  if (should_collect_runtime_stats()) {
+    record_backward_comm_end_time();
   }
 }
 
@@ -1466,6 +1524,90 @@ void Reducer::ensure_prior_reduction_finished() {
         "Please include the loss function and the structure of the return ",
         "value of `forward` of your module when reporting this issue (e.g. ",
         "list, dict, iterable).");
+  }
+}
+
+bool Reducer::should_collect_runtime_stats() {
+  if (num_iterations_ > 0 &&
+    (num_iterations_ <= 10 ||
+    num_iterations_ % kDDPRuntimeLoggingSampleRate == 0)) {
+    return true;
+  }
+  return false;
+}
+
+void Reducer::record_forward_compute_start_time() {
+  if (replicas_[0][0].is_cuda()) {
+#ifdef USE_CUDA
+    // Record event only for single process single device
+    // and single device module.
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
+      // Create and record event on the replicas_[0][0].device().
+      at::DeviceGuard g(replicas_[0][0].device());
+      gpu_timer_.forward_start.record();
+    }
+#endif
+  } else {
+    cpu_timer_.forward_start_time = current_time_in_nanos();
+  }
+}
+
+void Reducer::record_backward_compute_start_time() {
+  if (replicas_[0][0].is_cuda()) {
+#ifdef USE_CUDA
+    // Record event only for single process single device
+    // and single device module.
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
+      // Create and record event on the replicas_[0][0].device().
+      at::DeviceGuard g(replicas_[0][0].device());
+      gpu_timer_.backward_compute_start.record();
+    }
+#endif
+  }
+}
+
+void Reducer::record_backward_compute_end_time() {
+  if (replicas_[0][0].is_cuda()) {
+#ifdef USE_CUDA
+    // Record event only for single process single device
+    // and single device module.
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
+      at::DeviceGuard g(replicas_[0][0].device());
+      gpu_timer_.backward_compute_end.record();
+    }
+#endif
+  } else {
+    cpu_timer_.backward_compute_end_time = current_time_in_nanos();
+  }
+}
+
+void Reducer::record_backward_comm_start_time() {
+  if (replicas_[0][0].is_cuda()) {
+#ifdef USE_CUDA
+    // Record event only for single process single device
+    // and single device module.
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
+      at::DeviceGuard g(replicas_[0][0].device());
+      gpu_timer_.backward_comm_start.record();
+    }
+#endif
+  } else {
+    cpu_timer_.backward_comm_start_time = current_time_in_nanos();
+  }
+}
+
+void Reducer::record_backward_comm_end_time() {
+  if (replicas_[0][0].is_cuda()) {
+#ifdef USE_CUDA
+    // Record event only for single process single device
+    // and single device module.
+    if (replicas_.size() == 1 && !is_multi_device_module_) {
+      at::DeviceGuard g(replicas_[0][0].device());
+      gpu_timer_.backward_comm_end.record();
+    }
+#endif
+  } else {
+    cpu_timer_.backward_comm_end_time = current_time_in_nanos();
   }
 }
 

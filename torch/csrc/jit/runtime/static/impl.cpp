@@ -667,7 +667,7 @@ void MemoryPlanner::allocate() {
     void* src = static_cast<void*>(start + offset);
 
     for (auto& impl : impls) {
-      impl->set_data_ptr(at::DataPtr(src, src, nullptr, impl->device()));
+      impl->set_data_ptr_noswap(at::DataPtr(src, src, nullptr, impl->device()));
       impl->set_nbytes(tensor_size);
     }
 
