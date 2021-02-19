@@ -604,6 +604,7 @@ class SigmoidTransform(Transform):
 class SoftplusTransform(Transform):
     r"""
     Transform via the mapping :math:`\text{Softplus}(x) = \log(1 + \exp(x))`.
+    The implementation reverts to the linear function when :math:`\text{x} > 20`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -614,13 +615,13 @@ class SoftplusTransform(Transform):
         return isinstance(other, SoftplusTransform)
 
     def _call(self, x):
-        return x.exp().log1p()
+        return softplus(x)
 
     def _inverse(self, y):
-        return y.expm1().log()
+        return torch.where(y > 20, y, y.expm1().log())
 
     def log_abs_det_jacobian(self, x, y):
-        return -(-x).exp().log1p()
+        return -softplus(-x)
 
 
 class TanhTransform(Transform):
