@@ -305,29 +305,22 @@ C10_API void LogAPIUsage(const std::string& context);
 // for analysis and debugging. Data structure is defined in
 // c10 directory so that it can be easily imported by both c10
 // and torch files.
-// TODO -- right now starting with logging a small set of straightforward
-// fields, will add more fields as follow ups such as performance stats,
-// internal states and env variables and etc.
 struct DDPLoggingData {
-// Data that can be got during DistributedDataParallel construction time
+  // Data that can be got during DistributedDataParallel construction time
   int world_size = -1;
   int rank = -1;
   std::string module_name = "";
   std::vector<int> device_ids = std::vector<int>();
   int output_device = -1;
   std::string backend_name = "";
-  // The DDPLoggingData is logged in which iteration of the training loop,
-  // 0 if the data is logged during DistributedDataParallel construction time.
-  int iteration = -1;
   // Parameter's data type
   std::string dtype = "";
   // Total parameters size (Bytes)
-  int total_parameter_size_bytes = -1;
+  int64_t total_parameter_size_bytes = -1;
   // The number of parameter tensors
   int num_parameter_tensors = -1;
   // A list of bucket sizes (Bytes) calculated during construction time
   std::vector<int> bucket_sizes = std::vector<int>();
-
 
   // Environment variables
   std::string master_port = "";
@@ -347,7 +340,35 @@ struct DDPLoggingData {
   bool find_unused_parameters = false;
   bool gradient_as_bucket_view = false;
 
-  // Runtime states
+  // The following runtime stats are collected for the first 10 iterations
+  // and then are collected every kDDPRuntimeLoggingSampleRate=100 iterations.
+  // Users can get these stats at any iteration of training
+  // loop by calling get_ddp_logging_data() in python.
+
+  // In which iteration of the training loop the get_ddp_logging_data()
+  // is called to fetch the DDPLoggingData, 0 if the data is fetched
+  // before training loop.
+  int64_t iteration = -1;
+
+  // When get_ddp_logging_data() is called, "unused_parameter_size",
+  // "has_rebuilt_buckets" and "rebuilt_bucket_sizes" are updated in the latest
+  // sampling iteration.
+  // Total unused parameter size (Bytes)
+  int64_t unused_parameter_size = 0;
+  // Rebuild buckets stats after 1st iteration
+  bool has_rebuilt_buckets = false;
+  std::vector<int> rebuilt_bucket_sizes = std::vector<int>();
+  // Average performance stats for the number of sampling iterations
+  // when time is recorded (ns).
+  // e.g., training loop has ran "DDPLoggingData::iteration=1000" iterations,
+  // time is recorded every kDDPRuntimeLoggingSampleRate=100 iterations,
+  // the following performance stats are averaged among the
+  // "DDPLoggingData::iteration"/"kDDPRuntimeLoggingSampleRate"=10 sampling
+  // iterations.
+  int64_t avg_forward_compute_time = 0;
+  int64_t avg_backward_compute_time = 0;
+  int64_t avg_backward_comm_time = 0;
+  int64_t avg_backward_compute_comm_overlap_time = 0;
 };
 
 C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
