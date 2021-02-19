@@ -3527,6 +3527,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out')),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('unfold',
+           op=lambda x, args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
            supports_tensor_out=False,
