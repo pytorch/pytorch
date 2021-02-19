@@ -173,7 +173,7 @@ test_jit_hooks() {
 
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
-  test_python_all
+  # test_python_all
   test_libtorch
   test_custom_script_ops
   test_jit_hooks
