@@ -10,12 +10,14 @@ class WindowsJob:
         vscode_spec,
         cuda_version,
         force_on_cpu=False,
+        multi_gpu=False,
         master_only_pred=lambda job: job.vscode_spec.year != 2019,
     ):
         self.test_index = test_index
         self.vscode_spec = vscode_spec
         self.cuda_version = cuda_version
         self.force_on_cpu = force_on_cpu
+        self.multi_gpu = multi_gpu
         self.master_only_pred = master_only_pred
 
     def gen_tree(self):
@@ -25,7 +27,10 @@ class WindowsJob:
             base_phase if self.test_index is None else base_phase + str(self.test_index)
         )
 
-        key_name = "_".join(["pytorch", "windows", base_phase])
+        key_parts = ["pytorch", "windows", base_phase]
+        if self.multi_gpu:
+            key_parts.append('multigpu')
+        key_name = "_".join(key_parts)
 
         cpu_forcing_name_parts = ["on", "cpu"] if self.force_on_cpu else []
 
@@ -132,7 +137,7 @@ WORKFLOW_DATA = [
     WindowsJob(None, _VC2019, CudaVersion(10, 1)),
     WindowsJob(1, _VC2019, CudaVersion(10, 1)),
     WindowsJob(2, _VC2019, CudaVersion(10, 1)),
-    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(10, 1)),
+    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(10, 1), multi_gpu=True),
     # VS2019 CUDA-11.1
     WindowsJob(None, _VC2019, CudaVersion(11, 1)),
     WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),

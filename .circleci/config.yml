@@ -1798,7 +1798,7 @@ jobs:
     - store_test_results:
         path: bazel-testlogs
 
-  pytorch_windows_vs2019_py36_cuda10_1_test_azure_multi_gpu:
+  pytorch_windows_test_multigpu:
     <<: *binary_windows_params
     machine:
       image: ubuntu-1604:202007-01
@@ -7614,7 +7614,7 @@ workflows:
           vc_product: Community
           vc_version: ""
           vc_year: "2019"
-      - pytorch_windows_test:
+      - pytorch_windows_test_multigpu:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
           executor: windows-with-nvidia-gpu
