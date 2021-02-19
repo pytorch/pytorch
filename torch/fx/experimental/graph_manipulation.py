@@ -186,6 +186,8 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
             weight = serialize_weight(p)
             serialized_dict["weights"][prefix + name] = weight
             weights[prefix + name] = p
+    # Note: lift_lowering_attrs_to_nodes is only used to support leaf modules
+    # that cannot currently be symbolically traced into, e.g. batch norm.
     lift_lowering_attrs_to_nodes(fx_module)
     for node in fx_module.graph.nodes:
         node_rep: Dict[str, Any] = {}
@@ -230,7 +232,6 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
 
         # Make sure we capture all constants.
         if node.op == "get_attr":
-            qualname = prefix + node.target
             # If we are targeting a parent constant we update the target.
             if node.target.startswith("parent."):
                 node.name = node.name[len("parent."):]
@@ -238,7 +239,14 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 weight = serialize_weight(weights[node.target[len("parent."):]])
                 serialized_dict["weights"][node.target[len("parent."):]] = weight
             else:
-                target = getattr(fx_module, node.target)
+                # Iterate through the module hierarchy to find the attr.
+                target = fx_module
+                split = node.target.split(".")
+                assert len(split)
+                while len(split):
+                    target = getattr(target, split.pop(0))
+
+                qualname = prefix + node.target
                 # Check that the target is a tensor, and that we haven't added it already from a leaf module.
                 if isinstance(target, torch.Tensor) and qualname not in weights:
                     weight = serialize_weight(target)
