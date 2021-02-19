@@ -59,7 +59,7 @@ enum class CPUCapability {
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
-struct TORCH_API DispatchStub;
+struct DispatchStub;
 
 /**
  * The sole purpose of this class is to outline methods that don't need to be
