@@ -74,11 +74,13 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
     ChannelShuffleNCHWKernel<float, false>
         <<<dim_grid, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, HxW, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const dim3 dim_grid(N, S, C);
     ChannelShuffleNCHWKernel<float, true>
         <<<dim_grid, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, HxW, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -105,14 +107,17 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
     ChannelShuffleNHWCKernel<float, 32>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (C <= 128) {
     ChannelShuffleNHWCKernel<float, 128>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (C <= 512) {
     ChannelShuffleNHWCKernel<float, 512>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const std::array<std::int64_t, 3> dims = {N * HxW, G, K};
     const std::array<std::int32_t, 3> axes = {0, 2, 1};
@@ -144,11 +149,13 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
     ChannelShuffleNCHWKernel<float, false>
         <<<dim_grid, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, HxW, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const dim3 dim_grid(N, S, C);
     ChannelShuffleNCHWKernel<float, true>
         <<<dim_grid, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, HxW, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -175,14 +182,17 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
     ChannelShuffleNHWCKernel<float, 32>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (C <= 128) {
     ChannelShuffleNHWCKernel<float, 128>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (C <= 512) {
     ChannelShuffleNHWCKernel<float, 512>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const std::array<std::int64_t, 3> dims = {N * HxW, K, G};
     const std::array<std::int32_t, 3> axes = {0, 2, 1};

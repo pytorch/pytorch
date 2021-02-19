@@ -1,8 +1,8 @@
 import torch
 from torch.types import _TensorOrTensors
-from torch._six import container_abcs, istuple
 import torch.testing
 from torch.overrides import is_tensor_like
+import collections
 from itertools import product
 import warnings
 from typing import Callable, Union, Optional, Iterable, List
@@ -14,7 +14,7 @@ def zero_gradients(x):
         if x.grad is not None:
             x.grad.detach_()
             x.grad.zero_()
-    elif isinstance(x, container_abcs.Iterable):
+    elif isinstance(x, collections.abc.Iterable):
         for elem in x:
             zero_gradients(elem)
 
@@ -26,7 +26,7 @@ def make_jacobian(input, num_out):
         if not input.requires_grad:
             return None
         return input.new_zeros((input.nelement(), num_out), dtype=input.dtype, layout=torch.strided)
-    elif isinstance(input, container_abcs.Iterable) and not isinstance(input, str):
+    elif isinstance(input, collections.abc.Iterable) and not isinstance(input, str):
         jacobians = list(filter(
             lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
         if not jacobians:
@@ -41,7 +41,7 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
         # mypy doesn't narrow type of `x` to torch.Tensor
         if x.requires_grad or not only_requiring_grad:  # type: ignore
             yield x  # type: ignore
-    elif isinstance(x, container_abcs.Iterable) and not isinstance(x, str):
+    elif isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
@@ -280,7 +280,7 @@ def test_batched_grad(fail_test, input, output, output_idx):
 
 
 def _as_tuple(x):
-    if istuple(x):
+    if isinstance(x, tuple):
         return x
     elif isinstance(x, list):
         return tuple(x)

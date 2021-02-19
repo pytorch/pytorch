@@ -226,12 +226,11 @@ def grad(
 
 
 # This function applies in case of gradient checkpointing for memory
-# optimization. Currently, for gradient checkpointing, we only support imperative
-# backwards call i.e. torch.autograd.backward() and the torch.autograd.grad() won't
-# work. The reason being that: torch.autograd.grad() only calculates the grads
-# for the inputs that are passed by user but it doesn't calculate grad for
-# anything else e.g. model parameters like weights, bias etc. However, for
-# torch.autograd.backward(), we would actually compute the grad for the weights as well.
+# optimization. Currently, gradient checkpointing is supported only if the
+# execution engine is invoked through torch.autograd.backward() and its
+# inputs argument is not passed. It is not supported for torch.autograd.grad().
+# This is because if inputs are specified, the gradient won't be calculated for
+# anything else e.g. model parameters like weights, bias etc.
 #
 # This function returns whether the checkpointing is valid i.e. torch.autograd.backward
 # or not i.e. torch.autograd.grad. The implementation works by maintaining a thread
