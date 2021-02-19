@@ -113,7 +113,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   # shellcheck disable=SC2034
