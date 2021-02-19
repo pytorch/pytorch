@@ -46,7 +46,7 @@ REGISTER_CPU_OPERATOR(Adagrad, AdagradOp<CPUContext>);
 // For backward compatibility
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Adagrad, SIMD, AdagradOp<CPUContext>);
 OPERATOR_SCHEMA(Adagrad)
-    .NumInputs(4)
+    .NumInputs(4, 5)
     .NumOutputs(2, 4)
     .AllowInplace({{0, 0}, {1, 1}})
     .SetDoc(R"DOC(
@@ -68,6 +68,7 @@ Optionally returns effective_lr and update as well.
     .Input(1, "moment", "Moment history")
     .Input(2, "grad", "Gradient computed")
     .Input(3, "lr", "learning rate")
+    .Input(4, "iter", "(optional) iteration")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
     .Output(2, "output_effective_lr", "(optional) Effective learning rate")
@@ -78,6 +79,9 @@ Optionally returns effective_lr and update as well.
         "decay",
         "Default 1. If it is in (0, 1), the gradient square sum "
         "is decayed by this factor.")
+    .Arg("weight_decay", "(optional) regulariation param in gradient updating, default 0.0")
+    .Arg("weight_decay_ratio", "(optional) decreasing slope of weight_decay if used, default 0.0")
+    .Arg("weight_decay_lb", "(optional) lower bound of weight decay, default 0.0")
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForAdagrad));
 
@@ -112,7 +116,7 @@ REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp);
 // For backward compatibility
 REGISTER_CPU_OPERATOR_WITH_ENGINE(SparseAdagrad, SIMD, SparseAdagradOp);
 OPERATOR_SCHEMA(SparseAdagrad)
-    .NumInputs(5)
+    .NumInputs(5, 6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -127,9 +131,13 @@ new_moment) as in the dense case.
     .Input(2, "indices", "Sparse indices")
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
+    .Input(5, "iter", "(optional) iteration")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
     .Arg("epsilon", "Default 1e-5")
+    .Arg("weight_decay", "(optional) regulariation param in gradient updating, default 0.0")
+    .Arg("weight_decay_ratio", "(optional) decreasing slope of weight_decay if used, default 0.0")
+    .Arg("weight_decay_lb", "(optional) lower bound of weight decay, default 0.0")
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForSparseAdagrad));
 
@@ -184,7 +192,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     SIMD,
     RowWiseSparseAdagradOp<CPUContext>);
 OPERATOR_SCHEMA(RowWiseSparseAdagrad)
-    .NumInputs(5)
+    .NumInputs(5, 6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -203,9 +211,13 @@ also be a 1D tensor indexing into the rows of param.
     .Input(2, "indices", "Sparse indices")
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
+    .Input(5, "iter", "(optional) iteration")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
     .Arg("epsilon", "Default 1e-5")
+    .Arg("weight_decay", "(optional) regulariation param in gradient updating, default 0.0")
+    .Arg("weight_decay_ratio", "(optional) decreasing slope of weight_decay if used, default 0.0")
+    .Arg("weight_decay_lb", "(optional) lower bound of weight decay, default 0.0")
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForRowWiseSparseAdagrad));
 

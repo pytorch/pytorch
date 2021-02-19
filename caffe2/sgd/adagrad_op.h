@@ -81,11 +81,14 @@ class AdagradOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         decay_(this->template GetSingleArgument<float>("decay", 1.0f)),
-        weight_decay_(
-            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+        weight_decay_(this->template GetSingleArgument<float>("weight_decay", 0.f)),
+        weight_decay_ratio_(this->template GetSingleArgument<float>("weight_decay_ratio", 0.f)),
+        weight_decay_lb_(this->template GetSingleArgument<float>("weight_decay_lb", 0.f)){
     VLOG(1) << "gradient optimization operator in use: "
             << "AdagradOp"
-            << " weight_decay_=" << weight_decay_;
+            << " weight_decay_=" << weight_decay_
+            << " weight_decay_ratio_=" << weight_decay_ratio_
+            << " weight_decay_lb_=" << weight_decay_lb_;
   }
 
   bool RunOnDevice() override {
@@ -102,8 +105,25 @@ class AdagradOp final : public Operator<Context> {
         Input(LR).numel());
 
     CAFFE_ENFORCE_EQ(Input(GRAD).numel(), Input(PARAM).numel());
+    if (weight_decay_ratio_ > 0.f){
+      CAFFE_ENFORCE_GE(ITER, 0, "ITER: ", ITER, "[For adaptive weight decay, iteration must be greater than or equal to 0]");
+    }
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
     Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
+
+    float weight_decay_correction = 1.0f;
+    if (weight_decay_ratio_ != 0.0){
+      const auto iter = OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
+      const auto t = iter + 1;
+      weight_decay_correction = std::max(1 - t * weight_decay_ratio_, 0.f);
+      VLOG(1) << "AdagradOp iteration" << t
+              << " weight_decay_correction=" << weight_decay_correction;
+    }
+    float weight_decay = std::max(weight_decay_ * weight_decay_correction, weight_decay_lb_);
+    VLOG(1) << "calculated weight_decay in AdagradOp"
+            << " weight_decay=" << weight_decay
+            << " weight_decay_=" << weight_decay_;
+
     if (OutputSize() == 2) {
       adagrad_update<Context>(
           Input(GRAD).numel(),
@@ -116,7 +136,7 @@ class AdagradOp final : public Operator<Context> {
           decay_,
           Input(LR).template data<float>(),
           &context_,
-          weight_decay_);
+          weight_decay);
     } else if (OutputSize() == 3) {
       Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(GRAD));
       adagrad_update_output_effective_lr<Context>(
@@ -131,7 +151,7 @@ class AdagradOp final : public Operator<Context> {
           decay_,
           Input(LR).template data<float>(),
           &context_,
-          weight_decay_);
+          weight_decay);
     } else {
       Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(GRAD));
       Output(OUTPUT_UPDATE)->ResizeLike(Input(GRAD));
@@ -148,7 +168,7 @@ class AdagradOp final : public Operator<Context> {
           decay_,
           Input(LR).template data<float>(),
           &context_,
-          weight_decay_);
+          weight_decay);
     }
 
     return true;
@@ -158,7 +178,9 @@ class AdagradOp final : public Operator<Context> {
   float epsilon_;
   float decay_;
   float weight_decay_;
-  INPUT_TAGS(PARAM, MOMENT_1, GRAD, LR);
+  float weight_decay_ratio_;
+  float weight_decay_lb_;
+  INPUT_TAGS(PARAM, MOMENT_1, GRAD, LR, ITER);
   OUTPUT_TAGS(
       OUTPUT_PARAM,
       OUTPUT_MOMENT_1,
@@ -171,11 +193,14 @@ class SparseAdagradOp final : public Operator<CPUContext> {
   SparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
-        weight_decay_(
-            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+        weight_decay_(this->template GetSingleArgument<float>("weight_decay", 0.f)),
+        weight_decay_ratio_(this->template GetSingleArgument<float>("weight_decay_ratio", 0.f)),
+        weight_decay_lb_(this->template GetSingleArgument<float>("weight_decay_lb", 0.f)){
     VLOG(1) << "gradient optimization operator in use: "
             << "SparseAdagradOp"
-            << " weight_decay_=" << weight_decay_;
+            << " weight_decay_=" << weight_decay_
+            << " weight_decay_ratio_=" << weight_decay_ratio_
+            << " weight_decay_lb_=" << weight_decay_lb_;
     const float decay = this->template GetSingleArgument<float>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -195,6 +220,9 @@ class SparseAdagradOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
         Input(GRAD).size_from_dim(Input(INDICES).dim()));
+    if (weight_decay_ratio_ > 0.f){
+      CAFFE_ENFORCE_GE(ITER, 0, "ITER: ", ITER, "[For adaptive weight decay, iteration must be greater than or equal to 0]");
+    }
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
@@ -203,6 +231,18 @@ class SparseAdagradOp final : public Operator<CPUContext> {
   template <typename SIndex>
   bool DoRunWithType() {
     const auto* lr = Input(LR).template data<float>();
+    float weight_decay_correction = 1.0f;
+    if (weight_decay_ratio_ != 0.0){
+      const auto iter = OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
+      const auto t = iter + 1;
+      weight_decay_correction = std::max(1 - t * weight_decay_ratio_, 0.f);
+      VLOG(1) << "SparseAdagradOp iteration" << t
+              << " weight_decay_correction=" << weight_decay_correction;
+    }
+    float weight_decay = std::max(weight_decay_ * weight_decay_correction, weight_decay_lb_);
+    VLOG(1) << "calculated weight_decay in SparseAdagradOp"
+            << " weight_decay=" << weight_decay
+            << " weight_decay_=" << weight_decay_;
 
     auto n = Input(INDICES).numel();
 
@@ -235,14 +275,14 @@ class SparseAdagradOp final : public Operator<CPUContext> {
             block_size,
             /*rowwise=*/false,
             /*prefetch=*/16,
-            weight_decay_ != 0.0f);
+            weight_decay != 0.0f);
       } else {
         CAFFE_ENFORCE((std::is_same<SIndex, std::int64_t>::value));
         kernel_i64_ = fbgemm::GenerateSparseAdaGrad<std::int64_t>(
             block_size,
             /*rowwise=*/false,
             /*prefetch=*/16,
-            weight_decay_ != 0.0f);
+            weight_decay != 0.0f);
       }
     }
 
@@ -257,7 +297,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
           reinterpret_cast<const std::int32_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_,
+          weight_decay,
           /*counter=*/nullptr,
           /*counter_halflife=*/0);
     } else {
@@ -270,7 +310,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
           reinterpret_cast<const std::int64_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_,
+          weight_decay,
           /*counter=*/nullptr,
           /*counter_halflife=*/0);
     }
@@ -322,7 +362,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
           Input(PARAM).numel());
 
       if (block_size == 1) {
-        float gi = std::fma(weight_decay_, paramIn[idx], gradIn[i]);
+        float gi = std::fma(weight_decay, paramIn[idx], gradIn[i]);
         float hi = momentOut[idx] = momentIn[idx] + gi * gi;
         paramOut[idx] = paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
       } else {
@@ -344,7 +384,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
             &momentOut[idx_pref * block_size],
             epsilon_,
             lr[0],
-            weight_decay_);
+            weight_decay);
       }
     }
     return true;
@@ -353,13 +393,15 @@ class SparseAdagradOp final : public Operator<CPUContext> {
  protected:
   float epsilon_;
   const float weight_decay_;
+  float weight_decay_ratio_;
+  float weight_decay_lb_;
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
   fbgemm::SparseAdaGradSignature<std::int32_t>::Type kernel_i32_;
   fbgemm::SparseAdaGradSignature<std::int64_t>::Type kernel_i64_;
   std::int64_t last_block_size_{-1};
 #endif
 
-  INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
+  INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
 
@@ -370,11 +412,14 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   RowWiseSparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
-        weight_decay_(
-            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+        weight_decay_(this->template GetSingleArgument<float>("weight_decay", 0.f)),
+        weight_decay_ratio_(this->template GetSingleArgument<float>("weight_decay_ratio", 0.f)),
+        weight_decay_lb_(this->template GetSingleArgument<float>("weight_decay_lb", 0.f)){
     VLOG(1) << "gradient optimization operator in use: "
             << "RowWiseSparseAdagradOp"
-            << " weight_decay_=" << weight_decay_;
+            << " weight_decay_=" << weight_decay_
+            << " weight_decay_ratio_=" << weight_decay_ratio_
+            << " weight_decay_lb_=" << weight_decay_lb_;
   }
 
   bool RunOnDevice() override {
@@ -384,7 +429,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
         Input(GRAD).size_from_dim(Input(INDICES).dim()));
-
+    if (weight_decay_ratio_ > 0.f){
+      CAFFE_ENFORCE_GE(ITER, 0, "ITER: ", ITER, "[For adaptive weight decay, iteration must be greater than or equal to 0]");
+    }
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
   }
@@ -392,6 +439,21 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   template <typename SIndex>
   bool DoRunWithType() {
     const auto* lr = Input(LR).template data<float>();
+    float weight_decay_correction = 1.0f;
+
+    const auto iter = OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
+    const auto t = iter + 1;
+
+    if (weight_decay_ratio_ != 0.0){
+      weight_decay_correction = std::max(1 - t * weight_decay_ratio_, 0.f);
+      VLOG(1) << "RowWiseSparseAdagradOp iteration" << t
+              << " weight_decay_correction=" << weight_decay_correction;
+    }
+    float weight_decay = std::max(weight_decay_ * weight_decay_correction, weight_decay_lb_);
+    VLOG(1) << "calculated weight_decay in RowWiseSparseAdagradOp"
+            << " weight_decay=" << weight_decay
+            << " weight_decay_=" << weight_decay_;
+
     auto* param = Output(OUTPUT_PARAM)->template mutable_data<float>();
     auto* moment = Output(OUTPUT_MOMENT_1)->template mutable_data<float>();
 
@@ -436,14 +498,14 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
             block_size,
             /*rowwise=*/true,
             /*prefetch=*/16,
-            weight_decay_ != 0.0f);
+            weight_decay != 0.0f);
       } else {
         CAFFE_ENFORCE((std::is_same<SIndex, std::int64_t>::value));
         kernel_i64_ = fbgemm::GenerateSparseAdaGrad<std::int64_t>(
             block_size,
             /*rowwise=*/true,
             /*prefetch=*/16,
-            weight_decay_ != 0.0f);
+            weight_decay != 0.0f);
       }
     }
 
@@ -458,7 +520,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
           reinterpret_cast<const std::int32_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_,
+          weight_decay,
           /*counter=*/nullptr,
           /*counter_halflife=*/0);
     } else {
@@ -471,7 +533,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
           reinterpret_cast<const std::int64_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_,
+          weight_decay,
           /*counter=*/nullptr,
           /*counter_halflife=*/0);
     }
@@ -501,7 +563,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
       if (block_size == 1) {
-        float gi = std::fma(weight_decay_, param[idx], gradIn[i]);
+        float gi = std::fma(weight_decay, param[idx], gradIn[i]);
         float hi = moment[idx] = moment[idx] + gi * gi;
         param[idx] = param[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
       } else {
@@ -528,19 +590,18 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
             " for input i:",
             i);
 #endif
-
         float* w = param + offsetIdx;
         const float* g = gradIn + offsetI;
         float* h = moment + idx;
         float hs = 0.;
         for (auto j = 0; j < block_size; ++j) {
-          float gj = std::fma(weight_decay_, w[j], g[j]);
+          float gj = std::fma(weight_decay, w[j], g[j]);
           hs += gj * gj;
         }
         float hi = h[0] = h[0] + hs / block_size;
         float step = lr[0] / (std::sqrt(hi) + epsilon_);
         for (auto j = 0; j < block_size; ++j) {
-          float gj = std::fma(weight_decay_, w[j], g[j]);
+          float gj = std::fma(weight_decay, w[j], g[j]);
           w[j] = w[j] + gj * step;
         }
       }
@@ -552,13 +613,15 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
  protected:
   float epsilon_;
   const float weight_decay_;
+  float weight_decay_ratio_;
+  float weight_decay_lb_;
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
   fbgemm::SparseAdaGradSignature<std::int32_t>::Type kernel_i32_;
   fbgemm::SparseAdaGradSignature<std::int64_t>::Type kernel_i64_;
   std::int64_t last_block_size_{-1};
 #endif
 
-  INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
+  INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
 } // namespace caffe2

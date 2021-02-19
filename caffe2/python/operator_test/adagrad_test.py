@@ -1,5 +1,3 @@
-
-
 import functools
 
 import caffe2.python.hypothesis_test_util as hu
@@ -121,6 +119,69 @@ class TestAdagrad(serial.SerializedTestCase):
             ),
         )
 
+    @given(
+        inputs=hu.tensors(n=3),
+        lr=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        epsilon=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        weight_decay=st.sampled_from([0.0, 0.1]),
+        weight_decay_ratio=st.sampled_from([0.0, 1.0]),
+        weight_decay_lb=st.sampled_from([0.0, 1e-8]),
+        lr_iter=st.integers(min_value=1, max_value=1000),
+        **hu.gcs
+    )
+    @settings(deadline=1000)
+    def test_adagrad_weight_decay_ratio(
+        self,
+        inputs,
+        lr,
+        epsilon,
+        weight_decay,
+        weight_decay_ratio,
+        weight_decay_lb,
+        lr_iter,
+        gc,
+        dc,
+    ):
+        param, momentum, grad = inputs
+        momentum = np.abs(momentum)
+        lr = np.array([lr], dtype=np.float32)
+        lr_iter = np.array([lr_iter], dtype=np.int64)
+
+        op = core.CreateOperator(
+            "Adagrad",
+            ["param", "momentum", "grad", "lr", "lr_iter"],
+            ["param", "momentum"],
+            epsilon=epsilon,
+            weight_decay=weight_decay,
+            weight_decay_ratio=weight_decay_ratio,
+            weight_decay_lb=weight_decay_lb,
+            device_option=gc,
+        )
+
+        def ref_adagrad_weight_decay_ratio(param, momentum, grad, lr, lr_iter):
+            return ref_adagrad(
+                param,
+                momentum,
+                grad,
+                lr,
+                epsilon=epsilon,
+                weight_decay=weight_decay,
+                weight_decay_ratio=weight_decay_ratio,
+                weight_decay_lb=weight_decay_lb,
+                lr_iter=lr_iter,
+            )
+
+        self.assertReferenceChecks(
+            gc,
+            op,
+            [param, momentum, grad, lr, lr_iter],
+            ref_adagrad_weight_decay_ratio,
+        )
+
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
     @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=10000)
@@ -146,6 +207,48 @@ class TestAdagrad(serial.SerializedTestCase):
             gc,
             dc,
             weight_decay=weight_decay,
+        )
+
+    @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=10000)
+    @given(
+        inputs=hu.tensors(n=3),
+        lr=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        lr_iter=st.integers(min_value=1, max_value=1000),
+        epsilon=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        weight_decay=st.sampled_from([0.0, 0.1]),
+        weight_decay_ratio=st.sampled_from([0.0, 0.1]),
+        weight_decay_lb=st.sampled_from([0.0, 1e-8]),
+        **hu.gcs
+    )
+    def test_sparse_adagrad_weight_decay_ratio(
+        self,
+        inputs,
+        lr,
+        epsilon,
+        weight_decay,
+        weight_decay_ratio,
+        weight_decay_lb,
+        lr_iter,
+        gc,
+        dc,
+    ):
+        adagrad_sparse_test_helper(
+            self,
+            inputs,
+            lr,
+            epsilon,
+            None,
+            ref_adagrad,
+            gc,
+            dc,
+            weight_decay=weight_decay,
+            weight_decay_ratio=weight_decay_ratio,
+            weight_decay_lb=weight_decay_lb,
+            lr_iter=lr_iter,
         )
 
     @given(
@@ -190,7 +293,7 @@ class TestAdagrad(serial.SerializedTestCase):
 
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
-    @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=1000)
+    @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=10000)
     @given(
         inputs=hu.tensors(n=3),
         lr=st.floats(
@@ -214,6 +317,49 @@ class TestAdagrad(serial.SerializedTestCase):
             dc,
             row_wise=True,
             weight_decay=weight_decay,
+        )
+
+    @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=10000)
+    @given(
+        inputs=hu.tensors(n=3),
+        lr=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        lr_iter=st.integers(min_value=1, max_value=1000),
+        epsilon=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        weight_decay=st.sampled_from([0.0, 0.1]),
+        weight_decay_ratio=st.sampled_from([0.0, 0.1]),
+        weight_decay_lb=st.sampled_from([0.0, 1e-8]),
+        **hu.gcs
+    )
+    def test_row_wise_sparse_adagrad_with_weight_decay_ratio(
+        self,
+        inputs,
+        lr,
+        epsilon,
+        weight_decay,
+        weight_decay_ratio,
+        weight_decay_lb,
+        lr_iter,
+        gc,
+        dc,
+    ):
+        adagrad_sparse_test_helper(
+            self,
+            inputs,
+            lr,
+            epsilon,
+            None,
+            functools.partial(ref_adagrad, row_wise=True),
+            gc,
+            dc,
+            row_wise=True,
+            weight_decay=weight_decay,
+            weight_decay_ratio=weight_decay_ratio,
+            weight_decay_lb=weight_decay_lb,
+            lr_iter=lr_iter,
         )
 
     @given(

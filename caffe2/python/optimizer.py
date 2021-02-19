@@ -562,6 +562,8 @@ class AdagradOptimizer(Optimizer):
         epsilon=1e-4,
         decay=1,
         weight_decay=0.0,
+        weight_decay_ratio=0.0,
+        weight_decay_lb=0.0,
         policy="fixed",
         sparse_dedup_aggregator=None,
         rowWise=False,
@@ -584,6 +586,8 @@ class AdagradOptimizer(Optimizer):
         self.epsilon = epsilon
         self.decay = decay
         self.weight_decay = float(weight_decay)
+        self.weight_decay_ratio = float(weight_decay_ratio)
+        self.weight_decay_lb = float(weight_decay_lb)
         self.policy = policy
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.rowWise = rowWise
@@ -907,6 +911,8 @@ class AdagradOptimizer(Optimizer):
         shapes, _ = workspace.InferShapesAndTypes([param_init_net])
         param_shape = shapes[str(param)]
         weight_decay = 0.0
+        weight_decay_ratio = 0.0
+        weight_decay_lb = 0.0
         if isinstance(grad, core.GradientSlice):
             if len(param_shape) == 1:
                 weight_decay = 0.0
@@ -917,6 +923,8 @@ class AdagradOptimizer(Optimizer):
                 )
             else:
                 weight_decay = self.weight_decay
+                weight_decay_ratio = self.weight_decay_ratio
+                weight_decay_lb = self.weight_decay_lb
         else:
             # Skip weight decay for 1d parameters
             if len(param_shape) == 1:
@@ -928,9 +936,11 @@ class AdagradOptimizer(Optimizer):
                 )
             else:
                 weight_decay = self.weight_decay
+                weight_decay_ratio = self.weight_decay_ratio
+                weight_decay_lb = self.weight_decay_lb
         logger.info(
-            "weight_decay for {} (shape:{}): {}".format(
-                str(param), param_shape, weight_decay
+            "weight_decay for {} (shape:{}): {}, {}, {}".format(
+                str(param), param_shape, weight_decay, weight_decay_ratio, weight_decay_lb
             )
         )
 
@@ -966,12 +976,23 @@ class AdagradOptimizer(Optimizer):
                 input_args += [lr_iteration, last_mask_updated_iter]
                 output_args += [mask_blob, last_mask_updated_iter]
 
+            if weight_decay_ratio != 0:
+                assert (
+                    self.use_mask is False
+                ), "MaskedAdagrad doesn't support for weight_decay_reatio"
+                if self.prune_delays:
+                    input_args = [param, param_squared_sum, grad.indices, grad.values, lr, lr_iteration, last_mask_updated_iter]
+                else:
+                    input_args = [param, param_squared_sum, grad.indices, grad.values, lr, lr_iteration]
+
             if weight_decay > 0:
                 net.__getattr__(op)(
                     input_args,
                     output_args,
                     epsilon=self.epsilon,
                     weight_decay=weight_decay,
+                    weight_decay_ratio=weight_decay_ratio,
+                    weight_decay_lb=weight_decay_lb,
                     engine=self.engine,
                 )
             else:
@@ -1007,6 +1028,15 @@ class AdagradOptimizer(Optimizer):
                 input_args += [lr_iteration, last_mask_updated_iter]
                 output_args += [mask_blob, last_mask_updated_iter]
 
+            if weight_decay_ratio != 0:
+                assert (
+                    self.use_mask is False
+                ), "MaskedAdagrad doesn't support for weight_decay_reatio"
+                if self.prune_delays:
+                    input_args = [param, param_squared_sum, grad.indices, grad.values, lr, lr_iteration, last_mask_updated_iter]
+                else:
+                    input_args = [param, param_squared_sum, grad.indices, grad.values, lr, lr_iteration]
+
             if self.use_mask:
                 assert (
                     weight_decay == 0
@@ -1029,6 +1059,8 @@ class AdagradOptimizer(Optimizer):
                         epsilon=self.epsilon,
                         decay=float(self.decay),
                         weight_decay=weight_decay,
+                        weight_decay_ratio=weight_decay_ratio,
+                        weight_decay_lb=weight_decay_lb,
                         engine=self.engine,
                     )
                 else:
