@@ -166,19 +166,27 @@ test_libtorch() {
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
 
-    # Run JIT cpp tests
+    # Create folder to store test results
     mkdir -p test/test-reports/cpp-unittest
-    python test/cpp/jit/tests_setup.py setup
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
+
+    if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+      # Run Lite Interpreter run time tests
+      build/bin/test_lite_interpreter_runtime  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_lite_interpreter_runtime.xml
     else
-      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
+      # Run JIT cpp tests
+      python test/cpp/jit/tests_setup.py setup
+      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+        build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
+      else
+        build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
+      fi
+      python test/cpp/jit/tests_setup.py shutdown
+      # Wait for background download to finish
+      wait
+      OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
+      build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
     fi
-    python test/cpp/jit/tests_setup.py shutdown
-    # Wait for background download to finish
-    wait
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
-    build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
+
     assert_git_not_dirty
   fi
 }
