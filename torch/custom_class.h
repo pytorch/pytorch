@@ -230,7 +230,8 @@ class class_ {
     return *this;
   }
 
-  /// Property registration API for properties with both getter and setter functions.
+  /// Property registration API for properties with both getter and setter
+  /// functions.
   template <typename GetterFunc, typename SetterFunc>
   class_& def_property(
       const std::string& name,
