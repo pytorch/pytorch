@@ -30,12 +30,12 @@ print("Submitted bulid: " + str(build_id))
 print("Bulid URL: " + run_build_json['url'])
 
 def get_build(build_id):
-    get_build_url = AZURE_PIPELINE_BASE_URL + f"/_apis/build/builds/{build_id}?api-version=6.0"
+    get_build_url = AZURE_PIPELINE_BASE_URL + "/_apis/build/builds/{}?api-version=6.0".format(build_id)
     get_build_raw = s.get(get_build_url)
     return get_build_raw.json()
 
 def get_build_logs(build_id):
-    get_build_logs_url = AZURE_PIPELINE_BASE_URL + f"/_apis/build/builds/{build_id}/logs?api-version=6.0"
+    get_build_logs_url = AZURE_PIPELINE_BASE_URL + "/_apis/build/builds/{}/logs?api-version=6.0".format(build_id)
     get_build_logs_raw = s.get(get_build_logs_url)
     return get_build_logs_raw.json()
 
