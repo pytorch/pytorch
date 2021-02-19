@@ -4,8 +4,10 @@ message(STATUS "BUILD_LITE_INTERPRETER (pytorch_jni_lite): ${BUILD_LITE_INTERPRE
 
 if(BUILD_LITE_INTERPRETER)
   project(pytorch_jni_lite CXX)
+  set(PYTORCH_JNI_TARGET pytorch_jni_lite)
 else()
   project(pytorch_jni CXX)
+  set(PYTORCH_JNI_TARGET pytorch_jni)
 endif()
 
 include(GNUInstallDirs)
@@ -59,7 +61,7 @@ if(BUILD_LITE_INTERPRETER)
     ${pytorch_android_DIR}/pytorch_jni_common.cpp
     ${pytorch_android_DIR}/pytorch_jni_common.h
   )
-  add_library(pytorch_jni_lite SHARED
+  add_library(${PYTORCH_JNI_TARGET} SHARED
       ${pytorch_android_SOURCES}
   )
 else()
@@ -68,7 +70,7 @@ else()
     ${pytorch_android_DIR}/pytorch_jni_common.cpp
     ${pytorch_android_DIR}/pytorch_jni_common.h
   )
-  add_library(pytorch_jni SHARED
+  add_library(${PYTORCH_JNI_TARGET} SHARED
       ${pytorch_android_SOURCES}
   )
 endif()
@@ -81,22 +83,11 @@ if(APPLE)
         $<TARGET_FILE:pytorch_jni>)
 endif()
 
-if(BUILD_LITE_INTERPRETER)
-  target_compile_options(pytorch_jni_lite PRIVATE
-    -fexceptions
-  )
-  target_include_directories(pytorch_jni_lite BEFORE
-  PUBLIC $<BUILD_INTERFACE:${libtorch_include_DIR}>
+target_compile_options(${PYTORCH_JNI_TARGET} PRIVATE
+  -fexceptions
 )
-else()
-  target_compile_options(pytorch_jni PRIVATE
-    -fexceptions
-  )
-  target_include_directories(pytorch_jni BEFORE
-  PUBLIC $<BUILD_INTERFACE:${libtorch_include_DIR}>
-)
-endif()
-
+target_include_directories(${PYTORCH_JNI_TARGET} BEFORE
+PUBLIC $<BUILD_INTERFACE:${libtorch_include_DIR}>)
 
 set(fbjni_DIR ${CMAKE_CURRENT_LIST_DIR}/../libs/fbjni/)
 set(fbjni_BUILD_DIR ${CMAKE_BINARY_DIR}/fbjni/${BUILD_SUBDIR})
@@ -180,27 +171,14 @@ if(USE_VULKAN)
   list(APPEND pytorch_jni_LIBS ${Vulkan_LIBS})
 endif()
 
-if(BUILD_LITE_INTERPRETER)
-  target_link_libraries(pytorch_jni_lite ${pytorch_jni_LIBS})
+target_link_libraries(${PYTORCH_JNI_TARGET} ${pytorch_jni_LIBS})
 
-  install(TARGETS pytorch_jni_lite
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}) #For windows
-else()
-  target_link_libraries(pytorch_jni ${pytorch_jni_LIBS})
-
-  install(TARGETS pytorch_jni
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}) #For windows
-endif()
+install(TARGETS ${PYTORCH_JNI_TARGET}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}) #For windows
 
 if(MSVC)
   install(FILES $<TARGET_PDB_FILE:pytorch_jni> DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
-  if(BUILD_LITE_INTERPRETER)
-    install(TARGETS pytorch_jni_lite DESTINATION ${CMAKE_INSTALL_LIBDIR})
-  else()
-    install(TARGETS pytorch_jni DESTINATION ${CMAKE_INSTALL_LIBDIR})
-  endif()
+  install(TARGETS ${PYTORCH_JNI_TARGET} DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
