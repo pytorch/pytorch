@@ -1037,8 +1037,6 @@ class TracedModule(ScriptModule):
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
         for name, val in orig.__dict__.items():
-            if isinstance(val, ScriptObjectWrapper):
-                val = val._c
             if (
                 torch._C._jit_is_script_object(val)
                 and name not in orig._parameters

@@ -230,6 +230,7 @@ class class_ {
     return *this;
   }
 
+  /// Property registration API for properties with both getter and setter functions.
   template <typename GetterFunc, typename SetterFunc>
   class_& def_property(
       const std::string& name,
@@ -253,6 +254,7 @@ class class_ {
     return *this;
   }
 
+  /// Property registration API for properties with only getter function.
   template <typename GetterFunc>
   class_& def_property(
       const std::string& name,
@@ -269,6 +271,7 @@ class class_ {
     return *this;
   }
 
+  /// Property registration API for properties with read-write access.
   template <typename T>
   class_& def_readwrite(const std::string& name, T CurClass::*field) {
     auto getter_func =
@@ -284,6 +287,7 @@ class class_ {
     return def_property(name, getter_func, setter_func);
   }
 
+  /// Property registration API for properties with read-only access.
   template <typename T>
   class_& def_readonly(const std::string& name, T CurClass::*field) {
     auto getter_func =

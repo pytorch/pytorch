@@ -22,8 +22,7 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
           instance.type()->repr_str()));
   Method init_method(instance._ivalue(), init_fn);
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
-  return py::module::import("torch.jit._recursive")
-      .attr("wrap_script_object")(instance);
+  return py::cast(instance);
 }
 
 /// Variant of StrongFunctionPtr, but for static methods of custom classes.

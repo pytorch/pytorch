@@ -127,8 +127,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             elif isinstance(item, torch.jit.Attribute):
                 ann_to_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
                 attr_type = torch._C.InferredType(ann_to_type)
-            elif isinstance(item, torch.jit.ScriptObjectWrapper):
-                attr_type = torch._C._jit_try_infer_type(item._c)
             else:
                 attr_type = torch._C._jit_try_infer_type(item)
                 inferred = True
@@ -275,12 +273,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 value)
             continue
 
-        # Handle ScriptObject attributes.
-        if isinstance(value, torch.jit.ScriptObjectWrapper):
-            attr_type, _ = infer_type(name, value)
-            concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
-            continue
-
         # If we got here, this is a regular "data" attribute, Add it to the concrete type
         attr_type, inferred = infer_type(name, value)
         if attr_type.success():
@@ -425,10 +417,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         for name, (attr_type, is_param) in concrete_type.get_attributes().items():
             orig_value = getattr(nn_module, name)
             orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
-            if isinstance(orig_value, torch.jit._script.ScriptObjectWrapper):
-                cpp_module.setattr(name, orig_value._c)
-            else:
-                cpp_module.setattr(name, orig_value)
+            cpp_module.setattr(name, orig_value)
 
         # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,
         #    recursively scripting them.
@@ -777,21 +766,6 @@ def try_compile_fn(fn, loc):
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
-
-def wrap_script_object(script_object):
-    """
-    Wrap this torch._C.Object in a Python ScriptObjectWrapper.
-    """
-    return torch.jit.ScriptObjectWrapper(script_object)
-
-def is_script_object_wrapper(script_object_wrapper):
-    return isinstance(script_object_wrapper, torch.jit.ScriptObjectWrapper)
-
-def unwrap_script_object(script_object_wrapper):
-    if is_script_object_wrapper(script_object_wrapper):
-        return script_object_wrapper._c
-    else:
-        raise RuntimeError("can only unwrap torch.jit.ScriptObjectWrapper")
 
 def wrap_cpp_module(cpp_module):
     """

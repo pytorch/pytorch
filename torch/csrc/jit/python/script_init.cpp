@@ -37,10 +37,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <Exceptions.h>
 #include <chrono>
 #include <cstddef>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -784,9 +786,53 @@ void initJitScriptBindings(PyObject* module) {
                   if (auto method = self.find_method(name)) {
                     return py::cast(*method);
                   }
+                  if (self.has_property(name)) {
+                    auto prop = self.get_property(name);
+                    auto getter_func = py::cast(std::get<1>(prop));
+                    auto setter_func = py::cast(std::get<2>(prop));
+                    py::object property_func =
+                        py::module::import("builtins").attr("property");
+                    py::object property =
+                        property_func(getter_func, setter_func);
+                    return property.attr("fget")();
+                  }
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
                   throw AttributeError("%s", err.what());
+                }
+              })
+          .def(
+              "__setattr__",
+              [](Object& self, const std::string& name, py::object value) {
+                try {
+                  if (self.has_property(name)) {
+                    auto prop = self.get_property(name);
+                    auto getter_func = py::cast(std::get<1>(prop));
+                    auto setter_func = py::cast(std::get<2>(prop));
+                    py::object property_func =
+                        py::module::import("builtins").attr("property");
+                    py::object property =
+                        property_func(getter_func, setter_func);
+                    property.attr("fset")(value);
+                    return;
+                  }
+
+                  if (self.type()->hasConstant(name)) {
+                    TORCH_CHECK(
+                        false,
+                        "Can't set constant '",
+                        name,
+                        "' which has value:",
+                        self.type()->getConstant(name));
+                  }
+                  TypePtr type = self.type()->getAttribute(name);
+                  auto ivalue = toIValue(std::move(value), type);
+                  self.setattr(name, ivalue);
+                } catch (const ObjectAttributeError& err) {
+                  throw AttributeError("%s", err.what());
+                } catch (const std::runtime_error& err) {
+                  throw AttributeError(
+                      "property %s doesn't have a setter method", name.c_str());
                 }
               })
           .def(

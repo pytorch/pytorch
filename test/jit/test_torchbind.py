@@ -145,6 +145,9 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(new, 15)
         # check if we can use scripted Torchbind Class
         self.assertEqual(out.x, 15)
+        out.x = 20
+        self.assertEqual(out.x, 24)
+
 
         def foo_getter_setter_lambda():
             foo = torch.classes._TorchScriptTesting._FooGetterSetterLambda(5)
@@ -165,7 +168,7 @@ class TestTorchbind(JitTestCase):
         scripted = torch.jit.script(foo_just_getter)
         out, result = scripted()
         self.assertEqual(result, 10)
-        with self.assertRaisesRegex(RuntimeError, 'Can\'t set a value when there is no setter given for attribute y'):
+        with self.assertRaisesRegex(AttributeError, 'property y doesn\'t have a setter method'):
             out.y = 5
 
         def foo_not_setter():

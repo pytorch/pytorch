@@ -115,6 +115,26 @@ struct TORCH_API Object {
     });
   }
 
+  bool has_property(const std::string& name) const {
+    auto props = get_properties();
+    for (auto prop : props) {
+      if (std::get<0>(prop) == name) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const Property get_property(const std::string& name) const {
+    auto props = get_properties();
+    for (auto prop : props) {
+      if (std::get<0>(prop) == name) {
+        return prop;
+      }
+    }
+    AT_ERROR("Property '", name, "' is not defined.");
+  }
+
   c10::optional<Method> find_method(const std::string& basename) const;
 
   /// Run a method from this module.
