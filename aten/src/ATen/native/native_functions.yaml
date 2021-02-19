@@ -8518,14 +8518,14 @@
     CPU: slow_conv_transpose2d_cpu
     CUDA: slow_conv_transpose2d_cuda
 
-- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose2d_backward_out_cpu
     CUDA: slow_conv_transpose2d_backward_out_cuda
 
-- func: slow_conv_transpose2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+- func: slow_conv_transpose2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose2d_backward_cpu
