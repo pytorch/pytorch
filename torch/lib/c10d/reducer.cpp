@@ -1041,16 +1041,16 @@ void Reducer::prepare_for_backward(
     }
   }
 
-  // Warn user about unnecessary perf hit if all parameters were used.
+  // Warn user about unnecessary perf hit if all parameters were used in forward.
   if (unused_parameters_.empty()) {
     TORCH_WARN_ONCE(
         "find_unused_parameters=True was specified in DDP constructor, "
-        "but did not find any unused parameters. This flag results in an extra "
-        "traversal of the autograd graph every iteration, which can adversely "
-        "affect performance. If your model indeed never has any unused "
-        "parameters, consider turning this flag off. Note that this warning may "
-        "be a false positive your model has flow control causing later iterations "
-        "to have unused parameters.");
+        "but did not find any unused parameters in the forward pass. This flag "
+        "results in an extra traversal of the autograd graph every iteration, "
+        " which can adversely affect performance. If your model indeed never "
+        "has any unused parameters in the forward pass, consider turning this "
+        "flag off. Note that this warning may be a false positive your model "
+        "has flow control causing later iterations to have unused parameters.");
   }
 }
 
