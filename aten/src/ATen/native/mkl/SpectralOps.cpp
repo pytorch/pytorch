@@ -1,8 +1,9 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Config.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -188,7 +189,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
     is_mirrored_dim[dim] = true;
   }
 
-  const auto numel = at::prod_intlist(signal_half_sizes);
+  const auto numel = c10::multiply_integers(signal_half_sizes);
   AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
     at::parallel_for(0, numel, at::internal::GRAIN_SIZE,
         [&](int64_t begin, int64_t end) {
@@ -267,7 +268,7 @@ static DftiDescriptor _plan_mkl_fft(
   }
   // rescale if requested
   const auto norm = static_cast<fft_norm_mode>(normalization);
-  int64_t signal_numel = at::prod_intlist(IntArrayRef(sizes.data() + 1, signal_ndim));
+  int64_t signal_numel = c10::multiply_integers(IntArrayRef(sizes.data() + 1, signal_ndim));
   if (norm != fft_norm_mode::none) {
     const double scale = (
       (norm == fft_norm_mode::by_root_n) ?

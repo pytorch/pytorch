@@ -2,6 +2,7 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
+#include <ATen/core/ivalue_to.h>
 #include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -50,6 +51,19 @@ struct GenericDict;
 struct Object;
 struct PyObjectHolder;
 struct EnumHolder;
+// We need a ComplexHolder because currently the payloads in the Union
+// only take 64 bits. Since ComplexDouble takes up 128 bits, and is too big
+// to fit in the IValue directly, we indirect complex numbers through an intrusive
+// pointer to ComplexHolder (which contains a c10::complex).
+struct ComplexHolder : c10::intrusive_ptr_target {
+  public:
+    template <typename T>
+    ComplexHolder(c10::complex<T> c) {
+      val = convert<decltype(val), c10::complex<T>>(c);
+    }
+    ComplexHolder() {}
+    c10::complex<double> val;
+};
 } // namespace ivalue
 
 // This is an owning wrapper for a c10::optional<std::vector<T>>
@@ -107,6 +121,7 @@ struct Capsule {
   _(Tensor)                  \
   _(Storage)                 \
   _(Double)                  \
+  _(ComplexDouble)           \
   _(Int)                     \
   _(Bool)                    \
   _(Tuple)                   \
@@ -443,6 +458,12 @@ struct TORCH_API IValue final {
     return payload.u.as_double;
   }
 
+  // ComplexDouble
+  template <typename T>
+  IValue(c10::complex<T> c);
+  bool isComplexDouble() const { return Tag::ComplexDouble == tag; }
+  c10::complex<double> toComplexDouble() const;
+
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
   bool isFuture() const {
@@ -528,6 +549,12 @@ struct TORCH_API IValue final {
   c10::List<double> toDoubleList() const&;
   std::vector<double> toDoubleVector() const;
 
+  // ComplexDoubleList
+  bool isComplexDoubleList() const;
+  c10::List<c10::complex<double>> toComplexDoubleList() &&;
+  c10::List<c10::complex<double>> toComplexDoubleList() const&;
+  std::vector<c10::complex<double>> toComplexDoubleVector() const;
+
   // BoolList
   bool isBoolList() const;
   c10::List<bool> toBoolList() &&;
@@ -555,7 +582,9 @@ struct TORCH_API IValue final {
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
-  IValue(c10::List<T> v);
+  IValue(c10::List<T>&& v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(const c10::List<T>& v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
@@ -631,22 +660,28 @@ struct TORCH_API IValue final {
     return i;
   }
 
-  // Scalar, which gets encoded as either an Int or a Double
+  // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(at::Scalar s) : IValue() {
     if (s.isFloatingPoint()) {
       *this = s.toDouble();
+    } else if (s.isComplex()) {
+      *this = s.toComplexDouble();
     } else {
       *this = s.toLong();
     }
   }
+
   bool isScalar() const {
-    return isDouble() || isInt();
+    return isDouble() || isInt() || isComplexDouble();
   }
+
   at::Scalar toScalar() const {
     if (isDouble())
       return toDouble();
     else if (isInt())
       return toInt();
+    else if (isComplexDouble())
+      return toComplexDouble();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -749,7 +784,7 @@ struct TORCH_API IValue final {
   template <typename T>
   T to() &&;
   template <typename T>
-  T to() const&;
+  typename c10::detail::ivalue_to_const_ref_overload_return<T>::type to() const&;
 
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
