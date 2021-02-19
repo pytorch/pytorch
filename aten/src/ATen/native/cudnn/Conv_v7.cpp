@@ -821,53 +821,62 @@ void raw_cudnn_convolution_backward_weight_out(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
-// No benchmark fo
-void raw_cudnn_convolution_bias_relu_forward_out(
-    const Tensor& output, const Tensor& input, const Tensor& weight,
-    bool use_z, const Tensor& z, bool use_b, const Tensor& bias,
+// Not running the benchamrk mode for now
+void raw_cudnn_convolution_bias_relu_out(
+    const Tensor& output, const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
   auto dataType = getCudnnDataType(input);
-  ConvolutionArgs args{ input, grad_output, grad_weight };
+
+  ConvolutionArgs args{ input, output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
+  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   args.idesc.set(input);
-  args.wdesc.set(grad_weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
-  args.odesc.set(grad_output);
+  args.wdesc.set(weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
+  args.odesc.set(output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
-  
-  Tensor workspace = allocate_workspace(fwdAlgPerf.memory, input);
+  TensorDescriptor bdesc;
+  bdesc.set(bias);
 
-  // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
-  // whether to use Tensor core kernels or not
-  // See Note [behavior of cudnnFind and cudnnGet]
-  ASSERT_CORRECT_PRECISION(fwdAlgPerf.mathType);
-  AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType), args);
+  ActivationDescriptor adesc;
+  adesc.set(CUDNN_ACTIVATION_RELU);
 
-  Constant one(dataType, 1);
-  Constant zero(dataType, 0);
+  AlgoIterator<cudnnConvolutionFwdAlgoPerf_t>(args, benchmark).try_all(
+    [&](const cudnnConvolutionFwdAlgoPerf_t &fwdAlgPerf){
+      Tensor workspace = allocate_workspace(fwdAlgPerf.memory, input);
 
-  AT_CUDNN_CHECK_WITH_SHAPES(cudnnConvolutionBiasActivationForward(
-      args.handle,
-      &one,
-      args.idesc.desc(),
-      input.data_ptr(),
-      args.wdesc.desc(),
-      weight.data_ptr(),
-      args.cdesc.desc(),
-      fwdAlgPerf.algo,
-      workspace.data_ptr(),
-      fwdAlgPerf.memory,
-      use_z ? &one : &zero,
-      use_z ? args.zdesc.desc() : args.ydesc.desc(),
-      use_z ? z.data_ptr() : y.data_ptr(),
-      use_b ? args.bdesc.desc() : , 
-      use_b ? bias.data_ptr() : ,
-      activation_desc_,
-      args.odesc.desc(),
-      output.data_ptr()),
-    args);
+      // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
+      // whether to use Tensor core kernels or not
+      // See Note [behavior of cudnnFind and cudnnGet]
+      ASSERT_CORRECT_PRECISION(fwdAlgPerf.mathType);
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType), args);
+
+      Constant one(dataType, 1);
+      Constant zero(dataType, 0);
+
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnConvolutionBiasActivationForward(
+          args.handle,
+          &one,
+          args.idesc.desc(),
+          input.data_ptr(),
+          args.wdesc.desc(),
+          weight.data_ptr(),
+          args.cdesc.desc(),
+          fwdAlgPerf.algo,
+          workspace.data_ptr(),
+          fwdAlgPerf.memory,
+          &zero,
+          args.odesc.desc(), // zDesc
+          output.data_ptr(), // z is not currently used but we have to feed a value
+          bdesc.desc(),
+          bias.data_ptr(),
+          adesc.desc(),
+          args.odesc.desc(),
+          output.data_ptr()),
+        args, "Forward algorithm: ", static_cast<int>(fwdAlgPerf.algo), "\n");
+      }
+  );
 }
 
 }}  // namespace at::native

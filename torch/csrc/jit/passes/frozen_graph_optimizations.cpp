@@ -12,20 +12,22 @@
 namespace torch {
 namespace jit {
 
-void OptimizeFrozenGraph(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("Before OptimizeFrozenGraph: ", graph);
-
+void OptimizeFrozenGraph(
+    std::shared_ptr<Graph>& graph,
+    bool optimize_numerics) {
   removeDropout(graph);
   RemoveTensorMutation(graph);
-  // run a couple times to capture Conv -> Mul -> Add etc
-  for (size_t i = 0; i < 2; i++) {
-    FoldFrozenConvBatchnorm(graph);
-    FoldFrozenConvAddOrSub(graph);
-    FoldFrozenConvMulOrDiv(graph);
-  }
-  FuseFrozenConvRelu(graph);
 
-  GRAPH_DUMP("After OptimizeFrozenGraph: ", graph);
+  // run a couple times to capture Conv -> Mul -> Add etc
+  if (optimize_numerics) {
+    for (size_t i = 0; i < 2; i++) {
+      FoldFrozenConvBatchnorm(graph);
+      FoldFrozenConvAddOrSub(graph);
+      FoldFrozenConvMulOrDiv(graph);
+    }
+  }
+
+  FuseFrozenConvRelu(graph);
 }
 
 } // namespace jit

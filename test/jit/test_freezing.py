@@ -1508,7 +1508,7 @@ class TestFrozenOptimizations(JitTestCase):
         bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
         mod = torch.nn.Sequential(conv, bn)
         # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize_numerics=False)
         # inspect frozen mod
         FileCheck().check("batch_norm").run(frozen_mod.graph)
         torch.jit.optimize_frozen_module(frozen_mod)
@@ -1528,18 +1528,14 @@ class TestFrozenOptimizations(JitTestCase):
                 return self.dropout(x)
 
         mod = torch.jit.script(Net())
-        # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
-        # inspect frozen mod
-        FileCheck().check("aten::dropout").run(frozen_mod.graph)
-        torch.jit.optimize_frozen_module(frozen_mod)
+        # inspect mod
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::dropout").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod.eval())
         FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
 
-        script_mod = torch.jit.script(mod)
-        script_mod.eval()
-
         input = torch.randn(2)
-        output_s = script_mod.forward(input)
+        output_s = mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
 
@@ -1552,23 +1548,18 @@ class TestFrozenOptimizations(JitTestCase):
             def forward(self, x):
                 return self.dropout(x)
 
-        mod = torch.jit.script(Net())
-        # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
-        # inspect frozen mod
-        FileCheck().check("aten::feature_dropout").run(frozen_mod.graph)
-        torch.jit.optimize_frozen_module(frozen_mod)
+        mod = torch.jit.script(Net().eval())
+        # inspect mod
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::feature_dropout").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod)
         FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
 
-        script_mod = torch.jit.script(mod)
-        script_mod.eval()
-
         input = torch.randn(2, 2)
-        output_s = script_mod.forward(input)
+        output_s = mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
 
-    #@unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_freeze_conv_relu_fusion(self):
         class Net(nn.Module):
             def __init__(self, num_classes: int = 1000) -> None:
@@ -1583,18 +1574,18 @@ class TestFrozenOptimizations(JitTestCase):
                 x = self.conv(x)
                 return x
 
-        mod = torch.jit.script(Net())
-        # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        mod = torch.jit.script(Net().eval())
         # inspect frozen mod
-        FileCheck().check("aten::relu").run(frozen_mod.graph)
-        torch.jit.optimize_frozen_module(frozen_mod)
-        # FileCheck().check_not("aten::relu").run(frozen_mod.graph)
-
-        script_mod = torch.jit.script(mod)
-        script_mod.eval()
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::relu").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod, optimize_numerics=False)
+        torch._C._jit_pass_remove_mutation(frozen_mod.graph)
+        print(frozen_mod.graph)
+        torch._C._jit_pass_fuse_frozen_conv_relu(frozen_mod.graph)
+        print(frozen_mod.graph)
+        #FileCheck().check_not("aten::relu").run(frozen_mod.graph)
 
         input = torch.randn(10, 1, 8, 8)
-        output_s = script_mod.forward(input)
+        output_s = mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
