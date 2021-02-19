@@ -415,7 +415,7 @@ def prepare_qat_fx(
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
 def _convert_fx(
-        graph_module: GraphModule, output_a_reference_model: bool,
+        graph_module: GraphModule, is_reference: bool,
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False) -> GraphModule:
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
@@ -426,7 +426,7 @@ def _convert_fx(
     _check_is_graph_module(graph_module)
 
     quantizer = Quantizer()
-    quantized = quantizer.convert(graph_module, output_a_reference_model, convert_custom_config_dict, is_standalone_module)
+    quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict, is_standalone_module)
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
     for attr_name in preserved_attributes:
@@ -434,12 +434,12 @@ def _convert_fx(
     return quantized
 
 def convert_fx(
-        graph_module: GraphModule, output_a_reference_model: bool = False,
+        graph_module: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
     r""" Convert a calibrated or trained model to a quantized model
     Args:
         `graph_module`: A prepared and calibrated/trained model (GraphModule)
-        `output_a_reference_model`: flag for whether to produce a reference quantized model,
+        `is_reference`: flag for whether to produce a reference quantized model,
         which will be a common interface between pytorch quantization with
         other backends like accelerators
         `convert_custom_config_dict`: dictionary for custom configurations for convert function:
@@ -490,10 +490,10 @@ def convert_fx(
     ```
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_fx")
-    return _convert_fx(graph_module, output_a_reference_model, convert_custom_config_dict)
+    return _convert_fx(graph_module, is_reference, convert_custom_config_dict)
 
 def _convert_standalone_module_fx(
-        graph_module: GraphModule, output_a_reference_model: bool = False,
+        graph_module: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
     r""" [Internal use only] Convert a model produced by :func:`~torch.quantization.prepare_standalone_module_fx`
     and convert it to a quantized model
@@ -503,4 +503,4 @@ def _convert_standalone_module_fx(
     input_quantized_idxs, output_quantized_idxs, please
     see docs for prepare_fx for details
     """
-    return _convert_fx(graph_module, output_a_reference_model, convert_custom_config_dict, is_standalone_module=True)
+    return _convert_fx(graph_module, is_reference, convert_custom_config_dict, is_standalone_module=True)

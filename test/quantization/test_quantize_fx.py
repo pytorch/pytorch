@@ -309,7 +309,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 inputs, quant_type,
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
-                output_a_reference_model=False)
+                is_reference=False)
 
     @skipIfNoFBGEMM
     def test_functional_reference(self):
@@ -327,7 +327,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
                 expected_node_occurrence=node_occurrence,
-                output_a_reference_model=True)
+                is_reference=True)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
@@ -346,7 +346,7 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'': qconfig}
         prepared = prepare_fx(m, qconfig_dict)
-        quantized = convert_fx(prepared, output_a_reference_model=True)
+        quantized = convert_fx(prepared, is_reference=True)
         qparams = (quantized._input_scale_0, quantized._input_zero_point_0)
         weight_obs = qconfig.weight()
         weight_obs(quantized.weight)
@@ -465,14 +465,14 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         for (ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
-            for output_a_reference_model in [True, False]:
+            for is_reference in [True, False]:
                 node_occurrence = dict()
                 if weight_prepack_node:
                     node_occurrence[weight_prepack_node] = 0
                 m = ModuleClass(*module_constructor_inputs).eval()
                 qconfig_dict = {"": float16_dynamic_qconfig}
                 m = prepare_fx(m, qconfig_dict)
-                m = convert_fx(m, output_a_reference_model=output_a_reference_model)
+                m = convert_fx(m, is_reference=is_reference)
                 self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 
@@ -1896,18 +1896,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.op(y, x)
                 return x
 
-        # TODO: decide whether we want to quantize or not
-        # in this case
-        # class NonQuantizedOp(torch.nn.Module):
-        #     def __init__(self, is_inplace, is_scalar):
-        #         super(NonQuantizedOp, self).__init__()
-        #         self.is_scalar = is_scalar
-        #         self.op = ibinary_op if is_inplace else binary_op
+        # This tests the binary op should be quantized even when it is not feed with a
+        # quantized input
+        class NonQuantizedInput(torch.nn.Module):
+            def __init__(self, is_inplace, is_scalar):
+                super(NonQuantizedInput, self).__init__()
+                self.is_scalar = is_scalar
+                self.op = ibinary_op if is_inplace else binary_op
 
-        #     def forward(self, x, y):
-        #         y = 3 if self.is_scalar else y
-        #         x = self.op(x, y)
-        #         return x
+            def forward(self, x, y):
+                y = 3 if self.is_scalar else y
+                x = self.op(x, y)
+                return x
 
         data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
                 torch.randn(1, 1, 1, 1, dtype=torch.float))
@@ -1917,6 +1917,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for is_inplace, is_scalar in options:
             self.checkGraphModeFxOp(
                 Op(is_inplace, is_scalar), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(
+                NonQuantizedInput(is_inplace, is_scalar), data, quant_type, quantized_node, print_debug_info=True)
 
     def _test_quantized_binary_op_relu_impl(self, binary_op, ibinary_op, quantized_op):
         class OpRelu(torch.nn.Module):

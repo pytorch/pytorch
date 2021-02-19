@@ -25,8 +25,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     override_qengines,
 )
-from torch.testing._internal.jit_utils import clear_class_registry
-from hypothesis import assume, given, seed
+from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -357,7 +356,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 self.assertEqual(conv_module.bias,
                                  converted_qconv_module[0].bias())
         # Smoke test extra_repr
-        self.assertTrue(module_name in str(converted_qconv_module))
+        self.assertTrue(module_name == converted_qconv_module._get_name())
 
     @override_qengines
     def test_conv1d_api(self):
@@ -381,7 +380,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             groups, kernel, stride, pad_mode, pad, dilation, \
             use_bias, use_fused, use_channelwise, reference in options:
             # Tests the correctness of the conv2d module.
-            clear_class_registry()
             in_channels = in_channels_per_group * groups
             out_channels = out_channels_per_group * groups
             input_feature_map_size = (length,)

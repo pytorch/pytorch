@@ -71,6 +71,26 @@ class Conv1d(_ConvNd, nnq.Conv1d):
     def _get_name(self):
         return 'QuantizedConv1d(Reference)'
 
+    @torch.jit.export
+    def __setstate__(self, state):
+        self.in_channels = state[0]
+        self.out_channels = state[1]
+        self.kernel_size = state[2]
+        self.stride = state[3]
+        self.padding = state[4]
+        self.dilation = state[5]
+        self.transposed = state[6]
+        self.output_padding = state[7]
+        self.groups = state[8]
+        self.padding_mode = state[9]
+        self.set_weight_bias(state[10], state[11])
+        self.scale = state[12]
+        self.zero_point = state[13]
+        self.training = state[14]
+        self._conv1d_stride = (self.stride[0],)
+        self._conv1d_padding = (self.padding[0],)
+        self._conv1d_dilation = (self.dilation[0],)
+
 class Conv2d(_ConvNd, nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
