@@ -1871,41 +1871,36 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
 =======
 def sample_inputs_unfold(op_info, device, dtype, requires_grad):
     test_cases = (
-        ((), (0, 1, 1), 'scalar'),
-        ((S, S, S, S), (0, 3, 1), '4d_dim0_step1'),
-        ((S, S, S, S), (1, 3, 1), '4d_dim1_step1'),
-        ((S, S, S, S), (2, 3, 1), '4d_dim2_step1'),
-        ((S, S, S, S), (3, 3, 1), '4d_dim3_step1'),
-        ((S, S, S, S), (0, 3, 2), '4d_dim0_step2'),
-        ((S, S, S, S), (1, 3, 2), '4d_dim1_step2'),
-        ((S, S, S, S), (2, 3, 2), '4d_dim2_step2'),
-        ((S, S, S, S), (3, 3, 2), '4d_dim3_step2'),
-        ((S, S, S, S), (0, 4, 1), '4d_dim0_size4'),
-        ((S, S, S, S), (1, 4, 1), '4d_dim1_size4'),
-        ((S, S, S, S), (2, 4, 1), '4d_dim2_size4'),
-        ((S, S, S, S), (3, 4, 1), '4d_dim3_size4'),
-        ((M,), (0, 3, 1), '1d_step1'),
-        ((M,), (0, 3, 2), '1d_step2'),
-        ((M,), (0, 3, 3), '1d_step3'),
-        ((1000,), (0, 3, 11), '1d_step_gt_size'),
-        ((1000,), (0, 2, 27), '1d_step_gt_size2'),
-        ((10, 10), (0, 1, 2), '2d_step_gt_size'),
-        ((10, 10), (1, 2, 3), '2d_step_gt_size2'),
-        ((10, 10), (1, 2, 2), '2d_step_ge_size2'),
-        ((S, S, S), (2, 3, 2), 'lastdim'),
+        ((), (0, 1, 1)),
+        ((S, S, S, S), (0, 3, 1)),
+        ((S, S, S, S), (1, 3, 1)),
+        ((S, S, S, S), (2, 3, 1)),
+        ((S, S, S, S), (3, 3, 1)),
+        ((S, S, S, S), (0, 3, 2)),
+        ((S, S, S, S), (1, 3, 2)),
+        ((S, S, S, S), (2, 3, 2)),
+        ((S, S, S, S), (3, 3, 2)),
+        ((S, S, S, S), (0, 4, 1)),
+        ((S, S, S, S), (1, 4, 1)),
+        ((S, S, S, S), (2, 4, 1)),
+        ((S, S, S, S), (3, 4, 1)),
+        ((M,), (0, 3, 1)),
+        ((M,), (0, 3, 2)),
+        ((M,), (0, 3, 3)),
+        ((1000,), (0, 3, 11)),
+        ((1000,), (0, 2, 27)),
+        ((10, 10), (0, 1, 2)),
+        ((10, 10), (1, 2, 3)),
+        ((10, 10), (1, 2, 2)),
+        ((S, S, S), (2, 3, 2)),
     )
 
     sample_inputs = []
-    for dim, size, step in test_cases:
-        args = (make_tensor(dim, device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(size, device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                step)
-        sample_inputs += [SampleInput(args)]
-
+    for shape, arguments in test_cases:
+        sample_inputs += [SampleInput(make_tensor(dim, device, dtype,
+                                      low=None, high=None,
+                                      requires_grad=requires_grad),
+                                      args=arguments)]
     return sample_inputs
 >>>>>>> c31542f078 (add test cases for complex supporting unfold)
 
@@ -3532,16 +3527,9 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out')),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('unfold',
-           # gradcheck expects the input arguments as a flat list
-           op=lambda *args: torch.unfold([*args]),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           test_complex_grad=True,
-           test_inplace_grad=False,
-           supports_tensor_out=False,
-           skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
-           ),
+#           test_inplace_grad=False,
+#           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('vstack',
            # gradcheck expects the input arguments as a flat list
@@ -3549,9 +3537,13 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
+<<<<<<< HEAD
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
                # vstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
+=======
+                        dtypes=all_types_and_complex_and(torch.bool, torch.fl16, torch.bfloat16)),
+>>>>>>> updates to the opinfo unfold test
            ),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('dstack',
