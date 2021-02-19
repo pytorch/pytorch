@@ -483,9 +483,9 @@ Tensor linspace(
     c10::optional<int64_t> steps,
     const TensorOptions& options) {
   const auto steps_ = steps.value_or(100);
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
   auto result_options = linspace_logspace_infer_options(start, end, options);
-  Tensor result = at::empty({steps}, result_options);
+  Tensor result = at::empty({steps_}, result_options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -498,9 +498,10 @@ Tensor logspace(
     double base,
     const TensorOptions& options) {
   const auto steps_ = steps.value_or(100);
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
   auto result_options = linspace_logspace_infer_options(start, end, options);
-  Tensor result = at::empty({steps}, result_options);
+  Tensor result = at::empty({steps_}, result_options);
+  return at::logspace_out(result, start, end, steps, base);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
