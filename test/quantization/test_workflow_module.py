@@ -890,29 +890,30 @@ class TestFakeQuantize(TestCase):
         self._test_forward_per_tensor_cachemask_impl(device)
 
     def _test_backward_per_tensor_cachemask_impl(self, device):
-        for torch_type in (torch.qint8, torch.quint8):
-            X = torch.randn(4, 8).to(device)
-            X.requires_grad_()
-            # pick the scale + zp so that some values get clipped
-            obs = torch.quantization.MinMaxObserver(torch_type)
-            obs(X * 0.75)
-            scale, zero_point = obs.calculate_qparams()
-            scale, zero_point = float(scale), int(zero_point)
-            quant_min, quant_max = obs._calculate_qmin_qmax()
+        for float_type in (torch.float32, torch.float16, torch.float64):
+            for torch_type in (torch.qint8, torch.quint8):
+                X = torch.randn(4, 8).to(device).to(float_type)
+                X.requires_grad_()
+                # pick the scale + zp so that some values get clipped
+                obs = torch.quantization.MinMaxObserver(torch_type)
+                obs(X * 0.75)
+                scale, zero_point = obs.calculate_qparams()
+                scale, zero_point = float(scale), int(zero_point)
+                quant_min, quant_max = obs._calculate_qmin_qmax()
 
-            # forward pass
-            Y_test = torch.fake_quantize_per_tensor_affine(
-                X, scale, zero_point, quant_min, quant_max)
-            Y_ref = _fake_quantize_per_tensor_affine_reference(
-                X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
-            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+                # forward pass
+                Y_test = torch.fake_quantize_per_tensor_affine(
+                    X, scale, zero_point, quant_min, quant_max)
+                Y_ref = _fake_quantize_per_tensor_affine_reference(
+                    X.cpu().to(torch.float32), scale, zero_point, quant_min, quant_max).to(device).to(float_type)
+                self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
 
-            # backward pass
-            dout = torch.rand(X.shape, dtype=torch.float).to(device)
-            dX = _fake_quantize_per_tensor_affine_grad_reference(
-                dout, X, scale, zero_point, quant_min, quant_max)
-            Y_test.backward(dout)
-            self.assertTrue(torch.allclose(dX, X.grad))
+                # backward pass
+                dout = torch.rand(X.shape, dtype=torch.float).to(device)
+                dX = _fake_quantize_per_tensor_affine_grad_reference(
+                    dout, X.to(torch.float32), scale, zero_point, quant_min, quant_max).to(float_type)
+                Y_test.backward(dout)
+                self.assertTrue(torch.allclose(dX, X.grad))
 
     def test_backward_per_tensor_cachemask_cpu(self):
         device = torch.device('cpu')
