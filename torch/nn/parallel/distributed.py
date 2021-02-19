@@ -677,6 +677,9 @@ class DistributedDataParallel(Module):
 
     def forward(self, *inputs, **kwargs):
         self.reducer.save_thread_local_state()
+        if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            self.logger.set_runtime_stats()
+            self.reducer.prepare_for_forward()
         if self.ddp_uneven_inputs_config.ddp_join_enabled:
             ones = torch.ones(
                 1, device=self.device

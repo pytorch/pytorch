@@ -251,6 +251,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
           py::call_guard<py::gil_scoped_release>())
+      .def("prepare_for_forward",
+          &::c10d::Reducer::prepare_for_forward,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
           &::c10d::Reducer::prepare_for_backward,
@@ -297,6 +300,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("device_ids"),
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
+          py::call_guard<py::gil_scoped_release>())
+        .def(
+          "set_runtime_stats",
+          &::c10d::Logger::set_runtime_stats,
           py::call_guard<py::gil_scoped_release>())
         .def(
           "get_ddp_logging_data",
@@ -1246,7 +1253,14 @@ Arguments:
       .def_readwrite("nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
       .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
       .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
-      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout);
+      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
+      .def_readwrite("unused_parameter_size", &c10::DDPLoggingData::unused_parameter_size)
+      .def_readwrite("has_rebuilt_buckets", &c10::DDPLoggingData::has_rebuilt_buckets)
+      .def_readwrite("rebuilt_bucket_sizes", &c10::DDPLoggingData::rebuilt_bucket_sizes)
+      .def_readwrite("avg_forward_compute_time", &c10::DDPLoggingData::avg_forward_compute_time)
+      .def_readwrite("avg_backward_compute_time", &c10::DDPLoggingData::avg_backward_compute_time)
+      .def_readwrite("avg_backward_comm_time", &c10::DDPLoggingData::avg_backward_comm_time)
+      .def_readwrite("avg_backward_compute_comm_overlap_time", &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time);
 
   module.def(
       "_compute_bucket_assignment_by_size",
