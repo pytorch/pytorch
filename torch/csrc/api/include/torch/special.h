@@ -5,7 +5,7 @@
 namespace torch {
 namespace special {
 
-/// Computes the logarithm of the gamma function on :attr:`input`.
+/// Computes the natural logarithm of the absolute value of the gamma function
 /// See https://pytorch.org/docs/master/special.html#torch.special.gammaln.
 ///
 /// Example:
