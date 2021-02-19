@@ -86,7 +86,7 @@ the_math = math
         filename = self.temp()
         filename_split = filename if IS_WINDOWS else filename.split('/')[-1]
 
-        export_plain = "─── " + filename_split + """\n\
+        export_plain = """\
     ├── main
     │   └── main
     ├── obj
@@ -96,13 +96,13 @@ the_math = math
     │   └── subpackage.py
     └── module_a.py
 """
-        export_include = "─── " + filename_split + """\n\
+        export_include = """\
     ├── obj
     │   └── obj.pkl
     └── package_a
         └── subpackage.py
 """
-        import_exclude = "─── " + filename + """\n\
+        import_exclude = """\
     ├── .data
     │   ├── extern_modules
     │   └── version
@@ -127,13 +127,14 @@ the_math = math
             he.save_text('main', 'main', "my string")
 
             export_file_structure = he.file_structure()
-            self.assertEqual(str(export_file_structure), export_plain)
+            # remove first line because WINDOWS has different filename from unix version 
+            self.assertEqual('\n'.join(str(export_file_structure).split('\n')[1:]), export_plain)
             export_file_structure = he.file_structure(include=["**/subpackage.py", "**/*.pkl"])
-            self.assertEqual(str(export_file_structure), export_include)
+            self.assertEqual('\n'.join(str(export_file_structure).split('\n')[1:]), export_include)
 
         hi = PackageImporter(filename)
         import_file_structure = hi.file_structure(exclude="**/*.storage")
-        self.assertEqual(str(import_file_structure), import_exclude)
+        self.assertEqual('\n'.join(str(import_file_structure).split('\n')[1:]), import_exclude)
 
     def test_save_module_binary(self):
         f = BytesIO()

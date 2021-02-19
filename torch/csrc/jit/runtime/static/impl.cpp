@@ -198,143 +198,12 @@ std::unordered_set<Value*> GetOptimizableValues(
   }
   return can_reuse;
 }
-
-size_t AssignRegisters(
-    const std::shared_ptr<torch::jit::Graph>& graph,
-    std::unordered_map<Value*, size_t>& value_to_reg,
-    std::vector<Value*>& values,
-    std::vector<size_t>& input_regs,
-    std::vector<size_t>& output_regs,
-    bool optimize_memory) {
-  auto lm = LivenessMap(graph);
-  auto optimizable_values = GetOptimizableValues(graph);
-
-  size_t num_regs = 0;
-  size_t reused_regs = 0;
-  std::unordered_map<size_t, std::set<Value*>> reg_to_val;
-  auto getReg = [&](Value* v) -> size_t {
-    if (!optimize_memory) {
-      return num_regs++;
-    }
-    TORCH_CHECK(!value_to_reg.count(v));
-    auto iter = lm.first.find(v);
-    if (iter == lm.first.end()) {
-      return num_regs++;
-    }
-    if (!optimizable_values.count(v)) {
-      return num_regs++;
-    }
-    if (lm.second.count(v)) {
-      return num_regs++;
-    }
-    const auto& live_values = iter->second;
-    // iterate through all the allocated registers
-    // and check for potential re-use, greedily
-    for (const auto& v2r : value_to_reg) {
-      auto candidate_v = v2r.first;
-
-      if (!optimizable_values.count(candidate_v)) {
-        continue;
-      }
-      if (lm.second.count(candidate_v)) {
-        continue;
-      }
-
-      // Only re-use float* tensors
-      auto t = candidate_v->type()->cast<TensorType>();
-      if (!t) {
-        continue;
-      }
-      // TODO audit this assumption (passes tests, but is scary)
-      if (t->scalarType() && *(t->scalarType()) != at::kFloat) {
-        continue;
-      }
-      // TODO
-      // if (*(t->scalarType()) != at::kFloat) {
-      //  continue;
-      //}
-      if (!live_values.count(candidate_v)) {
-        bool already_used = false;
-        for (auto use : reg_to_val.at(v2r.second)) {
-          if (live_values.count(use)) {
-            already_used = true;
-          }
-        }
-        if (already_used) {
-          continue;
-        }
-        reused_regs++;
-        return v2r.second;
-      }
-    }
-    return num_regs++;
-  };
-
-  // assign register to Value*
-  for (Value* input : graph->inputs()) {
-    TORCH_CHECK(value_to_reg.count(input) == 0);
-    auto reg = getReg(input);
-    value_to_reg[input] = reg;
-    reg_to_val[reg].insert(input);
-    input_regs.push_back(reg);
-  }
-  for (Node* node : graph->nodes()) {
-    for (Value* input : node->inputs()) {
-      TORCH_CHECK(value_to_reg.count(input) > 0);
-    }
-    for (Value* output : node->outputs()) {
-      TORCH_CHECK(
-          value_to_reg.count(output) == 0, "the graph needs to be in SSA form");
-      auto reg = getReg(output);
-      value_to_reg[output] = reg;
-      reg_to_val[reg].insert(output);
-    }
-  }
-  TORCH_CHECK(graph->outputs().size() > 0);
-  for (Value* output : graph->outputs()) {
-    TORCH_CHECK(value_to_reg.count(output) > 0);
-    output_regs.push_back(value_to_reg[output]);
-  }
-
-  values.resize(value_to_reg.size());
-  for (const auto& p : value_to_reg) {
-    values[p.second] = p.first;
-  }
-  return reused_regs;
-}
-
-// Internal values are discarded after run if
-// opts_.cleanup_activations is true.
-void DeduceInternalValues(
-    const std::shared_ptr<torch::jit::Graph>& graph,
-    const std::unordered_map<Value*, size_t>& value_to_reg,
-    std::vector<size_t>& internals) {
-  std::unordered_set<Value*> outputs{
-      graph->outputs().begin(), graph->outputs().end()};
-  for (Node* node : graph->nodes()) {
-    if (node->kind() != prim::Constant) {
-      for (Value* output : node->outputs()) {
-        if (outputs.count(output) == 0) {
-          internals.push_back(value_to_reg.at(output));
-        }
-      }
-    }
-  }
-}
 } // namespace
 
 void InferenceModule::init() {
   OptimizeGraph(graph);
   CheckGraphEligibility(graph);
   RemoveSelfFromGraphInput(graph);
-  reused_regs = AssignRegisters(
-      graph,
-      value_to_reg,
-      values,
-      input_regs,
-      output_regs,
-      opts.optimize_memory);
-  DeduceInternalValues(graph, value_to_reg, internals);
 }
 
 InferenceModule::InferenceModule(
@@ -429,10 +298,6 @@ StaticRuntime::StaticRuntime(
   }
 }
 
-size_t StaticRuntime::num_outputs() const {
-  return module_->output_regs.size();
-}
-
 std::vector<at::Tensor> StaticRuntime::run(
     const std::vector<at::Tensor>& inps) {
   std::vector<c10::IValue> stack;
@@ -478,7 +343,7 @@ c10::IValue StaticRuntime::run(
     std::vector<c10::IValue> s = args;
     module_->schema->checkAndNormalizeInputs(s, kwargs);
     for (size_t i = 0; i < s.size(); i++) {
-      Input(i) = s[i];
+      Input(i) = std::move(s[i]);
     }
   } else {
     for (size_t i = 0; i < args.size(); i++) {
@@ -499,6 +364,10 @@ c10::IValue StaticRuntime::run(
       planner_ = std::make_unique<MemoryPlanner>(this, shared);
     }
     planner_->deallocate();
+    // clean up owning refs of input tensors
+    for (IValue& ival : inputs_) {
+      ival = IValue();
+    }
   }
 
   // no need to keep references of outputs in static runtime anymore
@@ -506,11 +375,13 @@ c10::IValue StaticRuntime::run(
     std::vector<c10::IValue> outputs;
     outputs.reserve(num_outputs());
     for (auto i = 0; i < num_outputs(); ++i) {
-      outputs.emplace_back(Output(i));
+      // use move here. Otherwise, clean up outputs_[i] explicitly
+      outputs.emplace_back(std::move(*outputs_[i]));
     }
-    return c10::ivalue::Tuple::create(outputs);
+    return c10::ivalue::Tuple::create(std::move(outputs));
   }
-  return Output(0);
+  // use move here. Otherwise, clean up outputs_[0] explicitly
+  return std::move(*outputs_[0]);
 }
 
 void StaticRuntime::benchmark(
@@ -557,8 +428,8 @@ void StaticRuntime::benchmark(
               << " bytes" << std::endl;
   }
   if (module_->opts.optimize_memory) {
-    std::cout << "Total number of reused registers: " << module_->reused_regs
-              << std::endl;
+    // std::cout << "Total number of reused registers: " << module_->reused_regs
+    //           << std::endl;
   }
 }
 
@@ -617,6 +488,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // main runs
+  for (size_t i = 0; i < stack.size(); i++) {
+    Input(i) = stack[i];
+  }
   for (int i = 0; i < main_runs; i++) {
     if (planner_) {
       planner_->allocate();
@@ -663,6 +537,7 @@ MemoryPlanner::MemoryPlanner(
   // collect register indices of outputs of ops with out variant
   std::unordered_set<Value*> managed_values;
   std::unordered_set<IValue*> unmanaged_value_set;
+  std::unordered_map<Value*, IValue*> values_map;
   for (ProcessedNode& pnode : runtime->get_nodes()) {
     bool should_manage = pnode.has_out_variant();
     if (should_manage && isViewOp(pnode.get_node())) {
@@ -678,30 +553,22 @@ MemoryPlanner::MemoryPlanner(
     }
     if (should_manage) {
       // Types are stored in the underlying TorchScript IR
-      for (Value* out : pnode.get_node()->outputs()) {
+      for (size_t i = 0; i < pnode.outputs().size(); i++) {
+        Value* out = pnode.get_node()->output(i);
         if (out->type()->cast<TensorType>()) {
           managed_values.insert(out);
+          values_map[out] = &pnode.Output(i);
         }
       }
     } else {
       for (auto i = 0; i < pnode.outputs().size(); ++i) {
         unmanaged_value_set.insert(&pnode.Output(i));
+        values_map[pnode.get_node()->output(i)] = &pnode.Output(i);
       }
     }
   }
 
   const InferenceModule* module = runtime->get_inference_module();
-
-  // remove model outputs from managed_values
-  for (Value* output : module->graph->outputs()) {
-    managed_values.erase(output);
-  }
-  for (IValue* output : runtime->outputs()) {
-    unmanaged_value_set.erase(output);
-  }
-  for (IValue* out : unmanaged_value_set) {
-    unmanaged_values_.emplace_back(out);
-  }
 
   // remove tensors in output List/Tuple from managed_values
   for (Value* output : module->graph->outputs()) {
@@ -710,8 +577,26 @@ MemoryPlanner::MemoryPlanner(
         output_node->kind() == prim::ListConstruct) {
       for (Value* input : output_node->inputs()) {
         managed_values.erase(input);
+        // Elements in Tuples and Lists are refcounted. MemoryPlanner should not
+        // hold refs of elements in output Tuples/Lists
+        if (graph_input_values.count(input) == 0) {
+          unmanaged_value_set.insert(values_map[input]);
+        }
       }
     }
+  }
+
+  // remove model outputs from managed_values and unmanaged_value_set
+  for (Value* output : module->graph->outputs()) {
+    managed_values.erase(output);
+  }
+  for (IValue* output : runtime->outputs()) {
+    unmanaged_value_set.erase(output);
+  }
+
+  // unmanaged_value_set => unmanaged_values_
+  for (IValue* out : unmanaged_value_set) {
+    unmanaged_values_.emplace_back(out);
   }
 
   // some Values should share storage, this map will
