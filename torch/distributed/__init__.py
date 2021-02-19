@@ -1,6 +1,17 @@
 
 import torch
 import sys
+import os
+from enum import Enum
+
+class DistributedDebugMode(Enum):
+    """
+    An enum whose values correspond to different debug settings of the
+    torch.distributed package.
+    """
+    OFF = "OFF"
+    INFO = "INFO"
+    DETAIL = "DETAIL"
 
 
 def is_available():
@@ -17,6 +28,22 @@ def is_available():
 
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
+
+def get_debug_mode():
+    """
+    Reads the environment variable ``TORCH_DISTRIBUTED_DEBUG`` and returns a
+    ``DistributedDebugMode`` corresponding to the appropriate debug level. The
+    env var ``TORCH_DISTRIBUTED_DEBUG`` must be set to one of "OFF", "INFO", or
+    "DETAIL". Default setting is INFO.
+    """
+    debug_mode_str = os.environ.get("TORCH_DISTRIBUTED_DEBUG", None)
+    if debug_mode_str == DistributedDebugMode.OFF.value:
+        return DistributedDebugMode.OFF
+    elif debug_mode_str == DistributedDebugMode.DETAIL.value:
+        return DistributedDebugMode.DETAIL
+    else:
+        # None, unknown or INFO, which is the default
+        return DistributedDebugMode.INFO
 
 
 if is_available():
