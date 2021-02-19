@@ -37,7 +37,7 @@ CUDAGraph::CUDAGraph()
 #endif
 }
 
-void CUDAGraph::capture_begin(CUDACaptureid_t pool/*=0*/) {
+void CUDAGraph::capture_begin(CaptureId_t pool/*=0*/) {
 #if CUDA_VERSION >= 11000
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -203,7 +203,7 @@ void CUDAGraph::reset() {
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
 // For simplicity, we just use the id_ as given by
-CUDACaptureid_t CUDAGraph::pool() {
+CaptureId_t CUDAGraph::pool() {
 #if CUDA_VERSION >= 11000
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
