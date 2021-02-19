@@ -339,6 +339,10 @@ else()
   set(TORCH_VERSION_DEBUG 0)
 endif()
 
+if(EXISTS "${TORCH_SRC_DIR}/version.py")
+  file(REMOVE "${TORCH_SRC_DIR}/version.py")
+endif()
+
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
   COMMAND
