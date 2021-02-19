@@ -852,8 +852,6 @@ void initJitScriptBindings(PyObject* module) {
                   return method.name();
                 });
               })
-          .def(
-              "_properties", [](Object& self) { return self.get_properties(); })
           .def("__copy__", &Object::copy)
           .def(
               "__hash__",

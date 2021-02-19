@@ -269,156 +269,6 @@ class ConstMap:
 
 
 if _enabled:
-
-    class ScriptObjectWrapper(object):
-        """
-        An analogue of RecursiveScriptModule for regular objects that are not modules.
-        This class is a wrapper around a torch._C.ScriptObject that represents an instance
-        of a TorchScript class and allows it to be used in Python.
-        Attributes:
-            _c [torch._C.ScriptObject]: The C++ object to which attribute lookups and method
-                calls are forwarded.
-            _props [Dict[str, property]]: A dictionary of properties fetched from self._c and
-                exposed on this wrppaer.
-        """
-        def __init__(self, cpp_class):
-            super(ScriptObjectWrapper, self).__init__()
-            self.__dict__["_initializing"] = True
-            self._c = cpp_class
-            # Add wrapped object's properties to this class instance.
-            self._props = {prop[0]: property(prop[1], prop[2]) for prop in self._c._properties()}
-            self.__dict__["_initializing"] = False
-
-        def __getattr__(self, attr):
-            if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
-                return super(ScriptObjectWrapper, self).__getattr__(attr)  # type: ignore
-            if attr in self._props:
-                return self._props[attr].fget()
-            return getattr(self._c, attr)
-
-        def __setattr__(self, attr, value):
-            if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
-                return super(ScriptObjectWrapper, self).__setattr__(attr, value)
-            if attr in self._props:
-                if self._props[attr].fset is None:
-                    raise RuntimeError("Can't set a value when there is no setter given for attribute {}.".format(attr))
-                self._props[attr].fset(value)
-                return
-            setattr(self._c, attr, value)
-
-        # Delegate calls to magic methods like __len__ to the C++ module backing the
-        # ScriptObjectWrapper.
-        def forward_magic_method(self, method_name, *args, **kwargs):
-            if not self._c._has_method(method_name):
-                raise TypeError()
-
-            self_method = self.__getattr__(method_name)
-            return self_method(*args, **kwargs)
-
-        def __getstate__(self):
-            return self.forward_magic_method("__getstate__")
-
-        def __setstate__(self, val):
-            self.forward_magic_method("__setstate__", val)
-
-        def __iter__(self):
-            return self.forward_magic_method("__iter__")
-
-        def __len__(self):
-            return self.forward_magic_method("__len__")
-
-        def __neg__(self):
-            return self.forward_magic_method("__neg__")
-
-        def __mul__(self, other):
-            return self.forward_magic_method("__mul__", other)
-
-        def __contains__(self, key):
-            return self.forward_magic_method("__contains__", key)
-
-        def __add__(self, other):
-            return self.forward_magic_method("__add__", other)
-
-        def __iadd__(self, other):
-            if self._c._has_method("__iadd__"):
-                return self.forward_magic_method("__iadd__", other)
-            else:
-                return self.forward_magic_method("__add__", other)
-
-        def __sub__(self, other):
-            return self.forward_magic_method("__sub__", other)
-
-        def __pow__(self, other):
-            return self.forward_magic_method("__pow__", other)
-
-        def __truediv__(self, other):
-            return self.forward_magic_method("__truediv__", other)
-
-        def __mod__(self, other):
-            return self.forward_magic_method("__mod__", other)
-
-        def __ne__(self, other):  # noqa T484
-            return self.forward_magic_method("__ne__", other)
-
-        def __eq__(self, other):  # noqa T484
-            return self.forward_magic_method("__eq__", other)
-
-        def __lt__(self, other):
-            return self.forward_magic_method("__lt__", other)
-
-        def __gt__(self, other):
-            return self.forward_magic_method("__gt__", other)
-
-        def __le__(self, other):
-            return self.forward_magic_method("__le__", other)
-
-        def __ge__(self, other):
-            return self.forward_magic_method("__ge__", other)
-
-        def __and__(self, other):
-            return self.forward_magic_method("__and__", other)
-
-        def __or__(self, other):
-            return self.forward_magic_method("__or__", other)
-
-        def __xor__(self, other):
-            return self.forward_magic_method("__xor__", other)
-
-        def __getitem__(self, other):
-            return self.forward_magic_method("__getitem__", other)
-
-        def __setitem__(self, idx, val):
-            return self.forward_magic_method("__setitem__", idx, val)
-
-        def __call__(self, val):
-            return self.forward_magic_method("__call__", val)
-
-        def __int__(self):
-            return self.forward_magic_method("__int__")
-
-        def __float__(self):
-            return self.forward_magic_method("__float__")
-
-        def __bool__(self):
-            return self.forward_magic_method("__bool__")
-
-        def __str__(self):
-            return self.forward_magic_method("__str__")
-
-        def __enter__(self):
-            return self.forward_magic_method("__enter__")
-
-        def __exit__(self, type, tb, traceback):
-            return self.forward_magic_method("__exit__", type, tb, traceback)
-
-        # TODO: this is a hack to manually call __init__ inside __setstate__ method. Since unpickling
-        # in python3 doesn't call the costructor deliberately, there is no way we can forward the
-        # __setstate__ method to its' cpp class. Therefore, this reduce method manually calls init inside
-        # __setstate__ so that we can avoid infinite recursion. The solution was suggested here:
-        # https://stackoverflow.com/questions/50308214/python-3-alternatives-for-getinitargs
-        def __reduce__(self):
-            return (ScriptObjectWrapper, (self._c,))
-
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
     # it in the objects dict. Due to the standard rules for attribute lookup
@@ -890,10 +740,6 @@ if _enabled:
 
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
-    class ScriptObjectWrapper(object):  # type: ignore
-        def __init__(self):
-            super().__init__()
-
     class ScriptModule(torch.nn.Module):  # type: ignore
         def __init__(self, arg=None):
             super().__init__()
@@ -1088,8 +934,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
-    if isinstance(obj, ScriptObjectWrapper):
-        return obj
     # No-op for modules and functions that are already scripted
     if isinstance(obj, ScriptModule):
         return obj

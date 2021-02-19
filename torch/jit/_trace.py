@@ -19,7 +19,7 @@ import re
 from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
-from torch.jit._script import ScriptModule, _CachedForward, script, ScriptObjectWrapper
+from torch.jit._script import ScriptModule, _CachedForward, script
 from torch._jit_internal import _qualified_name, get_callable_argument_names
 from torch.autograd import function
 from torch.nn import Module
