@@ -204,6 +204,7 @@ message AOTConfig {
   required bool in_batch_broadcast = 3;
   optional string onnxifi_blacklist_ops = 4;
   optional int32 onnxifi_min_ops = 5;
+  optional bool pair_ln_with_sls = 6;
 }
 
 // A named argument containing either singular float, integer and string
