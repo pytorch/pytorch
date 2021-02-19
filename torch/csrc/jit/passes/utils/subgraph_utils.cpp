@@ -96,28 +96,29 @@ Node* executeSubgraphMergeAndUpdateAliasing(
 // Combine the nodes in two subgraph together. The nodes will end up in
 // `mergeTo`, and `mergeFrom` is destroyed.
 void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
+  bool merge_from_is_after = mergeFrom->isAfter(mergeTo);
   Node* nodeBeforeMergeFrom = mergeFrom->prev();
   Node* nodeAfterMergeFrom = mergeFrom->next();
 
   unmergeSubgraph(mergeFrom);
 
-  std::vector<Node*> nodes;
-  const auto end_it = nodeBeforeMergeFrom->reverseIterator();
-  auto it = nodeAfterMergeFrom->reverseIterator();
+  graph_node_list_iterator end_it;
+  graph_node_list_iterator it;
+
+  if (merge_from_is_after) {
+    it = nodeBeforeMergeFrom->iterator();
+    end_it = nodeAfterMergeFrom->iterator();
+  } else {
+    end_it = nodeBeforeMergeFrom->reverseIterator();
+    it = nodeAfterMergeFrom->reverseIterator();
+  }
   ++it;
 
-  // defer destroying nodes until after all nodes have been merged,
-  // to make iterators easier to reason about
   std::vector<Node*> merged_nodes;
   while (it != end_it) {
     Node* node = *it;
     ++it;
-    merged_nodes.push_back(node);
-    mergeNodeIntoSubgraph(node, mergeTo, /*destroyNode*/ false);
-  }
-
-  for (Node* n : merged_nodes) {
-    n->destroy();
+    mergeNodeIntoSubgraph(node, mergeTo);
   }
 }
 
@@ -143,27 +144,28 @@ void unmergeSubgraph(Node* subgraphNode) {
 void collectNestedUses(
     std::unordered_set<Value*>& closed_over_values,
     std::unordered_set<Value*>& new_values,
-    std::unordered_map<Value*, Value*>& inputsMap,
+    std::unordered_map<Value*, Value*>& externalValuesMap,
     Node* input_node) {
   for (auto input : input_node->inputs()) {
-    if (inputsMap.count(input) == 0 && new_values.count(input) == 0) {
+    if (externalValuesMap.count(input) == 0 && new_values.count(input) == 0) {
       closed_over_values.insert(input);
     }
   }
   if (input_node->kind() == prim::If) {
     for (Block* block : input_node->blocks()) {
       for (Node* node : block->nodes()) {
-        collectNestedUses(closed_over_values, new_values, inputsMap, node);
+        collectNestedUses(
+            closed_over_values, new_values, externalValuesMap, node);
       }
       for (Value* v : block->outputs()) {
-        if (inputsMap.count(v) == 0 && new_values.count(v) == 0) {
+        if (externalValuesMap.count(v) == 0 && new_values.count(v) == 0) {
           closed_over_values.insert(v);
         }
       }
     }
   } else if (input_node->kind() == prim::Loop) {
     for (Value* v : input_node->inputs()) {
-      if (inputsMap.count(v) == 0 && new_values.count(v) == 0) {
+      if (externalValuesMap.count(v) == 0 && new_values.count(v) == 0) {
         closed_over_values.insert(v);
       }
     }
@@ -172,7 +174,8 @@ void collectNestedUses(
       new_values.insert(v);
     }
     for (Node* node : block->nodes()) {
-      collectNestedUses(closed_over_values, new_values, inputsMap, node);
+      collectNestedUses(
+          closed_over_values, new_values, externalValuesMap, node);
     }
   } else if (input_node->blocks().size() != 0) {
     TORCH_INTERNAL_ASSERT(false, input_node, " kind not handled yet");
@@ -184,10 +187,10 @@ void collectNestedUses(
 
 std::unordered_set<Value*> closedOverValues(
     Node* toMerge,
-    std::unordered_map<Value*, Value*>& inputsMap) {
+    std::unordered_map<Value*, Value*>& externalValuesMap) {
   std::unordered_set<Value*> closed_over_values;
   std::unordered_set<Value*> new_values;
-  collectNestedUses(closed_over_values, new_values, inputsMap, toMerge);
+  collectNestedUses(closed_over_values, new_values, externalValuesMap, toMerge);
   return closed_over_values;
 }
 
@@ -202,20 +205,30 @@ void mergeNodeIntoSubgraph(
 
   auto subgraph = getSubgraph(subgraphNode);
 
-  // Map from values in the surrounding graph to inputs in the subgraph
-  std::unordered_map<Value*, Value*> inputsMap;
+  // Map from values in the surrounding graph to values in the subgraph
+  std::unordered_map<Value*, Value*> externalValuesMap;
 
   AT_ASSERT(subgraphNode->inputs().size() == subgraph->inputs().size());
   size_t idx = 0;
   for (auto input : subgraphNode->inputs()) {
-    inputsMap[input] = subgraph->inputs()[idx];
+    externalValuesMap[input] = subgraph->inputs()[idx];
     idx++;
   }
 
+  for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
+    externalValuesMap[subgraphNode->outputs().at(i)] =
+        subgraph->outputs().at(i);
+  }
+
   // Add n's inputs to the group's input list if we don't already have them
-  WithInsertPoint guard(*subgraph->nodes().begin());
+
+  bool merging_node_after_subgraph = toMerge->isAfter(subgraphNode);
+  Node* guard_node = merging_node_after_subgraph ? *subgraph->nodes().end()
+                                                 : *subgraph->nodes().begin();
+  WithInsertPoint guard(guard_node);
+
   std::unordered_set<Value*> closedValues =
-      closedOverValues(toMerge, inputsMap);
+      closedOverValues(toMerge, externalValuesMap);
 
   // There are currently downstream usage that relies on a fixed ordering
   // of graph inputs. TODO: remove
@@ -233,67 +246,76 @@ void mergeNodeIntoSubgraph(
   }
 
   for (auto input : orderedClosedValues) {
-    if (inputsMap.count(input) == 0) {
+    if (externalValuesMap.count(input) == 0) {
       // Clone constants inside the subgraph instead of referencing them, to
       // enable more optimizations
       if (auto value = toIValue(input)) {
         auto nv = subgraph->insertConstant(*value);
         nv->copyMetadata(input);
-        inputsMap[input] = nv;
+        externalValuesMap[input] = nv;
       } else {
         // The common case: this is a regular input, so just register it with
         // the group node and inner subgraph
         subgraphNode->addInput(input);
         auto inputToGraph = subgraph->addInput();
         inputToGraph->copyMetadata(input);
-        inputsMap[input] = inputToGraph;
+        externalValuesMap[input] = inputToGraph;
       }
     }
   }
 
   // Merge the node into the graph
-  auto mergedNode = subgraph->insertNode(
-      subgraph->createClone(toMerge, [&](Value* v) { return inputsMap[v]; }));
+  auto mergedNode = subgraph->insertNode(subgraph->createClone(
+      toMerge, [&](Value* v) { return externalValuesMap[v]; }));
 
-  // If n's outputs were inputs to `group`, remove them since we just merged
-  // n in.
-  //
-  // i.e.,
-  // x = f(w); group(x, y, z) becomes group(w, y, z).
-  // x, y, z = f(w); group(x, y, z) becomes group(w).
-  auto inputs = subgraphNode->inputs();
-  for (size_t i = 0; i < toMerge->outputs().size(); ++i) {
-    auto it = std::find(inputs.begin(), inputs.end(), toMerge->outputs()[i]);
-    if (it != inputs.end()) {
-      size_t p = it - inputs.begin();
-      subgraphNode->removeInput(p);
-      subgraph->inputs()[p]->replaceAllUsesWith(mergedNode->outputs()[i]);
-      subgraph->eraseInput(p);
+  if (!merging_node_after_subgraph) {
+    // If n's outputs were inputs to `group`, remove them since we just merged
+    // n in.
+    //
+    // i.e.,
+    // x = f(w); group(x, y, z) becomes group(w, y, z).
+    // x, y, z = f(w); group(x, y, z) becomes group(w).
+    auto inputs = subgraphNode->inputs();
+    for (size_t i = 0; i < toMerge->outputs().size(); ++i) {
+      auto it = std::find(inputs.begin(), inputs.end(), toMerge->outputs()[i]);
+      if (it != inputs.end()) {
+        size_t p = it - inputs.begin();
+        subgraphNode->removeInput(p);
+        subgraph->inputs()[p]->replaceAllUsesWith(mergedNode->outputs()[i]);
+        subgraph->eraseInput(p);
+      }
     }
   }
 
   // Add n's outputs to the group node and inner subgraph outputs.
   for (size_t i = 0; i < toMerge->outputs().size(); i++) {
     auto oldOutput = toMerge->outputs()[i];
-
-    // Only register the output in the group node if it's actually used
-    // outside the subgraph.
-    const auto hasUsesOutsideSubgraph = std::any_of(
-        oldOutput->uses().cbegin(),
-        oldOutput->uses().cend(),
-        [&](const Use& use) { return use.user->isAfter(subgraphNode); });
-
-    if (hasUsesOutsideSubgraph) {
-      auto newOutput = mergedNode->outputs()[i];
-      subgraph->registerOutput(newOutput);
-      auto groupOutput = subgraphNode->addOutput();
-      groupOutput->copyMetadata(oldOutput);
-      oldOutput->replaceAllUsesWith(groupOutput);
-    }
+    auto newOutput = mergedNode->outputs()[i];
+    subgraph->registerOutput(newOutput);
+    auto groupOutput = subgraphNode->addOutput();
+    groupOutput->copyMetadata(oldOutput);
+    oldOutput->replaceAllUsesWith(groupOutput);
   }
   // Remove the original node now that the merge is complete
   if (destroyNode) {
     toMerge->destroy();
+  }
+
+  // Only register the output in the group node if it's actually used
+  // outside the subgraph.
+  const auto hasUsesOutsideSubgraph = [&](Value* v) {
+    return std::any_of(
+        v->uses().cbegin(), v->uses().cend(), [&](const Use& use) {
+          return use.user->isAfter(subgraphNode);
+        });
+  };
+
+  // prune extra outputs
+  for (int64_t i = subgraphNode->outputs().size() - 1; i >= 0; i--) {
+    if (!hasUsesOutsideSubgraph(subgraphNode->outputs().at(i))) {
+      subgraphNode->eraseOutput(i);
+      subgraph->eraseOutput(i);
+    }
   }
 }
 
