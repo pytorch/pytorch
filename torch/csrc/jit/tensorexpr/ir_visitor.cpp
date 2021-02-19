@@ -239,12 +239,8 @@ void IRVisitor::visit(const MinTerm* v) {
 }
 
 void IRVisitor::visit(const ReduceOp* v) {
-  v->accumulator()->accept(this);
   v->body()->accept(this);
 
-  for (auto* e : v->output_args()) {
-    e->accept(this);
-  }
   for (auto* r : v->reduce_args()) {
     r->accept(this);
   }
