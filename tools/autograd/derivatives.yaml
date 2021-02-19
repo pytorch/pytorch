@@ -325,8 +325,8 @@
   imag: at::imag(grad)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
-  abs: not_implemented("polar abs")
-  angle: not_implemented("polar angle")
+  abs: at::real(grad) * angle.cos() + at::imag(grad) * angle.sin()
+  angle: at::real(grad) * abs * -angle.sin() + at::imag(grad) * abs * angle.cos()
 
 - name: _conj(Tensor self) -> Tensor
   self: grad.conj()
