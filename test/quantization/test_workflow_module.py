@@ -822,90 +822,6 @@ class TestHistogramObserver(QuantizationTestCase):
 
 
 class TestFakeQuantize(TestCase):
-    def test_forward_half_precision_fake_quantize(self):
-        r"""Tests the half precision fake quantize function
-        """
-        for i in range(20):
-            #check similarity to float operation
-            x = torch.randn(4, 4)
-            h = x.half()
-
-            scale=0.1
-            zero_point=0
-            quant_min=0
-            quant_max=255
-
-            xq = torch.fake_quantize_per_tensor_affine(x, scale, zero_point, quant_min, quant_max)
-            hq = torch.fake_quantize_per_tensor_affine(h, scale, zero_point, quant_min, quant_max)
-
-            rel_err_from_half=(((x-h)*1/x).abs().max())
-            rel_err_from_quant=(((x-xq)*1/x).abs().max())
-            rel_err_from_both_steps=(1+rel_err_from_half)*(1+rel_err_from_quant)-1
-
-            np.testing.assert_allclose(xq, hq, rtol=rel_err_from_both_steps, atol=tolerance)
-
-            #check function same as reference
-            hqr = _fake_quantize_per_tensor_affine_reference(h.float(), scale, zero_point, quant_min, quant_max).half()
-            np.testing.assert_allclose(hqr, hq, rtol=tolerance, atol=tolerance)
-
-    def test_backward_half_precision_fake_quantize(self):
-        r"""Tests the half precision fake quantize function
-        """
-        for i in range(20):
-            #check similarity to float operation
-            x = torch.randn(4, 4).requires_grad_()
-            h = x.half()
-            b = torch.randn(4,4)
-
-            scale=0.1
-            zero_point=0
-            quant_min=0
-            quant_max=255
-
-            xq = torch.fake_quantize_per_tensor_affine(x, scale, zero_point, quant_min, quant_max)
-            hq = torch.fake_quantize_per_tensor_affine(h, scale, zero_point, quant_min, quant_max)
-
-            out=(b*hq).sum()
-
-            out.backward()
-
-
-            #dout = torch.rand(h.shape, dtype=torch.float)
-            #hq.backward(dout)
-
-            print(torch.cuda.is_available())
-            print("here")
-            print(x.grad)
-            print(h.grad)
-
-            assert(False)
-
-    def test_forward_double_precision_fake_quantize(self):
-        r"""Tests the half precision fake quantize function
-        """
-        for i in range(20):
-            #check similarity to float operation
-            d = torch.randn(4, 4).double()**2
-            x = d.float()
-
-            scale=0.1
-            zero_point=0
-            quant_min=0
-            quant_max=255
-
-            xq = torch.fake_quantize_per_tensor_affine(x, scale, zero_point, quant_min, quant_max)
-            dq = torch.fake_quantize_per_tensor_affine(d, scale, zero_point, quant_min, quant_max)
-
-            rel_err_from_double=(((x-d)*1/x).abs().max())
-            rel_err_from_quant=(((x-xq)*1/x).abs().max())
-            rel_err_from_both_steps=(1+rel_err_from_double)*(1+rel_err_from_quant)-1
-
-            np.testing.assert_allclose(xq, dq, rtol=rel_err_from_both_steps, atol=tolerance)
-
-            #check function same as reference
-            dqr = _fake_quantize_per_tensor_affine_reference(d, scale, zero_point, quant_min, quant_max)
-            np.testing.assert_allclose(dqr, dq, rtol=tolerance, atol=tolerance)
-
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -946,21 +862,23 @@ class TestFakeQuantize(TestCase):
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def _test_forward_per_tensor_cachemask_impl(self, device):
-        for torch_type in (torch.qint8, torch.quint8):
-            Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
-            # pick the scale + zp so that some values get clipped
-            for X in Xs:
-                obs = torch.quantization.MinMaxObserver(torch_type)
-                obs(X * 0.75)
-                scale, zero_point = obs.calculate_qparams()
-                scale, zero_point = float(scale), int(zero_point)
-                quant_min, quant_max = obs._calculate_qmin_qmax()
+        for float_type in (torch.float32, torch.float16, torch.float64):
+            for torch_type in (torch.qint8, torch.quint8):
+                Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
+                # pick the scale + zp so that some values get clipped
+                for X in Xs:
+                    X=X.to(float_type)
+                    obs = torch.quantization.MinMaxObserver(torch_type)
+                    obs(X * 0.75)
+                    scale, zero_point = obs.calculate_qparams()
+                    scale, zero_point = float(scale), int(zero_point)
+                    quant_min, quant_max = obs._calculate_qmin_qmax()
 
-                Y_test = torch.fake_quantize_per_tensor_affine(
-                    X, scale, zero_point, quant_min, quant_max)
-                Y_ref = _fake_quantize_per_tensor_affine_reference(
-                    X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
-                self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+                    Y_test = torch.fake_quantize_per_tensor_affine(
+                        X, scale, zero_point, quant_min, quant_max)
+                    Y_ref = _fake_quantize_per_tensor_affine_reference(
+                        X.cpu().to(torch.float32), scale, zero_point, quant_min, quant_max).to(device).to(float_type)
+                    self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
 
     def test_forward_per_tensor_cachemask_cpu(self):
         device = torch.device('cpu')
