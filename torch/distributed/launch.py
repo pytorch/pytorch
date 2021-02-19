@@ -174,10 +174,10 @@ def parse_args():
                              "the IP address or the hostname of node 0, for "
                              "single node multi-proc training, the "
                              "--master_addr can simply be 127.0.0.1")
-    parser.add_argument("--master_port", default=29500, type=int,
+    parser.add_argument("--master_port", default=0, type=int,
                         help="Master node (rank 0)'s free port that needs to "
                              "be used for communication during distributed "
-                             "training")
+                             "training. A random free port will be used if not provided.")
     parser.add_argument("--use_env", default=False, action="store_true",
                         help="Use environment variable to pass "
                              "'local rank'. For legacy reasons, the default value is False. "
@@ -212,6 +212,33 @@ def parse_args():
     parser.add_argument('training_script_args', nargs=REMAINDER)
     return parser.parse_args()
 
+from random import randint
+import socket
+def is_port_in_use(master_address, master_port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex((master_address, master_port)) == 0
+
+def get_port(master_address, master_port):
+    """
+    If a user provided an explicit port - use that, otherwise use a random port that is open. There
+    could still be a race condition over the same port if multiple launchers are run at the same time or
+    some other unrelated application takes that port over, but with some randomization the same port
+    shouldn't happen too often concurrently.
+    """
+    if master_port != 0:
+        return master_port
+
+    base_port = 29500
+    try_port = base_port
+    tries = 10
+    while (tries > 0):
+        tries -= 1
+        try_port = base_port + randint(0, 199)
+        if not is_port_in_use(master_address, try_port):
+            return try_port
+
+    raise ValueError("Unable to find a free port, please provide an explicit port number via --master_port")
+
 def main():
     args = parse_args()
 
@@ -221,7 +248,7 @@ def main():
     # set PyTorch distributed related environmental variables
     current_env = os.environ.copy()
     current_env["MASTER_ADDR"] = args.master_addr
-    current_env["MASTER_PORT"] = str(args.master_port)
+    current_env["MASTER_PORT"] = str(get_port(args.master_addr, args.master_port))
     current_env["WORLD_SIZE"] = str(dist_world_size)
 
     processes: List[Any] = []
