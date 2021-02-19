@@ -18,7 +18,6 @@ from ..utils import (
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
     weight_is_statically_quantized,
-    weight_dtype,
     get_qconfig_dtypes,
 )
 
@@ -399,6 +398,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        weight_dtype = dtypes[1]
         # TODO: debug option for linear module
         if self.linear_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
@@ -486,7 +486,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     bias = kwargs['bias']
                     kwargs.pop('bias')
                 prepack_args = (linear_weight, bias)
-                prepack_op = get_linear_prepack_op_for_dtype(weight_dtype(qconfig))
+                prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
                 packed_weight = quantizer.quantized_graph.create_node(
                     'call_function', prepack_op, prepack_args, {})
                 # construct linear input
@@ -509,10 +509,14 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.linear_node.name]
                     return op
                 else:
+                    # choose linear dynamic or linear dynamic fp16 op based on weight dtype
+                    qlinear_op = torch.ops.quantized.linear_dynamic \
+                        if weight_dtype == torch.qint8 \
+                        else torch.ops.quantized.linear_dynamic_fp16
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore
                     op_out = quantizer.quantized_graph.create_node(
-                        "call_function", torch.ops.quantized.linear_dynamic, qlinear_args, kwargs)
+                        "call_function", qlinear_op, qlinear_args, kwargs)
                     # Store the name of the dynamic op to get the path of node after replacement as well.
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
