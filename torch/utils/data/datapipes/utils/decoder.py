@@ -1,14 +1,14 @@
 # This file takes partial of the implementation from NVIDIA's webdataset at here:
 # https://github.com/tmbdev/webdataset/blob/master/webdataset/autodecode.py
 
+import io
+import os
 import pickle
 import re
-import os
+import tempfile
 
 import json
-import tempfile
-import io
-
+import numpy as np
 import torch
 
 
@@ -133,29 +133,15 @@ class ImageHandler:
         self.imagespec = imagespec.lower()
 
     def __call__(self, key, data):
-        try:
-            import numpy as np
-        except ImportError as e:
-            try:
-                import pip  # type: ignore
-                pip.main(['intall', '--user', 'numpy'])
-                import numpy as np
-            except ImportError:
-                raise e
+        extension = re.sub(r".*[.]", "", key)
+        if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
+            return None
 
         try:
             import PIL.Image
         except ImportError as e:
-            try:
-                import pip  # type: ignore
-                pip.main(['install', '--user', 'Pillow'])
-                import PIL.Image
-            except ImportError:
-                raise e
-
-        extension = re.sub(r".*[.]", "", key)
-        if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
-            return None
+            raise ModuleNotFoundError("Package `PIL` is required to be installed for default image decoder."
+                                      "Please use `pip install Pillow` to install the package")
 
         imagespec = self.imagespec
         atype, etype, mode = imagespecs[imagespec]
@@ -202,12 +188,9 @@ def torch_video(key, data):
     try:
         import torchvision.io
     except ImportError as e:
-        try:
-            import pip  # type: ignore
-            pip.main(['install', '--user', 'torchvision'])
-            import torchvision.io
-        except ImportError:
-            raise e
+        raise ModuleNotFoundError("Package `torchvision` is required to be installed for default video reader."
+                                  "Please use `pip install torchvision` or `conda install torchvision -c pytorch`"
+                                  "to install the package")
 
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
