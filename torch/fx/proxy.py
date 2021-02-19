@@ -4,7 +4,7 @@ import inspect
 import operator
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable, Union
+from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
 from .node import Target, Node, Argument, base_types, map_aggregate
 
 class TracerBase:

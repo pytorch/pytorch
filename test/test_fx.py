@@ -948,8 +948,10 @@ class TestFX(JitTestCase):
 
     def test_if_stmt(self):
         def foo(x):
+
             def true_block(x):
                 return torch.relu(x)
+
             def false_block(x):
                 return torch.neg(x)
             return torch.fx.if_stmt(x.sum() > 0, true_block, false_block, x)
