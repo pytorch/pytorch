@@ -416,7 +416,7 @@ TCPStore::TCPStore(
   // Connect to the daemon
   storeSocket_ = tcputil::connect(
       tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-  if (numWorkers >= 0 && waitWorkers) {
+  if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
     waitForWorkers();
   }
 }
@@ -442,7 +442,7 @@ void TCPStore::waitForWorkers() {
       auto buf = reinterpret_cast<const char*>(value.data());
       auto len = value.size();
       int numWorkersCompleted = std::stoi(std::string(buf, len));
-      if (numWorkersCompleted >= numWorkers_) {
+      if (numWorkersCompleted >= numWorkers_.value_or(-1)) {
         break;
       }
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
