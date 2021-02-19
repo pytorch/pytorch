@@ -64,8 +64,6 @@ std::vector<const Expr*> AccessInfo::getIndices() const {
       indices = load->indices();
     } else if (auto* call = dynamic_cast<const FunctionCall*>(expr_)) {
       indices = call->params();
-    } else if (auto* reduce = dynamic_cast<const ReduceOp*>(expr_)) {
-      indices = reduce->output_args();
     }
   } else {
     if (auto* store = dynamic_cast<const Store*>(stmt_)) {

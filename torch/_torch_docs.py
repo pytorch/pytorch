@@ -1672,13 +1672,13 @@ reciprocal(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
+.. math::
+    \text{out}_{i} = \frac{1}{\text{input}_{i}}
+
 .. note::
     Unlike NumPy's reciprocal, torch.reciprocal supports integral inputs. Integral
     inputs to reciprocal are automatically :ref:`promoted <type-promotion-doc>` to
     the default scalar type.
-
-.. math::
-    \text{out}_{i} = \frac{1}{\text{input}_{i}}
 """ + r"""
 Args:
     {input}
@@ -2741,7 +2741,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.div, r"""
-div(input, other, *, out=None) -> Tensor
+div(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -2750,8 +2750,8 @@ Divides each element of the input ``input`` by the corresponding element of
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}_i}}
 
 .. note::
-    Performs a "true" division like Python 3. See :func:`torch.floor_divide`
-    for floor division.
+    By default, this performs a "true" division like Python 3.
+    See the :attr:`rounding_mode` argument for floor division.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
@@ -2762,33 +2762,51 @@ Args:
     other (Tensor or Number): the divisor
 
 Keyword args:
+    rounding_mode (str, optional): Type of rounding applied to the result:
+
+        * None - default behavior. Performs no rounding and, if both :attr:`input` and
+          :attr:`other` are integer types, promotes the inputs to the default scalar type.
+          Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
+        * ``"trunc"`` - rounds the results of the division towards zero.
+          Equivalent to C-style integer division.
+        * ``"floor"`` - rounds the results of the division down.
+          Equivalent to floor division in Python (the ``//`` operator) and NumPy's ``np.floor_divide``.
+
     {out}
 
 Examples::
 
-    >>> a = torch.randn(5)
-    >>> a
-    tensor([ 0.3810,  1.2774, -0.2972, -0.3719,  0.4637])
-    >>> torch.div(a, 0.5)
-    tensor([ 0.7620,  2.5548, -0.5944, -0.7439,  0.9275])
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-0.3711, -1.9353, -0.4605, -0.2917],
-            [ 0.1815, -1.0111,  0.9805, -1.5923],
-            [ 0.1062,  1.4581,  0.7759, -1.2344],
-            [-0.1830, -0.0313,  1.1908, -1.4757]])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([ 0.8032,  0.2930, -0.8113, -0.2308])
+    >>> x = torch.tensor([ 0.3810,  1.2774, -0.2972, -0.3719,  0.4637])
+    >>> torch.div(x, 0.5)
+    tensor([ 0.7620,  2.5548, -0.5944, -0.7438,  0.9274])
+
+    >>> a = torch.tensor([[-0.3711, -1.9353, -0.4605, -0.2917],
+    ...                   [ 0.1815, -1.0111,  0.9805, -1.5923],
+    ...                   [ 0.1062,  1.4581,  0.7759, -1.2344],
+    ...                   [-0.1830, -0.0313,  1.1908, -1.4757]])
+    >>> b = torch.tensor([ 0.8032,  0.2930, -0.8113, -0.2308])
     >>> torch.div(a, b)
-    tensor([[-0.4620, -6.6051,  0.5676,  1.2637],
-            [ 0.2260, -3.4507, -1.2086,  6.8988],
-            [ 0.1322,  4.9764, -0.9564,  5.3480],
-            [-0.2278, -0.1068, -1.4678,  6.3936]])
+    tensor([[-0.4620, -6.6051,  0.5676,  1.2639],
+            [ 0.2260, -3.4509, -1.2086,  6.8990],
+            [ 0.1322,  4.9764, -0.9564,  5.3484],
+            [-0.2278, -0.1068, -1.4678,  6.3938]])
+
+    >>> torch.div(a, b, rounding_mode='trunc')
+    tensor([[-0., -6.,  0.,  1.],
+            [ 0., -3., -1.,  6.],
+            [ 0.,  4., -0.,  5.],
+            [-0., -0., -1.,  6.]])
+
+    >>> torch.div(a, b, rounding_mode='floor')
+    tensor([[-1., -7.,  0.,  1.],
+            [ 0., -4., -2.,  6.],
+            [ 0.,  4., -1.,  5.],
+            [-1., -1., -2.,  6.]])
+
 """.format(**common_args))
 
 add_docstr(torch.divide, r"""
-divide(input, other, *, out=None) -> Tensor
+divide(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Alias for :func:`torch.div`.
 """)
@@ -3140,9 +3158,12 @@ add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
 .. warning::
-    This function's name is a misnomer. It actually rounds the
-    quotient towards zero instead of taking its floor. This behavior
-    will be deprecated in a future PyTorch release.
+
+    :func:`torch.floor_divide` is deprecated and will be removed in a future PyTorch
+    release. Its name is a misnomer because it actually rounds the quotient
+    towards zero instead of taking its floor. To keep the current behavior use
+    :func:`torch.div` with ``rounding_mode='trunc'``. To actually perform floor
+    division, use :func:`torch.div` with ``rounding_mode='floor'``.
 
 Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
 quotient towards zero. Equivalently, it truncates the quotient(s):
@@ -3832,8 +3853,7 @@ Example::
             [-1.1734,  0.7230]])
 """.format(**common_args))
 
-add_docstr(torch.inverse,
-           r"""
+add_docstr(torch.inverse, r"""
 inverse(input, *, out=None) -> Tensor
 
 Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batches
@@ -3841,6 +3861,8 @@ of 2D square tensors, in which case this function would return a tensor composed
 individual inverses.
 
 Supports real and complex input.
+
+.. note:: :func:`torch.inverse` is deprecated. Please use :func:`torch.linalg.inv` instead.
 
 .. note::
 
@@ -4956,9 +4978,8 @@ Example::
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """.format(**common_args))
 
-add_docstr(torch.matrix_rank,
-           r"""
-matrix_rank(input, tol=None, symmetric=False) -> Tensor
+add_docstr(torch.matrix_rank, r"""
+matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
@@ -4971,11 +4992,17 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
+.. note:: :func:`torch.matrix_rank` is deprecated. Please use :func:`torch.linalg.matrix_rank` instead.
+          The parameter :attr:`symmetric` was renamed in :func:`torch.linalg.matrix_rank` to ``hermitian``.
+
 Args:
     input (Tensor): the input 2-D tensor
     tol (float, optional): the tolerance value. Default: ``None``
     symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
                                Default: ``False``
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -4986,7 +5013,7 @@ Example::
     >>> b[0, 0] = 0
     >>> torch.matrix_rank(b)
     tensor(9)
-""")
+""".format(**common_args))
 
 add_docstr(torch.matrix_power,
            r"""
@@ -5151,10 +5178,10 @@ Example::
 add_docstr(torch.fmax, r"""
 fmax(input, other, *, out=None) -> Tensor
 
-Computes the element-wise maximum of :attr:`input` and :attr:`other`. 
+Computes the element-wise maximum of :attr:`input` and :attr:`other`.
 
-This is like :func:`torch.maximum` except it handles NaNs differently: 
-if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum. 
+This is like :func:`torch.maximum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum.
 Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
@@ -5626,10 +5653,10 @@ Example::
 add_docstr(torch.fmin, r"""
 fmin(input, other, *, out=None) -> Tensor
 
-Computes the element-wise minimum of :attr:`input` and :attr:`other`. 
+Computes the element-wise minimum of :attr:`input` and :attr:`other`.
 
-This is like :func:`torch.minimum` except it handles NaNs differently: 
-if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum. 
+This is like :func:`torch.minimum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum.
 Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
@@ -8464,8 +8491,7 @@ Example::
 .. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
-add_docstr(torch.symeig,
-           r"""
+add_docstr(torch.symeig, r"""
 symeig(input, eigenvectors=False, upper=True, *, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
@@ -8492,9 +8518,9 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 .. note:: Irrespective of the original strides, the returned matrix `V` will
           be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
 
-.. note:: Extra care needs to be taken when backward through outputs. Such
-          operation is really only stable when all eigenvalues are distinct.
-          Otherwise, ``NaN`` can appear as the gradients are not properly defined.
+.. warning:: Extra care needs to be taken when backward through outputs. Such
+             operation is only stable when all eigenvalues are distinct and becomes
+             less stable the smaller :math:`\min_{i \neq j} |\lambda_i - \lambda_j|` is.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
@@ -9184,7 +9210,7 @@ Example::
 add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
-Alias for :func:`torch.div`.
+Alias for :func:`torch.div` with ``rounding_mode=None``.
 """.format(**common_args))
 
 add_docstr(torch.trunc,
@@ -9208,6 +9234,91 @@ Example::
     >>> torch.trunc(a)
     tensor([ 3.,  0., -0., -0.])
 """.format(**common_args))
+
+add_docstr(torch.fake_quantize_per_tensor_affine,
+           r"""
+fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+
+Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`scale`,
+:attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`.
+
+.. math::
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
+
+Args:
+    input (Tensor): the input value(s), in ``torch.float32``.
+    scale (double): quantization scale
+    zero_point (int64): quantization zero_point
+    quant_min (int64): lower bound of the quantized domain
+    quant_max (int64): upper bound of the quantized domain
+
+Returns:
+    Tensor: A newly fake_quantized tensor
+
+Example::
+
+    >>> x = torch.randn(4)
+    >>> x
+    tensor([ 0.0552,  0.9730,  0.3973, -1.0780])
+    >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
+    tensor([0.1000, 1.0000, 0.4000, 0.0000])
+""")
+
+add_docstr(torch.fake_quantize_per_channel_affine,
+           r"""
+fake_quantize_per_channel_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+
+Returns a new tensor with the data in :attr:`input` fake quantized per channel using :attr:`scale`,
+:attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`, across the channel specified by :attr:`axis`.
+
+.. math::
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
+
+Args:
+    input (Tensor): the input value(s), in ``torch.float32``.
+    scale (Tensor): quantization scale, per channel
+    zero_point (Tensor): quantization zero_point, per channel
+    axis (int32): channel axis
+    quant_min (int64): lower bound of the quantized domain
+    quant_max (int64): upper bound of the quantized domain
+
+Returns:
+    Tensor: A newly fake_quantized per channel tensor
+
+Example::
+
+    >>> x = torch.randn(2, 2, 2)
+    >>> x
+    tensor([[[-0.2525, -0.0466],
+             [ 0.3491, -0.2168]],
+
+            [[-0.5906,  1.6258],
+             [ 0.6444, -0.0542]]])
+    >>> scales = (torch.randn(2) + 1) * 0.05
+    >>> scales
+    tensor([0.0475, 0.0486])
+    >>> zero_points = torch.zeros(2).to(torch.long)
+    >>> zero_points
+    tensor([0, 0])
+    >>> torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
+    tensor([[[0.0000, 0.0000],
+             [0.3405, 0.0000]],
+
+            [[0.0000, 1.6134],
+            [0.6323, 0.0000]]])
+""")
 
 add_docstr(torch.fix,
            r"""
@@ -9543,21 +9654,22 @@ Keyword args:
     {memory_format}
 """.format(**factory_like_common_args))
 
-add_docstr(torch.det,
-           r"""
+add_docstr(torch.det, r"""
 det(input) -> Tensor
 
 Calculates determinant of a square matrix or batches of square matrices.
 
+.. note:: :func:`torch.det` is deprecated. Please use :func:`torch.linalg.det` instead.
+
 .. note::
-    Backward through :meth:`det` internally uses SVD results when :attr:`input` is
-    not invertible. In this case, double backward through :meth:`det` will be
-    unstable in when :attr:`input` doesn't have distinct singular values. See
-    :meth:`~torch.svd` for details.
+    Backward through :math:`det` internally uses SVD results when :attr:`input` is
+    not invertible. In this case, double backward through :math:`det` will be
+    unstable when :attr:`input` doesn't have distinct singular values. See
+    :math:`~torch.svd` for details.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
-                batch dimensions.
+                    batch dimensions.
 
 Example::
 
@@ -9722,12 +9834,14 @@ Example::
     torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
-add_docstr(torch.pinverse,
-           r"""
+add_docstr(torch.pinverse, r"""
 pinverse(input, rcond=1e-15) -> Tensor
 
 Calculates the pseudo-inverse (also known as the Moore-Penrose inverse) of a 2D tensor.
 Please look at `Moore-Penrose inverse`_ for more details
+
+.. note:: :func:`torch.pinverse` is deprecated. Please use :func:`torch.linalg.pinv` instead
+          which includes new parameters :attr:`hermitian` and :attr:`out`.
 
 .. note::
     This method is implemented using the Singular Value Decomposition.

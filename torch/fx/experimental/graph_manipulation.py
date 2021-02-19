@@ -1,11 +1,12 @@
 from typing import Dict, List, NamedTuple, Any
 
 import torch
-from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
-from torch.fx.graph import Graph, get_qualified_name
+from torch.fx.node import _get_qualified_name
 from torch.fx.graph_module import GraphModule
+from torch.fx.graph import Graph
 from torch.fx.node import Node, Target, map_arg
+from torch.fx.passes.shape_prop import ShapeProp
 
 
 def replace_target_nodes_with(
@@ -185,6 +186,8 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
             weight = serialize_weight(p)
             serialized_dict["weights"][prefix + name] = weight
             weights[prefix + name] = p
+    # Note: lift_lowering_attrs_to_nodes is only used to support leaf modules
+    # that cannot currently be symbolically traced into, e.g. batch norm.
     lift_lowering_attrs_to_nodes(fx_module)
     for node in fx_module.graph.nodes:
         node_rep: Dict[str, Any] = {}
@@ -223,18 +226,32 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 )
 
         if node.op == "call_function":
-            node_rep["target"] = get_qualified_name(node.target)
+            node_rep["target"] = _get_qualified_name(node.target)
         else:
             node_rep["target"] = str(node.target)
 
         # Make sure we capture all constants.
         if node.op == "get_attr":
-            target = getattr(fx_module, node.target)
-            qualname = prefix + node.target
-            if isinstance(target, torch.Tensor) and qualname not in weights:
-                weight = serialize_weight(target)
-                serialized_dict["weights"][prefix + node.target] = weight
-                weights[prefix + node.target] = target
+            # If we are targeting a parent constant we update the target.
+            if node.target.startswith("parent."):
+                node.name = node.name[len("parent."):]
+                node_rep["target"] = str(node.target[len("parent."):])
+                weight = serialize_weight(weights[node.target[len("parent."):]])
+                serialized_dict["weights"][node.target[len("parent."):]] = weight
+            else:
+                # Iterate through the module hierarchy to find the attr.
+                target = fx_module
+                split = node.target.split(".")
+                assert len(split)
+                while len(split):
+                    target = getattr(target, split.pop(0))
+
+                qualname = prefix + node.target
+                # Check that the target is a tensor, and that we haven't added it already from a leaf module.
+                if isinstance(target, torch.Tensor) and qualname not in weights:
+                    weight = serialize_weight(target)
+                    serialized_dict["weights"][prefix + node.target] = weight
+                    weights[prefix + node.target] = target
 
         node_rep["op_code"] = node.op
         node_rep["name"] = node.name

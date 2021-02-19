@@ -1761,12 +1761,13 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
   LoopNest loop({c});
+
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
   loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
 
-  reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
+  auto stores = NodeFinder<Store>::find(loop.root_stmt());
   std::vector<For*> loops = NodeFinder<For>::find(loop.root_stmt());
-  loop.cacheAccesses(reduces[0]->accumulator(), "tmp2", loops[2]);
+  loop.cacheAccesses(stores[1]->buf(), "tmp2", loops[2]);
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1823,9 +1824,9 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
   loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
 
-  reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
+  auto stores = NodeFinder<Store>::find(loop.root_stmt());
   std::vector<For*> loops = NodeFinder<For>::find(loop.root_stmt());
-  loop.cacheAccesses(reduces[0]->accumulator(), "tmp2", loops[3]);
+  loop.cacheAccesses(stores[1]->buf(), "tmp2", loops[3]);
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1886,7 +1887,7 @@ TEST(Reductions, ReductionVectorize) {
       R"IR(
 #CHECK: sum[Ramp(0, 1, 8)] = Broadcast(0.f, 8);
 #CHECK: for (int n = 0; n < 8; n++) {
-#CHECK: sum[Ramp(0, 1, 8)] = ReduceOp((sum[Ramp(0, 1, 8)]) + (in[Ramp(n, 8, 8)]), out_args={Ramp(0, 1, 8)}, reduce_args={n});
+#CHECK: sum[Ramp(0, 1, 8)] = ReduceOp((sum[Ramp(0, 1, 8)]) + (in[Ramp(n, 8, 8)]), reduce_args={n});
 #CHECK: }
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
@@ -1960,10 +1961,10 @@ TEST(Reductions, ReductionVectorizeRfactor) {
 #CHECK:   tmp_buf[n] = 0.f;
 #CHECK: }
 #CHECK: for (int m = 0; m < 8; m++) {
-#CHECK:   tmp_buf[Ramp(0, 1, 8)] = ReduceOp((tmp_buf[Ramp(0, 1, 8)]) + (in[Ramp(8 * m, 1, 8)]), out_args={Ramp(0, 1, 8)}, reduce_args={m});
+#CHECK:   tmp_buf[Ramp(0, 1, 8)] = ReduceOp((tmp_buf[Ramp(0, 1, 8)]) + (in[Ramp(8 * m, 1, 8)]), reduce_args={m});
 #CHECK: }
 #CHECK: for (int n = 0; n < 8; n++) {
-#CHECK:   sum = ReduceOp((sum) + (tmp_buf[n]), out_args={}, reduce_args={n});
+#CHECK:   sum = ReduceOp((sum) + (tmp_buf[n]), reduce_args={n});
 #CHECK: }
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());

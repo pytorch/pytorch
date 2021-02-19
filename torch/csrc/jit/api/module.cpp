@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -334,6 +336,21 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   classType->getMethod("__init__").operator()(std::move(stackWithSelf));
 
   return obj;
+}
+
+Module freeze(
+    const Module& module,
+    c10::optional<std::vector<std::string>> preserved_attrs,
+    bool optimize_numerics) {
+  TORCH_CHECK(
+      module.is_training(),
+      "Freezing is currently only implemented for modules in eval mode. Please call .eval() before freezing");
+
+  Module out_mod = freeze_module(
+      module, preserved_attrs.value_or(std::vector<std::string>({})));
+  auto graph = module.get_method("forward").graph();
+  OptimizeFrozenGraph(graph, optimize_numerics);
+  return out_mod;
 }
 
 buffer_list Module::buffers(bool recurse) const {

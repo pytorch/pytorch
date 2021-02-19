@@ -359,7 +359,7 @@ void recurseThroughNestedModules(
     if (prefix != "") {
       submodule_prefix = prefix + ".";
     }
-    submodule_prefix = submodule_prefix + key_string;
+    submodule_prefix += key_string;
     recurseThroughNestedModules(
         loc, m, keys, values, module_value, submodule_prefix, field);
   };
@@ -382,7 +382,7 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
   for (const auto& name : paramNames) {
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
-    Value* tensor_v = m.graph()->insertGetAttr(self_, name);
+    m.graph()->insertGetAttr(self_, name);
     values.push_back(tryGetAttr(loc, m, name));
     keys.push_back(name_v);
   }
@@ -765,6 +765,9 @@ std::shared_ptr<SugaredValue> PythonClassValue::attr(
     const std::string& field) {
   // Resolve values from the Python object first (e.g. for static methods on
   // this type, resolve them as functions)
+  if (auto* fn = type_->findStaticMethod(field)) {
+    return std::make_shared<FunctionValue>(fn);
+  }
   auto py_attr = py::getattr(py_type_, field.c_str(), py::none());
   if (!py_attr.is_none()) {
     return toSugaredValue(py_attr, m, loc);
@@ -967,9 +970,9 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
     return given;
   };
 
-  Value* start;
-  Value* stop;
-  Value* step;
+  Value* start = nullptr;
+  Value* stop = nullptr;
+  Value* step = nullptr;
   size_t n = args.size();
   // Slice's constructor signature is Slice(start=None, stop, step=None)
   if (n == 1) {
@@ -998,7 +1001,7 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
-    SourceRange loc,
+    const SourceRange& loc,
     bool is_constant) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
