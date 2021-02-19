@@ -69,7 +69,7 @@ run_custom_build_with_static_dispatch() {
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-    -DSTATIC_DISPATCH_BACKENDS=CPU \
+    -DSTATIC_DISPATCH_BACKEND=CPU \
     -DSELECTED_OP_LIST="${ROOT_OPS}"
 }
 
