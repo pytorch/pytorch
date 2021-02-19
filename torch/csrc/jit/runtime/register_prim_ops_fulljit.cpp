@@ -546,6 +546,7 @@ RegisterOperators reg(
      Operator(
          "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
          [](Stack* stack) {
+           RECORD_FUNCTION("_grad_sum_to_size", std::vector<c10::IValue>());
            IValue self, size;
            pop(stack, self, size);
            if (size.isNone()) {
