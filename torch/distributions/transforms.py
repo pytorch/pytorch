@@ -604,7 +604,7 @@ class SigmoidTransform(Transform):
 class SoftplusTransform(Transform):
     r"""
     Transform via the mapping :math:`\text{Softplus}(x) = \log(1 + \exp(x))`.
-    The implementation reverts to the linear function when :math:`\text{x} > 20`.
+    The implementation reverts to the linear function when :math:`x > 20`.
     """
     domain = constraints.real
     codomain = constraints.positive
