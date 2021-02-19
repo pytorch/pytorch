@@ -1159,10 +1159,16 @@ void MemDependencyChecker::visit(const Allocate* v) {
 
   const Var* var = v->buffer_var();
   IndexBounds bounds;
-  for (auto* d : v->dims()) {
-    bounds.push_back(
-        {new IntImm(0), IRSimplifier::simplify(new Sub(d, new IntImm(1)))});
-  }
+  // TODO: remove the "flatten_buf_dims" process below and extend the buf bound
+  // check to support N-d indices access and 1-d index access.
+  // "Allocate" stmt is based on "Buf" which supports N-d indices access and 1-d
+  // index access. Currently the write bound check in memory analysis cannot
+  // identify 1-d index access for N-d bufs. Thus we flatten N-d bufs here to avoid
+  // failing the bound check. But this is not the correct approach and should be fixed.
+  const Expr* flat_size = flatten_buf_dims(v->buf());
+  flat_size = IRSimplifier::simplify(new Sub(flat_size, new IntImm(1)));
+  bounds.push_back({new IntImm(0), flat_size});
+
   auto info = std::make_shared<AccessInfo>(
       nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
 

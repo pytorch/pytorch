@@ -56,6 +56,7 @@ class IndexFlattener : public IRMutator {
   Stmt* flatten(Stmt* s) {
     return s->accept_mutator(this);
   }
+
   const Expr* mutate(const Load* v) override {
     if (v->indices().size() == 1) {
       return v;
@@ -940,10 +941,8 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   // Insert allocations and frees for temporary buffers in the innermost
   // possible scope.
   for (const Buf* buf : intermediate_bufs_) {
-    const Expr* flat_size = buf_flattening_helper(buf);
-    const Buf* buf_new = new Buf(buf->base_handle(), {flat_size}, buf->dtype());
-    Stmt* alloc = new Allocate(buf_new);
-    Stmt* free = new Free(buf_new);
+    Stmt* alloc = new Allocate(buf);
+    Stmt* free = new Free(buf);
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);
     alloc_block->append_stmt(free);

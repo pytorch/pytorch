@@ -1961,7 +1961,7 @@ const Expr* TermExpander::mutate(const RoundOff* v) {
   return term->accept_mutator(this);
 }
 
-const Expr* buf_flattening_helper(const Buf* v) {
+const Expr* flatten_buf_dims(const Buf* v) {
   std::vector<const Expr*> dims = v->dims();
 
   const Expr* flattened = getImmediateByType(kInt, 1);
@@ -1977,7 +1977,7 @@ Stmt* TermExpander::mutate(const Allocate* v) {
   const Buf* buf = v->buf();
   const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
   assert(buf_new);
-  const Expr* flattened = buf_flattening_helper(buf_new);
+  const Expr* flattened = flatten_buf_dims(buf_new);
 
   if (flattened->isConstant() && immediateEquals(flattened, 0)) {
     eliminated_allocations_.insert(buf_new->base_handle());

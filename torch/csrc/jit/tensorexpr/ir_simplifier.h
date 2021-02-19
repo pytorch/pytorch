@@ -610,7 +610,7 @@ class TORCH_API IRSimplifier {
 };
 
 // Flattens the buf and performs the simplifier on the flattened dims.
-const Expr* buf_flattening_helper(const Buf* v);
+const Expr* flatten_buf_dims(const Buf* v);
 // Returns true if expressions A and B can be simplified to an equal expression.
 TORCH_API bool exprEquals(const Expr* A, const Expr* B);
 
