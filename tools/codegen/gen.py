@@ -136,7 +136,7 @@ def static_dispatch(
         if dispatch_key in f.dispatch:
             return f'return at::{dispatch_key.lower()}::{name}({exprs_str});'
 
-    return None
+    return f'TORCH_CHECK(false, "Static dispatch does not support {name} for {backend}.");'
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
