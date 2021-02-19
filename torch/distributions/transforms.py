@@ -618,7 +618,7 @@ class SoftplusTransform(Transform):
         return softplus(x)
 
     def _inverse(self, y):
-        return torch.where(y > 20, y, y.expm1().log())
+        return (-y).expm1().neg().log() + y
 
     def log_abs_det_jacobian(self, x, y):
         return -softplus(-x)
