@@ -61,19 +61,14 @@ if(BUILD_LITE_INTERPRETER)
     ${pytorch_android_DIR}/pytorch_jni_common.cpp
     ${pytorch_android_DIR}/pytorch_jni_common.h
   )
-  add_library(${PYTORCH_JNI_TARGET} SHARED
-      ${pytorch_android_SOURCES}
-  )
 else()
   file(GLOB pytorch_android_SOURCES
     ${pytorch_android_DIR}/pytorch_jni_jit.cpp
     ${pytorch_android_DIR}/pytorch_jni_common.cpp
     ${pytorch_android_DIR}/pytorch_jni_common.h
   )
-  add_library(${PYTORCH_JNI_TARGET} SHARED
-      ${pytorch_android_SOURCES}
-  )
 endif()
+add_library(${PYTORCH_JNI_TARGET} SHARED ${pytorch_android_SOURCES})
 
 if(APPLE)
   # Need to add rpath so dlopen can find dependencies.
