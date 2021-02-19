@@ -194,12 +194,13 @@ static void imag_kernel(TensorIterator& iter) {
 }
 
 static void conj_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "conj_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return conj_impl(a); },
-        [=](Vec256<scalar_t> a) { return a.conj(); });
-  });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
+        cpu_kernel_vec(
+            iter,
+            [=](scalar_t a) -> scalar_t { return conj_impl(a); },
+            [=](Vec256<scalar_t> a) { return a.conj(); });
+      });
 }
 
 static void bitwise_not_kernel(TensorIterator& iter) {
