@@ -457,7 +457,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         tests = [
             (Linear, (linear_weight,), (linear_input,),
-             ns.call_function(torch.ops.quantized.linear_dynamic),
+             ns.call_function(torch.ops.quantized.linear_dynamic_fp16),
              ns.call_function(torch.ops.quantized.linear_prepack_fp16)),
             (LinearModule, (), (linear_module_input,),
              ns.call_module(nnqd.Linear),
