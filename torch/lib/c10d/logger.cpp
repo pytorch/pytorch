@@ -2,6 +2,10 @@
 
 namespace c10d {
 
+// When training runs at these iterations, log the runtime
+// stats.
+const int LoggingIterations[] = {10, 20, 100, 1000};
+
 namespace {
 
 const int kMilliSecondToNanosSecond = 1000000;
@@ -132,7 +136,7 @@ void Logger::calculate_avg_gpu_time(
 }
 #endif
 
-void Logger::set_runtime_stats() {
+void Logger::set_runtime_stats_and_log() {
   // Sync with reducer's data
   std::lock_guard<std::mutex> lock(reducer_->mutex_);
   // Set runtime stats at the sampling iterations.
@@ -183,7 +187,7 @@ void Logger::set_runtime_stats() {
       return;
     }
 
-    // set_runtime_stats is called at the beginning of forward call,
+    // set_runtime_stats_and_log is called at the beginning of forward call,
     // when it is cheap to synchronize the cuda events of previous iteration,
     // as mostly all cuda operations are finished in previous iteration.
     reducer_->gpu_timer_.forward_start.synchronize();
@@ -228,6 +232,17 @@ void Logger::set_runtime_stats() {
         ddp_logging_data_->avg_backward_compute_comm_overlap_time,
         reducer_->cpu_timer_.backward_comm_start_time,
         reducer_->cpu_timer_.backward_compute_end_time);
+  }
+  // Log runtime (e.g. avg performance) stats at the beginning and also
+  // after a larger number of iterations. Choosing 10/1000/10000 is
+  // not scientific here, it assumes most of applications will run
+  // at least 10 iterations. stats could have smaller variance if
+  // selected num_iterations_ is larger.
+  if (std::find(
+          std::begin(LoggingIterations),
+          std::end(LoggingIterations),
+          num_iterations_stats_recorded_) != std::end(LoggingIterations)) {
+    LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 }
 

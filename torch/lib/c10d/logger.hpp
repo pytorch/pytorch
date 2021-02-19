@@ -44,7 +44,7 @@ class Logger {
   // single device program and single device module right now.
   // TODO to support single process multiple devices and multi device modules,
   // events need to be created and recorded on multiple devices.
-  void set_runtime_stats();
+  void set_runtime_stats_and_log();
 
  private:
   // ddp_logging_data_ is used to hold all the ddp related logging
