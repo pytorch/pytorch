@@ -1368,6 +1368,9 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
 def sample_inputs_unfold(op_info, device, dtype, requires_grad):
     test_cases = (
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> c4b3a88bce... updates to the opinfo unfold test
         ((), (0, 1, 1)),
         ((S, S, S, S), (0, 3, 1)),
         ((S, S, S, S), (1, 3, 1)),
@@ -1390,6 +1393,7 @@ def sample_inputs_unfold(op_info, device, dtype, requires_grad):
         ((10, 10), (1, 2, 3)),
         ((10, 10), (1, 2, 2)),
         ((S, S, S), (2, 3, 2)),
+<<<<<<< HEAD
     )
 
     sample_inputs = []
@@ -1435,6 +1439,16 @@ def sample_inputs_unfold(op_info, device, dtype, requires_grad):
         sample_inputs += [SampleInput(args)]
 
 >>>>>>> adad4f0586... add test cases for complex supporting unfold
+=======
+    )
+
+    sample_inputs = []
+    for shape, arguments in test_cases:
+        sample_inputs += [SampleInput(make_tensor(dim, device, dtype,
+                                      low=None, high=None,
+                                      requires_grad=requires_grad),
+                                      args=arguments)]
+>>>>>>> c4b3a88bce... updates to the opinfo unfold test
     return sample_inputs
 
 # Operator database (sorted alphabetically)
@@ -2427,6 +2441,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('unfold',
 <<<<<<< HEAD
+<<<<<<< HEAD
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
@@ -2445,6 +2460,11 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
            ),
+=======
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+#           test_inplace_grad=False,
+#           supports_tensor_out=False,
+>>>>>>> c4b3a88bce... updates to the opinfo unfold test
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('vstack',
            # gradcheck expects the input arguments as a flat list
