@@ -65,7 +65,8 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 // - Resulting tensor must have the same dtype as the input one
 
 // Check if all tensors have the same device, layout, strides and are not overlapping and dense
-bool has_same_attributes(Device expected_device, IntArrayRef expected_strides, TensorList tensors) {
+bool has_same_attributes(Device expected_device, TensorList tensors) {
+  auto expected_strides = tensors[0].strides();
   for (const auto& t : tensors) {
     if (t.device() != expected_device) {
       return false;
@@ -97,10 +98,9 @@ bool can_use_fast_route(TensorList tensors) {
   return false;
 #else
   auto expected_device = tensors[0].device();
-  auto expected_strides = tensors[0].strides();
 
   for (auto t : tensors) {
-    if (!has_same_attributes(expected_device, expected_strides, {t})) {
+    if (!has_same_attributes(expected_device, {t})) {
       return false;
     }
   }
@@ -114,10 +114,9 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
   return false;
 #else
   auto expected_device = tensors[0].device();
-  auto expected_strides = tensors[0].strides();
 
   for (auto t : tensors) {
-    if (!has_same_attributes(expected_device, expected_strides, {t})) {
+    if (!has_same_attributes(expected_device, {t})) {
       return false;
     }
 
@@ -135,7 +134,6 @@ bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars) {
   return false;
 #else
   auto expected_device = tensors[0].device();
-  auto expected_strides = tensors[0].strides();
 
   for (int i = 0; i < tensors.size(); i++) {
     if (will_promote_tensor(tensors[i], scalars[i])) {
@@ -143,7 +141,7 @@ bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars) {
     }
   }
 
-  if (!has_same_attributes(expected_device, expected_strides, tensors)) {
+  if (!has_same_attributes(expected_device, tensors)) {
       return false;
   }
 
@@ -156,9 +154,8 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_strides = tensors1[0].strides();
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_strides, {tensors1[i], tensors2[i]})) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
       return false;
     }
   }
@@ -172,9 +169,8 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar)
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_strides = tensors1[0].strides();
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_strides, {tensors1[i], tensors2[i]})) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
       return false;
     }
 
@@ -192,9 +188,8 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_strides = tensors1[0].strides();
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_strides, {tensors1[i], tensors2[i], tensors3[i]})) {
+    if (!has_same_attributes(expected_device,  {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
     }
   }
@@ -208,9 +203,8 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_strides = tensors1[0].strides();
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_strides, {tensors1[i], tensors2[i], tensors3[i]})) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
     }
 
@@ -228,9 +222,8 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_strides = tensors1[0].strides();
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_strides, {tensors1[i], tensors2[i], tensors3[i]})) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
     }
 
