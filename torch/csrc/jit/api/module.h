@@ -276,6 +276,13 @@ struct TORCH_API Module : public Object {
       bool non_blocking);
 };
 
+// C++ equivalent api of `torch.jit.freeze`. See documentation there for
+// details.
+TORCH_API Module freeze(
+    const Module& module,
+    c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
+    bool optimize_numerics = true);
+
 namespace detail {
 
 struct TORCH_API SlotCursor {
