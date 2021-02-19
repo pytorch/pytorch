@@ -2693,9 +2693,27 @@ void checkIdMapped(
     IterDomain* id1,
     bool should_map) {
   if (should_map) {
-    TORCH_CHECK(root_map.canMap(v0->domain(), id0, v1->domain(), id1));
+    TORCH_CHECK(
+        root_map.canMap(v0->domain(), id0, v1->domain(), id1),
+        "Should be mappable: ",
+        id0,
+        " of ",
+        v0,
+        " and ",
+        id1,
+        " of ",
+        v1);
   } else {
-    TORCH_CHECK(!root_map.canMap(v0->domain(), id0, v1->domain(), id1));
+    TORCH_CHECK(
+        !root_map.canMap(v0->domain(), id0, v1->domain(), id1),
+        "Should not be mappable: ",
+        id0,
+        " of ",
+        v0,
+        " and ",
+        id1,
+        " of ",
+        v1);
   }
 }
 
@@ -2881,7 +2899,7 @@ TEST(NVFuserTest, FusionRootMappingRfactor_CUDA) {
       {true, true, false});
 }
 
-TEST(NVFuserTest, FusionRootMappingReductionDependency_CUDA) {
+TEST(NVFuserTest, FusionRootMappingReductionDependency1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2899,6 +2917,113 @@ TEST(NVFuserTest, FusionRootMappingReductionDependency_CUDA) {
       tv2,
       tv2->getRootDomain(),
       {true, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+}
+
+TEST(NVFuserTest, FusionRootMappingReductionDependency2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv0, tv2);
+  fusion.addOutput(tv3);
+
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv1,
+      tv1->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv3,
+      tv3->getRootDomain(),
+      {true, false});
+  checkIdMapped(tv2, tv2->getRootDomain(), tv3, tv3->getRootDomain());
+}
+
+TEST(NVFuserTest, FusionRootMappingReductionDependency3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  fusion.addOutput(tv2);
+
+  tv1->split(-1, 4);
+  auto tv3 = tv1->rFactor({-2});
+
+  checkIdMapped(tv0, tv0->getRootDomain(), tv3, tv3->getRootDomain());
+  checkIdMapped(
+      tv3,
+      tv3->getMaybeRFactorDomain(),
+      {true, false, true},
+      tv1,
+      tv1->getRootDomain(),
+      {true, true});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+}
+
+TEST(NVFuserTest, FusionRootMappingReductionDependency4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv0, tv2);
+  fusion.addOutput(tv3);
+
+  tv1->split(-1, 4);
+  auto tv4 = tv1->rFactor({-2});
+
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv4,
+      tv4->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv4,
+      tv4->getMaybeRFactorDomain(),
+      {true, false, true},
+      tv1,
+      tv1->getRootDomain(),
+      {true, true});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+  checkIdMapped(tv2, tv2->getRootDomain(), tv3, tv3->getRootDomain());
   checkIdMapped(
       tv0,
       tv0->getRootDomain(),

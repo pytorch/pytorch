@@ -198,7 +198,7 @@ void UnmappableReductionDomains::handle(ReductionOp* op) {
   // Builds a map from reduction domains to consumer domains.
   TensorView* out_tv = op->out()->as<TensorView>();
   std::vector<DomainKey> reduction_keys;
-  for (const auto id : out_tv->getMaybeRFactorDomain()) {
+  for (const auto id : out_tv->getRootDomain()) {
     if (id->isReduction()) {
       DomainKey key(out_tv->domain(), id);
       reduction_keys.push_back(key);
