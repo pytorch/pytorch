@@ -100,13 +100,19 @@ static inline void slow_conv_transpose2d_shape_check(
   }
 
   int ndim = input.dim();
-  int dimf = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
+
+   if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
+  }
 
   TORCH_CHECK(
-      input.numel() != 0 && ndim == 4,
-      "non-empty 4D input tensor expected but got a tensor with size ",
+      input.numel() != 0 && (ndim == 3 || ndim == 4),
+      "non-empty 3D or 4D input tensor expected but got a tensor with size ",
       input.sizes());
 
   int64_t input_height = input.size(dimh);
@@ -279,6 +285,13 @@ void slow_conv_transpose2d_out_cpu_template(
   Tensor columns = columns_;
   TORCH_CHECK(columns.is_contiguous(), "columns needs to be contiguous");
 
+  bool is_batch = false;
+  if (input.dim() == 3) {
+    // Force batch
+    is_batch = true;
+    input.resize_({1, input.size(0), input.size(1), input.size(2)});
+  }
+
   auto output_sizes = conv_input_size(
       input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, /*groups*/ 1);
 
@@ -375,6 +388,10 @@ void slow_conv_transpose2d_out_cpu_template(
       }
     }
   });
+
+  if (is_batch) {
+    output.resize_({n_output_plane, output_height, output_width});
+  }
 }
 
 void slow_conv_transposed2d_backward_channels_last(
@@ -497,6 +514,14 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
   Tensor grad_columns = grad_columns_;
   TORCH_CHECK(grad_columns.is_contiguous(), "grad_columns needs to be contiguous");
 
+  bool is_batch = false;
+  if (input.dim() == 3) {
+    // Force batch
+    is_batch = true;
+    input.resize_({1, input.size(0), input.size(1), input.size(2)});
+    grad_output.resize_({1, grad_output.size(0), grad_output.size(1), grad_output.size(2)});
+  }
+
   int64_t batch_size = input.size(0);
   int64_t input_width = input.size(3);
   int64_t input_height = input.size(2);
@@ -579,6 +604,10 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
       });
     }
   });
+
+  if (is_batch) {
+    grad_input.resize_({n_input_plane, input_height, input_width});
+  }
 }
 
 void slow_conv_transposed_acc_grad_channels_last(
@@ -708,14 +737,6 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   Tensor input = input_.contiguous(memory_format);
   Tensor grad_output = grad_output_.contiguous(memory_format);
 
-  int64_t batch_size = input.size(0);
-  int64_t input_width = input.size(3);
-  int64_t input_height = input.size(2);
-  int64_t output_height = grad_output.size(2);
-  int64_t output_width = grad_output.size(3);
-  int64_t n_input_plane = input.size(1);
-  int64_t n_output_plane = grad_output.size(1);
-
   Tensor columns = columns_;
   TORCH_CHECK(columns.is_contiguous(), "columns needs to be contiguous");
   if (grad_weight.defined()) {
@@ -724,6 +745,22 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   if (grad_bias.defined()) {
     TORCH_CHECK(grad_bias.is_contiguous(), "grad_bias needs to be contiguous");
   }
+
+  bool is_batch = false;
+  if (input.dim() == 3) {
+    // Force batch
+    is_batch = true;
+    input.resize_({1, input.size(0), input.size(1), input.size(2)});
+    grad_output.resize_({1, grad_output.size(0), grad_output.size(1), grad_output.size(2)});
+  }
+
+  int64_t batch_size = input.size(0);
+  int64_t input_width = input.size(3);
+  int64_t input_height = input.size(2);
+  int64_t output_height = grad_output.size(2);
+  int64_t output_width = grad_output.size(3);
+  int64_t n_input_plane = input.size(1);
+  int64_t n_output_plane = grad_output.size(1);
 
   bool skip_im2col = skip_transforming(kernel_size, stride, padding, output_padding);
 
