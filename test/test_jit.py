@@ -9104,6 +9104,8 @@ dedent """
         self.checkScript(fn, (torch.zeros(5, 7, 1),))
         self.checkScript(fn1, (torch.empty(3, 4), -2))
         self.checkScript(fn1, (torch.randn(3, 8), 1))
+        self.checkScript(fn1, (torch.zeros(3, 6, 9), -3))
+        self.checkScript(fn1, (torch.empty(5), 0))
 
     def test_any(self):
         def fn(x: List[int]):
@@ -9120,13 +9122,18 @@ dedent """
 
         self.checkScript(fn, ([0, 0, 0, 0], ))
         self.checkScript(fn, ([0, 3, 0], ))
+        self.checkScript(fn, ([], ))
         self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
         self.checkScript(fn1, ([0.0, 0.0, 0.0], ))
         self.checkScript(fn1, ([0, 0, 0], ))
+        self.checkScript(fn1, ([], ))
         self.checkScript(fn2, ([True, False, False], ))
         self.checkScript(fn2, ([False, False, False], ))
+        self.checkScript(fn2, ([True, True, True, True], ))
+        self.checkScript(fn2, ([], ))
         self.checkScript(fn3, (["", "", ""], ))
         self.checkScript(fn3, (["", "", "", "-1"], ))
+        self.checkScript(fn3, ([], ))
 
     def test_script_module_not_tuple(self):
         class M(torch.jit.ScriptModule):
