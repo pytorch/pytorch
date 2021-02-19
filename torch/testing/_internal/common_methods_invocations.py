@@ -1532,6 +1532,24 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs'),
                    ),
                    sample_inputs_func=sample_inputs_clamp),
+    UnaryUfuncInfo('conj',
+                   ref=np.conj,
+                   dtypes=all_types_and_complex_and(torch.bool,
+                                                    torch.bfloat16, torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None,
+                   dtypesIfROCM=None,
+                   skips=(
+                       # File "test_unary_ufuncs.py", line 289, in test_reference_numerics
+                       #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
+                       # KeyError: <class 'numpy.intc'>
+                       # Following error in Windows CI
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.int],
+                                active_if=IS_WINDOWS),
+                   ),
+                   supports_tensor_out=True,
+                   test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2748,7 +2766,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('conj', (S, S, S), NO_ARGS),
         ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
         ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
         ('copysign', (S, S), ((S, S, S),), 'broadcast_lhs', (False,)),
