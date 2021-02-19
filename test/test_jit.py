@@ -12996,7 +12996,7 @@ dedent """
 
     def test_ignored_props(self):
         class A(nn.Module):
-            __jit_ignored_attributes__ = ["ignored"]
+            __jit_ignored_attributes__ = ["ignored", "ignored_return_val"]
 
             def __init__(self):
                 super().__init__()
@@ -13005,9 +13005,19 @@ dedent """
             def ignored(self):
                 raise ValueError("shouldn't be called")
 
+            @property
+            def ignored_return_val(self):
+                return 1
+
+            @torch.jit.ignore
+            def call(self):
+                return self.ignored_return_val
+
         f = torch.jit.script(A())
         # jank way to test if there is no error
         self.assertTrue(isinstance(f, torch.jit.ScriptModule))
+        self.assertTrue(isinstance(f.call(), property))
+
 
     def test_pass(self):
         def foo(x):
