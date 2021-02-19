@@ -221,8 +221,8 @@ struct AllocParams {
 
 // CUDA graphs helper
 struct PrivatePool {
-  PrivatePool(int init_use_count) :
-    use_count(init_use_count),
+  PrivatePool() :
+    use_count(1),
     cudaMalloc_count(0),
     large_blocks(BlockComparator, false, this),
     small_blocks(BlockComparator, true, this) {}
@@ -295,7 +295,7 @@ class DeviceCachingAllocator {
   // Members specific to CUDA graphs
 
   // Private pools for CUDA graphs
-  std::unordered_map<CUDACaptureid_t/*pool id*/, PrivatePool> graph_pools;
+  std::unordered_map<CUDACaptureid_t/*pool id*/, std::unique_ptr<PrivatePool>> graph_pools;
   // Pools no longer referenced by any graph. Their BlockPools are eligible for free_blocks.
   // Needs to be a map (not a vector) because (like graph_pools) we might erase entries in any order.
   std::unordered_map<CUDACaptureid_t/*pool id*/, PrivatePool*> graph_pools_freeable;
@@ -512,8 +512,8 @@ class DeviceCachingAllocator {
     cache_info_aux(large_blocks, total, largest);
     cache_info_aux(small_blocks, total, largest);
     for (const auto& gp : graph_pools) {
-      cache_info_aux(gp.second.large_blocks, total, largest);
-      cache_info_aux(gp.second.small_blocks, total, largest);
+      cache_info_aux(gp.second->large_blocks, total, largest);
+      cache_info_aux(gp.second->small_blocks, total, largest);
     }
   }
 
@@ -620,12 +620,12 @@ class DeviceCachingAllocator {
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool. Make a new pool for this capture.
-      graph_pools.emplace(mempool_id, 1);
+      graph_pools.emplace(std::make_pair(mempool_id, std::unique_ptr<PrivatePool>(new PrivatePool)));
     } else {
       // mempool_id references an existing pool, which the current capture will share.
       // Check this pool is live (at least one other capture already references it).
-      TORCH_INTERNAL_ASSERT(it->second.use_count > 0);
-      it->second.use_count++;
+      TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
+      (it->second->use_count)++;
     }
     // Maps this graph_id to mempool_id and makes sure this graph_id wasn't somehow
     // assigned a mempool_id already. Keeps essential effect (insert) out of macro.
@@ -653,12 +653,12 @@ class DeviceCachingAllocator {
     // this graph's pool when it discovers they're unused (unsplit).
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
-    auto uc = --it->second.use_count;
+    auto uc = --(it->second->use_count);
     TORCH_INTERNAL_ASSERT(uc >= 0);
     if (uc == 0) {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
       // and makes sure this pool wasn't somehow made freeable already.
-      bool inserted = graph_pools_freeable.insert({mempool_id, &(it->second)}).second;
+      bool inserted = graph_pools_freeable.insert({mempool_id, it->second.get()}).second;
       TORCH_INTERNAL_ASSERT(inserted);
     }
   }
@@ -672,8 +672,8 @@ class DeviceCachingAllocator {
     blocks.insert(blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
     for (const auto& gp : graph_pools) {
-      blocks.insert(blocks.end(), gp.second.small_blocks.blocks.begin(), gp.second.small_blocks.blocks.end());
-      blocks.insert(blocks.end(), gp.second.large_blocks.blocks.begin(), gp.second.large_blocks.blocks.end());
+      blocks.insert(blocks.end(), gp.second->small_blocks.blocks.begin(), gp.second->small_blocks.blocks.end());
+      blocks.insert(blocks.end(), gp.second->large_blocks.blocks.begin(), gp.second->large_blocks.blocks.end());
     }
     blocks.insert(blocks.end(), active_blocks.begin(), active_blocks.end());
     return blocks;
@@ -765,9 +765,9 @@ class DeviceCachingAllocator {
         auto it1 = graph_pools.find(it0->second);
         TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
         if (size <= kSmallSize) {
-          return it1->second.small_blocks;
+          return it1->second->small_blocks;
         } else {
-          return it1->second.large_blocks;
+          return it1->second->large_blocks;
         }
       }
     }
