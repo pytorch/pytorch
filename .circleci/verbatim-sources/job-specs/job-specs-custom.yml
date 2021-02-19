@@ -204,6 +204,28 @@
       - store_test_results:
           path: test/test-reports
 
+  pytorch_macos_10_13_py3_test_build_lite_interpreter:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
+    macos:
+      xcode: "12.0"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/workspace
+      - run_brew_for_macos_build
+      - run:
+          name: Test
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CI=1
+            export BUILD_LITE_INTERPRETER=1
+            chmod a+x .jenkins/pytorch/macos-test.sh
+            unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+      - store_test_results:
+          path: test/test-reports
+
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
