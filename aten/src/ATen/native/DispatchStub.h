@@ -114,7 +114,7 @@ struct TORCH_API DispatchStubImpl {
 };
 
 template <typename rT, typename T, typename... Args>
-struct TORCH_API DispatchStub<rT (*)(Args...), T> {
+struct DispatchStub<rT (*)(Args...), T> {
   using FnPtr = rT (*) (Args...);
 
   DispatchStub() = default;
