@@ -1996,7 +1996,7 @@ const Expr* flatten_buf_dims(const Buf* v) {
 Stmt* TermExpander::mutate(const Allocate* v) {
   const Buf* buf = v->buf();
   const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
-  assert(buf_new);
+  TORCH_INTERNAL_ASSERT(buf_new);
   const Expr* flattened = flatten_buf_dims(buf_new);
 
   if (flattened->isConstant() && immediateEquals(flattened, 0)) {
@@ -2014,7 +2014,7 @@ Stmt* TermExpander::mutate(const Allocate* v) {
 Stmt* TermExpander::mutate(const Free* v) {
   const Buf* buf = v->buf();
   const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
-  assert(buf_new);
+  TORCH_INTERNAL_ASSERT(buf_new);
 
   if (eliminated_allocations_.count(buf_new->base_handle())) {
     eliminated_allocations_.erase(buf_new->base_handle());

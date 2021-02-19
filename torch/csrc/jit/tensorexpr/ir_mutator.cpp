@@ -189,8 +189,9 @@ const Expr* IRMutator::mutate(const Load* v) {
 const Expr* IRMutator::mutate(const Buf* v) {
   const Var* var = v->base_handle();
   const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
-  if (!var_new)
+  if (!var_new) {
     return nullptr;
+  }
   bool any_change = var_new != var;
 
   std::vector<const Expr*> dims_old = v->dims();
@@ -444,7 +445,7 @@ Stmt* IRMutator::mutate(const ExternalCall* v) {
 Stmt* IRMutator::mutate(const Allocate* v) {
   const Buf* buf = v->buf();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
-  assert(buf_new);
+  TORCH_INTERNAL_ASSERT(buf_new);
   if (buf_new == buf) {
     return (Stmt*)v;
   }
@@ -454,7 +455,7 @@ Stmt* IRMutator::mutate(const Allocate* v) {
 Stmt* IRMutator::mutate(const Free* v) {
   const Buf* buf = v->buf();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
-  assert(buf_new);
+  TORCH_INTERNAL_ASSERT(buf_new);
   if (buf_new == buf) {
     return (Stmt*)v;
   }
