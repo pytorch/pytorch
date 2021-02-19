@@ -2,10 +2,10 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
-#include <torch/csrc/jit/testing/file_check.h>
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
 #include <torch/csrc/jit/tensorexpr/mem_arena.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
@@ -33,7 +33,8 @@ TEST(CppPrinter, AllocateOnStackThenFree) {
 
 TEST(CppPrinter, AllocateOnHeapThenFree) {
   KernelScope kernel_scope;
-  std::vector<const Expr*> dims = {new IntImm(20), new IntImm(50), new IntImm(3)};
+  std::vector<const Expr*> dims = {
+      new IntImm(20), new IntImm(50), new IntImm(3)};
   const Buf* buf = new Buf("y", dims, kLong);
   Allocate* alloc = new Allocate(buf);
   Free* free = new Free(buf);
