@@ -188,7 +188,7 @@ def torch_video(key, data):
     try:
         import torchvision.io
     except ImportError as e:
-        raise ModuleNotFoundError("Package `torchvision` is required to be installed for default video reader."
+        raise ModuleNotFoundError("Package `torchvision` is required to be installed for default video file loader."
                                   "Please use `pip install torchvision` or `conda install torchvision -c pytorch`"
                                   "to install the package")
 
@@ -212,12 +212,9 @@ def torch_audio(key, data):
     try:
         import torchaudio
     except ImportError as e:
-        try:
-            import pip  # type: ignore
-            pip.main(['install', '--user', 'torchaudio'])
-            import torchaudio  # type: ignore
-        except ImportError:
-            raise e
+        raise ModuleNotFoundError("Package `torchaudio` is required to be installed for default audio file loader."
+                                  "Please use `pip install torchaudio` or `conda install torchaudio -c pytorch`"
+                                  "to install the package")
 
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
