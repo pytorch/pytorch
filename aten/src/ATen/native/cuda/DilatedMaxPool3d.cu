@@ -141,7 +141,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   {
     int maxIndex = indices[slice][oFrame][oRow][oColumn];
     if (maxIndex != -1) {
-      gpuAtomicAdd(&gradInputData[slice * itime * iheight * iwidth + maxIndex],
+      gpuAtomicAddNoReturn(&gradInputData[slice * itime * iheight * iwidth + maxIndex],
                 gradOutput[slice][oFrame][oRow][oColumn]);
     }
   }

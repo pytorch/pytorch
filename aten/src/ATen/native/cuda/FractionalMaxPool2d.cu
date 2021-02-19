@@ -114,7 +114,7 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int inputH = index / gradInput.size(3);
     assert(inputH < gradInput.size(2));
 
-    gpuAtomicAdd(
+    gpuAtomicAddNoReturn(
       &gradInput[batch][plane][inputH][inputW],
       gradOutput[batch][plane][outputH][outputW]
     );

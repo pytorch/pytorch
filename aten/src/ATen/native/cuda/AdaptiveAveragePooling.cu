@@ -200,7 +200,7 @@ namespace {
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             // atomic add since different threads could update same variable
-            gpuAtomicAdd(&(ptr_gradInput[iw]), grad_delta);
+            gpuAtomicAddNoReturn(&(ptr_gradInput[iw]), grad_delta);
           }
           ptr_gradInput += isizeW; // next input line
         }
