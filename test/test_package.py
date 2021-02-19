@@ -476,7 +476,7 @@ def load():
 
 
     def test_module_glob(self):
-        from torch.package.exporter import _GlobGroup
+        from torch.package.package_exporter import _GlobGroup
 
         def check(include, exclude, should_match, should_not_match):
             x = _GlobGroup(include, exclude)
