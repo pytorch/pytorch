@@ -1532,12 +1532,40 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
+  std::vector<Tensor*> non_output_tensors;
+  for (auto t : tensors_) {
+    non_output_tensors.push_back(t.second);
+  }
   // Find all tensors we need to compute (including dependencies) and put them
   // in a topological order
-  std::vector<Tensor*> tensors_to_compute =
-      findAllNeededTensors(tensorOutputs_);
+  auto all_needed_tensors =
+      findDependentTensors(non_output_tensors, tensorOutputs_);
+  // Collect the stmts from all the tensors to build an aggregate stmt.
+  std::vector<Stmt*> loops;
+  for (Tensor* t : all_needed_tensors) {
+    Stmt* loop = t->stmt();
+    if (loop->get_parent()) {
+      std::cerr << "Error: creating a loopnest from already used Tensors\n";
+      loops = {};
+      break;
+    }
+    // Flatten initializers.
+    if (Block* block = dynamic_cast<Block*>(loop)) {
+      for (auto* s : block->stmts()) {
+        block->remove_stmt(s);
+        loops.push_back(s);
+      }
+    } else {
+      loops.push_back(loop);
+    }
+  }
+  // Collect the output buffers.
+  std::unordered_set<const Buf*> output_bufs;
+  for (auto t : tensorOutputs_) {
+    output_bufs.insert(t->buf());
+  }
+  torch::jit::tensorexpr::LoopNest l(new Block(loops), output_bufs);
 
-  torch::jit::tensorexpr::LoopNest l(tensorOutputs_, tensors_to_compute);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;

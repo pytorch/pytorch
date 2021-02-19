@@ -192,6 +192,10 @@ class CreateBufferMap : public IRVisitor {
 
 std::vector<Tensor*> findAllNeededTensors(const std::vector<Tensor*>& tensors);
 
+std::vector<Tensor*> findDependentTensors(
+    const std::vector<Tensor*>& non_output_tensors,
+    const std::vector<Tensor*>& output_tensors);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
