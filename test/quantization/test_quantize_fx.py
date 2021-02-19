@@ -1739,6 +1739,53 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
 
+    def test_linear_dynamic_fp16(self):
+        class FuncLinear(torch.nn.Module):
+            def __init__(self, use_bias, has_relu, f_relu):
+                super(FuncLinear, self).__init__()
+                self.w = torch.randn(4, 30)
+                self.b = torch.randn(4)
+                self.use_bias = use_bias
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
+
+            def forward(self, x):
+                if self.use_bias:
+                    x = F.linear(x, self.w, self.b)
+                else:
+                    x = F.linear(x, self.w)
+                x = self.relu(x)
+                return x
+
+        data = (torch.rand((1, 30), dtype=torch.float),)
+        options = itertools.product(
+            (True, False),  # use_bias
+            (True, False),  # has_relu
+            (True, False),  # functional relu
+            (True, False),  # output_a_reference_model
+        )
+        for use_bias, has_relu, f_relu, reference in options:
+            model = FuncLinear(use_bias, has_relu, f_relu)
+            reference = False
+            if reference:
+                qlinear_fun = torch.functional.linear
+            else:
+                qlinear_fun = torch.ops.quantized.linear_dynamic_fp16
+            convert_node_occurrence = {
+                qlinear_fun: 1,
+            }
+            self.checkGraphModeFxOp(
+                model, data, QuantType.DYNAMIC, qlinear_fun,
+                debug=reference,
+                custom_qconfig=float16_dynamic_qconfig,
+                expected_node_occurrence=convert_node_occurrence,
+                print_debug_info=True)
+
     @skipIfNoFBGEMM
     def test_conv_module(self):
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
