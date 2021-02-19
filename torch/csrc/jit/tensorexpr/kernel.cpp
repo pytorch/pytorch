@@ -2207,8 +2207,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   std::vector<CodeGen::CallArg> runArgs;
   runArgs.reserve(inputs.size() + tensorOutputs_.size());
 
-  for (size_t i = 0, e = inputs.size(); i < e; i++) {
-    auto const& input = inputs[i];
+  for (const auto& input : inputs) {
     if (input.isInt()) {
       runArgs.emplace_back(input.toInt());
     } else if (input.isDouble()) {

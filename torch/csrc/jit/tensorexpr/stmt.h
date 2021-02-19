@@ -64,11 +64,11 @@ class TORCH_API Block : public StmtNode<Block> {
  public:
   static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
-    for (size_t i = 0; i < stmts.size(); i++) {
-      if (!stmts[i]) {
+    for (auto stmt : stmts) {
+      if (!stmt) {
         continue;
       }
-      valid_stmts.push_back(stmts[i]);
+      valid_stmts.push_back(stmt);
     }
     if (valid_stmts.empty()) {
       return nullptr;
