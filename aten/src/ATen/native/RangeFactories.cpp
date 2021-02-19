@@ -63,7 +63,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
     // skip
   } else if (steps == 1) {
     if (isComplexType(r.scalar_type())){
-      r.fill_(std::pow(base, start.to<std::complex<double>>()));
+      r.fill_(std::pow(base, start.to<c10::complex<double>>()));
     } else {
       r.fill_(std::pow(base, start.to<double>()));
     }
