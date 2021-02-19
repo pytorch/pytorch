@@ -6,6 +6,22 @@
 
 namespace at { namespace native {
 
+void resize_output(Tensor& output, IntArrayRef shape) {
+  // Tests for resizing of tensors with one more elements
+  if (output.numel() != 0 && !output.sizes().equals(shape)) {
+    TORCH_WARN(
+      "An output with one or more elements was resized since it had ",
+      "shape ", output.sizes(), ", which does not match the required ",
+      "output shape ", shape, ".",
+      "This behavior is deprecated, and in a future PyTorch release outputs ",
+      "will not be resized unless they have zero elements. You can explicitly ",
+      "reuse an out tensor t by resizing it, inplace, to zero elements with ",
+      "t.resize_(0).");
+  }
+
+  output.resize_(shape);
+}
+
 // Call the sparse implementation in SparseTensor.cpp directly.
 // A dynamic dispatch here is NOT necessary, so I didn't put
 // this function in native_functions.yaml
@@ -61,12 +77,13 @@ Tensor& resize_as_(
 Tensor& resize_(
     Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    c10::optional<MemoryFormat> optional_memory_format,
+    bool resize_storage) {
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
-  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
+  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt, resize_storage);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -79,12 +96,19 @@ Tensor& resize_(
   return self;
 }
 
-TORCH_LIBRARY_IMPL(aten, CPU, m) {
-  m.impl_UNBOXED("resize_", resize_);
+Tensor& resize_(
+    Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  return resize_(self, size, optional_memory_format, /*resize_storage=*/true);
 }
 
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl_UNBOXED("resize_as_", resize_as_);
+Tensor& resize_meta_(
+    Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  // meta tensors don't have storage, so don't resize them
+  return resize_(self, size, optional_memory_format, /*resize_storage=*/false);
 }
 
 } // namespace native

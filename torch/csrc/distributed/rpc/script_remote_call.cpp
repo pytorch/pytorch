@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/script_remote_call.h>
 
 #include <c10/util/C++17.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -21,8 +21,9 @@ ScriptRemoteCall::ScriptRemoteCall(
     const c10::QualifiedName& qualifiedName,
     std::vector<at::IValue>&& stack,
     const RRefId& retRRefId,
-    const ForkId& retForkId)
-    : ScriptCall(qualifiedName, std::move(stack)),
+    const ForkId& retForkId,
+    const bool isAsyncExecution)
+    : ScriptCall(qualifiedName, std::move(stack), isAsyncExecution),
       retRRefId_(retRRefId),
       retForkId_(retForkId) {}
 
@@ -44,7 +45,8 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
         scriptCallPtr->qualifiedName(),
         std::move(ivalues),
         retRRefId,
-        retForkId);
+        retForkId,
+        scriptCallPtr->isAsyncExecution());
   }
 }
 

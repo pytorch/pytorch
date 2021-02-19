@@ -24,6 +24,8 @@
 #include "torch/csrc/jit/serialization/import.h"
 #include "torch/script.h"
 
+#include "c10/mobile/CPUCachingAllocator.h"
+
 #include <chrono>
 using namespace std::chrono;
 
@@ -45,6 +47,10 @@ C10_DEFINE_bool(
   no_inputs,
   false,
   "Whether the model has any input. Will ignore other input arugments if true");
+C10_DEFINE_bool(
+  use_caching_allocator,
+  false,
+  "Whether to cache allocations between inference iterations");
 C10_DEFINE_int(
     use_bundled_input,
     -1,
@@ -62,6 +68,9 @@ C10_DEFINE_bool(
   "Whether to print performance stats for AI-PEP.");
 
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
+C10_DEFINE_bool(vulkan, false, "Whether to use Vulkan backend (GPU).");
+
+namespace {
 
 std::vector<std::string>
 split(char separator, const std::string& string, bool ignore_empty = true) {
@@ -136,9 +145,11 @@ std::vector<c10::IValue> create_inputs() {
           "Unsupported input memory format: ", input_memory_format_list[i]);
     }
 
-    inputs.push_back(torch::ones(
-        input_dims,
-        at::TensorOptions(input_type).memory_format(input_memory_format)));
+    inputs.push_back(
+        torch::ones(
+            input_dims,
+            at::TensorOptions(input_type).
+            memory_format(input_memory_format)));
   }
 
   if (FLAGS_pytext_len > 0) {
@@ -148,6 +159,39 @@ std::vector<c10::IValue> create_inputs() {
 
   return inputs;
 }
+
+class Runner {
+ public:
+  virtual ~Runner() = default;
+  virtual c10::IValue run(
+      torch::jit::Module& module,
+      const std::vector<c10::IValue>& inputs) {
+    return module.forward(inputs);
+  }
+};
+
+class vkRunner final : public Runner {
+ public:
+  virtual ~vkRunner() = default;
+  virtual c10::IValue run(
+      torch::jit::Module& module,
+      const std::vector<c10::IValue>& inputs) override {
+    // Upload the input tensor(s) to GPU memory.
+    inputs_.clear();
+    inputs_.reserve(inputs.size());
+    for (const auto& input : inputs) {
+      inputs_.emplace_back(input.toTensor().vulkan());
+    }
+
+    // Run, and download the output tensor to system memory.
+    return module.forward(inputs_).toTensor().cpu();
+  }
+
+ private:
+  std::vector<c10::IValue> inputs_;
+};
+
+} // namespace
 
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
@@ -187,11 +231,20 @@ int main(int argc, char** argv) {
     inputs = all_inputs.get(FLAGS_use_bundled_input).toTuple()->elements();
   }
 
+  const std::unique_ptr<Runner> runner =
+      FLAGS_vulkan ? std::make_unique<vkRunner>() :
+                     std::make_unique<Runner>();
+
   module.eval();
   if (FLAGS_print_output) {
-    std::cout << module.forward(inputs) << std::endl;
+    std::cout << runner->run(module, inputs) << std::endl;
   }
 
+  c10::CPUCachingAllocator caching_allocator;
+  c10::optional<c10::WithCPUCachingAllocatorGuard> caching_allocator_guard;
+  if (FLAGS_use_caching_allocator) {
+    caching_allocator_guard.emplace(&caching_allocator);
+  }
   std::cout << "Starting benchmark." << std::endl;
   std::cout << "Running warmup runs." << std::endl;
   CAFFE_ENFORCE(
@@ -200,7 +253,7 @@ int main(int argc, char** argv) {
       FLAGS_warmup,
       ".");
   for (int i = 0; i < FLAGS_warmup; ++i) {
-    module.forward(inputs);
+    runner->run(module, inputs);
   }
 
   std::cout << "Main runs." << std::endl;
@@ -214,7 +267,7 @@ int main(int argc, char** argv) {
   auto micros = timer.MicroSeconds();
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
-    module.forward(inputs);
+    runner->run(module, inputs);
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());

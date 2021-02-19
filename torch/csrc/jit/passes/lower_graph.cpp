@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/lower_graph.h>
+
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -34,7 +35,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     std::size_t operator()(const Slot& slot) const {
       auto obj_hash = std::hash<c10::ivalue::Object*>{}(slot.obj.get());
       auto offset_hash = std::hash<size_t>{}(slot.offset);
-      return torch::hash_combine(obj_hash, offset_hash);
+      return c10::hash_combine(obj_hash, offset_hash);
     }
   };
   std::unordered_map<Slot, size_t, SlotHash> slot_to_offset;
@@ -136,7 +137,7 @@ static std::vector<IValue> loadTensors(const std::vector<Slot>& slots) {
                getCustomClass(
                    "__torch__.torch.classes.quantized.LinearPackedParamsBase")),
           "Unknown type ",
-          type->python_str(),
+          type->repr_str(),
           " encountered in graph lowering. This type is not supported in ONNX export.");
       result.emplace_back(
           script::Object(obj.toObject()).run_method("__getstate__"));

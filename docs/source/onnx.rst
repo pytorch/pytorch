@@ -231,6 +231,252 @@ The dynamic control flow is captured correctly. We can verify in backends with d
     #       [37, 37, 37]], dtype=int64)]
 
 
+To avoid exporting a variable scalar tensor as a fixed value constant as part of the ONNX model, please
+avoid use of ``torch.Tensor.item()``. Torch supports implicit cast of single-element tensors to numbers.
+E.g.: ::
+
+    class LoopModel(torch.nn.Module):
+        def forward(self, x, y):
+            res = []
+            arr = x.split(2, 0)
+            for i in range(int(y)):
+                res += [arr[i].sum(0, False)]
+            return torch.stack(res)
+
+    model = torch.jit.script(LoopModel())
+    inputs = (torch.randn(16), torch.tensor(8))
+
+    out = model(*inputs)
+    torch.onnx.export(model, inputs, 'loop_and_list.onnx', opset_version=11, example_outputs=out)
+
+Write PyTorch model in Torch way
+--------------------------------
+
+PyTorch models can be written using numpy manipulations, but this is not proper when we convert to the ONNX model.
+For the trace-based exporter, tracing treats the numpy values as the constant node,
+therefore it calculates the wrong result if we change the input.
+So the PyTorch model need implement using torch operators.
+For example, do not use numpy operators on numpy tensors: ::
+
+    np.concatenate((x, y, z), axis=1)
+
+do not convert to numpy types: ::
+
+    y = x.astype(np.int)
+
+Always use torch tensors and torch operators: torch.concat, etc.
+In addition, Dropout layer need defined in init function so that inferencing can handle it properly, i.e., ::
+
+    class MyModule(nn.Module):
+        def __init__(self):
+            self.dropout = nn.Dropout(0.5)
+
+        def forward(self, x):
+            x = self.dropout(x)
+
+Using dictionaries to handle Named Arguments as model inputs
+------------------------------------------------------------
+
+There are two ways to handle models which consist of named parameters or keyword arguments as inputs:
+ 
+* The first method is to pass all the inputs in the same order as required by the model and pass None
+  values for the keyword arguments that do not require a value to be passed
+
+* The second and more intuitive method is to represent the keyword arguments as key-value pairs where
+  the key represents the name of the argument in the model signature and the value represents the value
+  of the argument to be passed
+
+For example, in the model: ::
+
+    class Model(torch.nn.Module): 
+      def forward(self, x, y=None, z=None): 
+        if y is not None: 
+          return x + y 
+        if z is not None: 
+          return x + z 
+        return x 
+    m = Model() 
+    x = torch.randn(2, 3)
+    z = torch.randn(2, 3) 
+
+There are two ways of exporting the model:
+
+* Not using a dictionary for the keyword arguments and passing all the inputs in the same order 
+  as required by the model ::
+
+      torch.onnx.export(model, (x, None, z), ‘test.onnx’) 
+
+* Using a dictionary to represent the keyword arguments. This dictionary is always passed in
+  addition to the non-keyword arguments and is always the last argument in the args tuple. ::
+
+      torch.onnx.export(model, (x, {'y': None, 'z': z}), ‘test.onnx’)
+
+For cases in which there are no keyword arguments, models can be exported with either an
+empty or no dictionary. For example, ::
+
+    torch.onnx.export(model, (x, {}), ‘test.onnx’)
+    or
+    torch.onnx.export(model, (x, ), ‘test.onnx’)
+
+An exception to this rule are cases in which the last input is also of a dictionary type. 
+In these cases it is mandatory to have an empty dictionary as the last argument in the 
+args tuple. For example, ::
+
+    class Model(torch.nn.Module): 
+      def forward(self, k, x): 
+        ...  
+        return x 
+    m = Model() 
+    k = torch.randn(2, 3)   
+    x = {torch.tensor(1.): torch.randn(2, 3)}
+
+Without the presence of the empty dictionary, the export call assumes that the 
+‘x’ input is intended to represent the optional dictionary consisting of named arguments. 
+In order to prevent this from being an issue a constraint is placed to provide an empty 
+dictionary as the last input in the tuple args in such cases. 
+The new call would look like this. :: 
+
+    torch.onnx.export(model, (k, x, {}), ‘test.onnx’) 
+
+
+Indexing
+--------
+
+Tensor indexing in PyTorch is very flexible and complicated.
+There are two categories of indexing. Both are largely supported in exporting today.
+If you are experiencing issues exporting indexing that belongs to the supported patterns below,
+please double check that you are exporting with the latest opset (opset_version=12).
+
+Getter
+~~~~~~
+
+This type of indexing occurs on the RHS. Export is supported for ONNX opset version >= 9. E.g.: ::
+
+  data = torch.randn(3, 4)
+  index = torch.tensor([1, 2])
+
+  # RHS indexing is supported in ONNX opset >= 11.
+  class RHSIndexing(torch.nn.Module):
+      def forward(self, data, index):
+          return data[index]
+
+  out = RHSIndexing()(data, index)
+
+  torch.onnx.export(RHSIndexing(), (data, index), 'indexing.onnx', opset_version=9)
+
+  # onnxruntime
+  import onnxruntime
+  sess = onnxruntime.InferenceSession('indexing.onnx')
+  out_ort = sess.run(None, {
+      sess.get_inputs()[0].name: data.numpy(),
+      sess.get_inputs()[1].name: index.numpy(),
+  })
+
+  assert torch.all(torch.eq(out, torch.tensor(out_ort)))
+
+Below is the list of supported patterns for RHS indexing. ::
+
+  # Scalar indices
+  data[0, 1]
+
+  # Slice indices
+  data[:3]
+
+  # Tensor indices
+  data[torch.tensor([[1, 2], [2, 3]])]
+  data[torch.tensor([2, 3]), torch.tensor([1, 2])]
+  data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])]
+  data[torch.tensor([2, 3]), :, torch.tensor([1, 2])]
+
+  # Ellipsis
+  # Not supported in scripting
+  # i.e. torch.jit.script(model) will fail if model contains this pattern.
+  # Export is supported under tracing
+  # i.e. torch.onnx.export(model)
+  data[...]
+
+  # The combination of above
+  data[2, ..., torch.tensor([2, 1, 3]), 2:4, torch.tensor([[1], [2]])]
+
+  # Boolean mask (supported for ONNX opset version >= 11)
+  data[data != 1]
+
+And below is the list of unsupported patterns for RHS indexing. ::
+
+  # Tensor indices that includes negative values.
+  data[torch.tensor([[1, 2], [2, -3]]), torch.tensor([-2, 3])]
+
+Setter
+~~~~~~
+
+In code, this type of indexing occurs on the LHS.
+Export is supported for ONNX opset version >= 11. E.g.: ::
+
+  data = torch.zeros(3, 4)
+  new_data = torch.arange(4).to(torch.float32)
+
+  # LHS indexing is supported in ONNX opset >= 11.
+  class LHSIndexing(torch.nn.Module):
+      def forward(self, data, new_data):
+          data[1] = new_data
+          return data
+
+  out = LHSIndexing()(data, new_data)
+
+  data = torch.zeros(3, 4)
+  new_data = torch.arange(4).to(torch.float32)
+  torch.onnx.export(LHSIndexing(), (data, new_data), 'inplace_assign.onnx', opset_version=11)
+
+  # onnxruntime
+  import onnxruntime
+  sess = onnxruntime.InferenceSession('inplace_assign.onnx')
+  out_ort = sess.run(None, {
+      sess.get_inputs()[0].name: torch.zeros(3, 4).numpy(),
+      sess.get_inputs()[1].name: new_data.numpy(),
+  })
+
+  assert torch.all(torch.eq(out, torch.tensor(out_ort)))
+
+Below is the list of supported patterns for LHS indexing. ::
+
+  # Scalar indices
+  data[0, 1] = new_data
+
+  # Slice indices
+  data[:3] = new_data
+
+  # Tensor indices
+  # If more than one tensor are used as indices, only consecutive 1-d tensor indices are supported.
+  data[torch.tensor([[1, 2], [2, 3]])] = new_data
+  data[torch.tensor([2, 3]), torch.tensor([1, 2])] = new_data
+
+  # Ellipsis
+  # Not supported to export in script modules
+  # i.e. torch.onnx.export(torch.jit.script(model)) will fail if model contains this pattern.
+  # Export is supported under tracing
+  # i.e. torch.onnx.export(model)
+  data[...] = new_data
+
+  # The combination of above
+  data[2, ..., torch.tensor([2, 1, 3]), 2:4] += update
+
+  # Boolean mask
+  data[data != 1] = new_data
+
+And below is the list of unsupported patterns for LHS indexing. ::
+
+  # Multiple tensor indices if any has rank >= 2
+  data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])] = new_data
+
+  # Multiple tensor indices that are not consecutive
+  data[torch.tensor([2, 3]), :, torch.tensor([1, 2])] = new_data
+
+  # Tensor indices that includes negative values.
+  data[torch.tensor([1, -2]), torch.tensor([-2, 3])] = new_data
+
+If you are experiencing issues exporting indexing that belongs to the above supported patterns, please double check that
+you are exporting with the latest opset (opset_version=12).
+
 TorchVision support
 -------------------
 
@@ -262,6 +508,7 @@ The following operators are supported:
 * Conv
 * Dropout
 * Embedding (no optional arguments supported)
+* EmbeddingBag
 * FeatureDropout (training mode not supported)
 * Index
 * MaxPool1d
@@ -289,10 +536,12 @@ The following operators are supported:
 * avg_pool2d
 * avg_pool2d
 * avg_pool3d
+* as_strided
 * baddbmm
 * bitshift
 * cat
 * ceil
+* celu
 * clamp
 * clamp_max
 * clamp_min
@@ -304,6 +553,7 @@ The following operators are supported:
 * dim_arange
 * div
 * dropout
+* einsum
 * elu
 * empty
 * empty_like
@@ -312,6 +562,7 @@ The following operators are supported:
 * exp
 * expand
 * expand_as
+* eye
 * flatten
 * floor
 * floor_divide
@@ -324,6 +575,7 @@ The following operators are supported:
 * glu
 * group_norm
 * gt
+* hardswish
 * hardtanh
 * im2col
 * index_copy
@@ -333,9 +585,11 @@ The following operators are supported:
 * instance_norm
 * interpolate
 * isnan
+* KLDivLoss
 * layer_norm
 * le
 * leaky_relu
+* len
 * log
 * log1p
 * log2
@@ -345,6 +599,8 @@ The following operators are supported:
 * logsumexp
 * lt
 * masked_fill
+* masked_scatter
+* masked_select
 * max
 * mean
 * min
@@ -354,6 +610,10 @@ The following operators are supported:
 * narrow
 * ne
 * neg
+* new_empty
+* new_full
+* new_zeros
+* nll_loss
 * nonzero
 * norm
 * ones
@@ -495,7 +755,7 @@ but intuitively the interface they provide looks like this::
       ONNX outputs whose values correspond to the original PyTorch return values
       of the autograd Function (or None if an output is not supported by ONNX).
 
-      Arguments:
+      Args:
         g (Graph): graph to write the ONNX representation into
         inputs (Value...): list of values representing the variables which contain
             the inputs for this function
@@ -522,7 +782,7 @@ but intuitively the interface they provide looks like this::
         The set of operators and the inputs/attributes they take
         is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
 
-        Arguments:
+        Args:
             opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
             args (Value...): The inputs to the operator; usually provided
                 as arguments to the `symbolic` definition.
@@ -596,12 +856,121 @@ you can create and register your own custom ops implementation in PyTorch. Here'
             return torch.ops.custom_ops.foo_forward(input1, input2, self.attr1, self.attr2)
 
     model = FooModel(attr1, attr2)
-    torch.onnx.export(model, (dummy_input1, dummy_input2), 'model.onnx')
+    torch.onnx.export(model, (dummy_input1, dummy_input2), 'model.onnx', custom_opsets={"custom_domain": 2})
 
 Depending on the custom operator, you can export it as one or a combination of existing ONNX ops.
-You can also export it as a custom op in ONNX as well. In that case, you will need to extend the backend of your choice
+You can also export it as a custom op in ONNX as well. In that case, you can specify the custom domain
+and version (custom opset) using the ``custom_opsets`` dictionary at export. If not
+explicitly specified, the custom opset version is set to 1 by default.
+Using custom ONNX ops, you will need to extend the backend of your choice
 with matching custom ops implementation, e.g. `Caffe2 custom ops <https://caffe2.ai/docs/custom-operators.html>`_,
 `ONNX Runtime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_.
+
+Operator Export Type
+------------------------------------------------
+Exporting models with unsupported ONNX operators can be achieved using the ``operator_export_type`` flag in export API.
+This flag is useful when users try to export ATen and non-ATen operators that are not registered and supported in ONNX.
+
+ONNX
+~~~~
+This mode is used to export all operators as regular ONNX operators. This is the default ``operator_export_type`` mode. ::
+
+  Example torch ir graph:
+
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = aten:exp(%0)
+      %4 : Float(2, 3, 4, strides=[12, 4, 1]) = aten:div(%0, %3)
+      return (%4)
+
+  Is exported as:
+
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %1 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx:Exp(%0)
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx:Div(%0, %1)
+      return (%2)
+
+
+ONNX_ATEN
+~~~~~~~~~
+This mode is used to export all operators as ATen ops, and avoid conversion to ONNX. ::
+
+  Example torch ir graph:
+
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::exp(%0)
+      %4 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::div(%0, %3)
+      return (%4)
+
+  Is exported as:
+
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %1 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::ATen[operator="exp"](%0)
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::ATen[operator="div"](%0, %1)
+      return (%2)
+
+ONNX_ATEN_FALLBACK
+~~~~~~~~~~~~~~~~~~
+To fallback on unsupported ATen operators in ONNX. Supported operators are exported to ONNX regularly.
+In the following example, aten::triu is not supported in ONNX. Exporter falls back on this operator. ::
+
+  Example torch ir graph:
+
+    graph(%0 : Float):
+      %3 : int = prim::Constant[value=0]()
+      %4 : Float = aten::triu(%0, %3) # unsupported op
+      %5 : Float = aten::mul(%4, %0) # registered op
+      return (%5)
+
+  is exported as:
+
+    graph(%0 : Float):
+      %1 : Long() = onnx::Constant[value={0}]()
+      %2 : Float = aten::ATen[operator="triu"](%0, %1) # unsupported op
+      %3 : Float = onnx::Mul(%2, %0) # registered op
+      return (%3)
+
+RAW
+~~~
+To export a raw ir. ::
+
+  Example torch ir graph:
+
+    graph(%x.1 : Float(1, strides=[1])):
+      %1 : Tensor = aten::exp(%x.1)
+      %2 : Tensor = aten::div(%x.1, %1)
+      %y.1 : Tensor[] = prim::ListConstruct(%2)
+      return (%y.1)
+
+  is exported as:
+
+    graph(%x.1 : Float(1, strides=[1])):
+      %1 : Tensor = aten::exp(%x.1)
+      %2 : Tensor = aten::div(%x.1, %1)
+      %y.1 : Tensor[] = prim::ListConstruct(%2)
+      return (%y.1)
+
+ONNX_FALLTHROUGH
+~~~~~~~~~~~~~~~~
+This mode can be used to export any operator (ATen or non-ATen) that is not registered and supported in ONNX.
+Exported falls through and exports the operator as is, as custom op. Exporting custom operators
+enables users to register and implement the operator as part of their runtime backend. ::
+
+  Example torch ir graph:
+
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1]),
+          %1 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %6 : Float(2, 3, 4, strides=[12, 4, 1]) = foo_namespace::bar(%0, %1) # custom op
+      %7 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::div(%6, %0) # registered op
+      return (%7))
+
+  is exported as:
+
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1]),
+          %1 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = foo_namespace::bar(%0, %1) # custom op
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx::Div(%2, %0) # registered op
+      return (%3
+
 
 Frequently Asked Questions
 --------------------------
@@ -666,38 +1035,16 @@ Q: Does ONNX support implicit scalar datatype casting?
 
 Q: Is tensor in-place indexed assignment like `data[index] = new_data` supported?
 
-  Yes, this is supported now for ONNX opset version >= 11. E.g.: ::
-
-    data = torch.zeros(3, 4)
-    new_data = torch.arange(4).to(torch.float32)
-
-    # Assigning to left hand side indexing is supported in ONNX opset >= 11.
-    class InPlaceIndexedAssignment(torch.nn.Module):
-        def forward(self, data, new_data):
-            data[1] = new_data
-            return data
-
-    out = InPlaceIndexedAssignment()(data, new_data)
-
-    data = torch.zeros(3, 4)
-    new_data = torch.arange(4).to(torch.float32)
-    torch.onnx.export(InPlaceIndexedAssignment(), (data, new_data), 'inplace_assign.onnx', opset_version=11)
-
-    # onnxruntime
-    import onnxruntime
-    sess = onnxruntime.InferenceSession('inplace_assign.onnx')
-    out_ort = sess.run(None, {
-        sess.get_inputs()[0].name: torch.zeros(3, 4).numpy(),
-        sess.get_inputs()[1].name: new_data.numpy(),
-    })
-
-    assert torch.all(torch.eq(out, torch.tensor(out_ort)))
+  Yes, this is supported for ONNX opset version >= 11. Please checkout `Indexing`_.
 
 Q: Is tensor list exportable to ONNX?
 
   Yes, this is supported now for ONNX opset version >= 11. ONNX introduced the concept of Sequence in opset 11.
   Similar to list, Sequence is a data type that contains arbitrary number of Tensors.
-  Associated operators are also introduced in ONNX, such as SequenceInsert, SequenceAt, etc. E.g.: ::
+  Associated operators are also introduced in ONNX, such as SequenceInsert, SequenceAt, etc.
+  However, in-place list append within loops is not exportable to ONNX. To implement this, please use inplace
+  add operator.
+  E.g.: ::
 
     class ListLoopModel(torch.nn.Module):
         def forward(self, x):
@@ -706,8 +1053,8 @@ Q: Is tensor list exportable to ONNX?
             arr = x.split(2, 0)
             res2 = torch.zeros(3, 4, dtype=torch.long)
             for i in range(len(arr)):
-                res = res.append(arr[i].sum(0, False))
-                res1 = res1.append(arr[-1 - i].sum(0, False))
+                res += [arr[i].sum(0, False)]
+                res1 += [arr[-1 - i].sum(0, False)]
                 res2 += 1
             return torch.stack(res), torch.stack(res1), res2
 
@@ -726,9 +1073,36 @@ Q: Is tensor list exportable to ONNX?
 
     assert [torch.allclose(o, torch.tensor(o_ort)) for o, o_ort in zip(out, out_ort)]
 
+Use external data format
+------------------------
+``use_external_data_format`` argument in export API enables export of models in ONNX external
+data format. With this option enabled, the exporter stores some model parameters in external
+binary files, rather than the ONNX file itself. These external binary files are stored in the
+same location as the ONNX file. Argument 'f' must be a string specifying the location of the model. ::
+
+    model = torchvision.models.mobilenet_v2(pretrained=True)
+    input = torch.randn(2, 3, 224, 224, requires_grad=True)
+    torch.onnx.export(model, (input, ), './large_model.onnx', use_external_data_format=True)
+
+
+This argument enables export of large models to ONNX. Models larger than 2GB cannot be exported
+in one file because of the protobuf size limit. Users should set ``use_external_data_format`` to
+``True`` to successfully export such models.
+
+Training
+--------
+``Training`` argument in export API allows users to export models in a training-friendly mode.
+``TrainingMode.TRAINING`` exports model in a training-friendly mode that avoids certain model
+optimizations which might interfere with model parameter training. ``TrainingMode.PRESERVE``
+exports the model in inference mode if ``model.training`` is ``False``. Otherwise, it exports
+the model in a training-friendly mode.
+The default mode for this argument is ``TrainingMode.EVAL`` which exports the model in
+inference mode.
+
 Functions
 --------------------------
 .. autofunction:: export
+.. autofunction:: export_to_pretty_string
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: torch.onnx.operators.shape_as_tensor
 .. autofunction:: select_model_mode_for_export

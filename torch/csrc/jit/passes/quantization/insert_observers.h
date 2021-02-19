@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 
 namespace std {
 
@@ -38,8 +39,8 @@ TORCH_API Module InsertObservers(
     Module& module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
-    bool inplace = false,
-    bool is_dynamic = false);
+    bool inplace,
+    QuantType quant_type = QuantType::STATIC);
 
 } // namespace jit
 } // namespace torch

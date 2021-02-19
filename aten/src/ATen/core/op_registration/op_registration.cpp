@@ -1,5 +1,6 @@
 #include <c10/macros/Macros.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -13,9 +14,7 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(options.schemaOrName_.has_value(), "In operator registration: Tried to register an operator without specifying a schema or operator name.");
   if (options.schemaOrName_->is_right()) {
-    // schema was explicitly specified. Check it matches the inferred one and register the op.
-
-    const FunctionSchema& schema = options.schemaOrName_->right();
+    // schema was explicitly specified.
 
     checkNoDuplicateKernels_(options);
 
@@ -99,7 +98,7 @@ void RegisterOperators::registerOp_(Options&& options) {
 
   for (auto& kernel : options.kernels) {
     registrars_.emplace_back(
-      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
+      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.cpp_signature), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
     );
   }
 }

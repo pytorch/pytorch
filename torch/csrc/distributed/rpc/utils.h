@@ -1,11 +1,25 @@
 #pragma once
 
-#include <tensorpipe/core/message.h>
+#include <c10/core/Device.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/utils/byte_order.h>
+
+namespace tensorpipe {
+class Message;
+} // namespace tensorpipe
 
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+// Parse error message and return RPCErrorType based on the message.
+TORCH_API RPCErrorType getRPCErrorType(const JitFuture& jitFuture);
+// Create an error string given the error description and error type
+TORCH_API std::string makeRPCError(
+    const std::string& rpcErrorStr,
+    RPCErrorType errorType);
 
 // Given an RPC message received as a request over the wire, deserialize it into
 // the appropriate 'RpcCommandBase' type.
@@ -40,27 +54,9 @@ TORCH_API std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     const void* data,
     size_t data_size);
 
-// TensorPipeEntry represents serialized tensorpipe message,
-// plus reserved tensor datas to keep memory lifetime.
-struct TensorPipeEntry {
-  tensorpipe::Message message;
-  // To keep original user tensors + cloned sparse tensors.
-  std::vector<torch::Tensor> reservedTensors;
-  // To keep memory of tensors who do not own underlying
-  // memory, say created from torch::from_blob()
-  std::vector<std::vector<uint8_t>> copiedTensors;
-};
-
-// TensorPipe doesn't own any underlying memory. Users are required to
-// keep rpcMessage alive for the returned TensorPipeEntry to be valid,
-// since TensorPipe message just keeps raw pointers to the memory.
-TORCH_API TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage);
-
-// The passed-in tensorpipe message is partial, which just contains
-// necessary information for memory allocation, like payload length
-// and tensor metadata. The returned RPC message doesn't have any
-// data, but would be valid after tensorpipe finishs data transfer.
-TORCH_API Message tensorpipeAllocateMessage(tensorpipe::Message& tpMessage);
+// We use vector<char> as the type of blobs because it's what rpc::Message uses
+// for its payload, even though it has the disadvantage that it cannot be
+// allocated with uninitialized memory: it is always zeroed out.
 
 // Some Tensors are effectively views of larger Tensors, where only a small
 // subset of the Storage data is referenced. This normally is good and avoids
@@ -69,6 +65,27 @@ TORCH_API Message tensorpipeAllocateMessage(tensorpipe::Message& tpMessage);
 // we'd save at least half the data, and over a minimum hurdle.
 TORCH_API c10::List<at::Tensor> cloneSparseTensors(
     const std::vector<at::Tensor>& tensors);
+
+// Combines an original payload and wrapped payload into the original payload.
+// Used to generate the overall payload for the wrapped RPC.
+TORCH_API void writeWrappedPayload(
+    std::vector<char>& originalPayload,
+    std::vector<char>& additionalPayload);
+
+// Reads the additional, wrapped payload from a wrapped RPC off of the input
+// payload. After this, payload will contain the payload of the original,
+// un-wrapped RPC.
+TORCH_API std::vector<at::IValue> readWrappedPayload(
+    std::vector<char>& payload,
+    const rpc::Message& message);
+
+// Takes a list of events from autograd profiler and populates them into
+// profiledEvents to be carried over RPC.
+TORCH_API void populateRemoteProfiledEvents(
+    std::vector<torch::autograd::profiler::LegacyEvent>& profiledEvents,
+    const torch::autograd::profiler::ProfilerConfig& profilerConfig,
+    const std::vector<std::vector<torch::autograd::profiler::LegacyEvent>>&
+        eventLists);
 
 } // namespace rpc
 } // namespace distributed

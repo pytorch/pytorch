@@ -26,7 +26,13 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #define CAFFE2_CUDA_EXPORT C10_EXPORT
-#define CAFFE2_CUDA_API TORCH_CUDA_API
+
+// CAFFE2_CUDA_API gets translated to CAFFE2_HIP_API in hipify script, which
+// causes a marco redefinition issue with the later definition of
+// CAFFE2_HIP_API, so we exclude this definition when HIP is specified
+#ifndef __HIP_PLATFORM_HCC__
+#define CAFFE2_CUDA_API TORCH_CUDA_CPP_API
+#endif // __HIP_PLATFORM_HCC__
 
 #define CAFFE2_HIP_EXPORT C10_EXPORT
 #define CAFFE2_HIP_API TORCH_HIP_API
@@ -132,6 +138,8 @@ CAFFE2_CUDA_API int GetGPUIDForPointer(const void* ptr);
 
 /**
  * Gets the device property for the given device. This function is thread safe.
+ * The initial run on this function is ~1ms/device; however, the results are
+ * cached so subsequent runs should be much faster.
  */
 CAFFE2_CUDA_API const cudaDeviceProp& GetDeviceProperty(const int device);
 
@@ -254,10 +262,6 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
        i += blockDim.x * gridDim.x)                                 \
     for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
          j += blockDim.y * gridDim.y)
-
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
-#define CUDA_KERNEL_ASSERT(...)
-#endif
 
 // The following helper functions are here so that you can write a kernel call
 // when you are not particularly interested in maxing out the kernels'

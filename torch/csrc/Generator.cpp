@@ -15,7 +15,6 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
 #ifdef USE_CUDA
-#include <THC/THCTensorRandom.h>
 #include <ATen/CUDAGeneratorImpl.h>
 #endif
 
@@ -34,11 +33,14 @@ PyObject * THPGenerator_initDefaultGenerator(at::Generator cdata)
   return self.release();
 }
 
-static void THPGenerator_dealloc(THPGenerator* self)
+static void THPGenerator_dealloc(PyObject* _self)
 {
-  self->cdata.set_pyobj(nullptr);
-  self->cdata.~Generator();
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  auto self = reinterpret_cast<THPGenerator*>(_self);
+  if (self->cdata.defined()) {
+    self->cdata.set_pyobj(nullptr);
+    self->cdata.~Generator();
+  }
+  Py_TYPE(_self)->tp_free(_self);
 }
 
 static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -71,79 +73,87 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_getState(THPGenerator *self, PyObject *noargs)
+static PyObject * THPGenerator_getState(PyObject *_self, PyObject *noargs)
 {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  Variable var = torch::empty({0}, at::device(at::kCPU).dtype(at::kByte));
-  if (self->cdata.device().type() == at::kCPU) {
-    THByteTensor_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
-  } else {
-#ifdef USE_CUDA
-    TORCH_INTERNAL_ASSERT(self->cdata.device().type() == at::kCUDA);
-    THCRandom_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
-#else 
-    TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
-#endif 
-  }
-  return THPVariable_Wrap(std::move(var));
+  auto& gen = ((THPGenerator*)_self)->cdata;
+
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen.mutex());
+  auto state_tensor = gen.get_state();
+
+  return THPVariable_Wrap(std::move(state_tensor));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state)
+static PyObject * THPGenerator_setState(PyObject *_self, PyObject *_new_state)
 {
   using namespace torch::autograd;
+  
   HANDLE_TH_ERRORS
   if (!THPVariable_Check(_new_state)) {
-    throw TypeError("expected a torch.ByteTensor, but got %s", Py_TYPE(_new_state)->tp_name);
+    throw torch::TypeError("expected a torch.ByteTensor, but got %s", Py_TYPE(_new_state)->tp_name);
   }
-  auto& tensor = ((THPVariable*)_new_state)->cdata;
-  if (tensor.layout() != kStrided || tensor.device().type() != kCPU || tensor.scalar_type() != kByte) {
-    auto type_name = torch::utils::options_to_string(tensor.options());
-    throw TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
-  }
-  if (self->cdata.device().type() == at::kCPU) {
-    THByteTensor_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
-  } else {
-#ifdef USE_CUDA
-    TORCH_INTERNAL_ASSERT(self->cdata.device().type() == at::kCUDA);
-    THCRandom_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
-#else 
-    TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
-#endif 
-  }
+  auto self = (THPGenerator*)_self;
+  auto& gen = self->cdata;
+  auto& new_state_tensor = ((THPVariable*)_new_state)->cdata;
+  
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen.mutex());
+  gen.set_state(new_state_tensor);
+  
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
+static PyObject * THPGenerator_manualSeed(PyObject *_self, PyObject *seed)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPGenerator*)_self;
   auto generator = self->cdata;
   THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
           "but got %s", THPUtils_typename(seed));
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(generator.mutex());
-  generator.set_current_seed(THPUtils_unpackLong(seed));
+  uint64_t seed_unpacked;
+  try {
+    // First try to interpret as unsigned long
+    seed_unpacked = THPUtils_unpackUInt64(seed);
+  } catch(...) {
+    if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
+      // If an overflow happened, then the seed could be negative,
+      // so try to interpret it as signed long
+      PyErr_Clear();
+      int64_t seed_unpacked_signed = THPUtils_unpackLong(seed);
+      seed_unpacked = *(reinterpret_cast<uint64_t*>(&seed_unpacked_signed));
+    } else {
+      // If any other type of exception happened, rethrow it
+      throw;
+    }
+  }
+  generator.set_current_seed(seed_unpacked);
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_seed(THPGenerator *self, PyObject *noargs)
+static PyObject * THPGenerator_seed(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
+  auto self = (THPGenerator*)_self;
   std::lock_guard<std::mutex> lock(self->cdata.mutex());
   uint64_t seed_val = self->cdata.seed();
   return THPUtils_packUInt64(seed_val);
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_initialSeed(THPGenerator *self, PyObject *noargs)
+static PyObject * THPGenerator_initialSeed(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPGenerator*)_self;
   return THPUtils_packUInt64(self->cdata.current_seed());
   END_HANDLE_TH_ERRORS
 }
@@ -160,11 +170,11 @@ static struct PyGetSetDef THPGenerator_properties[] = {
 };
 
 static PyMethodDef THPGenerator_methods[] = {
-  {"get_state",       (PyCFunction)THPGenerator_getState,       METH_NOARGS,  nullptr},
-  {"set_state",       (PyCFunction)THPGenerator_setState,       METH_O,       nullptr},
-  {"manual_seed",     (PyCFunction)THPGenerator_manualSeed,     METH_O,       nullptr},
-  {"seed",            (PyCFunction)THPGenerator_seed,           METH_NOARGS,  nullptr},
-  {"initial_seed",    (PyCFunction)THPGenerator_initialSeed,    METH_NOARGS,  nullptr},
+  {"get_state",       THPGenerator_getState,       METH_NOARGS,  nullptr},
+  {"set_state",       THPGenerator_setState,       METH_O,       nullptr},
+  {"manual_seed",     THPGenerator_manualSeed,     METH_O,       nullptr},
+  {"seed",            THPGenerator_seed,           METH_NOARGS,  nullptr},
+  {"initial_seed",    THPGenerator_initialSeed,    METH_NOARGS,  nullptr},
   {nullptr}
 };
 
@@ -178,7 +188,7 @@ PyTypeObject THPGeneratorType = {
   "torch._C.Generator",                   /* tp_name */
   sizeof(THPGenerator),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
-  (destructor)THPGenerator_dealloc,            /* tp_dealloc */
+  THPGenerator_dealloc,                        /* tp_dealloc */
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

@@ -33,8 +33,6 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   if (!variable.requires_grad())
     return {};
 
-  at::Tensor& grad = variable.grad();
-
   // std::move(grads[0]) to avoid bumping up refcount
   at::Tensor new_grad = callHooks(variable, std::move(grads[0]));
 
@@ -44,6 +42,8 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   // and rely on user to provide thread safe hooks
   // see Note [Thread Safety on Autograd Node]
   std::lock_guard<std::mutex> lock(mutex_);
+
+  at::Tensor& grad = variable.mutable_grad();
 
   // If the function has post hooks (for example, a DDP allreduce hook),
   // call_function in Engine.cpp will temporarily bump the expected refcount

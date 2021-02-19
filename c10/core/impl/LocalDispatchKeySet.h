@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/DispatchKeySet.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Flags.h>
 
 // TLS management for DispatchKeySet (the "local" DispatchKeySet(s))
@@ -22,8 +23,6 @@
 
 namespace c10 {
 namespace impl {
-
-C10_DECLARE_bool(disable_variable_dispatch);
 
 // POD version of LocalDispatchKeySet.  Declared here just so that
 // we can put it in the guards.
@@ -54,7 +53,19 @@ struct C10_API LocalDispatchKeySet {
   DispatchKeySet excluded_;
 };
 
+// thread_local variables cannot be C10_API on Windows.
+// Inlining this seems to break AutoNonVariableTypeGuard on Android.
+#if defined(_MSC_VER) || defined(C10_ANDROID)
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
+#else // defined(_MSC_VER) || defined(C10_ANDROID)
+  extern C10_API thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
+
+inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
+  // Don't let people fiddle with the thread_local directly just
+  // because they include this header.
+  return raw_local_dispatch_key_set;
+}
+#endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
 // Internal, use ThreadLocalStateGuard
 C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
@@ -63,7 +74,8 @@ C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
 
 class C10_API IncludeDispatchKeyGuard {
 public:
-  IncludeDispatchKeyGuard(DispatchKey);
+  IncludeDispatchKeyGuard(DispatchKeySet);
+  IncludeDispatchKeyGuard(DispatchKey k) : IncludeDispatchKeyGuard(DispatchKeySet(k)) {}
   IncludeDispatchKeyGuard(const IncludeDispatchKeyGuard&) = delete;
   IncludeDispatchKeyGuard operator=(const IncludeDispatchKeyGuard&) = delete;
   IncludeDispatchKeyGuard(IncludeDispatchKeyGuard&&) = delete;
@@ -73,13 +85,13 @@ private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
   PODLocalDispatchKeySet* tls_;
-  DispatchKey id_;
-  bool prev_state_;
+  DispatchKeySet include_;
 };
 
 class C10_API ExcludeDispatchKeyGuard {
 public:
-  ExcludeDispatchKeyGuard(DispatchKey);
+  ExcludeDispatchKeyGuard(DispatchKeySet);
+  ExcludeDispatchKeyGuard(DispatchKey k) : ExcludeDispatchKeyGuard(DispatchKeySet(k)) {}
   ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;
   ExcludeDispatchKeyGuard operator=(const ExcludeDispatchKeyGuard&) = delete;
   ExcludeDispatchKeyGuard(ExcludeDispatchKeyGuard&&) = delete;
@@ -89,8 +101,7 @@ private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
   PODLocalDispatchKeySet* tls_;
-  DispatchKey id_;
-  bool prev_state_;
+  DispatchKeySet exclude_;
 };
 
 // Non-RAII API for manipulating the thread-local dispatch state.

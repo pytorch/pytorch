@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
+
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
@@ -18,6 +19,15 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code)
   registers_.resize(code_->register_size_);
 }
 
+namespace {
+void createObject(Stack& stack, const at::ClassTypePtr& type) {
+  auto userObj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(type->compilation_unit(), type),
+      type->numAttributes());
+  push(stack, std::move(userObj));
+}
+} // namespace
+
 using namespace at;
 
 bool InterpreterState::run(Stack& stack) {
@@ -35,13 +45,14 @@ bool InterpreterState::run(Stack& stack) {
     //    std::cout << std::endl;
     switch (inst.op) {
       case OP: {
-        if (auto debug_info = c10::ThreadLocalDebugInfo::get(
-                c10::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
+        if (at::hasGlobalCallbacks()) {
           if (auto* mobile_debug_info =
-                  dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
+                  static_cast<MobileDebugInfo*>(c10::ThreadLocalDebugInfo::get(
+                      c10::DebugInfoKind::MOBILE_RUNTIME_INFO))) {
             mobile_debug_info->setOpIdx(pc);
           }
         }
+
         // TODO(iliacher): remove the workaround after RecordFunction is in
         // Dispatcher
         bool prev_value = isRecordFunctionEnabled();
@@ -49,7 +60,7 @@ bool InterpreterState::run(Stack& stack) {
           // enable only for the RecordFunction
           enableRecordFunction(true);
         }
-        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
+        RECORD_USER_SCOPE_WITH_INPUTS(code_->op_names_[inst.X].name, stack);
         if (!prev_value) {
           enableRecordFunction(false);
         }
@@ -147,7 +158,7 @@ bool InterpreterState::run(Stack& stack) {
       case RET:
         return false;
       case LIST_CONSTRUCT: {
-        auto type = code_->types_[inst.X]->expect<at::ListType>();
+        const auto& type = code_->types_[inst.X]->expectRef<at::ListType>();
         listConstruct(stack, type, inst.N);
         ++pc;
       } break;
@@ -171,6 +182,11 @@ bool InterpreterState::run(Stack& stack) {
       case NAMED_TUPLE_CONSTRUCT: {
         auto type = code_->types_[inst.X]->expect<at::TupleType>();
         namedTupleConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
+      case CREATE_OBJECT: {
+        auto type = code_->types_[inst.X]->expect<c10::ClassType>();
+        createObject(stack, type);
         ++pc;
       } break;
       case WARN: {

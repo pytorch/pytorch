@@ -2,6 +2,7 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <atomic>
@@ -56,13 +57,14 @@ struct RecvWork {
   torch::Tensor payload_;
 };
 
-class ProcessGroupAgent : public RpcAgent {
+class TORCH_API ProcessGroupAgent : public RpcAgent {
  public:
   ProcessGroupAgent(
       std::string workerName,
-      std::shared_ptr<c10d::ProcessGroup> pg,
+      c10::intrusive_ptr<::c10d::ProcessGroup> pg,
       int numSendRecvThreads,
-      std::chrono::milliseconds rpcTimeout);
+      std::chrono::milliseconds rpcTimeout,
+      std::unique_ptr<RequestCallback> cb);
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
@@ -70,7 +72,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   std::vector<WorkerInfo> getWorkerInfos() const override;
 
-  void join() override;
+  void join(bool shutdown = false) override;
 
   void sync() override;
 
@@ -86,13 +88,17 @@ class ProcessGroupAgent : public RpcAgent {
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
-  std::shared_ptr<FutureMessage> send(
+  std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
+          {}) override;
 
   // put SendWork into a queue and notify the worker thread
   virtual void enqueueSend(SendWork work);
+  // Bypass handleSend() logic and send a message to self rank
+  virtual void sendToSelf(Message&& message);
 
  private:
   class MessageCounter {
@@ -126,16 +132,16 @@ class ProcessGroupAgent : public RpcAgent {
   // additional information to manage timeouts and destination information,
   // which is needed for termination detection.
   struct FutureInfo {
-    std::shared_ptr<FutureMessage> future_;
+    std::shared_ptr<JitFuture> future_;
     steady_clock_time_point endTime_;
     int dstRank_;
     std::chrono::milliseconds timeout_;
     FutureInfo(
-        const std::shared_ptr<FutureMessage>& future,
+        std::shared_ptr<JitFuture> future,
         const steady_clock_time_point& endTime,
         int dstRank,
         const std::chrono::milliseconds timeout)
-        : future_(future),
+        : future_(std::move(future)),
           endTime_(endTime),
           dstRank_(dstRank),
           timeout_(timeout) {}
@@ -205,7 +211,7 @@ class ProcessGroupAgent : public RpcAgent {
     return ++nextId_;
   }
 
-  std::shared_ptr<c10d::ProcessGroup> pg_;
+  c10::intrusive_ptr<::c10d::ProcessGroup> pg_;
   // worker name -> rank
   std::unordered_map<std::string, worker_id_t> nameMap_;
   std::vector<WorkerInfo> allWorkerInfo_;
@@ -226,14 +232,14 @@ class ProcessGroupAgent : public RpcAgent {
   // Lock and shared ptr to currently pending work, set in listenloop() and
   // interruptible in shutdown().
   std::mutex recvWorkMutex_;
-  std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> recvWork_;
   // Map of dst rank to current oustanding sends that we are waiting on. In the
   // case of a call to ::shutdown() while we are still waiting on these sends,
   // the pending sends contained in this map will be aborted, allowing the
   // waiting thread to be unblocked.
   std::unordered_map<
       worker_id_t,
-      std::set<std::shared_ptr<c10d::ProcessGroup::Work>>>
+      std::set<c10::intrusive_ptr<c10d::ProcessGroup::Work>>>
       currentPendingSends_;
   // Lock to serialize access to the above map.
   std::mutex pendingSendMutex_;

@@ -1,7 +1,5 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import threading
-import unittest
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -11,9 +9,6 @@ from torch.distributed.optim import DistributedOptimizer
 from torch.testing._internal.dist_utils import dist_init
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
-)
-from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
-    TensorPipeRpcAgentTestFixture,
 )
 
 
@@ -98,17 +93,7 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
 
 
 class DistOptimizerTest(RpcAgentTestFixture):
-    def _skip_if_tensorpipe_agent(old_func):  # noqa: B902
-        def decorator(self):
-            return unittest.skipIf(
-                self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE,
-                "This test is not yet supported in the Tensorpipe Agent"
-            )(old_func)
-
-        return decorator
-
     @dist_init()
-    @_skip_if_tensorpipe_agent
     def test_dist_optim_exception(self):
         # distributed version
         owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
@@ -137,7 +122,6 @@ class DistOptimizerTest(RpcAgentTestFixture):
                 dist_optim.step(context_id)
 
     @dist_init()
-    @_skip_if_tensorpipe_agent
     def test_dist_optim_exception_on_constructor(self):
         # distributed version
         owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
@@ -153,13 +137,12 @@ class DistOptimizerTest(RpcAgentTestFixture):
                 OptimizerFailingOnConstructor, [remote_param1, remote_param2]
             )
 
-    @dist_init()
-    def test_dist_optim(self):
+    def _test_dist_optim_base(self, optim_cls, *args, **kwargs):
         # local version
         module1 = MyModule()
         module2 = MyModule()
         params = [module1.get_w(), module2.get_w()]
-        local_optim = optim.SGD(params, lr=0.05)
+        local_optim = optim_cls(params, *args, **kwargs)
 
         old_w1 = module1.w.clone().detach()
         old_w2 = module2.w.clone().detach()
@@ -191,7 +174,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
         self.assertEqual(old_w2, remote_param2.to_here())
 
         dist_optim = DistributedOptimizer(
-            optim.SGD, [remote_param1, remote_param2], lr=0.05
+            optim_cls, [remote_param1, remote_param2], *args, **kwargs
         )
 
         with dist_autograd.context() as context_id:
@@ -215,9 +198,12 @@ class DistOptimizerTest(RpcAgentTestFixture):
             self.assertEqual(new_w1, module1.get_w())
             self.assertEqual(new_w2, module2.get_w())
 
-class TensorPipeRpcAgentDistOptimizerTest(TensorPipeRpcAgentTestFixture,
-                                          DistOptimizerTest):
-
-    @dist_init
-    def test_verify_backend_options(self):
-        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)
+    @dist_init()
+    def test_dist_optim(self):
+        self._test_dist_optim_base(optim.Adagrad, lr=0.05)
+        self._test_dist_optim_base(optim.Adam, lr=1e-2, amsgrad=True)
+        self._test_dist_optim_base(optim.AdamW, lr=0.05, amsgrad=True)
+        self._test_dist_optim_base(optim.SGD, lr=0.05)
+        self._test_dist_optim_base(optim.SGD, lr=1e-3, momentum=1, weight_decay=1, nesterov=True)
+        self._test_dist_optim_base(optim.Adadelta, rho=0.95)
+        self._test_dist_optim_base(optim.RMSprop, lr=0.05)

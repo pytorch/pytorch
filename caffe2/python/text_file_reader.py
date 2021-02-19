@@ -1,9 +1,9 @@
 ## @package text_file_reader
 # Module caffe2.python.text_file_reader
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.python import core
 from caffe2.python.dataio import Reader
 from caffe2.python.schema import Scalar, Struct, data_type_for_dtype

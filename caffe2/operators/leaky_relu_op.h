@@ -13,8 +13,8 @@ class LeakyReluOp : public Operator<Context> {
   explicit LeakyReluOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...), alpha_(0.01) {
     if (HasArgument("alpha")) {
-      alpha_ =
-          static_cast<T>(this->template GetSingleArgument<float>("alpha", 0.01));
+      alpha_ = static_cast<T>(
+          this->template GetSingleArgument<float>("alpha", 0.01));
     }
   }
 
@@ -33,8 +33,8 @@ class LeakyReluGradientOp final : public Operator<Context> {
   explicit LeakyReluGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...), alpha_(0.01) {
     if (HasArgument("alpha")) {
-      alpha_ =
-          static_cast<T>(this->template GetSingleArgument<float>("alpha", 0.01));
+      alpha_ = static_cast<T>(
+          this->template GetSingleArgument<float>("alpha", 0.01));
     }
   }
 

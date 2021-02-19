@@ -1,15 +1,12 @@
 r""" Functional interface (quantized)."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from typing import List, Optional
+import warnings
 
 import torch
 from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
 from torch.nn.quantized.modules.utils import _pair_from_first
+from torch.jit.annotations import BroadcastingList2
 
 # Although some of the functions and docstrings are mirrored from the torch.nn,
 # we want to have them here for future changes.
@@ -76,13 +73,12 @@ def avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
                                           ceil_mode, count_include_pad,
                                           divisor_override)
 
-def adaptive_avg_pool2d(input, output_size):
-    # type: (Tensor, BroadcastingList2[int]) -> Tensor
+def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
     r"""
     Applies a 2D adaptive average pooling over a quantized input signal composed
     of several quantized input planes.
 
-    .. note:: The input quantization paramteres propagate to the output.
+    .. note:: The input quantization parameters propagate to the output.
 
     See :class:`~torch.nn.quantized.AdaptiveAvgPool2d` for details and output shape.
 
@@ -91,8 +87,26 @@ def adaptive_avg_pool2d(input, output_size):
                      double-integer tuple)
     """
     if not input.is_quantized:
-        raise ValueError("Input to 'quantized.adaptive_avg_pool2d' must be quantized!")
+        raise ValueError("Input to 'quantized.functional.adaptive_avg_pool2d' must be quantized!")
     return torch.nn.functional.adaptive_avg_pool2d(input, output_size)
+
+def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
+    r"""
+    Applies a 3D adaptive average pooling over a quantized input signal composed
+    of several quantized input planes.
+
+    .. note:: The input quantization parameters propagate to the output.
+
+    See :class:`~torch.nn.quantized.AdaptiveAvgPool3d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or
+                     double-integer tuple)
+    """
+    if not input.is_quantized:
+        raise ValueError(
+            "Input to 'quantized.functional.adaptive_avg_pool3d' must be quantized!")
+    return torch.nn.functional.adaptive_avg_pool3d(input, output_size)
 
 def conv1d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
@@ -313,8 +327,10 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     return torch.nn.functional.interpolate(input, size, scale_factor, mode,
                                            align_corners)
 
-def linear(input, weight, bias=None, scale=None, zero_point=None):
-    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], Optional[int]) -> Tensor
+def linear(
+    input: Tensor, weight: Tensor, bias: Optional[Tensor] = None,
+    scale: Optional[float] = None, zero_point: Optional[int] = None
+) -> Tensor:
     r"""
     Applies a linear transformation to the incoming quantized data:
     :math:`y = xA^T + b`.
@@ -346,6 +362,22 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
     _packed_params = torch.ops.quantized.linear_prepack(weight, bias)
     return torch.ops.quantized.linear(input, _packed_params, scale, zero_point)
 
+def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
+               ceil_mode=False, return_indices=False):
+    r"""Applies a 1D max pooling over a quantized input signal composed of
+    several quantized input planes.
+
+    .. note:: The input quantization parameters are propagated to the output.
+
+    See :class:`~torch.nn.quantized.MaxPool1d` for details.
+    """
+    if return_indices:
+        raise NotImplementedError("return_indices is not yet implemented!")
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.nn.functional.max_pool1d(input, kernel_size, stride, padding,
+                                          dilation, ceil_mode, return_indices)
+
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
     r"""Applies a 2D max pooling over a quantized input signal composed of
@@ -362,27 +394,24 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
-def relu(input, inplace=False):
-    # type: (Tensor, bool) -> Tensor
-    r"""relu(input, inplace=False) -> Tensor
+def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
+    r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
 
-    Applies the rectified linear unit function element-wise.
-    See :class:`~torch.nn.quantized.ReLU` for more details.
+    Applies the quantized CELU function element-wise.
+    .. math::
+        \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x / \alpha) - 1))
 
     Args:
         input: quantized input
-        inplace: perform the computation inplace
+        alpha: the :math:`\alpha` value for the CELU formulation. Default: 1.0
     """
     if not input.is_quantized:
-        raise ValueError("Input to 'quantized.relu' must be quantized!")
-    if inplace:
-        return torch.relu_(input)
-    else:
-        return torch.relu(input)
+        raise ValueError("Input to 'quantized.celu' must be quantized!")
+    return torch.ops.quantized.celu(input, scale, zero_point, alpha)
 
-def leaky_relu(input, negative_slope=0.01, inplace=False,
-               scale=None, zero_point=None):
-    # type: (Tensor, float, bool, float, int) -> Tensor
+
+def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False,
+               scale: Optional[float] = None, zero_point: Optional[int] = None):
     r"""
     Quantized version of the.
     leaky_relu(input, negative_slope=0.01, inplace=False, scale, zero_point) -> Tensor
@@ -394,7 +423,7 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
         input: Quaintized input
         negative_slope: The slope of the negative input
         inplace: Inplace modification of the input tensor
-        scale, zero_point: Scale and zero point of thhe output tensor.
+        scale, zero_point: Scale and zero point of the output tensor.
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
@@ -410,14 +439,8 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
         result = torch._C._nn.leaky_relu(input, negative_slope)
     return result
 
-def hardtanh(input, min_val=-1., max_val=1., inplace=False):
-    # type: (Tensor, float, float, bool) -> Tensor
-    r"""
-    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
-
-    Applies the quantized HardTanh function element-wise, with scale and
-    zero-point carried over from the input tensor. See :class:`~torch.nn.Hardtanh`
-    for more details.
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardtanh`.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardtanh' must be quantized!")
@@ -425,83 +448,58 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
         return torch._C._nn.hardtanh_(input, min_val, max_val)
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
-def hardswish(input, scale, zero_point):
-    # type: (Tensor, float, int) -> Tensor
-    r"""Applies the quantized version of the hardswish function, element-wise,
-    as described in the paper:
-
-    `Searching for MobileNetV3`_.
-
-    .. math::
-        \text{Hardswish}(x) = \begin{cases}
-            0 & \text{if~} x \le -3, \\
-            x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
-        \end{cases}
+def hardswish(input: Tensor, scale: float, zero_point: int) -> Tensor:
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardswish`.
 
     Args:
         input: quantized input
-        scale, zero_point: Scale and zero point of the output tensor.
-
-    See :class:`~torch.nn.Hardswish` for more details.
-
-    .. _`Searching for MobileNetV3`:
-        https://arxiv.org/abs/1905.02244
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
     return torch._ops.ops.quantized.hardswish(input, scale, zero_point)
 
-def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
-    # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor
-    r"""
-    Applies the quantized ELU function element-wise:
+def threshold(input: Tensor, threshold: float, value: float) -> Tensor:
+    r"""Applies the quantized version of the threshold function element-wise:
 
     .. math::
-        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+        x = \begin{cases}
+                x & \text{if~} x > \text{threshold} \\
+                \text{value} & \text{otherwise}
+            \end{cases}
+
+    See :class:`~torch.nn.Threshold` for more details.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.threshold' must be quantized!")
+    if threshold is None:
+        raise ValueError("Input to 'threshold' must be specified!")
+    if value is None:
+        raise ValueError("Input to 'value' must be specified!")
+    return torch._ops.ops.quantized.threshold(input, threshold, value)
+
+def elu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
+    r"""This is the quantized version of :func:`~torch.nn.functional.elu`.
 
     Args:
         input: quantized input
-        alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
-        inplace: Inplace modification of the input tensor
-        scale, zero_point: Scale and zero point of the output tensor.
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        alpha: the alpha constant
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.elu' must be quantized!")
-    if (scale is not None) != (zero_point is not None):
-        raise ValueError("Either both or none of (scale, zero_point) must be specified!")
+    return torch.ops.quantized.elu(input, scale, zero_point, alpha)
 
-    if scale is not None and zero_point is not None:
-        assert not inplace, "Cannot rescale with `inplace`"
-        output = torch._empty_affine_quantized(
-            input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
-        torch._C._nn.elu(input, alpha, out=output)
-        return output
-    elif inplace:
-        return torch._C._nn.elu_(input, alpha)
-    else:
-        return torch._C._nn.elu(input, alpha)
-
-def hardsigmoid(input):
-    # type: (Tensor) -> Tensor
-    r"""
-    Applies the quantized element-wise function
-
-    .. math::
-        \text{Hardsigmoid}(x) = \begin{cases}
-            0 & \text{if~} x \le -3, \\
-            1 & \text{if~} x \ge +3, \\
-            x / 6 & \text{otherwise}
-        \end{cases}
-
-    See :class:`~torch.nn.Hardsigmoid` for more details.
+def hardsigmoid(input: Tensor) -> Tensor:
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardsigmoid`.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
     return torch._C._nn.hardsigmoid(input)
 
-def clamp(input, min_, max_):
-    # type: (Tensor, float, float) -> Tensor
+def clamp(input: Tensor, min_: float, max_: float) -> Tensor:
     r"""float(input, min_, max_) -> Tensor
 
     Applies the clamp function element-wise.

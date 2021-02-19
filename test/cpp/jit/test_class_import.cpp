@@ -1,7 +1,7 @@
-#include <test/cpp/jit/test_base.h>
-#include <test/cpp/jit/test_utils.h>
+#include <gtest/gtest.h>
 
 #include <ATen/core/qualified_name.h>
+#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
@@ -36,7 +36,7 @@ static void import_libs(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& class_name,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table) {
+    const std::vector<at::IValue>& tensor_table) {
   SourceImporter si(
       cu,
       &tensor_table,
@@ -45,10 +45,10 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
-void testClassImport() {
+TEST(ClassImportTest, Basic) {
   auto cu1 = std::make_shared<CompilationUnit>();
   auto cu2 = std::make_shared<CompilationUnit>();
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,
@@ -80,10 +80,10 @@ void testClassImport() {
   ASSERT_FALSE(c);
 }
 
-void testScriptObject() {
+TEST(ClassImportTest, ScriptObject) {
   Module m1("m1");
   Module m2("m2");
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   import_libs(
       m1._ivalue()->compilation_unit(),
       "__torch__.FooTest",
@@ -114,7 +114,7 @@ def __init__(self, x):
     return x
 )JIT";
 
-void testClassDerive() {
+TEST(ClassImportTest, ClassDerive) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu);
   const auto self = SimpleSelf(cls);
@@ -142,9 +142,9 @@ class FooBar1234(Module):
     return (self.f).top()
 )JIT";
 
-void testSaveLoadTorchbind() {
+TEST(ClassImportTest, CustomClass) {
   auto cu1 = std::make_shared<CompilationUnit>();
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,

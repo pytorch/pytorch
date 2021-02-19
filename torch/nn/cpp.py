@@ -57,9 +57,9 @@ class ModuleWrapper(nn.Module):
         # assigned to in the super class constructor.
         self.cpp_module = cpp_module
         super(ModuleWrapper, self).__init__()
-        self._parameters = OrderedDictWrapper(cpp_module, "_parameters")
-        self._buffers = OrderedDictWrapper(cpp_module, "_buffers")
-        self._modules = OrderedDictWrapper(cpp_module, "_modules")
+        self._parameters = OrderedDictWrapper(cpp_module, "_parameters")  # type: ignore[assignment]
+        self._buffers: OrderedDictWrapper = OrderedDictWrapper(cpp_module, "_buffers")  # type: ignore[assignment]
+        self._modules: OrderedDictWrapper = OrderedDictWrapper(cpp_module, "_modules")  # type: ignore[assignment]
         for attr in dir(cpp_module):
             # Skip magic methods and the three attributes above.
             if not attr.startswith("_"):
@@ -78,7 +78,8 @@ class ModuleWrapper(nn.Module):
 
         return self
 
-    @property
+    # nn.Module defines training as a boolean
+    @property  # type: ignore[override]
     def training(self):
         return self.cpp_module.training
 

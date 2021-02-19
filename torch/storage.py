@@ -2,15 +2,35 @@ import io
 
 import torch
 from ._utils import _type, _cuda
+from typing import Any, TypeVar, Type
 
-
+T = TypeVar('T', bound='_StorageBase')
 class _StorageBase(object):
-    is_cuda = False
-    is_sparse = False
+    _cdata: Any
+    is_cuda: bool = False
+    is_sparse: bool = False
+
+    def __init__(self, *args, **kwargs): ...  # noqa: E704
+    def __len__(self) -> int: ...  # noqa: E704
+    def __getitem__(self, idx): ...  # noqa: E704
+    def copy_(self, source: T) -> T: ...  # noqa: E704
+    def size(self) -> int: ...  # noqa: E704
+    def type(self, dtype: str = None, non_blocking: bool = False) -> T: ...  # noqa: E704
+    def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
+    def element_size(self) -> int: ...  # noqa: E704
+    def get_device(self) -> int: ...  # noqa: E704
+
+    # Defined in torch/csrc/generic/StorageSharing.cpp
+    def _share_filename_(self): ...  # noqa: E704
+    def _share_fd_(self): ...  # noqa: E704
+    @classmethod
+    def _new_using_filename(cls: Type[T], size: int) -> T: ...  # noqa: E704
+    @classmethod
+    def _new_using_fd(cls: Type[T], size: int) -> T: ...  # noqa: E704
 
     def __str__(self):
         content = ' ' + '\n '.join(str(self[i]) for i in range(len(self)))
-        return content + '\n[{} of size {}]'.format(torch.typename(self), len(self))
+        return content + f'\n[{torch.typename(self)} of size {len(self)}]'
 
     def __repr__(self):
         return str(self)
@@ -31,7 +51,7 @@ class _StorageBase(object):
 
     def __reduce__(self):
         b = io.BytesIO()
-        torch.save(self, b)
+        torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
@@ -102,10 +122,9 @@ class _StorageBase(object):
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:
-            raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
-                            .format(self.type()))
+            raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
         import torch.cuda
-        allocator = torch.cuda._host_allocator()
+        allocator = torch.cuda._host_allocator()  # type: ignore[attr-defined]
         return type(self)(self.size(), allocator=allocator).copy_(self)
 
     def share_memory_(self):
@@ -142,5 +161,5 @@ def _load_from_bytes(b):
     return torch.load(io.BytesIO(b))
 
 
-_StorageBase.type = _type
-_StorageBase.cuda = _cuda
+_StorageBase.type = _type  # type: ignore[assignment]
+_StorageBase.cuda = _cuda  # type: ignore[assignment]

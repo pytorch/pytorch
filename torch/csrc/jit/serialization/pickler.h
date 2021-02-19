@@ -2,11 +2,13 @@
 
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
@@ -105,7 +107,8 @@ struct WriteableTensorData {
   }
 
  private:
-  friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
+  friend TORCH_API WriteableTensorData
+  getWriteableTensorData(const at::Tensor& tensor, bool to_cpu);
   at::Tensor tensor_;
   uint64_t size_;
 };
@@ -113,22 +116,22 @@ struct WriteableTensorData {
 void setTypeTags(bool state);
 bool getTypeTags();
 
-class Pickler {
+class TORCH_API Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
   Pickler(std::function<void(const char*, size_t)> writer)
-      : Pickler(writer, nullptr, nullptr, nullptr) {}
+      : Pickler(std::move(writer), nullptr, nullptr, nullptr) {}
 
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
-      std::vector<c10::ClassTypePtr>* memorized_class_types)
-      : writer_(writer),
+      std::vector<c10::ClassTypePtr>* memoized_class_types)
+      : writer_(std::move(writer)),
         tensor_table_(tensor_table),
-        type_renamer_(type_renamer),
-        memorized_class_types_(memorized_class_types) {}
+        type_renamer_(std::move(type_renamer)),
+        memoized_class_types_(memoized_class_types) {}
   ~Pickler();
 
   // Push protocol onto the stack
@@ -142,7 +145,7 @@ class Pickler {
   void startTuple();
   void endTuple();
 
-  const std::vector<WriteableTensorData>& tensorData() {
+  const std::vector<at::Tensor>& tensorData() {
     return tensor_data_;
   }
 
@@ -157,6 +160,7 @@ class Pickler {
   void endTypeTag(const IValue& value);
   void pushBool(bool value);
   void pushDouble(double value);
+  void pushComplexDouble(const IValue& value);
   void pushGenericList(const IValue& ivalue);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
@@ -206,7 +210,7 @@ class Pickler {
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
   // does not)
-  static constexpr size_t kBufferSize = 256;
+  static CONSTEXPR_EXCEPT_WIN_CUDA size_t kBufferSize = 256;
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
@@ -250,11 +254,11 @@ class Pickler {
   std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer_;
 
   // List of all the types that it wrote, inspect from the IValues it wrote.
-  std::vector<c10::ClassTypePtr>* memorized_class_types_;
+  std::vector<c10::ClassTypePtr>* memoized_class_types_;
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
-  std::vector<WriteableTensorData> tensor_data_;
+  std::vector<at::Tensor> tensor_data_;
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
@@ -263,8 +267,9 @@ class Pickler {
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
-// if necessary
-WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
+// if it was CUDA and to_cpu is True.
+TORCH_API WriteableTensorData
+getWriteableTensorData(const at::Tensor& tensor, bool to_cpu = true);
 
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);

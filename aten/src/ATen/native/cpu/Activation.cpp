@@ -4,7 +4,8 @@
 
 #include <ATen/native/Activation.h>
 
-#include <math.h>
+#include <cmath>
+#include <functional>
 
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
@@ -188,12 +189,12 @@ void GeluBackwardMKLKernelImpl(TensorIterator* it) {
 
 template <typename T>
 void GeluMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 template <typename T>
 void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED()
@@ -225,7 +226,7 @@ void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_sca
   });
 }
 
-void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
+void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
     using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
@@ -237,15 +238,23 @@ void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar 
     const Vec zero_vec(static_cast<scalar_t>(0));
     cpu_kernel_vec(
         it,
-        [negcoef, negiptcoef, poscoef](scalar_t a, scalar_t b) -> scalar_t {
-          return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
-        },
-        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vec a, Vec b) -> Vec {
-          auto cmp = (b > zero_vec);
-          if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
-            return a * poscoef_vec;
+        [negcoef, negiptcoef, poscoef, is_result](scalar_t a, scalar_t b) -> scalar_t {
+          if (is_result) {
+            return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
           } else {
-            return Vec::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
+            return b <= scalar_t(0) ? a * negiptcoef * negcoef * std::exp(b * negiptcoef): a * poscoef;
+          }
+        },
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec, is_result](Vec a, Vec b) -> Vec {
+          auto cmp = (b > zero_vec);
+          if (is_result) {
+            if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+              return a * poscoef_vec;
+            } else {
+              return Vec::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
+            }
+          } else {
+            return Vec::blendv(a * negiptcoef_vec * negcoef_vec * (b * negiptcoef_vec).exp(), a * poscoef_vec, cmp);
           }
         }
     );
@@ -349,7 +358,7 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t grad_val, scalar_t self_val) {
-          return (self_val >= neg_three && self_val <= three)
+          return (self_val > neg_three && self_val < three)
             ? grad_val * one_sixth
             : zero;
         },
@@ -589,6 +598,40 @@ void glu_backward_kernel(TensorIterator& iter) {
   });
 }
 
+void silu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kBFloat16, iter.dtype(), "silu_cpu", [&]() {
+        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) {
+              return x / (scalar_t(1) + std::exp(-x));
+            },
+            [kOneVec](Vec256<scalar_t> x_vec) {
+              return x_vec / (kOneVec + x_vec.neg().exp());
+            });
+      });
+}
+
+void silu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kBFloat16, iter.dtype(), "silu_backward_cpu", [&]() {
+        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t dy, scalar_t x) {
+              const scalar_t sigmoid =
+                  scalar_t(1) / (scalar_t(1) + std::exp(-x));
+              return dy * sigmoid * (scalar_t(1) + x * (scalar_t(1) - sigmoid));
+            },
+            [kOneVec](Vec256<scalar_t> dy_vec, Vec256<scalar_t> x_vec) {
+              const Vec256<scalar_t> sigmoid =
+                  kOneVec / (kOneVec + x_vec.neg().exp());
+              return dy_vec * sigmoid * (kOneVec + x_vec * (kOneVec - sigmoid));
+            });
+      });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
@@ -612,6 +655,8 @@ REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
 REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
+REGISTER_DISPATCH(silu_stub, &silu_kernel);
+REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 
 } // namespace native
 } // namespace at

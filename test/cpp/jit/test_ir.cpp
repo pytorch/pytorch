@@ -1,11 +1,12 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/ir/irparser.h"
 
 namespace torch {
 namespace jit {
 
-void testAttributes() {
+TEST(IRTest, Attributes) {
   Graph g;
   auto one = attr::alpha;
   auto two = attr::device;
@@ -33,7 +34,7 @@ void testAttributes() {
   ASSERT_EQ(attr2.f(one), 5);
 }
 
-void testBlocks() {
+TEST(IRTest, Blocks) {
   auto g = std::make_shared<Graph>();
   const auto graph_string = R"IR(
     graph(%a : Tensor,
@@ -92,7 +93,7 @@ void testBlocks() {
       ->run(*g2);
 }
 
-void testCommonAncestor() {
+TEST(IRTest, CommonAncestor) {
   std::string input_str = R"(
 graph(%x : Tensor,
       %a.1 : bool,

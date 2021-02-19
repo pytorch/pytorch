@@ -818,6 +818,67 @@ c10::optional<int> OperatorBase::argumentIndexWithName(
 #endif
 }
 
+bool OperatorBase::RunAsync(int stream_id) {
+  try {
+    auto result = Run(stream_id);
+    if (result) {
+      if (HasAsyncPart()) {
+        RecordEvent();
+      } else {
+        SetEventFinished();
+      }
+    } else {
+      SetEventFinished(getErrorMsg().c_str());
+    }
+    return result;
+  } catch (EnforceNotMet& err) {
+    SetEventFinishedWithException(err.what());
+    throw;
+  } catch (const std::exception& err) {
+    SetEventFinishedWithException(err.what());
+    throw;
+  } catch (...) {
+    SetEventFinishedWithException(getErrorMsg().c_str());
+    throw;
+  }
+}
+
+void OperatorBase::AddRelatedBlobInfo(EnforceNotMet* err) {
+  CAFFE_ENFORCE(
+      isLegacyOperator(),
+      "AddRelatedBlobInfo(err) not supported for operators exported to c10.");
+
+  if (!has_debug_def()) {
+    return;
+  }
+
+  bool found_input = false;
+  bool found_output = false;
+  if (err->caller() != nullptr) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < inputs_.size(); i++) {
+      if (inputs_[i]->GetRaw() == err->caller()) {
+        found_input = true;
+        oss << "while accessing input: " << debug_def().input(i);
+        break;
+      }
+    }
+    for (size_t i = 0; i < outputs_.size(); i++) {
+      if (outputs_[i]->GetRaw() == err->caller()) {
+        found_output = true;
+        if (found_input) {
+          oss << " OR ";
+        }
+        oss << "while accessing output: " << debug_def().output(i);
+        break;
+      }
+    }
+    if (found_input || found_output) {
+      err->add_context(oss.str());
+    }
+  }
+}
+
 OperatorBase::~OperatorBase() noexcept = default;
 
 #ifndef C10_MOBILE

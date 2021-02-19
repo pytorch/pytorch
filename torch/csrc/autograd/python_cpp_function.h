@@ -31,9 +31,9 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 }
 
 #define THP_FUNCTION_DEFAULT_METHODS \
-  {(char*)"_register_hook_dict", (PyCFunction)THPCppFunction_register_hook_dict, METH_O, nullptr}, \
-  {(char*)"register_hook", (PyCFunction)THPCppFunction_register_hook, METH_O, nullptr}, \
-  {(char*)"name", (PyCFunction)THPCppFunction_name, METH_NOARGS, nullptr}
+  {(char*)"_register_hook_dict", THPCppFunction_register_hook_dict, METH_O, nullptr}, \
+  {(char*)"register_hook", THPCppFunction_register_hook, METH_O, nullptr}, \
+  {(char*)"name", THPCppFunction_name, METH_NOARGS, nullptr}
 
 #define THP_FUNCTION_DEFAULT_PROPERTIES \
   {(char*)"next_functions", (getter)THPCppFunction_next_functions, nullptr, nullptr, nullptr}, \

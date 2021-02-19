@@ -30,21 +30,31 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
 void RegisterCodeGenList::AddStmtFactoryMethod(
     const std::string& name,
     const StmtFactoryMethod& stmt_factory_method) {
-  auto insert_ret =
-      stmt_factory_methods_.insert(std::make_pair(name, stmt_factory_method));
-  if (!insert_ret.second) {
-    throw std::runtime_error("Duplicated CodeGen names: " + name);
-  }
+  stmt_factory_methods_[name] = stmt_factory_method;
 }
 
 std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params,
-    at::Device device) {
+    at::Device device,
+    const std::string& kernel_func_name) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(stmt, params, device);
+  return method(stmt, params, device, kernel_func_name);
+}
+
+const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
+  if (v->op_type() == kSigmoid) {
+    auto x = v->param(0)->accept_mutator(this);
+    auto one = expr_to_vec(
+        ExprHandle(getImmediateByType(v->dtype(), 1.0)), v->dtype().lanes());
+    auto zero = expr_to_vec(
+        ExprHandle(getImmediateByType(v->dtype(), 0.0)), v->dtype().lanes());
+    ExprHandle y = one / (one + exp(zero - ExprHandle(x)));
+    return y.node();
+  }
+  return IRMutator::mutate(v);
 }
 
 } // namespace tensorexpr

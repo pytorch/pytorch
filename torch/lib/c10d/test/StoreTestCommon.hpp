@@ -3,6 +3,8 @@
 #include <c10d/Store.hpp>
 #include <c10d/test/TestUtils.hpp>
 
+#include <gtest/gtest.h>
+
 namespace c10d {
 namespace test {
 
@@ -14,15 +16,23 @@ inline void set(
   store.set(key, data);
 }
 
+inline std::vector<uint8_t> compareSet(
+    Store& store,
+    const std::string& key,
+    const std::string& currentValue,
+    const std::string& newValue) {
+  std::vector<uint8_t> currentData(currentValue.begin(), currentValue.end());
+  std::vector<uint8_t> newData(newValue.begin(), newValue.end());
+  return store.compareSet(key, currentData, newData);
+}
+
 inline void check(
     Store& store,
     const std::string& key,
     const std::string& expected) {
   auto tmp = store.get(key);
   auto actual = std::string((const char*)tmp.data(), tmp.size());
-  if (actual != expected) {
-    throw std::runtime_error("Expected " + expected + ", got " + actual);
-  }
+  EXPECT_EQ(actual, expected);
 }
 
 } // namespace test

@@ -1,5 +1,5 @@
 import sys
-sys.argv.append("--ge_config=legacy")
+sys.argv.append("--jit_executor=legacy")
 from test_jit import *
 
 if __name__ == '__main__':

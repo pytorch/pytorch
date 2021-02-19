@@ -110,6 +110,24 @@ enum pytorch_qnnp_status qnnpackLinear(
 
 enum pytorch_qnnp_status qnnpackConv(
     const conv_param_t& conv_p,
+    const pytorch_qnnp_operator_t convolution,
+    void* packed_weights,
+    const size_t batch_size,
+    const size_t input_height,
+    const size_t input_width,
+    const uint8_t input_zero_point,
+    const uint8_t* input,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
+    const uint8_t output_zero_point,
+    const uint8_t output_min,
+    const uint8_t output_max,
+    uint8_t* output,
+    pthreadpool_t threadpool);
+
+enum pytorch_qnnp_status qnnpackDeConv(
+    const conv_param_t& deconv_p,
+    const pytorch_qnnp_operator_t deconvolution,
     void* packed_weights,
     const size_t batch_size,
     const size_t input_height,

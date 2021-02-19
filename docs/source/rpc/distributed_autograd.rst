@@ -270,7 +270,7 @@ As an example the complete code with distributed autograd would be as follows:
     # Retrieve the gradients from the context.
     dist_autograd.get_gradients(context_id)
 
-The distributed autograd graph with dependencies would be as follows:
+The distributed autograd graph with dependencies would be as follows (t5.sum() excluded for simplicity):
 
 .. image:: ../_static/img/distributed_autograd/distributed_dependencies_computed.png
 

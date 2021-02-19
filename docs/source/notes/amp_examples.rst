@@ -19,6 +19,10 @@ gradients by minimizing gradient underflow, as explained :ref:`here<gradient-sca
 :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` are modular.
 In the samples below, each is used as its individual documentation suggests.
 
+(Samples here are illustrative.  See the
+`Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_
+for a runnable walkthrough.)
+
 .. contents:: :local:
 
 Typical Mixed Precision Training
@@ -44,7 +48,7 @@ Typical Mixed Precision Training
 
             # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
             # Backward passes under autocast are not recommended.
-            # Backward ops run in the same precision that autocast used for corresponding forward ops.
+            # Backward ops run in the same dtype autocast chose for corresponding forward ops.
             scaler.scale(loss).backward()
 
             # scaler.step() first unscales the gradients of the optimizer's assigned params.
@@ -169,7 +173,9 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
             loss = loss_fn(output, target)
 
             # Creates gradients
-            grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+            grad_params = torch.autograd.grad(outputs=loss,
+                                              inputs=model.parameters(),
+                                              create_graph=True)
 
             # Computes the penalty term and adds it to the loss
             grad_norm = 0
@@ -184,8 +190,8 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
 
             optimizer.step()
 
-To implement a gradient penalty *with* gradient scaling, the loss passed to
-:func:`torch.autograd.grad` should be scaled.  The resulting gradients
+To implement a gradient penalty *with* gradient scaling, the ``outputs`` Tensor(s)
+passed to :func:`torch.autograd.grad` should be scaled.  The resulting gradients
 will therefore be scaled, and should be unscaled before being combined to create the
 penalty value.
 
@@ -203,8 +209,10 @@ Here's how that looks for the same L2 penalty::
                 output = model(input)
                 loss = loss_fn(output, target)
 
-            # Scales the loss for autograd.grad's backward pass, resulting in scaled grad_params
-            scaled_grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
+            # Scales the loss for autograd.grad's backward pass, producing scaled_grad_params
+            scaled_grad_params = torch.autograd.grad(outputs=scaler.scale(loss),
+                                                     inputs=model.parameters(),
+                                                     create_graph=True)
 
             # Creates unscaled grad_params before computing the penalty. scaled_grad_params are
             # not owned by any optimizer, so ordinary division is used instead of scaler.unscale_:
@@ -254,6 +262,8 @@ after all optimizers used this iteration have been stepped::
                 loss0 = loss_fn(2 * output0 + 3 * output1, target)
                 loss1 = loss_fn(3 * output0 - 5 * output1, target)
 
+            # (retain_graph here is unrelated to amp, it's present because in this
+            # example, both backward() calls share some sections of graph.)
             scaler.scale(loss0).backward(retain_graph=True)
             scaler.scale(loss1).backward()
 
@@ -368,8 +378,8 @@ the relevant case below.
 Functions with multiple inputs or autocastable ops
 --------------------------------------------------
 
-Apply :func:`custom_fwd` and :func:`custom_bwd` (with no arguments) to ``forward`` and ``backward``
-respectively.  These ensure ``forward`` executes with the current autocast state and ``backward``
+Apply :func:`custom_fwd<custom_fwd>` and :func:`custom_bwd<custom_bwd>` (with no arguments) to ``forward`` and
+``backward`` respectively.  These ensure ``forward`` executes with the current autocast state and ``backward``
 executes with the same autocast state as ``forward`` (which can prevent type mismatch errors)::
 
     class MyMM(torch.autograd.Function):
@@ -391,13 +401,14 @@ Now ``MyMM`` can be invoked anywhere, without disabling autocast or manually cas
     with autocast():
         output = mymm(input1, input2)
 
-Functions that need a particular dtype
---------------------------------------
+Functions that need a particular ``dtype``
+------------------------------------------
 
+Consider a custom function that requires ``torch.float32`` inputs.
 Apply :func:`custom_fwd(cast_inputs=torch.float32)<custom_fwd>` to ``forward``
 and :func:`custom_bwd<custom_bwd>` (with no arguments) to ``backward``.
-With ``cast_inputs=torch.float32``, these disable autocast in ``forward`` and ``backward``,
-and ``forward`` casts incoming floating-point CUDA Tensors to ``float32``::
+If ``forward`` runs in an autocast-enabled region, the decorators cast floating-point CUDA Tensor
+inputs to ``float32``, and locally disable autocast during ``forward`` and ``backward``::
 
     class MyFloat32Func(torch.autograd.Function):
         @staticmethod
@@ -411,7 +422,7 @@ and ``forward`` casts incoming floating-point CUDA Tensors to ``float32``::
         def backward(ctx, grad):
             ...
 
-Now ``MyFloat32Func`` can be invoked anywhere, without disabling autocast or manually casting inputs::
+Now ``MyFloat32Func`` can be invoked anywhere, without manually disabling autocast or casting inputs::
 
     func = MyFloat32Func.apply
 

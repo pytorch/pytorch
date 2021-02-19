@@ -76,7 +76,7 @@ struct TopKTypeConfig<short> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(short v) {
-    CUDA_KERNEL_ASSERT(sizeof(short) == 2);
+    static_assert(sizeof(short) == 2, "");
     return 32768u + v;
   }
 
@@ -90,7 +90,7 @@ struct TopKTypeConfig<int> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(int v) {
-    CUDA_KERNEL_ASSERT(sizeof(int) == 4);
+    static_assert(sizeof(int) == 4, "");
     return 2147483648u + v;
   }
 
@@ -100,15 +100,16 @@ struct TopKTypeConfig<int> {
 };
 
 template <>
-struct TopKTypeConfig<long> {
+struct TopKTypeConfig<int64_t> {
   typedef unsigned long long int RadixType;
 
-  static inline __device__ RadixType convert(long v) {
-    CUDA_KERNEL_ASSERT(sizeof(long) == 8);
+  static inline __device__ RadixType convert(int64_t v) {
+    //static_assert fails on windows, so leave it as CUDA_KERNEL_ASSERT
+    static_assert(sizeof(int64_t) == 8, "");
     return 9223372036854775808ull + v;
   }
 
-  static inline __device__ long deconvert(RadixType v) {
+  static inline __device__ int64_t deconvert(RadixType v) {
     return v - 9223372036854775808ull;
   }
 };

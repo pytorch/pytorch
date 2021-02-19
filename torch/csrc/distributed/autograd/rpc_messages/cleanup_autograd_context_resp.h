@@ -2,7 +2,6 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
-#include <vector>
 
 namespace torch {
 namespace distributed {

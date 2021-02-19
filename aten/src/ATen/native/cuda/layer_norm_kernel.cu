@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 #include <THC/THCDeviceUtils.cuh>
 
 #include <c10/cuda/CUDAMathCompat.h>
@@ -16,33 +17,7 @@ namespace native {
 namespace {
 
 constexpr int kCUDANumThreads = 256;
-constexpr int kCUDABlockReduceNumThreads = 512;
 constexpr int kColwiseReduceTileSize = 32;
-
-template <typename T>
-__inline__ __device__ T WarpReduceSum(T val) {
-#pragma unroll
-  for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
-    val += WARP_SHFL_DOWN(val, offset);
-  }
-  return val;
-}
-
-template <typename T>
-__inline__ __device__ T BlockReduceSum(T val, T* shared) {
-  const int lid = threadIdx.x % C10_WARP_SIZE;
-  const int wid = threadIdx.x / C10_WARP_SIZE;
-  val = WarpReduceSum(val);
-  if (lid == 0) {
-    shared[wid] = val;
-  }
-  __syncthreads();
-  val = (threadIdx.x < blockDim.x / C10_WARP_SIZE) ? shared[lid] : 0;
-  if (wid == 0) {
-    val = WarpReduceSum(val);
-  }
-  return val;
-}
 
 template <typename T>
 __global__ void RowwiseMomentsCUDAKernel(
@@ -62,8 +37,8 @@ __global__ void RowwiseMomentsCUDAKernel(
     sum1 += static_cast<T_ACC>(X[index]);
     sum2 += static_cast<T_ACC>(X[index]) * static_cast<T_ACC>(X[index]);
   }
-  sum1 = BlockReduceSum<T_ACC>(sum1, m_shared);
-  sum2 = BlockReduceSum<T_ACC>(sum2, v_shared);
+  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, m_shared);
+  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, v_shared);
   if (threadIdx.x == 0) {
     const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
     sum1 *= scale;
@@ -118,8 +93,8 @@ __global__ void ComputeInternalGradientsCUDAKernel(
         static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]) * gamma_v;
     sum2 += static_cast<T_ACC>(dY[index]) * gamma_v;
   }
-  sum1 = BlockReduceSum<T_ACC>(sum1, ds_shared);
-  sum2 = BlockReduceSum<T_ACC>(sum2, db_shared);
+  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
+  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   if (threadIdx.x == 0) {
     ds[i] = sum1;
     db[i] = sum2;
@@ -249,8 +224,8 @@ __global__ void GammaBetaBackwardCUDAKernel(
   __syncthreads();
   T_ACC sum1 = g_shared[threadIdx.x][threadIdx.y];
   T_ACC sum2 = b_shared[threadIdx.x][threadIdx.y];
-  sum1 = WarpReduceSum(sum1);
-  sum2 = WarpReduceSum(sum2);
+  sum1 = cuda_utils::WarpReduceSum(sum1);
+  sum2 = cuda_utils::WarpReduceSum(sum2);
   if (threadIdx.x == 0) {
     const int64_t j = blockIdx.x * blockDim.x + threadIdx.y;
     if (j < N) {
@@ -264,8 +239,8 @@ __global__ void GammaBetaBackwardCUDAKernel(
   }
   sum1 = g_shared[threadIdx.x][threadIdx.y + blockDim.y];
   sum2 = b_shared[threadIdx.x][threadIdx.y + blockDim.y];
-  sum1 = WarpReduceSum(sum1);
-  sum2 = WarpReduceSum(sum2);
+  sum1 = cuda_utils::WarpReduceSum(sum1);
+  sum2 = cuda_utils::WarpReduceSum(sum2);
   if (threadIdx.x == 0) {
     const int64_t j = blockIdx.x * blockDim.x + threadIdx.y + blockDim.y;
     if (j < N) {
@@ -301,11 +276,12 @@ void LayerNormKernelImplInternal(
   T* rstd_data = rstd->data_ptr<T>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   RowwiseMomentsCUDAKernel<T>
-      <<<M, kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
+      <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
           N, eps, X_data, mean_data, rstd_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   LayerNormForwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void LayerNormKernelImpl(
@@ -320,10 +296,8 @@ void LayerNormKernelImpl(
     Tensor* rstd) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormKernelImpl", [&]() {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormKernelImpl", [&] {
-          LayerNormKernelImplInternal<scalar_t>(
-              X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
-        });
+        LayerNormKernelImplInternal<scalar_t>(
+            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
       });
 }
 
@@ -364,8 +338,9 @@ void LayerNormBackwardKernelImplInternal(
     T_ACC* scale_data = scale.template data_ptr<T_ACC>();
     T_ACC* bias_data = bias.template data_ptr<T_ACC>();
     ComputeInternalGradientsCUDAKernel<T>
-        <<<M, kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
+        <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
             N, dY_data, X_data, gamma_data, ds_data, db_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     const int64_t B = (M + kCUDANumThreads - 1) / kCUDANumThreads;
     ComputeGradientFusedParamsCUDAKernel<T>
         <<<B, kCUDANumThreads, 0, cuda_stream>>>(
@@ -377,6 +352,7 @@ void LayerNormBackwardKernelImplInternal(
             db_data,
             scale_data,
             bias_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     LayerNormBackwardCUDAKenrel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
         N,
         dY_data,
@@ -386,6 +362,7 @@ void LayerNormBackwardKernelImplInternal(
         scale_data,
         bias_data,
         dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   if (dgamma->defined() || dbeta->defined()) {
     T* dgamma_data =
@@ -404,6 +381,7 @@ void LayerNormBackwardKernelImplInternal(
               rstd_data,
               dgamma_data,
               dbeta_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       const int64_t B =
           (N + kColwiseReduceTileSize - 1) / kColwiseReduceTileSize;
@@ -419,6 +397,7 @@ void LayerNormBackwardKernelImplInternal(
               rstd_data,
               dgamma_data,
               dbeta_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 }
@@ -436,57 +415,84 @@ void LayerNormBackwardKernelImpl(
     Tensor* dbeta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormBackwardKernelImpl", [&] {
-          LayerNormBackwardKernelImplInternal<scalar_t>(
-              dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-        });
+        LayerNormBackwardKernelImplInternal<scalar_t>(
+            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
 
 } // namespace
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
-    const Tensor& X,
-    const Tensor& gamma /* optional */,
-    const Tensor& beta /* optional */,
-    int64_t M,
-    int64_t N,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */,
     double eps) {
+
+  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto X = std::get<0>(inputs);
+  auto gamma = std::get<1>(inputs);
+  auto beta = std::get<2>(inputs);
+  auto M = std::get<3>(inputs);
+  auto N = std::get<4>(inputs);
+
   Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   if (M > 0) {
     LayerNormKernelImpl(X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+
+    const auto input_shape = input.sizes();
+    const size_t axis = input.dim() - normalized_shape.size();
+
+    std::vector<int64_t> stat_shape;
+    for (size_t idx = 0; idx < axis; ++idx) {
+      stat_shape.push_back(input_shape[idx]);
+    }
+    for (size_t idx = axis; idx < input.dim(); ++idx) {
+      stat_shape.push_back(1);
+    }
+
+    mean = mean.view(stat_shape);
+    rstd = rstd.view(stat_shape);
   }
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     const Tensor& dY,
-    const Tensor& X,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const Tensor& gamma,
-    int64_t M,
-    int64_t N,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */,
     std::array<bool, 3> grad_input_mask) {
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
-  if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (grad_input_mask[1]) {
-    dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (grad_input_mask[2]) {
-    dbeta = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (M > 0) {
-    LayerNormBackwardKernelImpl(
-        dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  }
-  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+
+    auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+    auto X = std::get<0>(inputs);
+    auto gamma = std::get<1>(inputs);
+    auto beta = std::get<2>(inputs);
+    auto M = std::get<3>(inputs);
+    auto N = std::get<4>(inputs);
+
+    Tensor dX;
+    Tensor dgamma;
+    Tensor dbeta;
+    if (grad_input_mask[0]) {
+      dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (grad_input_mask[1]) {
+      dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (grad_input_mask[2]) {
+      dbeta = M > 0 ? at::native::empty_like(beta, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(beta, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (M > 0) {
+      LayerNormBackwardKernelImpl(
+          dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+    }
+    return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 

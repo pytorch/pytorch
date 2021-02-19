@@ -8,7 +8,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <c10/core/TensorOptions.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 
@@ -82,7 +82,7 @@ Tensor quantized_channel_shuffle_impl(
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK ChannelShuffle operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
   TORCH_INTERNAL_ASSERT(
@@ -95,7 +95,7 @@ Tensor quantized_channel_shuffle_impl(
 #endif
 
 // at::native functions for the native_functions.yaml
-Tensor quantized_channel_shuffle(
+Tensor channel_shuffle_quantized_cpu(
     const Tensor& self,
     int64_t groups) {
 #ifdef USE_PYTORCH_QNNPACK
@@ -111,7 +111,7 @@ namespace {
 class QChannelShuffle final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qx, int64_t groups) {
-    return quantized_channel_shuffle(qx, groups);
+    return channel_shuffle_quantized_cpu(qx, groups);
   }
 };
 

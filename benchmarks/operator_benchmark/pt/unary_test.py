@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 
 import operator_benchmark as op_bench
 import torch
@@ -32,12 +27,43 @@ unary_ops_configs_long = op_bench.cross_product_configs(
 
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, device, op_func):
-        self.input_one = torch.rand(M, N, device=device)
+        self.inputs = {
+            "input": torch.rand(M, N, device=device)
+        }
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.input_one)
+    def forward(self, input):
+        return self.op_func(input)
 
+def bernoulli_(input):
+    return input.bernoulli_()
+
+def cauchy_(input):
+    return input.cauchy_()
+
+def digamma_(input):
+    return input.digamma_()
+
+def exponential_(input):
+    return input.exponential_()
+
+def normal_(input):
+    return input.normal_()
+
+def random_(input):
+    return input.random_()
+
+def sign_(input):
+    return input.sign_()
+
+def uniform_(input):
+    return input.uniform_()
+
+def half_(input):
+    return input.half()
+
+def long_(input):
+    return input.long()
 
 unary_ops_list = op_bench.op_list(
     attr_names=['op_name', 'op_func'],
@@ -81,6 +107,8 @@ unary_ops_list = op_bench.op_list(
         ['log2', torch.log2],
         ['log2_', torch.log2_],
         ['log_', torch.log_],
+        ['logit', torch.logit],
+        ['logit_', torch.logit_],
         ['neg', torch.neg],
         ['neg_', torch.neg_],
         ['reciprocal', torch.reciprocal],
@@ -94,6 +122,7 @@ unary_ops_list = op_bench.op_list(
         ['sigmoid', torch.sigmoid],
         ['sigmoid_', torch.sigmoid_],
         ['sign', torch.sign],
+        ['sgn', torch.sgn],
         ['sin', torch.sin],
         ['sin_', torch.sin_],
         ['sinh', torch.sinh],
@@ -107,18 +136,18 @@ unary_ops_list = op_bench.op_list(
         ['tanh_', torch.tanh_],
         ['trunc', torch.trunc],
         ['trunc_', torch.trunc_],
-        ['unique', torch.unique],
+        ['unique', torch.functional._return_output],
         ['zero_', torch.zero_],
-        ['bernoulli_', lambda t: t.bernoulli_()],
-        ['cauchy_', lambda t: t.cauchy_()],
-        ['digamma_', lambda t: t.digamma_()],
-        ['exponential_', lambda t: t.exponential_()],
-        ['normal_', lambda t: t.normal_()],
-        ['random_', lambda t: t.random_()],
-        ['sign_', lambda t: t.sign_()],
-        ['uniform_', lambda t: t.uniform_()],
-        ['half', lambda t: t.half()],
-        ['long', lambda t: t.long()],
+        ['bernoulli_', bernoulli_],
+        ['cauchy_', cauchy_],
+        ['digamma_', digamma_],
+        ['exponential_', exponential_],
+        ['normal_', normal_],
+        ['random_', random_],
+        ['sign_', sign_],
+        ['uniform_', uniform_],
+        ['half', half_],
+        ['long', long_],
     ],
 )
 

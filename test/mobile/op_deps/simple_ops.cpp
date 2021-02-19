@@ -60,6 +60,11 @@ Tensor FF_op(const Tensor& self) {
   return self;
 }
 
+// GG -> FF
+Tensor GG_op(const Tensor& self) {
+  return call_FF_op(self);
+}
+
 namespace {
 
 // NB: Some of these registrations (AA, EE) are not what you
@@ -75,16 +80,16 @@ namespace {
 // cares about the name
 TORCH_LIBRARY(_test, m) {
   m.def("AA(Tensor self) -> Tensor");
-  m.impl("AA", torch::CppFunction::makeUnboxedOnly(AA_op));
+  m.impl("AA", torch::CppFunction::makeFromUnboxedFunction(AA_op));
 
   m.def("BB(Tensor self) -> Tensor");
-  m.impl("BB", &BB_op);
+  m.impl("BB", TORCH_FN(BB_op));
 
-  m.def("CC(Tensor self) -> Tensor", &CC_op);
-  m.def("DD", &DD_op);
+  m.def("CC(Tensor self) -> Tensor", TORCH_FN(CC_op));
+  m.def("DD", TORCH_FN(DD_op));
 }
 
-TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(_test, m) {
+TORCH_LIBRARY_FRAGMENT(_test, m) {
   m.def("EE(Tensor self) -> Tensor");
   m.def("FF(Tensor self) -> Tensor");
   m.def("GG(Tensor self) -> Tensor");
@@ -92,12 +97,15 @@ TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(_test, m) {
 }
 
 TORCH_LIBRARY_IMPL(_test, CPU, m) {
-  m.impl_UNBOXED("EE", EE_op);
-  m.impl("FF", torch::CppFunction::makeUnboxedOnly(FF_op));
+  m.impl("EE", EE_op);
+  m.impl("FF",
+         torch::dispatch(DispatchKey::CPU,
+                         torch::CppFunction::makeFromUnboxedFunction(FF_op))
+  );
   m.impl("GG",
-    [] (Tensor a) -> Tensor {
-      return call_FF_op(a);
-    });
+         torch::dispatch(DispatchKey::CPU,
+                         TORCH_FN((GG_op)))
+  );
   m.impl("HH",
     [] (Tensor a) -> Tensor {
       return a;

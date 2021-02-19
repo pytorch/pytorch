@@ -15,7 +15,6 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorFill.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorEvenMoreMath.cpp
@@ -66,6 +65,7 @@ install(FILES
   THGenerateComplexTypes.h
   THGenerateIntTypes.h
   THGenerateQUInt8Type.h
+  THGenerateQUInt4x2Type.h
   THGenerateQInt8Type.h
   THGenerateQInt32Type.h
   THGenerateQTypes.h
@@ -79,7 +79,6 @@ install(FILES
   THHalf.h
   THTensor.hpp
   THStorageFunctions.hpp
-  THGenerator.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 install(FILES
@@ -99,8 +98,6 @@ install(FILES
   generic/THTensor.cpp
   generic/THTensor.h
   generic/THTensor.hpp
-  generic/THTensorFill.cpp
-  generic/THTensorFill.h
   generic/THTensorLapack.cpp
   generic/THTensorLapack.h
   generic/THTensorMath.cpp

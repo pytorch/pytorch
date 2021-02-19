@@ -52,6 +52,11 @@ class LayerNormOp final : public Operator<Context> {
     T* sigma_data = sigma->template mutable_data<T>();
     T* scale_data = scale_.template mutable_data<T>();
     T* bias_data = bias_.template mutable_data<T>();
+
+    if (M == 0) {
+      return true;
+    }
+
     const std::array<int, 2> X_dims = {M, N};
     const std::array<int, 2> Y_dims = {M, 1};
     math::Moments<T, Context>(
@@ -172,6 +177,16 @@ class LayerNormGradientOp final : public Operator<Context> {
       dgamma_data = dgamma->template mutable_data<T>();
       dbeta_data = dbeta->template mutable_data<T>();
       g_scale_data = g_scale_.template mutable_data<T>();
+    }
+
+    if (M == 0) {
+      if (N > 0 && dgamma_data != nullptr) {
+        math::Set<T, Context>(N, T(0), dgamma_data, &context_);
+      }
+      if (N > 0 && dbeta_data != nullptr) {
+        math::Set<T, Context>(N, T(0), dbeta_data, &context_);
+      }
+      return true;
     }
 
     ComputeInternalGradients<T>(

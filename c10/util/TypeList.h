@@ -153,18 +153,32 @@ using contains = typename detail::contains<TypeList, Type>::type;
 /**
  * Returns true iff the type trait is true for all types in the type list
  * Examples:
- *   true   ==  true_for_each_type<std::is_reference, typelist<int&, const float&&, const MyClass&>>::value
- *   false  ==  true_for_each_type<std::is_reference, typelist<int&, const float&&, MyClass>>::value
+ *   true   ==  all<std::is_reference, typelist<int&, const float&&, const MyClass&>>::value
+ *   false  ==  all<std::is_reference, typelist<int&, const float&&, MyClass>>::value
  */
-template<template <class> class Condition, class TypeList> struct true_for_each_type final {
-    static_assert(false_t<TypeList>::value, "In typelist::true_for_each_type<Condition, TypeList>, the TypeList argument must be typelist<...>.");
+template<template <class> class Condition, class TypeList> struct all {
+    static_assert(false_t<TypeList>::value, "In typelist::all<Condition, TypeList>, the TypeList argument must be typelist<...>.");
 };
 template<template <class> class Condition, class... Types>
-struct true_for_each_type<Condition, typelist<Types...>> final
+struct all<Condition, typelist<Types...>>
 : guts::conjunction<Condition<Types>...> {
-    static_assert(is_type_condition<Condition>::value, "In typelist::true_for_each_type<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
+    static_assert(is_type_condition<Condition>::value, "In typelist::all<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
 };
 
+/**
+ * Returns true iff the type trait is true for any type in the type list
+ * Examples:
+ *   true   ==  true_for_any_type<std::is_reference, typelist<int, const float&&, const MyClass>>::value
+ *   false  ==  true_for_any_type<std::is_reference, typelist<int, const float, MyClass>>::value
+ */
+template<template <class> class Condition, class TypeList> struct true_for_any_type final {
+    static_assert(false_t<TypeList>::value, "In typelist::true_for_any_type<Condition, TypeList>, the TypeList argument must be typelist<...>.");
+};
+template<template <class> class Condition, class... Types>
+struct true_for_any_type<Condition, typelist<Types...>> final
+: guts::disjunction<Condition<Types>...> {
+    static_assert(is_type_condition<Condition>::value, "In typelist::true_for_any_type<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
+};
 
 
 /**
@@ -197,6 +211,22 @@ template<class Head, class... Tail> struct head<typelist<Head, Tail...>> final {
 };
 template<class TypeList> using head_t = typename head<TypeList>::type;
 
+
+/**
+ * Returns the first element of a type list, or the specified default if the type list is empty.
+ * Example:
+ *   int  ==  head_t<bool, typelist<int, string>>
+ *   bool  ==  head_t<bool, typelist<>>
+ */
+template<class Default, class TypeList> struct head_with_default final {
+  using type = Default;
+};
+template<class Default, class Head, class... Tail> struct head_with_default<Default, typelist<Head, Tail...>> final {
+  using type = Head;
+};
+template<class Default, class TypeList> using head_with_default_t = typename head_with_default<Default, TypeList>::type;
+
+
 /**
  * Returns the N-th element of a type list.
  * Example:
@@ -225,6 +255,7 @@ template<size_t Index, class Head, class... Tail> struct element<Index, typelist
 template<size_t Index, class TypeList>
 using element_t = typename element<Index, TypeList>::type;
 
+
 /**
  * Returns the last element of a type list.
  * Example:
@@ -249,6 +280,54 @@ using last_t = typename last<TypeList>::type;
 static_assert(
     std::is_same<int, last_t<typelist<double, float, int>>>::value,
     "");
+
+
+/**
+ * Take/drop a number of arguments from a typelist.
+ * Example:
+ *   typelist<int, string> == take_t<typelist<int, string, bool>, 2>
+ *   typelist<bool> == drop_t<typelist<int, string, bool>, 2>
+ */
+namespace detail {
+  template<class TypeList, size_t offset, class IndexSequence>
+  struct take_elements final {};
+
+  template<class TypeList, size_t offset, size_t... Indices>
+  struct take_elements<TypeList, offset, std::index_sequence<Indices...>> final {
+    using type = typelist<typename element<offset + Indices, TypeList>::type...>;
+  };
+}
+
+template<class TypeList, size_t num> struct take final {
+  static_assert(is_instantiation_of<typelist, TypeList>::value, "In typelist::take<T, num>, the T argument must be typelist<...>.");
+  static_assert(num <= size<TypeList>::value, "Tried to typelist::take more elements than there are in the list");
+  using type = typename detail::take_elements<TypeList, 0, std::make_index_sequence<num>>::type;
+};
+template<class TypeList, size_t num> using take_t = typename take<TypeList, num>::type;
+
+template<class TypeList, size_t num> struct drop final {
+  static_assert(is_instantiation_of<typelist, TypeList>::value, "In typelist::drop<T, num>, the T argument must be typelist<...>.");
+  static_assert(num <= size<TypeList>::value, "Tried to typelist::drop more elements than there are in the list");
+  using type = typename detail::take_elements<TypeList, num, std::make_index_sequence<size<TypeList>::value - num>>::type;
+};
+template<class TypeList, size_t num> using drop_t = typename drop<TypeList, num>::type;
+
+/**
+ * Like drop, but returns an empty list rather than an assertion error if `num`
+ * is larger than the size of the TypeList.
+ * Example:
+ *   typelist<> == drop_if_nonempty_t<typelist<string, bool>, 2>
+ *   typelist<> == drop_if_nonempty_t<typelist<int, string, bool>, 3>
+ */
+template<class TypeList, size_t num> struct drop_if_nonempty final {
+  static_assert(is_instantiation_of<typelist, TypeList>::value, "In typelist::drop<T, num>, the T argument must be typelist<...>.");
+  using type = typename detail::take_elements<
+    TypeList,
+    min(num, size<TypeList>::value),
+    std::make_index_sequence<size<TypeList>::value - min(num, size<TypeList>::value)>>::type;
+};
+template<class TypeList, size_t num> using drop_if_nonempty_t = typename drop_if_nonempty<TypeList, num>::type;
+
 
 /**
  * Reverses a typelist.
@@ -287,8 +366,6 @@ template<class Head, class... Tail, template<class> class Condition>
 struct find_if<typelist<Head, Tail...>, Condition, std::enable_if_t<!Condition<Head>::value>> final {
   static constexpr size_t value = 1 + find_if<typelist<Tail...>, Condition>::value;
 };
-
-
 
 /**
  * Maps a list of types into a list of values.

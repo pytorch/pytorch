@@ -87,16 +87,22 @@ __global__ void upsample_nearest3d_backward_out_frame(
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
+  // note that we do not want to clamp src_z to src_dim_z, since we might
+  // intentionally want to skip in case of scale_factor < 1.0
   int src_z = nearest_neighbor_bw_compute_source_index(depth_scale, dst_z, src_dim_d);
-  int src_z_up = nearest_neighbor_bw_compute_source_index(depth_scale, dst_z+1, src_dim_d+1);
+  int src_z_up = nearest_neighbor_bw_compute_source_index(depth_scale, dst_z+1, src_dim_d);
 
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
+  // note that we do not want to clamp src_y to src_dim_y, since we might
+  // intentionally want to skip in case of scale_factor < 1.0
   int src_y = nearest_neighbor_bw_compute_source_index(height_scale, dst_y, src_dim_h);
-  int src_y_up = nearest_neighbor_bw_compute_source_index(height_scale, dst_y+1, src_dim_h+1);
+  int src_y_up = nearest_neighbor_bw_compute_source_index(height_scale, dst_y+1, src_dim_h);
 
   int dst_x = dst_idx % dst_dim_w;
+  // note that we do not want to clamp src_x to src_dim_w, since we might
+  // intentionally want to skip in case of scale_factor < 1.0
   int src_x = nearest_neighbor_bw_compute_source_index(width_scale, dst_x, src_dim_w);
-  int src_x_up = nearest_neighbor_bw_compute_source_index(width_scale, dst_x+1, src_dim_w+1);
+  int src_x_up = nearest_neighbor_bw_compute_source_index(width_scale, dst_x+1, src_dim_w);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -161,7 +167,7 @@ static void upsample_nearest3d_out_cuda_template(
                   output_depth,
                   output_height,
                   output_width});
-  
+
   if (input.numel() == 0) {
     return;
   }
@@ -199,9 +205,8 @@ static void upsample_nearest3d_out_cuda_template(
             depth_scale,
             height_scale,
             width_scale);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_nearest3d_backward_out_cuda_template(
@@ -292,9 +297,8 @@ static void upsample_nearest3d_backward_out_cuda_template(
                 depth_scale,
                 height_scale,
                 width_scale);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace
@@ -340,6 +344,37 @@ Tensor upsample_nearest3d_backward_cuda(
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_nearest3d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
+  return grad_input;
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample_cuda::get_scale_value;
+
+Tensor upsample_nearest3d_cuda(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_d = get_scale_value(scale_factors, 0);
+  auto scale_h = get_scale_value(scale_factors, 1);
+  auto scale_w = get_scale_value(scale_factors, 2);
+  upsample_nearest3d_out_cuda_template(output, input, osize, scale_d, scale_h, scale_w);
+  return output;
+}
+
+Tensor upsample_nearest3d_backward_cuda(
+    const Tensor& grad_output,
+    c10::optional<IntArrayRef> output_size,
+    IntArrayRef input_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto scale_d = get_scale_value(scale_factors, 0);
+  auto scale_h = get_scale_value(scale_factors, 1);
+  auto scale_w = get_scale_value(scale_factors, 2);
+  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  upsample_nearest3d_backward_out_cuda_template(
+      grad_input, grad_output, osize, input_size, scale_d, scale_h, scale_w);
   return grad_input;
 }
 

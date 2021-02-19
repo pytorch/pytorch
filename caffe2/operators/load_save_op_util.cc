@@ -24,8 +24,16 @@ void ProcessBlob(
     std::unordered_map<std::string, BlobState>* blob_states_ptr,
     const std::string& key,
     int* loaded_blobs) {
-  auto& blob_states = *blob_states_ptr;
-  if (blob_states.count(key) == 0) {
+  prepareBlob(blob, blob_states_ptr, key);
+  DeserializeBlob(proto, blob);
+  updateBlobStates(proto, blob_states_ptr, key, loaded_blobs);
+}
+
+void prepareBlob(
+    Blob* blob,
+    std::unordered_map<std::string, BlobState>* blob_states,
+    const std::string& key) {
+  if (blob_states->count(key) == 0) {
     // We reset the blob so that any existing content is destroyed. This
     // is to guarantee correct device placement: if we are deserializing
     // into a TensorCUDA, without explicit Reset we might be loading data
@@ -33,7 +41,15 @@ void ProcessBlob(
     // different GPU.
     blob->Reset();
   }
-  DeserializeBlob(proto, blob);
+}
+
+void updateBlobStates(
+    const BlobProto& proto,
+    std::unordered_map<std::string, BlobState>* blob_states_ptr,
+    const std::string& key,
+    int* loaded_blobs) {
+  auto& blob_states = *blob_states_ptr;
+
   if (proto.has_content_num_chunks()) {
     if (!blob_states.count(key)) {
       blob_states[key] = BlobState(proto.content_num_chunks());

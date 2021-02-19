@@ -6,7 +6,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -24,7 +24,7 @@ Tensor qnnpack_relu(Tensor input) {
   TORCH_CHECK(
       input.ndimension() > 0, "qnnpack_relu(): Got empty input tensor");
 
-  Tensor input_contig = input.contiguous();
+  Tensor input_contig = input.contiguous(input.suggest_memory_format());
 
   const auto zero_point = input_contig.q_zero_point();
 
@@ -53,9 +53,10 @@ Tensor qnnpack_relu(Tensor input) {
 
   qy = at::_empty_affine_quantized(
       input_contig.sizes(),
-      input.options(),
+      at::device(kCPU).dtype(input.scalar_type()),
       input_contig.q_scale(),
-      input_contig.q_zero_point());
+      input_contig.q_zero_point(),
+      input.suggest_memory_format());
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_clamp_nc_u8(
       qnnpack_operator, /* clamp */
@@ -68,7 +69,7 @@ Tensor qnnpack_relu(Tensor input) {
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Relu operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
@@ -80,7 +81,7 @@ Tensor qnnpack_relu(Tensor input) {
 }
 #endif
 
-Tensor quantized_relu(const Tensor& qx) {
+Tensor relu_quantized_cpu(const Tensor& qx) {
   #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
     return qnnpack_relu(qx);
@@ -90,7 +91,7 @@ Tensor quantized_relu(const Tensor& qx) {
   qrelu_stub(qx.device().type(), qx, qy);
   return qy;
 }
-Tensor& quantized_relu_(Tensor& qx) {
+Tensor& relu_quantized_cpu_(Tensor& qx) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
     using Vec = Vec256<scalar_t>;
@@ -106,21 +107,24 @@ Tensor& quantized_relu_(Tensor& qx) {
   return qx;
 }
 
-Tensor& quantized_leaky_relu_out(Tensor& result, const Tensor& self,
+Tensor& leaky_relu_out_quantized_cpu(Tensor& result, const Tensor& self,
                                  Scalar negval) {
   qrelu_leaky_stub(self.device().type(), result, self, negval);
   return result;
 }
 
-Tensor quantized_leaky_relu(const Tensor& self, Scalar negval) {
-  const auto qx = self.contiguous();
-  auto qy = at::_empty_affine_quantized(qx.sizes(), self.options(),
-                                        qx.q_scale(), qx.q_zero_point());
+Tensor leaky_relu_quantized_cpu(const Tensor& self, Scalar negval) {
+  const auto qx = self.contiguous(self.suggest_memory_format());
+  auto qy = at::_empty_affine_quantized(qx.sizes(),
+      at::device(kCPU).dtype(self.scalar_type()),
+      qx.q_scale(),
+      qx.q_zero_point(),
+      self.suggest_memory_format());
   qrelu_leaky_stub(self.device().type(), qy, qx, negval);
   return qy;
 }
 
-Tensor& quantized_leaky_relu_(Tensor& self, Scalar negval) {
+Tensor& leaky_relu_quantized_cpu_(Tensor& self, Scalar negval) {
   qrelu_leaky_stub(self.device().type(), self, self, negval);
   return self;
 }
@@ -166,8 +170,27 @@ class QRelu6 final {
   }
 };
 
+class QLeakyRelu final {
+ public:
+  static Tensor run(Tensor self, Scalar negative_slope, bool inplace, double output_scale, int64_t output_zero_point) {
+    // inplace argument is ignored now, TODO:support inplace
+    if (inplace) {
+      TORCH_WARN("inplace=True is not supported for quantized::leaky_relu yet");
+    }
+    const auto qx = self.contiguous(self.suggest_memory_format());
+    auto qy = at::_empty_affine_quantized(qx.sizes(),
+      at::device(kCPU).dtype(self.scalar_type()),
+      output_scale,
+      output_zero_point,
+      self.suggest_memory_format());
+    qrelu_leaky_stub(self.device().type(), qy, qx, negative_slope);
+    return qy;
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("relu6", QRelu6::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::relu6"), TORCH_FN(QRelu6::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::leaky_relu"), TORCH_FN(QLeakyRelu::run));
 }
 
 } // namespace

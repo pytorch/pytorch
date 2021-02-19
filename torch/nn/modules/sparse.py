@@ -34,7 +34,7 @@ class Embedding(Module):
                          initialized from :math:`\mathcal{N}(0, 1)`
 
     Shape:
-        - Input: :math:`(*)`, LongTensor of arbitrary shape containing the indices to extract
+        - Input: :math:`(*)`, IntTensor or LongTensor of arbitrary shape containing the indices to extract
         - Output: :math:`(*, H)`, where `*` is the input shape and :math:`H=\text{embedding\_dim}`
 
     .. note::
@@ -49,6 +49,23 @@ class Embedding(Module):
         initialization method, and thus changing the vector used to pad the
         output. The gradient for this vector from :class:`~torch.nn.Embedding`
         is always zero.
+
+    .. note::
+        When :attr:`max_norm` is not ``None``, :class:`Embedding`'s forward method will modify the
+        :attr:`weight` tensor in-place. Since tensors needed for gradient computations cannot be
+        modified in-place, performing a differentiable operation on ``Embedding.weight`` before
+        calling :class:`Embedding`'s forward method requires cloning ``Embedding.weight`` when
+        :attr:`max_norm` is not ``None``. For example::
+
+            n, d, m = 3, 5, 7
+            embedding = nn.Embedding(n, d, max_norm=True)
+            W = torch.randn((m, d), requires_grad=True)
+            idx = torch.tensor([1, 2])
+            a = embedding.weight.clone() @ W.t()  # weight must be cloned for this to be differentiable
+            b = embedding(idx) @ W.t()  # modifies weight in-place
+            out = (a.unsqueeze(0) + b.unsqueeze(1))
+            loss = out.sigmoid().prod()
+            loss.backward()
 
     Examples::
 
@@ -80,9 +97,18 @@ class Embedding(Module):
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
                      'norm_type', 'scale_grad_by_freq', 'sparse']
 
-    def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
-                 max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                 sparse=False, _weight=None):
+    num_embeddings: int
+    embedding_dim: int
+    padding_idx: Optional[int]
+    max_norm: Optional[float]
+    norm_type: float
+    scale_grad_by_freq: bool
+    weight: Tensor
+    sparse: bool
+
+    def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
+                 max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
+                 sparse: bool = False, _weight: Optional[Tensor] = None) -> None:
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -103,20 +129,24 @@ class Embedding(Module):
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
             self.weight = Parameter(_weight)
+            self._fill_padding_idx_with_zero()
         self.sparse = sparse
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         init.normal_(self.weight)
+        self._fill_padding_idx_with_zero()
+
+    def _fill_padding_idx_with_zero(self) -> None:
         if self.padding_idx is not None:
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.embedding(
             input, self.weight, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         s = '{num_embeddings}, {embedding_dim}'
         if self.padding_idx is not None:
             s += ', padding_idx={padding_idx}'
@@ -177,11 +207,11 @@ class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length and no :attr:`per_sample_weights`, this class
+    For bags of constant length and no :attr:`per_sample_weights` and 2D inputs, this class
 
-        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=0)``,
-        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=0)``,
-        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=0)``.
+        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=1)``,
+        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=1)``,
+        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=1)``.
 
     However, :class:`~torch.nn.EmbeddingBag` is much more time and memory efficient than using a chain of these
     operations.
@@ -210,15 +240,16 @@ class EmbeddingBag(Module):
                                  Notes for more details regarding sparse gradients. Note: this option is not
                                  supported when ``mode="max"``.
         include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
-                                      is equivalent to the size of `indices`. This matches the CSR format. Note:
-                                      this option is currently only supported when ``mode="sum"``.
+                                      is equivalent to the size of `indices`. This matches the CSR format.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
                          initialized from :math:`\mathcal{N}(0, 1)`.
 
-    Inputs: :attr:`input` (LongTensor), :attr:`offsets` (LongTensor, optional), and
+    Inputs: :attr:`input` (IntTensor or LongTensor), :attr:`offsets` (IntTensor or LongTensor, optional), and
         :attr:`per_index_weights` (Tensor, optional)
+
+        - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
 
         - If :attr:`input` is 2D of shape `(B, N)`,
 
@@ -257,9 +288,20 @@ class EmbeddingBag(Module):
     __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
                      'scale_grad_by_freq', 'mode', 'sparse', 'include_last_offset']
 
-    def __init__(self, num_embeddings, embedding_dim,
-                 max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                 mode='mean', sparse=False, _weight=None, include_last_offset=False):
+    num_embeddings: int
+    embedding_dim: int
+    max_norm: Optional[float]
+    norm_type: float
+    scale_grad_by_freq: bool
+    weight: Tensor
+    mode: str
+    sparse: bool
+    include_last_offset: bool
+
+    def __init__(self, num_embeddings: int, embedding_dim: int,
+                 max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
+                 mode: str = 'mean', sparse: bool = False, _weight: Optional[Tensor] = None,
+                 include_last_offset: bool = False) -> None:
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -277,17 +319,16 @@ class EmbeddingBag(Module):
         self.sparse = sparse
         self.include_last_offset = include_last_offset
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         init.normal_(self.weight)
 
-    def forward(self, input, offsets=None, per_sample_weights=None):
-        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
+    def forward(self, input: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None) -> Tensor:
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse,
                                per_sample_weights, self.include_last_offset)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         s = '{num_embeddings}, {embedding_dim}'
         if self.max_norm is not None:
             s += ', max_norm={max_norm}'
@@ -299,9 +340,9 @@ class EmbeddingBag(Module):
         return s.format(**self.__dict__)
 
     @classmethod
-    def from_pretrained(cls, embeddings, freeze=True, max_norm=None,
-                        norm_type=2., scale_grad_by_freq=False,
-                        mode='mean', sparse=False, include_last_offset=False):
+    def from_pretrained(cls, embeddings: Tensor, freeze: bool = True, max_norm: Optional[float] = None,
+                        norm_type: float = 2., scale_grad_by_freq: bool = False,
+                        mode: str = 'mean', sparse: bool = False, include_last_offset: bool = False) -> 'EmbeddingBag':
         r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:

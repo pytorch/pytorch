@@ -4,6 +4,7 @@
 
 #include "onnx/onnx_pb.h"
 
+#include "c10/util/Exception.h"
 #include "c10/util/SmallVector.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -18,7 +19,7 @@ namespace caffe2 {
 namespace details {
 
 /// Provides slicing info for the outputs. All the vector members should be of
-/// the same size as number of outpus of the Onnxifi op.
+/// the same size as number of outputs of the Onnxifi op.
 struct OutputReshapeInfo {
   std::vector<Tensor> begins;
   std::vector<Tensor> ends;
@@ -26,11 +27,17 @@ struct OutputReshapeInfo {
 };
 
 struct TensorInfo {
-  TensorInfo() {}
-  TensorInfo(TensorInfo&&) = default;
-  TensorInfo& operator=(TensorInfo&&) = default;
   std::vector<uint64_t> dims;
   uint64_t onnxifi_type;
+  bool quantized;
+  uint32_t quantizationAxis;
+  uint64_t quantizationParams;
+  std::vector<float> scales;
+  std::vector<int32_t> biases;
+  explicit TensorInfo(const TensorProto& t);
+  explicit TensorInfo(const QTensorProto& t);
+  TensorInfo(TensorInfo&&) = default;
+  TensorInfo& operator=(TensorInfo&&) = default;
 };
 } // namespace details
 
@@ -41,18 +48,28 @@ class OnnxifiOp final : public Operator<Context> {
   explicit OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         use_onnx_(this->template GetSingleArgument<int>("use_onnx", 0)),
+        use_glow_aot_(this->template GetSingleArgument<int>("use_glow_aot", 0)),
         max_batch_size_(
             this->template GetSingleArgument<int>("max_batch_size", 0)),
         max_seq_size_(this->template GetSingleArgument<int>("max_seq_size", 0)),
+        timeout_(this->template GetSingleArgument<int>("timeout", 0)),
         nominal_batch_idx_(
-            this->template GetSingleArgument<int>("nominal_batch_idx", 0)) {
+            this->template GetSingleArgument<int>("nominal_batch_idx", 0)),
+        use_passed_output_shapes_(this->template GetSingleArgument<int>("use_passed_output_shapes", 0)),
+        adjust_quantized_offset_(this->template GetSingleArgument<int>(
+            "adjust_quantized_offset",
+            128)) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
     auto onnx_model_str =
         this->template GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
-    if (!use_onnx_) {
+    if (use_glow_aot_) {
+      auto netdef_str =
+          this->template GetSingleArgument<std::string>("netdef_str", "");
+      CAFFE_ENFORCE(ParseProtoFromLargeString(netdef_str, &netdef_));
+    } else if (!use_onnx_) {
       CAFFE_ENFORCE(ParseProtoFromLargeString(onnx_model_str, &netdef_));
     }
 
@@ -70,24 +87,74 @@ class OnnxifiOp final : public Operator<Context> {
     all_offsets_.reserve(ws->Blobs().size());
     all_scales_.reserve(ws->Blobs().size());
     input_shapes_.resize(input_names_.size());
-    output_shapes_.resize(output_names_.size());
+    output_shapes_max_bs_.resize(output_names_.size());
+    quantized_outputs_.resize(output_names_.size(), false);
     int output_idx = 0;
+    ArgumentHelper helper(operator_def);
+    auto output_shape_info =
+        helper.GetRepeatedArgument<TensorProto>("output_shape_info");
+    auto output_qshape_info =
+        helper.GetRepeatedArgument<QTensorProto>("output_qshape_info");
+    std::unordered_map<std::string, TensorProto> output_shape_map;
+    for (const auto& info : output_shape_info) {
+      output_shape_map.emplace(info.name(), info);
+    }
+    std::unordered_map<std::string, QTensorProto> output_qshape_map;
+    for (const auto& info : output_qshape_info) {
+      output_qshape_map.emplace(info.name(), info);
+    }
+    bool has_quantized_output = false;
     for (const auto& output : output_names_) {
       output_desc_.push_back(onnxTensorDescriptorV1());
       output_desc_.back().name = output.c_str();
 
       // For output, we try to get its output size hint
-      const std::string key = c10::str("output_shape_hint_", output_idx);
-      auto output_shape_hint = this->template GetRepeatedArgument<int>(key);
-      if (!output_shape_hint.empty()) {
-        details::TensorInfo info;
-        info.onnxifi_type = output_shape_hint.front();
-        for (size_t i = 1; i < output_shape_hint.size(); ++i) {
-          info.dims.push_back(output_shape_hint[i]);
+      const auto it = output_shape_map.find(output);
+      if (it != output_shape_map.end()) {
+        output_shape_hints_.emplace(
+            output_idx, details::TensorInfo(it->second));
+      } else {
+        const auto qit = output_qshape_map.find(output);
+        if (qit != output_qshape_map.end()) {
+          output_shape_hints_.emplace(
+              output_idx, details::TensorInfo(qit->second));
+          quantized_outputs_[output_idx] = true;
+          has_quantized_output = true;
         }
-        output_shape_hints_.emplace(output_idx, std::move(info));
       }
       ++output_idx;
+    }
+    if (!has_quantized_output) {
+      adjust_quantized_offset_ = 0;
+    }
+
+    LOG(INFO) << "use_onnx_=" << use_onnx_
+        << ", use_glow_aot_=" << use_glow_aot_
+        << ", use_passed_output_shapes_=" << use_passed_output_shapes_;
+
+    if (use_passed_output_shapes_) {
+      // Populate output_shapes_per_bs_
+      for (int bs = 1; bs < max_batch_size_; ++bs) {
+        auto output_shapes_tp = helper.GetRepeatedArgument<TensorProto>("output_shapes_bs_" + caffe2::to_string(bs));
+        auto output_qshapes_tp = helper.GetRepeatedArgument<TensorProto>("output_qshapes_bs_" + caffe2::to_string(bs));
+        CAFFE_ENFORCE_EQ(output_names_.size(), output_shapes_tp.size() + output_qshapes_tp.size());
+
+        std::unordered_map<std::string, details::TensorInfo> name_to_shape;
+        for (const auto& output_shape_tp : output_shapes_tp) {
+          name_to_shape.emplace(output_shape_tp.name(), details::TensorInfo{output_shape_tp});
+        }
+        for (const auto& output_qshape_tp : output_qshapes_tp) {
+          name_to_shape.emplace(output_qshape_tp.name(), details::TensorInfo{output_qshape_tp});
+        }
+
+        for (output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
+          auto it = name_to_shape.find(output_names_[output_idx]);
+          CAFFE_ENFORCE(it != name_to_shape.end());
+          output_shapes_per_bs_[bs].push_back({});
+          auto &output_shapes = output_shapes_per_bs_[bs].back();
+          std::copy(it->second.dims.cbegin(), it->second.dims.cend(), std::back_inserter(output_shapes));
+        }
+      }
     }
 
     // Get output resizing hints
@@ -129,18 +196,13 @@ class OnnxifiOp final : public Operator<Context> {
   }
 #endif
  private:
-  uint64_t SetOutputShapeAndType(int output_idx, std::vector<size_t>* dims) {
-    uint64_t type = ONNXIFI_DATATYPE_FLOAT32;
-    const auto it = output_shape_hints_.find(output_idx);
-    if (it != output_shape_hints_.end()) {
-      std::copy(
-          it->second.dims.begin(),
-          it->second.dims.end(),
-          std::back_inserter(*dims));
-      type = it->second.onnxifi_type;
-    }
-    return type;
-  }
+  // Second argument is a cache vector to avoid repeated reallocation.
+  // The existence of this is not ideal, which is purely due to the fact that
+  // we use int64_t for c2::tensor dim but uint64_t for onnxDesciptor dim.
+  // Maybe we should just use int64_t.
+  void setOutputShapeAndType(
+      int output_idx,
+      c10::SmallVector<int64_t, 4>& tensor_dims_int64);
 
   void buildPropertyList(
       const OperatorDef& /* unused */,
@@ -161,7 +223,13 @@ class OnnxifiOp final : public Operator<Context> {
     auto initializers =
         this->template GetRepeatedArgument<std::string>("initializers");
     // Build the Onnxifi engine
-    auto backend_index = this->template GetSingleArgument<int>("backend_id", 0);
+    auto backend_index =
+        this->template GetSingleArgument<int>("backend_id", use_onnx_ ? 1 : 0);
+    // If using Glow AOT, override the backend_id to 1, since it uses a custom
+    // ONNX format, and that's the id we use for the ONNX backend.
+    if (use_glow_aot_) {
+      backend_index = 1;
+    }
     auto creator = [this,
                     ws,
                     property_pointers,
@@ -232,18 +300,27 @@ class OnnxifiOp final : public Operator<Context> {
         defered_blob_reader = ws->GetBlob("__DEFERRED_BLOB_READER__");
       }
       onnxGraph graph{nullptr};
-      CAFFE_ENFORCE_EQ(
-          lib_->onnxInitGraph(
-              backend,
-              nullptr,
-              onnx_model_str.size(),
-              (const void*)(onnx_model_str.c_str()),
-              weight_descs.size(),
-              weight_descs.data(),
-              &graph,
-              static_cast<uint32_t>(max_seq_size_),
-              defered_blob_reader),
-          ONNXIFI_STATUS_SUCCESS);
+
+      static const uint64_t auxPropertiesListAOT[] = {
+          ONNXIFI_OPTIMIZATION_AOT, ONNXIFI_GRAPH_PROPERTY_NONE};
+      auto ret = lib_->onnxInitGraph(
+          backend,
+          use_glow_aot_ ? auxPropertiesListAOT : nullptr,
+          onnx_model_str.size(),
+          (const void*)(onnx_model_str.c_str()),
+          weight_descs.size(),
+          weight_descs.data(),
+          &graph,
+          static_cast<uint32_t>(max_seq_size_),
+          defered_blob_reader);
+      if (ret != ONNXIFI_STATUS_SUCCESS) {
+        if (ret == ONNXIFI_STATUS_FATAL_ERROR) {
+          C10_THROW_ERROR(
+              OnnxfiBackendSystemError, "Fatal error during onnxInitGraph");
+        } else {
+          CAFFE_THROW("onnxInitGraph failed");
+        }
+      }
 
       return std::make_shared<onnx::BackendGraphInfo>(
           backend_id, backend, graph, lib_, std::move(weight_shape_info));
@@ -263,9 +340,10 @@ class OnnxifiOp final : public Operator<Context> {
   void getExtFunctionPointers() {
 #ifdef ONNXIFI_ENABLE_EXT
     union {
-       onnxExtensionFunctionPointer p;
-       decltype(onnxSetIOAndRunGraphPointer_) set;
-       decltype(onnxReleaseTraceEventsPointer_) release;
+      onnxExtensionFunctionPointer p;
+      decltype(onnxSetIOAndRunGraphPointer_) set;
+      decltype(onnxReleaseTraceEventsPointer_) release;
+      decltype(onnxWaitEventForPointer_) waitfor;
     } u;
     if (lib_->onnxGetExtensionFunctionAddress(
             backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
@@ -281,8 +359,23 @@ class OnnxifiOp final : public Operator<Context> {
     } else {
       onnxReleaseTraceEventsPointer_ = u.release;
     }
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxWaitEventForFunction", &u.p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxWaitEventForPointer_ = nullptr;
+    } else {
+      onnxWaitEventForPointer_ = u.waitfor;
+    }
 #endif
   }
+
+  /// Helper method for extractOutputBatchSizes(), used to deduplicate code of populating output reshape infos
+  template <typename DimContainer>
+  void fillOutputReshapeInfo(
+      const DimContainer& real_shape,
+      c10::ArrayRef<uint64_t> max_shape,
+      details::OutputReshapeInfo &output_reshape_info,
+      int index);
 
   /// Extract output batch size. If the output batch size is going to be at
   /// max_batch_size_, return true indicating that no output shape adjustment is
@@ -339,6 +432,13 @@ class OnnxifiOp final : public Operator<Context> {
       onnxTraceEventList*);
 
   onnxStatus (*onnxReleaseTraceEventsPointer_)(onnxTraceEventList*);
+  onnxStatus (*onnxWaitEventForPointer_)(
+      onnxEvent event,
+      uint32_t timeoutMs,
+      onnxEventState* eventState,
+      onnxStatus* eventStatus,
+      char* message,
+      size_t* messageLength);
 
   std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
@@ -346,17 +446,23 @@ class OnnxifiOp final : public Operator<Context> {
   // ONNX model or not
   bool use_onnx_{false};
 
+  // Glow AOT model or not
+  bool use_glow_aot_{false};
+
   // max batch size
   int max_batch_size_;
 
   // max sequence lookup size
   int max_seq_size_;
 
+  // Inference timeout limits. Default 0 means no timeout.
+  int timeout_;
+
   // index of the input whose first dimension represents the batch size
   int nominal_batch_idx_{0};
 
   // We bind the op input/output by position while ONNXIFI binds input/output by
-  // names. In addition, op input/output names can be writtten by, for example,
+  // names. In addition, op input/output names can be written by, for example,
   // memonger. We cache the original input/output name of ONNX object here and
   // bind them by position.
   std::vector<std::string> input_names_;
@@ -366,12 +472,13 @@ class OnnxifiOp final : public Operator<Context> {
   NetDef netdef_;
 
   std::vector<c10::SmallVector<uint64_t, 4>> input_shapes_;
-  std::vector<c10::SmallVector<uint64_t, 4>> output_shapes_;
+  std::vector<c10::SmallVector<uint64_t, 4>> output_shapes_max_bs_;
 
-  // A cache vector to avoid repeated reallocation. The existence of this is not
-  // ideal, which is purely due to the factor that we use int64_t for c2::tensor
-  // dim but uint64_t for onnxDesciptor dim. Maybe we should just use int64_t
-  c10::SmallVector<int64_t, 4> tensor_dims_int64_;
+  // Mapping of batch sizes to output shapes
+  std::unordered_map<int, std::vector<c10::SmallVector<uint64_t, 4>>> output_shapes_per_bs_;
+
+  // Indicate if i-th output is a quantized tensor
+  std::vector<bool> quantized_outputs_;
 
   // This is for multi group quantization info
   std::vector<std::vector<float>> all_scales_;
@@ -384,11 +491,17 @@ class OnnxifiOp final : public Operator<Context> {
   // max_batch_size
   std::unordered_map<std::string, ShapeInfo> input_shape_info_;
 
+  // Whether we should use passed output shape hints or do shape inference
+  const bool use_passed_output_shapes_{false};
+
   // Whether we need to resize outputs or not
   bool adjust_output_batch_{false};
 
   // Whether we enable tracing in one run of inference
   bool enable_tracing_{false};
+
+  // Adjust the quantized offset to compensate mismatch of certain backend
+  uint8_t adjust_quantized_offset_{0};
 };
 
 } // namespace caffe2

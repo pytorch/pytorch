@@ -1,12 +1,7 @@
 """Provides an API for writing protocol buffers to event files to be
 consumed by TensorBoard for visualization."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
-import six
 import time
 import torch
 
@@ -247,7 +242,7 @@ class SummaryWriter(object):
         workspace.FetchBlob(blob_name)
         workspace.FetchBlobs([blob_name1, blob_name2, ...])
         """
-        return isinstance(item, six.string_types)
+        return isinstance(item, str)
 
     def _get_file_writer(self):
         """Returns the default FileWriter instance. Recreates it if closed."""
@@ -268,7 +263,9 @@ class SummaryWriter(object):
         """Returns the directory where event files will be written."""
         return self.log_dir
 
-    def add_hparams(self, hparam_dict, metric_dict):
+    def add_hparams(
+        self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None
+    ):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
         Args:
@@ -281,6 +278,10 @@ class SummaryWriter(object):
               here should be unique in the tensorboard record. Otherwise the value
               you added by ``add_scalar`` will be displayed in hparam plugin. In most
               cases, this is unwanted.
+            hparam_domain_discrete: (Optional[Dict[str, List[Any]]]) A dictionary that
+              contains names of the hyperparameters and all discrete values they can hold
+            run_name (str): Name of the run, to be included as part of the logdir.
+              If unspecified, will use current timestamp.
 
         Examples::
 
@@ -299,12 +300,11 @@ class SummaryWriter(object):
         torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
         if type(hparam_dict) is not dict or type(metric_dict) is not dict:
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
-        exp, ssi, sei = hparams(hparam_dict, metric_dict)
+        exp, ssi, sei = hparams(hparam_dict, metric_dict, hparam_domain_discrete)
 
-        logdir = os.path.join(
-            self._get_file_writer().get_logdir(),
-            str(time.time())
-        )
+        if not run_name:
+            run_name = str(time.time())
+        logdir = os.path.join(self._get_file_writer().get_logdir(), run_name)
         with SummaryWriter(log_dir=logdir) as w_hp:
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
@@ -339,6 +339,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_scalar")
         if self._check_caffe2_blob(scalar_value):
+            from caffe2.python import workspace
             scalar_value = workspace.FetchBlob(scalar_value)
         self._get_file_writer().add_summary(
             scalar(tag, scalar_value), global_step, walltime)
@@ -377,6 +378,7 @@ class SummaryWriter(object):
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
+            assert self.all_writers is not None
             if fw_tag in self.all_writers.keys():
                 fw = self.all_writers[fw_tag]
             else:
@@ -384,6 +386,7 @@ class SummaryWriter(object):
                                 self.filename_suffix)
                 self.all_writers[fw_tag] = fw
             if self._check_caffe2_blob(scalar_value):
+                from caffe2.python import workspace
                 scalar_value = workspace.FetchBlob(scalar_value)
             fw.add_summary(scalar(main_tag, scalar_value),
                            global_step, walltime)
@@ -418,8 +421,9 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_histogram")
         if self._check_caffe2_blob(values):
+            from caffe2.python import workspace
             values = workspace.FetchBlob(values)
-        if isinstance(bins, six.string_types) and bins == 'tensorflow':
+        if isinstance(bins, str) and bins == 'tensorflow':
             bins = self.default_bins
         self._get_file_writer().add_summary(
             histogram(tag, values, bins, max_bins=max_bins), global_step, walltime)
@@ -535,6 +539,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_image")
         if self._check_caffe2_blob(img_tensor):
+            from caffe2.python import workspace
             img_tensor = workspace.FetchBlob(img_tensor)
         self._get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
@@ -578,6 +583,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_images")
         if self._check_caffe2_blob(img_tensor):
+            from caffe2.python import workspace
             img_tensor = workspace.FetchBlob(img_tensor)
         self._get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
@@ -603,12 +609,14 @@ class SummaryWriter(object):
             e.g. CHW or HWC
 
             box_tensor: (torch.Tensor, numpy.array, or string/blobname): NX4,  where N is the number of
-            boxes and each 4 elememts in a row represents (xmin, ymin, xmax, ymax).
+            boxes and each 4 elements in a row represents (xmin, ymin, xmax, ymax).
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_image_with_boxes")
         if self._check_caffe2_blob(img_tensor):
+            from caffe2.python import workspace
             img_tensor = workspace.FetchBlob(img_tensor)
         if self._check_caffe2_blob(box_tensor):
+            from caffe2.python import workspace
             box_tensor = workspace.FetchBlob(box_tensor)
         if labels is not None:
             if isinstance(labels, str):
@@ -671,6 +679,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_audio")
         if self._check_caffe2_blob(snd_tensor):
+            from caffe2.python import workspace
             snd_tensor = workspace.FetchBlob(snd_tensor)
         self._get_file_writer().add_summary(
             audio(tag, snd_tensor, sample_rate=sample_rate), global_step, walltime)
@@ -816,7 +825,7 @@ class SummaryWriter(object):
             metadata, label_img, fs, subdir, global_step, tag)
         self._projector_config.embeddings.extend([embedding_info])
 
-        from google.protobuf import text_format
+        from google.protobuf import text_format  # type: ignore
         config_pbtxt = text_format.MessageToString(self._projector_config)
         write_pbtxt(self._get_file_writer().get_logdir(), config_pbtxt)
 
@@ -836,7 +845,7 @@ class SummaryWriter(object):
               Ground truth data. Binary label for each element.
             predictions (torch.Tensor, numpy.array, or string/blobname):
               The probability that an element be classified as true.
-              Value should in [0, 1]
+              Value should be in [0, 1]
             global_step (int): Global step value to record
             num_thresholds (int): Number of thresholds used to draw the curve.
             walltime (float): Optional override default walltime (time.time())

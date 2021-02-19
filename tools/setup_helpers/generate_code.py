@@ -1,11 +1,18 @@
 import argparse
 import os
 import sys
+import yaml
+
+try:
+    # use faster C loader if available
+    from yaml import CLoader as YamlLoader
+except ImportError:
+    from yaml import Loader as YamlLoader
 
 source_files = {'.py', '.cpp', '.h'}
 
 DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
-
+NATIVE_FUNCTIONS_PATH = 'aten/src/ATen/native/native_functions.yaml'
 
 # TODO: This is a little inaccurate, because it will also pick
 # up setup_helper scripts which don't affect code generation
@@ -22,23 +29,26 @@ def all_generator_source():
 def generate_code(ninja_global=None,
                   declarations_path=None,
                   nn_path=None,
+                  native_functions_path=None,
                   install_dir=None,
                   subset=None,
                   disable_autograd=False,
-                  selected_op_list_path=None,
-                  selected_op_list=None,
-                  force_schema_registration=False):
-    # cwrap depends on pyyaml, so we can't import it earlier
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    sys.path.insert(0, root)
+                  force_schema_registration=False,
+                  operator_selector=None):
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
-    from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
+    from tools.autograd.gen_annotated_fn_args import gen_annotated
+    from tools.codegen.selective_build.selector import SelectiveBuilder
+
 
     # Build ATen based Variable classes
-    install_dir = install_dir or 'torch/csrc'
+    if install_dir is None:
+        install_dir = 'torch/csrc'
+        python_install_dir = 'torch/testing/_internal/generated'
+    else:
+        python_install_dir = install_dir
     autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
     jit_gen_dir = os.path.join(install_dir, 'jit', 'generated')
-    for d in (autograd_gen_dir, jit_gen_dir):
+    for d in (autograd_gen_dir, jit_gen_dir, python_install_dir):
         if not os.path.exists(d):
             os.makedirs(d)
     runfiles_dir = os.environ.get("RUNFILES_DIR", None)
@@ -47,29 +57,85 @@ def generate_code(ninja_global=None,
     tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
 
     if subset == "pybindings" or not subset:
-        gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
+        gen_autograd_python(
+            declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
+            autograd_gen_dir,
+            autograd_dir)
+
+    if operator_selector is None:
+        operator_selector = SelectiveBuilder.get_nop_selector()
 
     if subset == "libtorch" or not subset:
-        # TODO: add selected op mechanism in augotrad to save learning size
+
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
+            operator_selector=operator_selector,
         )
-        gen_unboxing_wrappers(
-            declarations_path or DECLARATIONS_PATH,
-            jit_gen_dir,
-            tools_jit_templates,
-            disable_autograd=disable_autograd,
-            selected_op_list_path=selected_op_list_path,
-            selected_op_list=selected_op_list,
-            force_schema_registration=force_schema_registration)
+
+    if subset == "python" or not subset:
+        gen_annotated(
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
+            python_install_dir,
+            autograd_dir)
+
+
+def get_selector_from_legacy_operator_selection_list(
+        selected_op_list_path: str,
+):
+    with open(selected_op_list_path, 'r') as f:
+        # strip out the overload part
+        # It's only for legacy config - do NOT copy this code!
+        selected_op_list = {
+            opname.split('.', 1)[0] for opname in yaml.load(f, Loader=YamlLoader)
+        }
+
+    # Internal build doesn't use this flag any more. Only used by OSS
+    # build now. Every operator should be considered a root operator
+    # (hence generating unboxing code for it, which is consistent with
+    # the current behaviour), and also be considered as used for
+    # training, since OSS doesn't support training on mobile for now.
+    #
+    is_root_operator = True
+    is_used_for_training = True
+
+    from tools.codegen.selective_build.selector import SelectiveBuilder
+    selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
+        selected_op_list,
+        is_root_operator,
+        is_used_for_training,
+    )
+
+    return selector
+
+
+def get_selector(selected_op_list_path, operators_yaml_path):
+    # cwrap depends on pyyaml, so we can't import it earlier
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, root)
+    from tools.codegen.selective_build.selector import SelectiveBuilder
+
+    assert not (selected_op_list_path is not None and
+                operators_yaml_path is not None), \
+        ("Expected at most one of selected_op_list_path and " +
+         "operators_yaml_path to be set.")
+
+    if selected_op_list_path is None and operators_yaml_path is None:
+        return SelectiveBuilder.get_nop_selector()
+    elif selected_op_list_path is not None:
+        return get_selector_from_legacy_operator_selection_list(selected_op_list_path)
+    else:
+        return SelectiveBuilder.from_yaml_path(operators_yaml_path)
 
 
 def main():
     parser = argparse.ArgumentParser(description='Autogenerate code')
     parser.add_argument('--declarations-path')
+    parser.add_argument('--native-functions-path')
     parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
     parser.add_argument('--install_dir')
@@ -85,14 +151,11 @@ def main():
     )
     parser.add_argument(
         '--selected-op-list-path',
-        help='Path to the yaml file that contains the list of operators to include for custom build.',
+        help='Path to the YAML file that contains the list of operators to include for custom build.',
     )
     parser.add_argument(
-        '--selected-op-list',
-        nargs="*",
-        type=str,
-        help="""List of operator names to include for custom build, in addition to those in selected-op-list-path.
-        For example, --selected-op-list aten::add.Tensor aten::_convolution.""",
+        '--operators_yaml_path',
+        help='Path to the model YAML file that contains the list of operators to include for custom build.',
     )
     parser.add_argument(
         '--force_schema_registration',
@@ -101,16 +164,18 @@ def main():
         'listed on --selected-op-list'
     )
     options = parser.parse_args()
+
     generate_code(
         options.ninja_global,
         options.declarations_path,
         options.nn_path,
+        options.native_functions_path,
         options.install_dir,
         options.subset,
         options.disable_autograd,
-        options.selected_op_list_path,
-        options.selected_op_list,
         options.force_schema_registration,
+        # options.selected_op_list
+        operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
     )
 
 

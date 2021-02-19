@@ -5,12 +5,14 @@ import sys
 import torch
 import torch.nn as nn
 
+from typing import Any, Tuple
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
-from torch.testing._internal.common_utils import TemporaryFileName
 from typing import List
+from torch import Tensor
 
 class TestAsync(JitTestCase):
     def test_async_python(self):
@@ -19,19 +21,19 @@ class TestAsync(JitTestCase):
             return torch.neg(x)
 
         x = torch.rand(3, 4)
-        fut = torch.jit._fork(foo, x)
+        fut = torch.jit.fork(foo, x)
         y_hat = foo(x)
-        y = torch.jit._wait(fut)
+        y = torch.jit.wait(fut)
         # assert nothing; only to make sure the fake python path works
 
     def test_async_future_type_python(self):
         def foo(inp):
             futures = torch.jit.annotate(List[torch.jit.Future[torch.Tensor]], [])
             for i in range(5):
-                futures.append(torch.jit._fork(lambda x: x, inp))
+                futures.append(torch.jit.fork(lambda x: x, inp))
             all_outputs = []
             for future in futures:
-                all_outputs.append(torch.jit._wait(future))
+                all_outputs.append(torch.jit.wait(future))
             return all_outputs
 
         # assert nothing, just to make sure python type parsing works
@@ -39,8 +41,7 @@ class TestAsync(JitTestCase):
 
     def test_async_parsing(self):
         @torch.jit.script
-        def foo(x):
-            # type: (Tensor) -> List[Tensor]
+        def foo(x: Tensor) -> List[Tensor]:
             return [torch.neg(x), x.t()]
 
         @torch.jit.script
@@ -49,13 +50,13 @@ class TestAsync(JitTestCase):
             for _ in range(3):
                 future = torch.jit.annotate(
                     Future[List[Tensor]],
-                    torch.jit._fork(foo, x)
+                    torch.jit.fork(foo, x)
                 )
                 futures.append(future)
 
             output = torch.jit.annotate(List[List[Tensor]], [])
             for i in range(3):
-                output.append(torch.jit._wait(futures[i]))
+                output.append(torch.jit.wait(futures[i]))
             return output
 
         x = torch.rand(3, 3)
@@ -71,9 +72,9 @@ class TestAsync(JitTestCase):
 
         @torch.jit.script
         def wait_script(x):
-            fut = torch.jit._fork(foo, x)
+            fut = torch.jit.fork(foo, x)
             y_hat = foo(x)
-            y = torch.jit._wait(fut)
+            y = torch.jit.wait(fut)
             return y, y_hat
 
         y, y_hat = wait_script(x)
@@ -95,9 +96,9 @@ class TestAsync(JitTestCase):
 
             @torch.jit.script_method
             def forward(self, x1, x2):
-                fut = torch.jit._fork(self.foo, x1, x2)
+                fut = torch.jit.fork(self.foo, x1, x2)
                 y_hat = self.foo(x1, x2)
-                y = torch.jit._wait(fut)
+                y = torch.jit.wait(fut)
                 return y, y_hat
 
         x1 = torch.rand(3, 4)
@@ -255,8 +256,7 @@ class TestAsync(JitTestCase):
                 self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
 
             @torch.jit.script_method
-            def forward(self, x):
-                # type: (Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]
+            def forward(self, x: Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]:
                 future1 = torch.jit._fork(self.traced, x)
                 future2 = torch.jit._fork(torch.neg, x)
 
@@ -490,50 +490,41 @@ class TestAsync(JitTestCase):
 
         self.checkTrace(TestModule(), (torch.randn(5, 5),))
 
-    def test_save_load_with_extra_files(self):
-        class MyMod(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, a):
-                return a
+    def test_no_future_subtype_message(self):
+        with self.assertRaisesRegex(RuntimeError, 'Future without a contained type'):
+            @torch.jit.script
+            def forward(self, x):
+                futs = torch.jit.annotate(List[torch.jit.Future], [])
 
-        expected_extra_files = torch._C.ExtraFilesMap()
-        expected_extra_files['foo'] = 'bar'
-        m = MyMod()
+    def test_future_subtyping(self):
+        """
+        Test that futures subtype each other properly.
+        """
+        # Successful subtyping.
+        def returns_int(x: int) -> int:
+            return x + x + 1
 
-        # Save to file.
-        with TemporaryFileName() as fname:
-            m.save(fname, _extra_files=expected_extra_files)
-            extra_files = torch._C.ExtraFilesMap()
-            extra_files['foo'] = ''
-            torch.jit.load(fname, _extra_files=extra_files)
-            self.assertEqual('bar', extra_files['foo'])
+        def returns_future_any(x: int) -> torch.jit.Future[Any]:
+            return torch.jit._fork(returns_int, (x))
 
-            # Use torch.jit API
-            torch.jit.save(m, fname, _extra_files=expected_extra_files)
-            extra_files['foo'] = ''
-            torch.jit.load(fname, _extra_files=extra_files)
-            self.assertEqual('bar', extra_files['foo'])
+        @torch.jit.script
+        def fn_int(x: int) -> Any:
+            fut = returns_future_any(x)
+            return fut.wait()
 
-        # Save to buffer.
-        buffer = io.BytesIO(m.save_to_buffer(_extra_files=expected_extra_files))
-        extra_files = torch._C.ExtraFilesMap()
-        extra_files['foo'] = ''
-        torch.jit.load(buffer, _extra_files=extra_files)
-        self.assertEqual('bar', extra_files['foo'])
+        # Unsuccessful subtyping.
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"was annotated as having type Future\[float\] but is actually of type Future\[int\]",
+        ):
+            def returns_future_float(x: int) -> torch.jit.Future[float]:
+                return torch.jit._fork(returns_int, (x))
 
-        # Use torch.jit API
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer, _extra_files=expected_extra_files)
-        buffer.seek(0)
-        extra_files = torch._C.ExtraFilesMap()
-        extra_files['foo'] = ''
-        torch.jit.load(buffer, _extra_files=extra_files)
-        self.assertEqual('bar', extra_files['foo'])
+            @torch.jit.script
+            def fn_float(x: int) -> Any:
+                fut = returns_future_float(x)
+                return fut.wait()
 
-        # Non-existent file 'bar'
-        with self.assertRaises(RuntimeError):
-            extra_files['bar'] = ''
-            torch.jit.load(buffer, _extra_files=extra_files)
 
 
 if __name__ == '__main__':

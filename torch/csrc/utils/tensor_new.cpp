@@ -18,6 +18,7 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TracerMode.h>
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
@@ -58,6 +59,8 @@ Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
     case DeviceType::XLA:
       TORCH_CHECK(!isSparse(b), "Sparse not implemented for XLA");
       return Backend::XLA;
+    case DeviceType::XPU:
+      return backendToXPU(b);
     default:
       AT_ERROR("Unknown device type");
   }
@@ -116,13 +119,10 @@ Tensor new_with_storage(c10::DispatchKey dispatch_key, at::ScalarType scalar_typ
 }
 
 Tensor new_with_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, const Tensor& other) {
-  if (legacyExtractDispatchKey(other.key_set()) != dispatch_key) {
-    // In temporary expression lifetime we trust
-    throw TypeError("expected %s (got %s)", toString(dispatch_key), toString(other.key_set()).c_str());
-  }
-  if (other.scalar_type() != scalar_type) {
-    throw TypeError("expected %s (got %s)", toString(scalar_type), toString(other.scalar_type()));
-  }
+  TORCH_CHECK_TYPE(legacyExtractDispatchKey(other.key_set()) == dispatch_key, "expected ",
+                   toString(dispatch_key), " (got ", toString(legacyExtractDispatchKey(other.key_set())), ")");
+  TORCH_CHECK_TYPE(other.scalar_type() == scalar_type, "expected ",
+                   toString(scalar_type), " (got ", toString(other.scalar_type()), ")");
   return other.slice();
 }
 
@@ -253,7 +253,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(computeDeviceType(dispatch_key)));
+    auto device = device_opt.has_value() ? *device_opt : var.device();
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -272,7 +272,7 @@ Tensor internal_new_from_data(
 
   if (PyArray_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
-    auto tensor = tensor_from_numpy(data);
+    auto tensor = tensor_from_numpy(data, /*warn_if_not_writeable=*/!copy_numpy);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
     pybind11::gil_scoped_release no_gil;
@@ -288,7 +288,8 @@ Tensor internal_new_from_data(
   // here.
   Tensor tensor;
   {
-    at::AutoNonVariableTypeMode guard;
+    at::AutoNonVariableTypeMode guard;  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
@@ -313,7 +314,9 @@ Tensor new_from_data_copy(
     at::ScalarType scalar_type,
     c10::optional<Device> device,
     PyObject* data) {
-  return internal_new_from_data(dispatch_key, scalar_type, std::move(device), data, true, true, false);
+  return internal_new_from_data(dispatch_key, scalar_type, std::move(device), data,
+                                /*copy_variables=*/true, /*copy_numpy=*/true,
+                                /*type_inference=*/false);
 }
 
 Tensor legacy_new_from_sequence(
@@ -324,31 +327,50 @@ Tensor legacy_new_from_sequence(
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
-  return internal_new_from_data(dispatch_key, scalar_type, std::move(device), data, false, false, false);
+  return internal_new_from_data(dispatch_key, scalar_type, std::move(device), data,
+                                /*copy_variables=*/false, /*copy_numpy=*/false,
+                                /*type_inference=*/false);
 }
 
 // "base" here refers to the Tensor type on which the function was invoked, e.g.:
 // in x.new(y), 'x' is the base.
 void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_layout) {
   if (expected_layout == c10::kStrided) {
-    TORCH_CHECK(dispatch_key == c10::DispatchKey::CPU
-                || dispatch_key == c10::DispatchKey::CUDA
-                || dispatch_key == c10::DispatchKey::HIP
-                || dispatch_key == c10::XLA(),
-                "new(): expected DispatchKey: ", c10::DispatchKey::CPU,
-                " or ", c10::DispatchKey::CUDA,
-                " or ", c10::DispatchKey::HIP,
-                " or ", c10::DispatchKey::XLA,
-                " but got: ", dispatch_key);
+    TORCH_CHECK(
+        dispatch_key == c10::DispatchKey::CPU ||
+            dispatch_key == c10::DispatchKey::CUDA ||
+            dispatch_key == c10::DispatchKey::HIP ||
+            dispatch_key == c10::DispatchKey::XLA ||
+            dispatch_key == c10::DispatchKey::XPU,
+        "new(): expected DispatchKey: ",
+        c10::DispatchKey::CPU,
+        " or ",
+        c10::DispatchKey::CUDA,
+        " or ",
+        c10::DispatchKey::HIP,
+        " or ",
+        c10::DispatchKey::XLA,
+        " or ",
+        c10::DispatchKey::XPU,
+        " but got: ",
+        dispatch_key);
   } else if(expected_layout == c10::kSparse) {
     // NOTE: no sparse XLA
-    TORCH_CHECK(dispatch_key == c10::DispatchKey::SparseCPU
-                || dispatch_key == c10::DispatchKey::SparseCUDA
-                || dispatch_key == c10::DispatchKey::SparseHIP,
-                "new(): expected DispatchKey: ", c10::DispatchKey::SparseCPU,
-                " or ", c10::DispatchKey::SparseCUDA,
-                " or ", c10::DispatchKey::SparseHIP,
-                " but got: ", dispatch_key);
+    TORCH_CHECK(
+        dispatch_key == c10::DispatchKey::SparseCPU ||
+            dispatch_key == c10::DispatchKey::SparseCUDA ||
+            dispatch_key == c10::DispatchKey::SparseHIP ||
+            dispatch_key == c10::DispatchKey::SparseXPU,
+        "new(): expected DispatchKey: ",
+        c10::DispatchKey::SparseCPU,
+        " or ",
+        c10::DispatchKey::SparseCUDA,
+        " or ",
+        c10::DispatchKey::SparseHIP,
+        " or ",
+        c10::DispatchKey::SparseXPU,
+        " but got: ",
+        dispatch_key);
   } else {
     TORCH_INTERNAL_ASSERT(false, "unexpected layout");
   }
@@ -357,9 +379,8 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
 void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Device> device) {
   if (device.has_value()) {
     TORCH_CHECK(computeDeviceType(dispatch_key) == device.value().type(),
-             "legacy constructor for device type: ", computeDeviceType(dispatch_key),
-             " was passed device type: ", device.value().type(),
-             ", but device type must be: ", computeDeviceType(dispatch_key));
+             "legacy constructor expects device type: ", computeDeviceType(dispatch_key),
+             "but device type: ", device.value().type(), " was passed");
   }
 }
 
@@ -590,9 +611,13 @@ Tensor indexing_tensor_from_data(
   // indexing tensor (type Byte or Long)
   ScalarType inferred_scalar_type = infer_scalar_type(data);
   if (inferred_scalar_type == ScalarType::Byte || inferred_scalar_type == ScalarType::Bool) {
-    return internal_new_from_data(dispatch_key, inferred_scalar_type, std::move(device), data, false, false, false);
+    return internal_new_from_data(dispatch_key, inferred_scalar_type, std::move(device), data,
+                                  /*copy_variables=*/false, /*copy_numpy=*/false,
+                                  /*type_inference=*/false);
   } else {
-    return internal_new_from_data(dispatch_key, scalar_type, std::move(device), data, false, false, false);
+    return internal_new_from_data(dispatch_key, scalar_type, std::move(device), data,
+                                  /*copy_variables=*/false, /*copy_numpy=*/false,
+                                  /*type_inference=*/false);
   }
 }
 
@@ -611,16 +636,24 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     const auto inferred_scalar_type = r.scalartypeWithDefault(2, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
-    Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(3), r.pyobject(0), false, true, false);
+    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1),
+                                           /*copy_variables=*/false, /*copy_numpy=*/true,
+                                           /*type_inference=*/type_inference);
+    Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(3), r.pyobject(0),
+                                            /*copy_variables=*/false, /*copy_numpy=*/true,
+                                            /*type_inference=*/false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
     const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 4, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
-    Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(4), r.pyobject(0), false, true, false);
+    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1),
+                                           /*copy_variables=*/false, /*copy_numpy=*/true,
+                                           /*type_inference=*/type_inference);
+    Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(4), r.pyobject(0),
+                                            /*copy_variables=*/false, /*copy_numpy=*/true,
+                                            /*type_inference=*/false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
     const auto inferred_dispatch_key = typeIdWithDefault(r, 2, dispatch_key);
@@ -629,6 +662,51 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     return at::sparse_coo_tensor(r.intlist(0), options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparse)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
+}
+
+Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  enum {
+    ARG_INDICES = 0,
+    ARG_VALUES,
+    ARG_SIZE,
+    ARG_TYPE,
+    ARG_DEVICE,
+    ARG_REQUIRES_GRAD,
+    ARGS_COUNT
+  };
+  static PythonArgParser parser({
+    "_sparse_coo_tensor_unsafe(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+  });
+
+  ParsedArgs<ARGS_COUNT> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  bool type_inference = r.isNone(ARG_TYPE);
+  const auto inferred_dispatch_key = denseTypeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+  const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
+  at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
+  Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES),
+                                         /*copy_variables=*/false, /*copy_numpy=*/true,
+                                         /*type_inference=*/type_inference);
+  Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES),
+                                          /*copy_variables=*/false, /*copy_numpy=*/true,
+                                          /*type_inference=*/false);
+  return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+}
+
+void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "_validate_sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size)",
+  });
+
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  Tensor values = internal_new_from_data(
+      dispatch_key, scalar_type, c10::nullopt, r.pyobject(1),
+      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
+  Tensor indices = internal_new_from_data(
+      legacyExtractDispatchKey(values.key_set()), kLong, c10::nullopt, r.pyobject(0),
+      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/false);
+  at::native::_validate_sparse_coo_tensor_args(indices, values, r.intlist(2));
 }
 
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
@@ -642,9 +720,10 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
     if (THPVariable_Check(data)) {
-      PyErr_WarnEx(PyExc_UserWarning,
+      auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
         "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
+      if (ret != 0) throw python_error();
     }
 
     bool type_inference = r.isNone(1);
@@ -655,9 +734,9 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
                r.scalartypeWithDefault(1, scalar_type),
                r.deviceOptional(2),
                data,
-               true,
-               true,
-               type_inference,
+               /*copy_variables=*/true,
+               /*copy_numpy=*/true,
+               /*type_inference=*/type_inference,
                pin_memory);
     auto names = r.toDimnameListOptional(5);
     if (names) {
@@ -685,9 +764,9 @@ Tensor as_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyOb
         r.scalartypeWithDefault(1, scalar_type),
         r.deviceOptional(2),
         r.pyobject(0),
-        false,
-        false,
-        type_inference);
+        /*copy_variables=*/false,
+        /*copy_numpy=*/false,
+        /*type_inference=*/type_inference);
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
@@ -702,9 +781,10 @@ Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyO
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
     if (THPVariable_Check(data)) {
-      PyErr_WarnEx(PyExc_UserWarning,
+      auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
         "or sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).", 1);
+      if (ret != 0) throw python_error();
     }
 
     bool args_requires_grad = r.toBool(3);

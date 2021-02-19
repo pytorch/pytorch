@@ -1,13 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import hypothesis.strategies as st
 from hypothesis import given, settings
 import numpy as np
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
@@ -20,6 +19,7 @@ class ShapeTest(hu.HypothesisTestCase):
            h=st.integers(1, 128),
            w=st.integers(1, 128),
            **mu.gcs)
+    @settings(max_examples=10, deadline=None)
     def test_shape(self, n, c, h, w, gc, dc):
         op0 = core.CreateOperator(
             "Shape",
@@ -53,6 +53,7 @@ class ShapeTest(hu.HypothesisTestCase):
            w=st.integers(1, 128),
            axes=st.lists(st.integers(0, 3), min_size=1, max_size=3),
            **mu.gcs)
+    @settings(max_examples=10, deadline=None)
     def test_shape_with_axes(self, n, c, h, w, axes, gc, dc):
         axes = list(set(axes)).sort()
         op0 = core.CreateOperator(

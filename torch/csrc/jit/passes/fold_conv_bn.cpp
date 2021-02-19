@@ -1,93 +1,109 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
+
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
 
 #include <stack>
 
 namespace torch {
 namespace jit {
 
+std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
+    const ConvBNParameters& p) {
+  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
+  const int64_t ndim = p.conv_w.dim();
+  at::DimVector sizes(ndim, 1);
+  sizes.at(0) = -1;
+  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape(sizes);
+  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
+  return std::make_tuple(new_w, new_b);
+}
+
 namespace {
 using graph_rewrite_helper::PatternInfo;
-
-struct ConvBNParameters {
-  at::Tensor conv_w;
-  at::Tensor conv_b;
-  at::Tensor bn_rm;
-  at::Tensor bn_rv;
-  double bn_eps = 0.0;
-  at::Tensor bn_w;
-  at::Tensor bn_b;
-};
 
 static bool hastensor(Module& m, const char* name) {
   return m.hasattr(name) && m.attr(name).isTensor();
 }
 
-void replaceConv2dBiasWithGetAttr(Module& module) {
+void replaceConvBiasWithGetAttr(Module& module) {
   auto graph = module.get_method("forward").graph();
   // Only looks fors _convolution pattern.
-  // Thus assumes that tracing will have always gotten rid of aten::conv2d.
-  // If it did not, BN folding will fail.
+  // Thus assumes that tracing will have always gotten rid of aten::conv2d or
+  // aten::conv3d. If it did not, BN folding will fail.
   const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+        %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
+        return (%conv_out) )");
+  const PatternInfo& pattern_convolution_deprecated =
+      PatternInfo::parse_from_str(R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
           %deterministic:bool, %cudnn_enabled:bool):
         %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
             %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
         return (%conv_out) )");
-  const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
-  const auto& convolution_vmap = pattern_convolution.vmap;
+  auto replace_pattern = [&](const PatternInfo& pattern_convolution) {
+    const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
+    const auto& convolution_vmap = pattern_convolution.vmap;
 
-  const auto& matches = findPatternMatches(pattern_convolution_graph, *graph);
-  for (const auto& match : matches) {
-    // We come here only if the bias was not present in the module.
-    // In that case, the corresponding graph will not have getAttr("bias")
-    // Insert that in the graph.
-    // And change _convolution to take the new value.
-    auto conv_node =
-        match.values_map.at(convolution_vmap.at("conv_out"))->node();
-    WithInsertPoint ins(conv_node);
-    Value* bias_attr_val = graph->insertGetAttr(graph->inputs()[0], "bias")
-                               ->setType(TensorType::get());
-    constexpr size_t conv_bias_index = 2;
-    conv_node->replaceInput(conv_bias_index, bias_attr_val);
-  }
+    const auto& matches = findPatternMatches(pattern_convolution_graph, *graph);
+    for (const auto& match : matches) {
+      // We come here only if the bias was not present in the module.
+      // In that case, the corresponding graph will not have getAttr("bias")
+      // Insert that in the graph.
+      // And change _convolution to take the new value.
+      auto conv_node =
+          match.values_map.at(convolution_vmap.at("conv_out"))->node();
+      WithInsertPoint ins(conv_node);
+      Value* bias_attr_val = graph->insertGetAttr(graph->inputs()[0], "bias")
+                                 ->setType(TensorType::get());
+      constexpr size_t conv_bias_index = 2;
+      conv_node->replaceInput(conv_bias_index, bias_attr_val);
+    }
+  };
+  replace_pattern(pattern_convolution);
+  replace_pattern(pattern_convolution_deprecated);
 }
 
-void addBiasForConv2dIfNone(Module& module) {
+void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   auto t = module.type()->expect<ClassType>();
-  auto real_typename = t->name()->qualifiedName();
-  const std::string pattern_name("Conv2d");
-  if (real_typename.size() >= pattern_name.size() &&
-      (0 ==
-       real_typename.compare(
-           real_typename.size() - pattern_name.size(),
-           pattern_name.size(),
-           pattern_name))) {
+
+  const std::string real_typename = t->name()->qualifiedName();
+  const std::string demangled_typename = removeTorchMangle(real_typename);
+  bool is_floating_point_conv =
+      ((demangled_typename == "__torch__.torch.nn.modules.conv.Conv1d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv2d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
+
+  if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
       t->addAttribute("bias", optional_tensor_type, true);
       auto optional_tensor = c10::optional<at::Tensor>();
       module.setattr("bias", optional_tensor);
-      replaceConv2dBiasWithGetAttr(module);
+      replaceConvBiasWithGetAttr(module);
     }
   }
   for (Module m : module.children()) {
-    addBiasForConv2dIfNone(m);
+    addBiasForConvIfNone(m, pattern_name);
   }
 }
 
-class FoldConvBatchNorm2dHelper {
+class FoldConvBatchNormHelper {
  public:
   /**
-   * In this step we find all Conv2d - BatchNorm2d patterns in the graph
+   * In this step we find all Conv - BatchNorm patterns in the graph
    * and extract the corresponding parameters for these two modules,
    * and record informations for the modifications of the graph without
    * actually performing these modifications.
    */
-  void analyze(Module& module);
+  void analyze(Module& module, const PatternInfo& pattern);
   /**
    * In this step we perform all the modifications including
    * setting the attributes for conv module, rewriting values
@@ -101,32 +117,29 @@ class FoldConvBatchNorm2dHelper {
       Module& bn,
       ConvBNParameters& r);
 
-  /**
-   * Given the current weight and bias tensors of a Conv2d module and parameters
-   * of the BatchNorm2d module we're folding with, compute the updated values
-   * for the weight and bias.
-   *
-   * The function is basically copied from torch/nn/utils/fusion.py
-   */
-  std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
-      const ConvBNParameters& p);
-
   std::unordered_map<ModulePtr, std::tuple<at::Tensor, at::Tensor>>
       conv_module_and_params_;
-  std::unordered_map<Graph*, std::vector<std::tuple<std::string, std::string>>>
-      conv_bn_names_;
+
+  // A map from graph to a list of tuple of paths of matched conv and bn module
+  // e.g. if we have a graph `g` containing following code
+  // x = self.sub.conv1(..)
+  // x = self.sub.bn1(..)
+  // x = self.sub.conv2(..)
+  // x = self.sub.bn2(..)
+  // then the value for graph `g` in this map will be:
+  // [(['sub', 'conv1'], ['sub', 'bn1']), (['sub', 'conv2'], ['sub', 'bn2'])]
+  // the first entry of the list is the paths to first conv-bn match
+  // the second entry of the list is the path to second match
+  std::unordered_map<
+      Graph*,
+      std::vector<
+          std::tuple<std::vector<std::string>, std::vector<std::string>>>>
+      conv_bn_paths_;
+
   std::unordered_map<Value*, Value*> rewrite_map_;
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
 };
-
-std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
-    computeUpdatedConvWeightAndBias(const ConvBNParameters& p) {
-  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
-  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape({-1, 1, 1, 1});
-  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
-  return std::make_tuple(new_w, new_b);
-}
 
 bool extractOptionalBNParams(const script::Module& bn, ConvBNParameters& r) {
   auto bn_forward = bn.get_method("forward");
@@ -189,7 +202,7 @@ bool extractOptionalBNParams(const script::Module& bn, ConvBNParameters& r) {
   return true;
 }
 
-bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
+bool FoldConvBatchNormHelper::tryExtractingConvBNParameters(
     Module& conv,
     Module& bn,
     ConvBNParameters& r) {
@@ -214,24 +227,14 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
   return true;
 }
 
-void FoldConvBatchNorm2dHelper::analyze(Module& module) {
-  // Dot in the ".Conv2d" and ".BatchNorm2d" is an attempt to
-  // prevent matching module's whose name might end with Conv2d
-  // But are user defined modules.
-  const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
-graph(%self, %x):
-    %conv_submodule = match::module[name=".Conv2d"](%self)
-    %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
-    %bn_submodule = match::module[name=".BatchNorm2d"](%self)
-    %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
-    return (%bn_out))IR");
-
+void FoldConvBatchNormHelper::analyze(
+    Module& module,
+    const PatternInfo& pattern) {
   const Graph& pattern_graph = *pattern.pattern_graph;
   const auto& vmap = pattern.vmap;
   Value* pattern_conv_out = vmap.at("conv_out");
   Value* pattern_bn_out = vmap.at("bn_out");
-  Value* pattern_conv_submodule = vmap.at("conv_submodule");
-  Value* pattern_bn_submodule = vmap.at("bn_submodule");
+  Value* pattern_bn_submodule = vmap.at("batchnorm");
   Node* pattern_conv = pattern_conv_out->node();
   Node* pattern_bn = pattern_bn_out->node();
 
@@ -251,35 +254,35 @@ graph(%self, %x):
     for (auto& method : current.get_methods()) {
       GRAPH_DUMP(
           current.type()->name()->name() + "::" + method.name() +
-              "() before Conv2d-BatchNorm2d folding",
+              "() before Conv-BatchNorm folding",
           method.graph());
       const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 
-      GRAPH_DEBUG("number of Conv2d-BatchNorm2d matches: ", matches.size());
+      GRAPH_DEBUG("number of Conv-BatchNorm matches: ", matches.size());
       Graph* g = method.graph().get();
-      if (!conv_bn_names_.count(g)) {
+      if (!conv_bn_paths_.count(g)) {
         // This is to make sure we don't visit one graph multiple times
-        conv_bn_names_[g] = {};
+        conv_bn_paths_[g] = {};
         for (const Match& match : matches) {
+          if (!std::all_of(
+                  pattern.filters.begin(),
+                  pattern.filters.end(),
+                  [&](const MatchFilter& f) { return f(match, vmap); })) {
+            continue;
+          }
           GRAPH_DEBUG("Checking next match...");
+          // Get the conv and bn submodule
           Node* matched_conv = match.nodes_map.at(pattern_conv);
           Node* matched_bn = match.nodes_map.at(pattern_bn);
-          Node* matched_conv_submodule =
-              match.values_map.at(pattern_conv_submodule)->node();
           Node* matched_bn_submodule =
               match.values_map.at(pattern_bn_submodule)->node();
-
-          TORCH_INTERNAL_ASSERT(
-              matched_conv_submodule->kind() == prim::GetAttr);
-          TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
-
-          const auto& conv_module_name =
-              matched_conv_submodule->s(Symbol::attr("name"));
-          const auto& bn_module_name =
-              matched_bn_submodule->s(Symbol::attr("name"));
-
-          Module conv_submodule = current.attr(conv_module_name).toModule();
-          Module bn_submodule = current.attr(bn_module_name).toModule();
+          Value* conv_instance = matched_conv->input(0);
+          Value* bn_instance = matched_bn->input(0);
+          Value* self = g->inputs()[0];
+          auto conv_module_path = getModuleAccessPath(conv_instance, self);
+          auto bn_module_path = getModuleAccessPath(bn_instance, self);
+          Module conv_submodule = findChildModule(current, conv_module_path);
+          Module bn_submodule = findChildModule(current, bn_module_path);
 
           ConvBNParameters params;
           if (!tryExtractingConvBNParameters(
@@ -288,8 +291,8 @@ graph(%self, %x):
                 "Conv and BN modules didn't have all required parameters or attributes...");
             continue;
           }
-          conv_bn_names_[g].push_back(
-              std::make_tuple(conv_module_name, bn_module_name));
+          conv_bn_paths_[g].push_back(
+              std::make_tuple(conv_module_path, bn_module_path));
           // We are using a separate vector for saving Values we want to rewrite
           // to make sure that the order in which we perform these
           // transformations is deterministic. Iterating through keys of
@@ -315,9 +318,9 @@ graph(%self, %x):
         } // matches
       }
 
-      for (const auto& conv_bn : conv_bn_names_.at(g)) {
-        Module conv_submodule = current.attr(std::get<0>(conv_bn)).toModule();
-        Module bn_submodule = current.attr(std::get<1>(conv_bn)).toModule();
+      for (const auto& conv_bn : conv_bn_paths_.at(g)) {
+        Module conv_submodule = findChildModule(current, std::get<0>(conv_bn));
+        Module bn_submodule = findChildModule(current, std::get<1>(conv_bn));
 
         ConvBNParameters params;
         TORCH_INTERNAL_ASSERT(tryExtractingConvBNParameters(
@@ -329,7 +332,7 @@ graph(%self, %x):
   } // while
 }
 
-void FoldConvBatchNorm2dHelper::transform() {
+void FoldConvBatchNormHelper::transform() {
   for (const auto& item : conv_module_and_params_) {
     Module conv(item.first);
     auto w_b = item.second;
@@ -353,12 +356,35 @@ void FoldConvBatchNorm2dHelper::transform() {
 
 } // namespace
 
-Module FoldConvBatchNorm2d(const Module& module) {
-  FoldConvBatchNorm2dHelper h;
+Module FoldConvBatchNorm(const Module& module) {
   Module m = module.clone();
-  addBiasForConv2dIfNone(m);
-  h.analyze(m);
-  h.transform();
+
+  addBiasForConvIfNone(m, "Conv2d");
+  addBiasForConvIfNone(m, "Conv3d");
+  // Conv2d + BatchNorm2d
+  const PatternInfo pattern2d = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %batchnorm):
+    %conv_out = prim::CallMethod[name="forward"](%conv, %input)
+    %bn_out = prim::CallMethod[name="forward"](%batchnorm, %conv_out)
+    return (%bn_out))",
+      {is_conv2d_module, is_batchnorm2d_module});
+  // Conv3d + BatchNorm3d
+  const PatternInfo pattern3d = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %batchnorm):
+    %conv_out = prim::CallMethod[name="forward"](%conv, %input)
+    %bn_out = prim::CallMethod[name="forward"](%batchnorm, %conv_out)
+    return (%bn_out))",
+      {is_conv3d_module, is_batchnorm3d_module});
+
+  const std::vector<std::reference_wrapper<const PatternInfo>> patterns = {
+      pattern2d, pattern3d};
+  for (const auto& pattern : patterns) {
+    FoldConvBatchNormHelper h;
+    h.analyze(m, pattern);
+    h.transform();
+  }
   return m;
 }
 

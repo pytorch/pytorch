@@ -53,7 +53,10 @@ std::vector<int> ComputeBinaryBroadcastForwardDims(
   for (; i >= 0 && j >= 0; --k) {
     const int A_dim = A_dims[i];
     const int B_dim = B_dims[j];
-    CAFFE_ENFORCE(A_dim == B_dim || A_dim == 1 || B_dim == 1);
+    CAFFE_ENFORCE(
+      A_dim == B_dim || A_dim == 1 || B_dim == 1,
+      "A_dim: ", A_dim , ",B_dim: ", B_dim
+    );
     if (A_dim == 0 || B_dim == 0) {
       C_dims[k] = 0;
     } else {

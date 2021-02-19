@@ -1,9 +1,9 @@
 ## @package layer_test_util
 # Module caffe2.python.layer_test_util
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from collections import namedtuple
 
@@ -20,6 +20,8 @@ from caffe2.proto import caffe2_pb2
 import numpy as np
 
 
+# pyre-fixme[13]: Pyre can't detect attribute initialization through the
+#    super().__new__ call
 class OpSpec(namedtuple("OpSpec", "type input output arg")):
 
     def __new__(cls, op_type, op_input, op_output, op_arg=None):

@@ -21,7 +21,7 @@ Tensor quantized_xand(Tensor qa, Tensor qb) {
   // Some type checks for qa and qb should be here...
   Tensor qc;
   double scale = qa.q_scale();
-  long zero_point qa.q_zero_point();
+  int64_t zero_point = qa.q_zero_point();
 
   auto iter = TensorIterator::binary_op(qc, qa, qb);
 
@@ -77,7 +77,7 @@ The registration is done using `TORCH_LIBRARY_IMPL`.
 
 ```c++
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("xand", quantized_xand);
+  m.impl("xand", TORCH_FN(quantized_xand));
 }
 ```
 
@@ -128,7 +128,7 @@ namespace at {
   }
 
   TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-    m.impl("xand", quantized_xand);
+    m.impl("xand", TORCH_FN(quantized_xand));
   }
 }}  // namespace at::native
 ```

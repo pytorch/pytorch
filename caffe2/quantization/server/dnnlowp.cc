@@ -82,22 +82,22 @@ QuantizationFactory::QuantizationKind StringToKind(const string& s) {
   string s_lower(s);
   transform(s_lower.begin(), s_lower.end(), s_lower.begin(), ::tolower);
 
-  if (s_lower == "min_max") {
+  if (s_lower == "min_max" || s == "MIN_MAX_QUANTIZATION") {
     return QuantizationFactory::MIN_MAX_QUANTIZATION;
-  } else if (s_lower == "l1") {
+  } else if (s_lower == "l1" || s == "L1_MIN_QUANTIZATION") {
     return QuantizationFactory::L1_MIN_QUANTIZATION;
-  } else if (s_lower == "l2") {
+  } else if (s_lower == "l2" || s == "L2_MIN_QUANTIZATION") {
     return QuantizationFactory::L2_MIN_QUANTIZATION;
-  } else if (s_lower == "l2_approx") {
+  } else if (s_lower == "l2_approx" || s == "L2_MIN_QUANTIZATION_APPROX") {
     if (FLAGS_caffe2_dnnlowp_preserve_weight_sparsity ||
         FLAGS_caffe2_dnnlowp_preserve_activation_sparsity) {
       return QuantizationFactory::L2_MIN_QUANTIZATION;
     } else {
       return QuantizationFactory::L2_MIN_QUANTIZATION_APPROX;
     }
-  } else if (s_lower == "kl") {
+  } else if (s_lower == "kl" || s == "KL_MIN_QUANTIZATION") {
     return QuantizationFactory::KL_MIN_QUANTIZATION;
-  } else if (s_lower == "p99") {
+  } else if (s_lower == "p99" || s == "P99_QUANTIZATION") {
     return QuantizationFactory::P99_QUANTIZATION;
   } else {
     assert(false);

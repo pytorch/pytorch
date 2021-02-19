@@ -6,13 +6,22 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
 
+inline PyObject* THPUtils_packInt32(int32_t value) {
+  return PyLong_FromLong(value);
+}
+
 inline PyObject* THPUtils_packInt64(int64_t value) {
   return PyLong_FromLongLong(value);
+}
+
+inline PyObject* THPUtils_packUInt32(uint32_t value) {
+  return PyLong_FromUnsignedLong(value);
 }
 
 inline PyObject* THPUtils_packUInt64(uint64_t value) {
@@ -33,6 +42,22 @@ inline bool THPUtils_checkLong(PyObject* obj) {
   return PyLong_Check(obj) && !PyBool_Check(obj);
 }
 
+inline int32_t THPUtils_unpackInt(PyObject* obj) {
+  int overflow;
+  long value = PyLong_AsLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
+  if (value > std::numeric_limits<int32_t>::max() ||
+      value < std::numeric_limits<int32_t>::min()) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
+  return (int32_t)value;
+}
+
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
   int overflow;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
@@ -43,6 +68,25 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw std::runtime_error("Overflow when unpacking long");
   }
   return (int64_t)value;
+}
+
+inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
+  unsigned long value = PyLong_AsUnsignedLong(obj);
+  if (PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (value > std::numeric_limits<uint32_t>::max()) {
+    throw std::runtime_error("Overflow when unpacking unsigned long");
+  }
+  return (uint32_t)value;
+}
+
+inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {
+  unsigned long long value = PyLong_AsUnsignedLongLong(obj);
+  if (PyErr_Occurred()) {
+    throw python_error();
+  }
+  return (uint64_t)value;
 }
 
 inline bool THPUtils_checkIndex(PyObject *obj) {
@@ -106,17 +150,6 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   if (PyFloat_Check(obj)) {
     return PyFloat_AS_DOUBLE(obj);
   }
-  if (PyLong_Check(obj)) {
-    int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (overflow != 0) {
-      throw std::runtime_error("Overflow when unpacking double");
-    }
-    if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
-      throw std::runtime_error("Precision loss when unpacking double");
-    }
-    return (double)value;
-  }
   double value = PyFloat_AsDouble(obj);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -124,13 +157,13 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   return value;
 }
 
-inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
+inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
   Py_complex value = PyComplex_AsCComplex(obj);
   if (value.real == -1.0 && PyErr_Occurred()) {
     throw python_error();
   }
 
-  return std::complex<double>(value.real, value.imag);
+  return c10::complex<double>(value.real, value.imag);
 }
 
 inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {

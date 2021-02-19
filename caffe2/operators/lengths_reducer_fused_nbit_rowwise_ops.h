@@ -331,8 +331,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
       !(with_weights && is_mean),
       "Cannot have with_weights and is_mean a the same time");
 
-  SparseLengthsNBitRowwiseSparseOp(const OperatorDef& def, Workspace* ws)
-      : Operator<CPUContext>(def, ws) {}
+  template<class... Args>
+  explicit SparseLengthsNBitRowwiseSparseOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
   ~SparseLengthsNBitRowwiseSparseOp() override {}
 
   bool RunOnDevice() override {

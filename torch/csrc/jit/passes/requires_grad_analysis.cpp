@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -64,7 +65,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
   } else if (node->matches(
                  "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
     return setRequiresGrad(node->output(), node->input(0)->requires_grad());
-  } else if (node->matches("aten::detach(Tensor self) -> Tensor")) {
+  } else if (node->matches("aten::detach(Tensor(a) self) -> Tensor(a)")) {
     return setRequiresGrad(node->output(), false);
   } else if (node->kind() == aten::tensor) {
     if (auto grad_index =
@@ -136,7 +137,7 @@ void PropagateRequiresGrad(Node* node) {
       PropagateRequiresGrad(body);
       new_body_outputs_require =
           fmap(body->return_node()->inputs().slice(1), getRequiresGrad);
-    } while (new_body_inputs_require != body_inputs_require &&
+    } while (new_body_inputs_require != body_inputs_require ||
              new_body_outputs_require != body_outputs_require);
 
     setRequiresGrad(node, bitwiseOr(body_outputs_require, loop_inputs_require));

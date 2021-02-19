@@ -5,6 +5,11 @@
 #include <atomic>
 #include <stdexcept>
 
+namespace pybind11 {
+template <typename, typename...>
+class class_;
+}
+
 namespace c10 {
 class intrusive_ptr_target;
 namespace raw {
@@ -14,13 +19,17 @@ namespace raw {
   namespace intrusive_ptr {
     inline void incref(intrusive_ptr_target * self);
   }
+
+  // constructor tag used by intrusive_ptr constructors
+  struct DontIncreaseRefcount {};
 }
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
  * performance because it does the refcounting intrusively
  * (i.e. in a member of the object itself).
  * Your class T needs to inherit from intrusive_ptr_target to allow it to be
- * used in an intrusive_ptr<T>.
+ * used in an intrusive_ptr<T>. Your class's constructor should not allow
+ *`this` to escape to other threads or create an intrusive_ptr from `this`.
  */
 
 // Note [Stack allocated intrusive_ptr_target safety]
@@ -97,7 +106,8 @@ class C10_API intrusive_ptr_target {
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        weakcount_.load() == 0,
+        // See ~intrusive_ptr for optimization that will frequently result in 1 at destruction time.
+        weakcount_.load() == 1 || weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(pop)
@@ -149,6 +159,29 @@ TTarget* assign_ptr_(TTarget* rhs) {
     return rhs;
   }
 }
+
+// Increment needs to be acquire-release to make use_count() and
+// unique() reliable.
+inline size_t atomic_refcount_increment(std::atomic<size_t>& refcount) {
+  return refcount.fetch_add(1, std::memory_order_acq_rel) + 1;
+}
+
+// weak_use_count() is only used for testing, so we don't need it to
+// be reliable. Relaxed should be fine.
+inline size_t atomic_weakcount_increment(std::atomic<size_t>& weakcount) {
+  return weakcount.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+// Both decrements need to be acquire-release for correctness. See
+// e.g. std::shared_ptr implementation.
+inline size_t atomic_refcount_decrement(std::atomic<size_t>& refcount) {
+  return refcount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+}
+
+inline size_t atomic_weakcount_decrement(std::atomic<size_t>& weakcount) {
+  return weakcount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+}
+
 } // namespace detail
 
 template <class TTarget, class NullType>
@@ -173,7 +206,7 @@ class intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
+      std::is_base_of<TTarget, typename std::remove_pointer<decltype(NullType::singleton())>::type>::value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -182,9 +215,19 @@ class intrusive_ptr final {
   friend class intrusive_ptr;
   friend class weak_intrusive_ptr<TTarget, NullType>;
 
+  // Make pybind11::class_ be a friend class of intrusive_ptr, so that custom
+  // smart holder in pybind11 could access the private constructor of
+  // intrusive_ptr(T*) which took the ownership of the object. This is required
+  // by customer holder macro PYBIND11_DECLARE_HOLDER_TYPE, where it uses
+  // intrusive_ptr(TTarget*) to initialize and take ownership of the object. For
+  // details, see
+  // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
+  template <typename, typename...>
+  friend class pybind11::class_;
+
   void retain_() {
     if (target_ != NullType::singleton()) {
-      size_t new_refcount = ++target_->refcount_;
+      size_t new_refcount = detail::atomic_refcount_increment(target_->refcount_);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
@@ -192,7 +235,7 @@ class intrusive_ptr final {
   }
 
   void reset_() noexcept {
-    if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
+    if (target_ != NullType::singleton() && detail::atomic_refcount_decrement(target_->refcount_) == 0) {
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
       const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
@@ -200,23 +243,45 @@ class intrusive_ptr final {
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
       // So we need to decrement it here.
-      if (--target_->weakcount_ == 0) {
+      if (target_->weakcount_.load(std::memory_order_acquire) == 1 ||
+          detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
         delete target_;
       }
     }
     target_ = NullType::singleton();
   }
 
+  // raw pointer constructors are not public because we shouldn't make
+  // intrusive_ptr out of raw pointers except from inside the make_intrusive(),
+  // reclaim() and weak_intrusive_ptr::lock() implementations.
+
   // This constructor will not increase the ref counter for you.
-  // This is not public because we shouldn't make intrusive_ptr out of raw
-  // pointers except from inside the make_intrusive() and
-  // weak_intrusive_ptr::lock() implementations
-  explicit intrusive_ptr(TTarget* target) noexcept : target_(target) {}
+  // We use the tagged dispatch mechanism to explicitly mark this constructor
+  // to not increase the refcount
+  explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
+      : target_(target) {}
+
+  // This constructor will increase the ref counter for you.
+  // This constructor will be used by the make_intrusive(), and also pybind11,
+  // which wrap the intrusive_ptr holder around the raw pointer and incref
+  // correspondingly (pybind11 requires raw pointer constructor to incref by
+  // default).
+  explicit intrusive_ptr(TTarget* target)
+      : intrusive_ptr(target, raw::DontIncreaseRefcount{}) {
+    if (target_ != NullType::singleton()) {
+      // We can't use retain_(), because we also have to increase weakcount
+      // and because we allow raising these values from 0, which retain_()
+      // has an assertion against.
+      detail::atomic_refcount_increment(target_->refcount_);
+      detail::atomic_weakcount_increment(target_->weakcount_);
+    }
+  }
 
  public:
   using element_type = TTarget;
 
-  intrusive_ptr() noexcept : intrusive_ptr(NullType::singleton()) {}
+  intrusive_ptr() noexcept
+      : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
 
   intrusive_ptr(intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
     rhs.target_ = NullType::singleton();
@@ -313,14 +378,14 @@ class intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->refcount_.load();
+    return target_->refcount_.load(std::memory_order_acquire);
   }
 
   size_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->weakcount_.load();
+    return target_->weakcount_.load(std::memory_order_acquire);
   }
 
   bool unique() const noexcept {
@@ -347,17 +412,30 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
-    return intrusive_ptr(owning_ptr);
+    return intrusive_ptr(owning_ptr, raw::DontIncreaseRefcount{});
   }
 
+  /**
+   * Allocate a heap object with args and wrap it inside a intrusive_ptr and
+   * incref. This is a helper function to let make_intrusive() access private
+   * intrusive_ptr constructors.
+   */
   template <class... Args>
   static intrusive_ptr make(Args&&... args) {
-    auto result = intrusive_ptr(new TTarget(std::forward<Args>(args)...));
-    // We can't use retain_(), because we also have to increase weakcount
-    // and because we allow raising these values from 0, which retain_()
-    // has an assertion against.
-    ++result.target_->refcount_;
-    ++result.target_->weakcount_;
+    auto result = intrusive_ptr(new TTarget(std::forward<Args>(args)...), raw::DontIncreaseRefcount{});
+
+    // We just created result.target_, so we know no other thread has
+    // access to it, so we know we needn't care about memory ordering.
+    // (On x86_64, a store with memory_order_relaxed generates a plain old
+    // `mov`, whereas an atomic increment does a lock-prefixed `add`, which is
+    // much more expensive: https://godbolt.org/z/eKPzj8.)
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        result.target_->refcount_ == 0 && result.target_->weakcount_ == 0,
+        "intrusive_ptr: Newly-created target had non-zero refcounts. Does its "
+        "constructor do something strange like incref or create an intrusive_ptr"
+        "from `this`?");
+    result.target_->refcount_.store(1, std::memory_order_relaxed);
+    result.target_->weakcount_.store(1, std::memory_order_relaxed);
 
     return result;
   }
@@ -431,7 +509,7 @@ class weak_intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
+      std::is_base_of<TTarget, typename std::remove_pointer<decltype(NullType::singleton())>::type>::value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -441,7 +519,7 @@ class weak_intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      size_t new_weakcount = ++target_->weakcount_;
+      size_t new_weakcount = detail::atomic_weakcount_increment(target_->weakcount_);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_weakcount != 1,
           "weak_intrusive_ptr: Cannot increase weakcount after it reached zero.");
@@ -449,7 +527,7 @@ class weak_intrusive_ptr final {
   }
 
   void reset_() noexcept {
-    if (target_ != NullType::singleton() && --target_->weakcount_ == 0) {
+    if (target_ != NullType::singleton() && detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
       delete target_;
     }
     target_ = NullType::singleton();
@@ -518,6 +596,12 @@ class weak_intrusive_ptr final {
     return operator=<TTarget, NullType>(rhs);
   }
 
+  weak_intrusive_ptr& operator=(const intrusive_ptr<TTarget, NullType>& rhs) & noexcept {
+    weak_intrusive_ptr tmp(rhs);
+    swap(tmp);
+    return *this;
+  }
+
   template <class From, class FromNullType>
       weak_intrusive_ptr& operator=(
           const weak_intrusive_ptr<From, NullType>& rhs) & {
@@ -568,14 +652,14 @@ class weak_intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->refcount_.load(); // refcount, not weakcount!
+    return target_->refcount_.load(std::memory_order_acquire); // refcount, not weakcount!
   }
 
   size_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->weakcount_.load();
+    return target_->weakcount_.load(std::memory_order_acquire);
   }
 
   bool expired() const noexcept {
@@ -583,15 +667,20 @@ class weak_intrusive_ptr final {
   }
 
   intrusive_ptr<TTarget, NullType> lock() const noexcept {
-    auto refcount = target_->refcount_.load();
-    do {
-      if (refcount == 0) {
-        // Object already destructed, no strong references left anymore.
-        // Return nullptr.
-        return intrusive_ptr<TTarget, NullType>(NullType::singleton());
-      }
-    } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
-    return intrusive_ptr<TTarget, NullType>(target_);
+    if (expired()) {
+      return intrusive_ptr<TTarget, NullType>();
+    } else {
+      auto refcount = target_->refcount_.load(std::memory_order_seq_cst);
+      do {
+        if (refcount == 0) {
+          // Object already destructed, no strong references left anymore.
+          // Return nullptr.
+          return intrusive_ptr<TTarget, NullType>();
+        }
+      } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
+      return intrusive_ptr<TTarget, NullType>(
+          target_, raw::DontIncreaseRefcount{});
+    }
   }
 
   /**
@@ -611,7 +700,7 @@ class weak_intrusive_ptr final {
   /**
    * Takes an owning (but must be weakly referenced) pointer to TTarget* and
    * creates a weak_intrusive_ptr that takes over ownership.
-   * Thas means the weakcount is not increased.
+   * This means that the weakcount is not increased.
    * This is the counter-part to weak_intrusive_ptr::release() and the pointer
    * passed in *must* have been created using weak_intrusive_ptr::release().
    */
@@ -692,7 +781,7 @@ namespace intrusive_ptr {
   // NullType::singleton to this function
   inline void incref(intrusive_ptr_target* self) {
     if (self) {
-      ++self->refcount_;
+      detail::atomic_refcount_increment(self->refcount_);
     }
   }
 
@@ -714,7 +803,7 @@ namespace intrusive_ptr {
     return wptr.release();
   }
 
-  inline uint32_t use_count(intrusive_ptr_target* self) {
+  inline size_t use_count(intrusive_ptr_target* self) {
     auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
     auto r = ptr.use_count();
     ptr.release();
@@ -726,7 +815,7 @@ namespace intrusive_ptr {
 namespace weak_intrusive_ptr {
 
   inline void incref(weak_intrusive_ptr_target* self) {
-    ++self->weakcount_;
+    detail::atomic_weakcount_increment(self->weakcount_);
   }
 
   inline void decref(weak_intrusive_ptr_target* self) {
@@ -745,7 +834,7 @@ namespace weak_intrusive_ptr {
   }
 
   // This gives the STRONG refcount of a WEAK pointer
-  inline uint32_t use_count(weak_intrusive_ptr_target* self) {
+  inline size_t use_count(weak_intrusive_ptr_target* self) {
     auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
     auto r = wptr.use_count();
     wptr.release();

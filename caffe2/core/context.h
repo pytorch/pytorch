@@ -15,6 +15,13 @@
 
 #include <c10/util/ArrayRef.h>
 
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#include <ATen/core/DistributionsHelper.h>
+#include <ATen/CPUGeneratorImpl.h>
+#else
+#include "caffe2/core/distributions_stubs.h"
+#endif
+
 C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
@@ -23,7 +30,7 @@ namespace caffe2 {
  * A function to generate a random number seed that is unique in a best-effort
  * basis, using an ever-incrementing seed and the current time.
  */
-CAFFE2_API uint32_t RandomNumberSeed();
+TORCH_API uint32_t RandomNumberSeed();
 
 /**
  * The CPU Context, representing the bare minimum of what a Context class in
@@ -37,9 +44,14 @@ CAFFE2_API uint32_t RandomNumberSeed();
  * computation it has.
  *
  */
-class CAFFE2_API CPUContext final : public BaseContext {
+class TORCH_API CPUContext final : public BaseContext {
  public:
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  typedef at::CPUGeneratorImpl rand_gen_type;
+#else
   typedef std::mt19937 rand_gen_type;
+#endif
+
   CPUContext() {}
   explicit CPUContext(const DeviceOption& option)
       : random_seed_(option.has_random_seed() ? option.random_seed() : 1701),
@@ -66,15 +78,19 @@ class CAFFE2_API CPUContext final : public BaseContext {
 
   inline void FinishDeviceComputation() override {}
 
-  inline rand_gen_type& RandGenerator() {
+  inline rand_gen_type* RandGenerator() {
     if (!random_generator_.get()) {
-      if (!random_seed_set_) {
-        random_seed_ = RandomNumberSeed();
-        random_seed_set_ = true;
-      }
-      random_generator_.reset(new rand_gen_type(random_seed_));
+      random_generator_.reset(new rand_gen_type(RandSeed()));
     }
-    return *random_generator_.get();
+    return random_generator_.get();
+  }
+
+  inline uint32_t RandSeed() {
+    if (!random_seed_set_) {
+      random_seed_ = RandomNumberSeed();
+      random_seed_set_ = true;
+    }
+    return static_cast<uint32_t>(random_seed_);
   }
 
   inline static at::DataPtr New(size_t nbytes) {
@@ -115,7 +131,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     if (meta.copy()) {
       meta.copy()(src, dst, n);
     } else {

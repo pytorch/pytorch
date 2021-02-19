@@ -2,6 +2,8 @@
 // Please note that this file is
 // used across both CPU and GPU.
 
+#include <type_traits>
+#include <complex>
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/NumericUtils.h>
@@ -13,7 +15,6 @@
 #include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#include <thrust/tuple.h>
 #include <thrust/pair.h>
 #else
 #include <cmath>
@@ -39,6 +40,16 @@
 #endif
 
 namespace at { namespace native {
+
+namespace detail {
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
+#else
+template <typename T1, typename T2> using pair = std::pair<T1, T2>;
+#endif
+
+} // namespace detail
 
 template <typename scalar_t, typename index_t, typename combine_t>
 struct WelfordData {
@@ -95,11 +106,7 @@ struct WelfordOps {
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, (scalar_t) mean);
-#else
-    std::tuple<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
-#endif
+    detail::pair<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
     return results;
   }
 
@@ -152,11 +159,15 @@ struct MeanOps {
   }
 };
 
-template <typename acc_t>
+// This accumulator template is used to calculate the minimum absolute value of
+// a set of numbers.
+// `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
+// value. These types differ for complex number input support.
+template <typename scalar_t, typename acc_t=scalar_t>
 struct AbsMinOps {
 
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return MIN(acc, acc_t(std::abs(data)));
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+    return MIN(acc, static_cast<acc_t>(std::abs(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -172,17 +183,21 @@ struct AbsMinOps {
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
-    return WARP_SHFL_DOWN(data, offset);
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
+    return WARP_SHFL_DOWN(acc, offset);
   }
 #endif
 };
 
-template <typename acc_t>
+// This accumulator template is used to calculate the maximum absolute value of
+// a set of numbers.
+// `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
+// value. These types differ for complex number input support.
+template <typename scalar_t, typename acc_t=scalar_t>
 struct AbsMaxOps {
 
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return MAX(acc, acc_t(std::abs(data)));
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+    return MAX(acc, static_cast<acc_t>(std::abs(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -198,18 +213,22 @@ struct AbsMaxOps {
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
-    return WARP_SHFL_DOWN(data, offset);
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
+    return WARP_SHFL_DOWN(acc, offset);
   }
 #endif
 };
 
-template <typename acc_t>
+// This accumulator template is used to calculate the norm of the absolute value
+// of a set of numbers.
+// `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
+// value. These types differ for complex number input support.
+template <typename scalar_t, typename acc_t=scalar_t>
 struct NormOps {
   acc_t norm_;
 
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return acc + compat_pow(std::abs(data), norm_);
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+    return acc + compat_pow(static_cast<acc_t>(std::abs(data)), norm_);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -217,7 +236,7 @@ struct NormOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
-    return compat_pow(a, acc_t(1.0)/norm_);
+    return compat_pow(a, static_cast<acc_t>(1.0) / norm_);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -225,8 +244,8 @@ struct NormOps {
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
-    return WARP_SHFL_DOWN(data, offset);
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
+    return WARP_SHFL_DOWN(acc, offset);
   }
 #endif
 
@@ -234,10 +253,14 @@ struct NormOps {
   }
 };
 
-template <typename acc_t>
+// This accumulator template is used to calculate the order zero norm of the
+// absolute value of a set of numbers.
+// `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
+// value. These types differ for complex number input support.
+template <typename scalar_t, typename acc_t=scalar_t>
 struct NormZeroOps {
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return acc + (data==acc_t(0) ? acc_t(0) : acc_t(1));
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+    return acc + (data == static_cast<scalar_t>(0) ? static_cast<acc_t>(0) : static_cast<acc_t>(1));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -254,16 +277,20 @@ struct NormZeroOps {
 
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
-    return WARP_SHFL_DOWN(data, offset);
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
+    return WARP_SHFL_DOWN(acc, offset);
   }
 #endif
 };
 
-template <typename acc_t>
+// This accumulator template is used to calculate the order one norm of the
+// absolute value of a set of numbers.
+// `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
+// value. These types differ for complex number input support.
+template <typename scalar_t, typename acc_t=scalar_t>
 struct NormOneOps {
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return acc + std::abs(data);
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+    return acc + static_cast<acc_t>(std::abs(data));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -279,16 +306,40 @@ struct NormOneOps {
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
-    return WARP_SHFL_DOWN(data, offset);
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
+    return WARP_SHFL_DOWN(acc, offset);
   }
 #endif
 };
 
-template <typename acc_t>
+
+template<typename acc_t>
+struct AbsSwitch {};
+
+template<typename scalar_t, typename acc_t>
+inline C10_DEVICE acc_t abs_if_complex(scalar_t data, AbsSwitch<acc_t> s) {
+  return static_cast<acc_t>(data);
+}
+
+template<typename scalar_t, typename acc_t>
+inline C10_DEVICE acc_t abs_if_complex(std::complex<scalar_t> data, AbsSwitch<acc_t> s) {
+  return static_cast<acc_t>(std::abs(data));
+}
+
+template<typename scalar_t, typename acc_t>
+inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<acc_t> s) {
+  return static_cast<acc_t>(std::abs(data));
+}
+
+// This accumulator template is used to calculate the order two norm of the
+// absolute value of a set of numbers.
+// `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
+// value. These types differ for complex number input support.
+template <typename scalar_t, typename acc_t=scalar_t>
 struct NormTwoOps {
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return acc + data * data;
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+    acc_t data_ = abs_if_complex(data, AbsSwitch<acc_t>());
+    return acc + data_ * data_;
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -304,6 +355,31 @@ struct NormTwoOps {
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
+    return WARP_SHFL_DOWN(acc, offset);
+  }
+#endif
+};
+
+template <typename acc_t, typename data_t>
+struct NanSumOps {
+  inline C10_DEVICE acc_t reduce(acc_t a, data_t b, int64_t /*idx*/) const {
+    return a + (at::_isnan(b) ? acc_t{0.} : acc_t{b});
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return  a + b;
+  }
+
+  inline C10_DEVICE data_t project(acc_t a) const {
+    return data_t{a};
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
   }
@@ -312,23 +388,31 @@ struct NormTwoOps {
 
 namespace detail {
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
-#else
-template <typename T1, typename T2> using pair = std::pair<T1, T2>;
-#endif
-
 template <typename scalar_t>
 struct LessOrNan {
-  C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
-    return at::_isnan(a) || a < b;
+  C10_DEVICE bool operator () (scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) const {
+    // If (a == b), then choose the one with lower idx, else min(a, b)
+    if (at::_isnan(a)) {
+      if (at::_isnan(b)) {
+        return idx_a < idx_b;
+      }
+      return true;
+    }
+    return (a == b) ? idx_a < idx_b : (a < b);
   }
 };
 
 template <typename scalar_t>
 struct GreaterOrNan {
-  C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
-    return at::_isnan(a) || a > b;
+  C10_DEVICE bool operator () (scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) const {
+    // If (a == b), then choose the one with lower idx, else max(a, b)
+    if (at::_isnan(a)) {
+      if (at::_isnan(b)) {
+        return idx_a < idx_b;
+      }
+      return true;
+    }
+    return (a == b) ? idx_a < idx_b : (a > b);
   }
 };
 
@@ -343,11 +427,11 @@ struct MinMaxReductionOps {
   }
 
   static C10_DEVICE arg_t reduce(arg_t arg, scalar_t val, int64_t idx) {
-    return comp_t{}(arg.first, val) ? arg : arg_t(val, idx);
+    return comp_t{}(arg.first, val, arg.second, idx) ? arg : arg_t(val, idx);
   }
 
   static C10_DEVICE arg_t combine(arg_t a, arg_t b) {
-    return comp_t{}(a.first, b.first) ? a : b;
+    return comp_t{}(a.first, b.first, a.second, b.second) ? a : b;
   }
 
   static C10_DEVICE arg_t translate_idx(arg_t a, int64_t base_idx) {
@@ -393,6 +477,37 @@ struct MinOps :
 template <typename scalar_t>
 struct MaxOps :
   public detail::MinMaxReductionOps<detail::GreaterOrNan<scalar_t>> {
+};
+
+template <typename scalar_t, typename acc_scalar_t, typename index_t>
+struct MinMaxOps {
+  using acc_t = detail::pair<acc_scalar_t, acc_scalar_t>;
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, index_t /*idx*/) const {
+    return combine(acc, {data, data});
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    auto min_val = (at::_isnan(a.first) || a.first < b.first) ? a.first : b.first;
+    auto max_val = (at::_isnan(a.second) || a.second > b.second) ? a.second : b.second;
+
+    return {min_val, max_val};
+  }
+
+  inline C10_DEVICE acc_t project(acc_t acc) const {
+    return acc;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
+    return {
+      WARP_SHFL_DOWN(acc.first, offset), WARP_SHFL_DOWN(acc.second, offset)
+    };
+  }
+#endif
 };
 
 }} // namespace at::native

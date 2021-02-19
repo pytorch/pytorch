@@ -43,13 +43,10 @@ DLDataType getDLDataType(const Tensor& t) {
       throw std::logic_error("BFloat16 is not supported by dlpack");
       break;
     case ScalarType::QInt8:
-      throw std::logic_error("QInt8 is not supported by dlpack");
-      break;
     case ScalarType::QUInt8:
-      throw std::logic_error("QUInt8 is not supported by dlpack");
-      break;
     case ScalarType::QInt32:
-      throw std::logic_error("QInt32 is not supported by dlpack");
+    case ScalarType::QUInt4x2:
+      throw std::logic_error("QUInt/QInt types are not supported by dlpack");
       break;
     case ScalarType::ComplexHalf:
       throw std::logic_error("ComplexHalf is not supported by dlpack");
@@ -71,10 +68,27 @@ DLDataType getDLDataType(const Tensor& t) {
 DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
   DLContext ctx;
   ctx.device_id = device_id;
-  if (tensor.is_cuda()) {
-    ctx.device_type = DLDeviceType::kDLGPU;
-  } else {
-    ctx.device_type = DLDeviceType::kDLCPU;
+  switch (tensor.device().type()) {
+    case DeviceType::CPU:
+      ctx.device_type = DLDeviceType::kDLCPU;
+      break;
+    case DeviceType::CUDA:
+#ifdef USE_ROCM
+      // ROCM, if enabled will look like cuda to PyTorch
+      // while everyone else should see HIP
+      ctx.device_type = DLDeviceType::kDLROCM;
+#else
+      ctx.device_type = DLDeviceType::kDLGPU;
+#endif
+      break;
+    case DeviceType::OPENCL:
+      ctx.device_type = DLDeviceType::kDLOpenCL;
+      break;
+    case DeviceType::HIP:
+      ctx.device_type = DLDeviceType::kDLROCM;
+      break;
+    default:
+      throw std::logic_error("Cannot pack tensors on " + tensor.device().str());
   }
   return ctx;
 }
@@ -83,12 +97,20 @@ static Device getATenDevice(const DLContext& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
+#ifndef USE_ROCM
+    // if we are compiled under HIP, we cannot do cuda
     case DLDeviceType::kDLGPU:
       return at::Device(DeviceType::CUDA, ctx.device_id);
+#endif
     case DLDeviceType::kDLOpenCL:
       return at::Device(DeviceType::OPENCL, ctx.device_id);
     case DLDeviceType::kDLROCM:
+#ifdef USE_ROCM
+      // this looks funny, we need to return CUDA here to masquerade
+      return at::Device(DeviceType::CUDA, ctx.device_id);
+#else
       return at::Device(DeviceType::HIP, ctx.device_id);
+#endif
     default:
       throw std::logic_error(
           "Unsupported device_type: " + c10::to_string(ctx.device_type));

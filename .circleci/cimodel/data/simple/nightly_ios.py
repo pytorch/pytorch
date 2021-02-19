@@ -18,7 +18,7 @@ class IOSNightlyJob:
 
         common_name_pieces = [
             "ios",
-        ] + ios_definitions.IOS_VERSION.render_dots_or_parts(with_version_dots) + [
+        ] + ios_definitions.XCODE_VERSION.render_dots_or_parts(with_version_dots) + [
             "nightly",
             self.variant,
             "build",
@@ -34,7 +34,7 @@ class IOSNightlyJob:
 
         props_dict = {
             "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(True)),
-            "requires": ["setup"] + extra_requires,
+            "requires": extra_requires,
             "context": "org-member",
             "filters": {"branches": {"only": "nightly"}},
         }

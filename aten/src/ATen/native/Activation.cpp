@@ -30,6 +30,8 @@ DEFINE_DISPATCH(softshrink_stub);
 DEFINE_DISPATCH(shrink_backward_stub);
 DEFINE_DISPATCH(leaky_relu_stub);
 DEFINE_DISPATCH(leaky_relu_backward_stub);
+DEFINE_DISPATCH(silu_stub);
+DEFINE_DISPATCH(silu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
   return at::clamp(self, min, max);
@@ -114,27 +116,22 @@ Tensor & elu_(
   return at::elu_out(self, self, alpha, scale, input_scale);
 }
 
-Tensor& elu_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale,
-    const Tensor& output) {
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
-  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
-  return grad_input;
-}
-
 Tensor elu_backward(
     const Tensor& grad_output,
     Scalar alpha,
     Scalar scale,
     Scalar input_scale,
-    const Tensor& output) {
+    bool is_result,
+    const Tensor& self_or_result) {
+  TORCH_CHECK(
+    !is_result || alpha.to<double>() >= 0.0,
+    "In-place elu backward calculation is triggered with a negative slope which is not supported. "
+    "This is caused by calling in-place forward function with a negative slope, "
+    "please call out-of-place version instead.");
+
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, grad_output, output);
-  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  auto iter = TensorIterator::binary_op(result, grad_output, self_or_result);
+  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale, is_result);
   return iter.output();
 }
 
@@ -165,11 +162,11 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-  return at::threshold(self, 0, 0);
+  return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-  return at::threshold_(self, 0, 0);
+  return at::clamp_min_(self, 0);
 }
 
 Tensor selu(const Tensor & self) {
@@ -181,15 +178,53 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
+Tensor silu(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  at::silu_out(result, self);
+  return result;
+}
+
+Tensor& silu_(Tensor& self) {
+  return at::silu_out(self, self);
+}
+
+Tensor& silu_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(
+      result.dtype() == self.dtype(),
+      "Output Tensor should have the same type as in Input Tensor.")
+  auto iter = TensorIterator::unary_op(result, self);
+  silu_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  Tensor grad_input = at::empty({0}, input.options());
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, input);
+  silu_backward_stub(iter.device_type(), iter);
+  return grad_input;
+}
+
+Tensor math_silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  auto input_sigmoid = at::sigmoid(input);
+  return grad_output * (input_sigmoid * (1 + input * (1 - input_sigmoid)));
+}
 
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
@@ -237,8 +272,8 @@ Tensor& rrelu_with_noise_out_cpu(
     });
     return output;
   } else {
-    auto lower_tensor = scalar_to_tensor(lower, self.device());
-    auto upper_tensor = scalar_to_tensor(upper, self.device());
+    auto lower_tensor = scalar_to_tensor(lower);
+    auto upper_tensor = scalar_to_tensor(upper);
     auto negative = (lower_tensor + upper_tensor) / 2;
     Scalar negative_slope = negative.item();
     return at::leaky_relu_out(output, self, negative_slope);
@@ -274,8 +309,8 @@ Tensor rrelu_with_noise_backward(
     Scalar upper,
     bool training,
     bool is_result) {
-  auto lower_tensor = scalar_to_tensor(lower, grad_output.device());
-  auto upper_tensor = scalar_to_tensor(upper, grad_output.device());
+  auto lower_tensor = scalar_to_tensor(lower);
+  auto upper_tensor = scalar_to_tensor(upper);
   if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
     return grad_output.mul(noise);
   } else {
@@ -339,7 +374,16 @@ static Tensor threshold_out(
     Scalar value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
   threshold_stub(iter.device_type(), iter, threshold, value);
   return iter.output();
 }
@@ -677,6 +721,15 @@ Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
   return dX;
 }
 
+Tensor infinitely_differentiable_gelu_backward(
+    const Tensor& grad,
+    const Tensor& self) {
+  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self * self).exp_();
+  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
+}
+
 Tensor& leaky_relu_out(
     Tensor& result,
     const Tensor& self,
@@ -756,13 +809,12 @@ Tensor log_sigmoid(const Tensor & self) {
 
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
-  auto iter = at::TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(grad_input);
-  iter.add_input(input);
-  iter.add_input(buffer);
-  iter.add_input(grad_output);
-  iter.build();
+  auto iter = at::TensorIteratorConfig()
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(buffer)
+    .add_input(grad_output)
+    .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return iter.output();
 }
@@ -772,13 +824,12 @@ Tensor& log_sigmoid_backward_out_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& buffer) {
-  auto iter = at::TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(grad_input);
-  iter.add_input(input);
-  iter.add_input(buffer);
-  iter.add_input(grad_output);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(buffer)
+    .add_input(grad_output)
+    .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return grad_input;
 }

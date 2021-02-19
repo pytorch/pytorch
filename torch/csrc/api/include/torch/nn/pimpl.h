@@ -191,12 +191,15 @@ serialize::InputArchive& operator>>(
 } // namespace torch
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
-/// wrapper over a `std::shared_ptr<Impl>`.
-#define TORCH_MODULE_IMPL(Name, Impl)                              \
-  class Name : public torch::nn::ModuleHolder<Impl> { /* NOLINT */ \
-   public:                                                         \
-    using torch::nn::ModuleHolder<Impl>::ModuleHolder;             \
+/// wrapper over a `std::shared_ptr<ImplType>`.
+/// `Impl` is a type alias for `ImplType` which provides a way to call static
+/// method of `ImplType`.
+#define TORCH_MODULE_IMPL(Name, ImplType)                              \
+  class Name : public torch::nn::ModuleHolder<ImplType> { /* NOLINT */ \
+   public:                                                             \
+    using torch::nn::ModuleHolder<ImplType>::ModuleHolder;             \
+    using Impl = ImplType;                                             \
   }
 
-/// Like `TORCH_MODULE_IMPL`, but defaults the `Impl` name to `<Name>Impl`.
+/// Like `TORCH_MODULE_IMPL`, but defaults the `ImplType` name to `<Name>Impl`.
 #define TORCH_MODULE(Name) TORCH_MODULE_IMPL(Name, Name##Impl)

@@ -76,6 +76,18 @@ void Error::add_context(std::string new_msg) {
   refresh_what();
 }
 
+namespace detail {
+
+void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg) {
+  throw ::c10::Error({func, file, line}, msg);
+}
+
+void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg) {
+  throw ::c10::Error({func, file, line}, msg);
+}
+
+} // namespace detail
+
 namespace Warning {
 
 namespace {
@@ -117,6 +129,16 @@ void set_warning_handler(WarningHandler* handler) noexcept(true) {
 
 WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
+}
+
+bool warn_always = false;
+
+void set_warnAlways(bool setting) noexcept(true) {
+    warn_always = setting;
+}
+
+bool get_warnAlways() noexcept(true) {
+    return warn_always;
 }
 
 } // namespace Warning

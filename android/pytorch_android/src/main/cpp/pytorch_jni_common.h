@@ -1,3 +1,5 @@
+#pragma once
+
 #include <fbjni/fbjni.h>
 #include <torch/csrc/api/include/torch/types.h>
 
@@ -17,6 +19,11 @@
 #endif
 
 namespace pytorch_jni {
+
+constexpr static int kDeviceCPU = 1;
+constexpr static int kDeviceVulkan = 2;
+
+c10::DeviceType deviceJniCodeToDeviceType(jint deviceJniCode);
 
 class Trace {
  public:

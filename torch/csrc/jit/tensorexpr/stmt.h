@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <list>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -10,7 +11,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Buffer;
+class Placeholder;
 
 // The common base between all statement node.
 class TORCH_API Stmt : public KernelScopedObject {
@@ -61,8 +62,6 @@ Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
 // Concrete Stmt classes
 class TORCH_API Block : public StmtNode<Block> {
  public:
-  using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
-
   static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
     for (size_t i = 0; i < stmts.size(); i++) {
@@ -75,20 +74,6 @@ class TORCH_API Block : public StmtNode<Block> {
       return nullptr;
     }
     return new Block(valid_stmts);
-  }
-
-  static Block* make(const VarMapping& vars, const std::vector<Stmt*>& stmts) {
-    std::vector<Stmt*> valid_stmts;
-    for (size_t i = 0; i < stmts.size(); i++) {
-      if (!stmts[i]) {
-        continue;
-      }
-      valid_stmts.push_back(stmts[i]);
-    }
-    if (valid_stmts.empty()) {
-      return nullptr;
-    }
-    return new Block(vars, valid_stmts);
   }
 
   int nstmts() const {
@@ -115,7 +100,22 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_after(Stmt* s, Stmt* after) {
+  void insert_stmt_before(Stmt* s, const Stmt* before) {
+    if (s->get_parent()) {
+      throw malformed_input("Block append Stmt with existing parent", s);
+    }
+
+    auto pos = std::find(stmts_.begin(), stmts_.end(), before);
+    if (pos == stmts_.end()) {
+      throw malformed_input(
+          "Inserting after statement that is not in block", s);
+    }
+
+    stmts_.insert(pos, s);
+    set_parent(s, this);
+  }
+
+  void insert_stmt_after(Stmt* s, const Stmt* after) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
     }
@@ -135,7 +135,7 @@ class TORCH_API Block : public StmtNode<Block> {
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt wiith existing parent", new_stmt);
+          "Block replace Stmt with existing parent", new_stmt);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -160,40 +160,15 @@ class TORCH_API Block : public StmtNode<Block> {
     return true;
   }
 
-  // adds a new binding to the map, replace
-  bool add_var_binding(const Var* v, const Expr* e) {
-    auto it =
-        std::find_if(varBindings_.begin(), varBindings_.end(), [v](auto p) {
-          return p.first == v;
-        });
-    if (it != varBindings_.end()) {
-      throw malformed_input(
-          "Var binding in Block would shadow existing binding");
-      return false;
-    }
-
-    varBindings_.emplace_back(v, e);
-    return true;
-  }
-
-  bool remove_var_binding(const Var* v) {
-    auto it =
-        std::find_if(varBindings_.begin(), varBindings_.end(), [v](auto p) {
-          return p.first == v;
-        });
-    if (it != varBindings_.end()) {
-      varBindings_.erase(it);
-      return true;
-    }
-    return false;
-  }
-
   std::list<Stmt*> stmts() const {
     return stmts_;
   }
 
-  VarMapping varBindings() const {
-    return varBindings_;
+  void clear() {
+    for (auto* s : stmts_) {
+      set_parent(s, nullptr);
+    }
+    stmts_.clear();
   }
 
   explicit Block(const std::vector<Stmt*>& stmts) {
@@ -251,24 +226,41 @@ class TORCH_API Block : public StmtNode<Block> {
     stmts_.splice(it, other->stmts_);
   }
 
-  explicit Block(const VarMapping& vars, const std::vector<Stmt*>& stmts) {
-    for (auto& pair : vars) {
-      add_var_binding(pair.first, pair.second);
-    }
+  static const Block* getSharedParent(const Stmt* p1, const Stmt* p2) {
+    std::unordered_set<const Block*> enclosing;
 
-    for (Stmt* s : stmts) {
-      if (s->get_parent()) {
-        throw malformed_input(
-            "Block creation has Stmt with existing parent", s);
+    const Stmt* p1_p = p1;
+    while (p1_p) {
+      if (const Block* b = dynamic_cast<const Block*>(p1_p)) {
+        if (b) {
+          enclosing.insert(b);
+        }
       }
-
-      stmts_.push_back(s);
-      set_parent(s, this);
+      p1_p = p1_p->get_parent();
     }
+
+    const Stmt* p2_p = p2;
+    while (p2_p) {
+      if (const Block* b = dynamic_cast<const Block*>(p2_p)) {
+        if (enclosing.count(b) != 0) {
+          return b;
+        }
+      }
+      p2_p = p2_p->get_parent();
+    }
+
+    return nullptr;
+  }
+
+  // returns the immediate child containing statement s.
+  const Stmt* getEnclosedRoot(const Stmt* s) const {
+    while (s && s->get_parent() != this) {
+      s = s->get_parent();
+    }
+    return s;
   }
 
  private:
-  VarMapping varBindings_;
   std::list<Stmt*> stmts_;
 };
 
@@ -295,12 +287,6 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   static Store* make(
-      const Buffer& buffer,
-      const std::vector<ExprHandle>& indices,
-      const ExprHandle& value,
-      const ExprHandle& mask);
-
-  static Store* make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
@@ -310,13 +296,6 @@ class TORCH_API Store : public StmtNode<Store> {
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value);
-
-  // TODO: merge this with Load.
-  Store(
-      const Buffer& buffer,
-      const std::vector<const Expr*>& indices,
-      const Expr* value,
-      const Expr* mask);
 
   Store(
       const Buf* buf,
@@ -389,6 +368,33 @@ class TORCH_API Free : public StmtNode<Free> {
   const Var* buffer_var_;
 };
 
+class TORCH_API Let : public StmtNode<Let> {
+ public:
+  static Let* make(const VarHandle& var, const ExprHandle& val) {
+    return new Let(var.node(), val.node());
+  }
+
+  Let(const Var* var, const Expr* val)
+      : dtype_(var->dtype()), var_(var), val_(val) {}
+
+  Dtype dtype() const {
+    return dtype_;
+  }
+
+  const Var* var() const {
+    return var_;
+  }
+
+  const Expr* value() const {
+    return val_;
+  }
+
+ private:
+  Dtype dtype_;
+  const Var* var_;
+  const Expr* val_;
+};
+
 class TORCH_API Cond : public StmtNode<Cond> {
  public:
   static Cond* make(
@@ -430,6 +436,14 @@ class TORCH_API Cond : public StmtNode<Cond> {
     }
   }
 
+  Cond* cloneWithNewBodies(Stmt* true_stmt, Stmt* false_stmt) {
+    return new Cond(condition_, true_stmt, false_stmt);
+  }
+
+  Cond* cloneWithNewBody(Stmt* true_stmt) {
+    return new Cond(condition_, true_stmt, nullptr);
+  }
+
  private:
   const Expr* condition_;
   Block* true_stmt_ = nullptr;
@@ -438,9 +452,17 @@ class TORCH_API Cond : public StmtNode<Cond> {
 
 class TORCH_API LoopOptions {
  public:
+  enum {
+    IDX_UNSET = -1,
+    IDX_X = 0,
+    IDX_Y = 1,
+    IDX_Z = 2,
+    IDX_W = 3,
+    IDX_MAX = IDX_W,
+  };
   // GPU Block Index
   bool is_gpu_block_index() const {
-    return gpu_block_index_ != -1;
+    return gpu_block_index_ != IDX_UNSET;
   }
 
   int gpu_block_index() const {
@@ -459,7 +481,7 @@ class TORCH_API LoopOptions {
         "blockIdx.w",
     };
 
-    if (gpu_block_index_ < 0 || gpu_block_index_ >= 4) {
+    if (gpu_block_index_ < IDX_X || gpu_block_index_ > IDX_MAX) {
       throw malformed_input("invalid GPU block index");
     }
 
@@ -467,6 +489,10 @@ class TORCH_API LoopOptions {
   }
 
   void set_gpu_block_index(int index) {
+    if (index == IDX_UNSET) {
+      gpu_block_index_ = IDX_UNSET;
+    }
+
     if (is_gpu_thread_index()) {
       throw std::runtime_error("Cannot set both gpu block and thread index");
     }
@@ -478,7 +504,7 @@ class TORCH_API LoopOptions {
 
   // GPU Thread Index
   bool is_gpu_thread_index() const {
-    return gpu_thread_index() != -1;
+    return gpu_thread_index() != IDX_UNSET;
   }
 
   int gpu_thread_index() const {
@@ -493,7 +519,7 @@ class TORCH_API LoopOptions {
     static const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
-    if (gpu_thread_index_ < 0 || gpu_thread_index_ >= 4) {
+    if (gpu_thread_index_ < IDX_X || gpu_thread_index_ > IDX_MAX) {
       throw malformed_input("invalid GPU thread index");
     }
 
@@ -501,6 +527,10 @@ class TORCH_API LoopOptions {
   }
 
   void set_gpu_thread_index(int index) {
+    if (index == IDX_UNSET) {
+      gpu_thread_index_ = IDX_UNSET;
+    }
+
     if (is_gpu_block_index()) {
       throw std::runtime_error("Cannot set both gpu thread and block index");
     }
@@ -511,22 +541,31 @@ class TORCH_API LoopOptions {
   }
 
   std::string ToString() const {
-    std::ostringstream oss;
     if (is_gpu_block_index()) {
-      oss << gpu_block_index_str();
+      return gpu_block_index_str();
     } else if (is_gpu_thread_index()) {
-      oss << gpu_thread_index_str();
+      return gpu_thread_index_str();
     }
-    return oss.str();
+    return "";
   }
 
   bool isDefault() const {
-    return gpu_block_index_ == -1 && gpu_thread_index_ == -1;
+    return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET;
+  }
+
+  void set_buffer_mapping(
+      const std::unordered_map<std::string, const Buf*>& map) {
+    map_input_to_tensor_bufs_ = map;
+  }
+
+  std::unordered_map<std::string, const Buf*> get_buffer_mapping() const {
+    return map_input_to_tensor_bufs_;
   }
 
  private:
-  int gpu_block_index_ = -1;
-  int gpu_thread_index_ = -1;
+  int gpu_block_index_{IDX_UNSET};
+  int gpu_thread_index_{IDX_UNSET};
+  std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
 class TORCH_API For : public StmtNode<For> {
@@ -620,6 +659,10 @@ class TORCH_API For : public StmtNode<For> {
     loop_options_.set_gpu_thread_index(thread_index);
   }
 
+  void set_buffer_map(const std::unordered_map<std::string, const Buf*>& map) {
+    loop_options_.set_buffer_mapping(map);
+  }
+
   For* cloneWithNewBody(Stmt* body) const {
     return new For(var_, start_, stop_, body, loop_options_);
   }
@@ -636,7 +679,7 @@ class TORCH_API For : public StmtNode<For> {
 // This node could only shows up as an internal with GPU backends.
 // TODO: move to this an internal IR.
 // TODO: make IR nodes extensible.
-class AtomicAdd : public StmtNode<AtomicAdd> {
+class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
   AtomicAdd(
       const Buf* buf,
@@ -669,6 +712,68 @@ class AtomicAdd : public StmtNode<AtomicAdd> {
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* value_;
+};
+
+class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
+ public:
+  SyncThreads() {}
+};
+
+/*
+ * ExternalCall statement represents a call to an external function that would
+ * compute the contents of the output buffer. An ExternalCall statement consists
+ * of:
+ *   1) output buffer - the buffer that'll be initialized by the call
+ *   2) external function name - a key from the NNC function registry to lookup
+ *      the actual function to call
+ *   3) buffer arguments - the input buffers used by the function
+ *   4) non-buffer arguments - scalar arguments to pass to the function
+ *
+ * An example:
+ *   A = nnc_conv2d(buf_args={Input, Weight, Bias}, args={1})
+ * Here 'A' is the output buffer, "nnc_conv2d" is the function name, the buffer
+ * arguments are 'Input', 'Weight', and 'Bias', and there is a single non-buffer
+ * argument - 1.
+ *
+ * The semantics of the scalar arguments is defined solely by the implementation
+ * of the external function.
+ */
+class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
+ public:
+  static ExternalCall* make(
+      BufHandle buf,
+      const std::string& func_name,
+      const std::vector<BufHandle>& buf_args,
+      const std::vector<ExprHandle>& args);
+
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  std::string func_name() const {
+    return func_name_;
+  }
+
+  std::vector<const Buf*> buf_args() const {
+    return buf_args_;
+  }
+
+  std::vector<const Expr*> args() const {
+    return args_;
+  }
+
+  ExternalCall(
+      const Buf* buf,
+      const std::string& func_name,
+      const std::vector<const Buf*>& buf_args,
+      const std::vector<const Expr*>& args)
+      : buf_(buf), func_name_(func_name), buf_args_(buf_args), args_(args) {}
+
+ private:
+  const Buf* buf_;
+  std::string func_name_;
+  std::vector<const Buf*> buf_args_;
+  std::vector<const Expr*> args_;
 };
 
 } // namespace tensorexpr

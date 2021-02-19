@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/ir/constants.h>
+
 #include <ATen/core/functional.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -8,19 +9,14 @@
 namespace torch {
 namespace jit {
 
-namespace {
-c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
-  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
-}
-} // namespace
-
 bool insertableTensor(const at::Tensor& ten) {
   return !ten.requires_grad();
 }
 
 bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
-      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice()) {
+      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice() ||
+      ivalue.isEnum()) {
     return true;
   }
   if (ivalue.isTensor()) {
@@ -37,7 +33,6 @@ bool insertableIValue(const IValue& ivalue) {
       return insertableIValue(tup_elem);
     });
   }
-
   if (ivalue.isGenericDict()) {
     const auto& dict = ivalue.toGenericDict();
     return std::all_of(dict.begin(), dict.end(), [](const auto& entry) {
@@ -53,7 +48,7 @@ Value* insertConstant(
     const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  auto value = tryInsertConstant(g, val, loc, scope);
+  auto value = tryInsertConstant(g, val, std::move(loc), std::move(scope));
   if (value) {
     return *value;
   }
@@ -70,6 +65,11 @@ c10::optional<Value*> tryInsertConstant(
   Node* n = g.create(prim::Constant);
   if (val.isTensor()) {
     at::Tensor ref = val.toTensor();
+    if (!ref.has_storage()) {
+      // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
+      n->destroy();
+      return c10::nullopt;
+    }
     if (!ref.defined()) {
       n->destroy();
       return g.insertNode(g.createNone())->output();
@@ -105,6 +105,10 @@ c10::optional<Value*> tryInsertConstant(
     ss << val.toDevice();
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
+  } else if (val.isStream()) {
+    auto stream = val.toStream();
+    n->i_(attr::value, stream.pack());
+    n->output()->setType(StreamObjType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
   } else if (val.isTuple()) {
@@ -115,7 +119,9 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return c10::nullopt;
     };
-  } else if (val.isGenericDict() && insertableIValue(val)) {
+  } else if (
+      (val.isGenericDict() && insertableIValue(val)) || (val.isEnum()) ||
+      (val.isObject() && !val.toObjectRef().type()->is_module())) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
   } else {
@@ -171,8 +177,17 @@ c10::optional<IValue> toIValue(const Value* v) {
   } else if (type == DeviceObjType::get()) {
     auto d = c10::Device(node->s(attr::value));
     return d;
+  } else if (type == StreamObjType::get()) {
+    auto s = c10::Stream::unpack(node->i(attr::value));
+    return s;
   } else if (node->mustBeNone()) {
     return IValue();
+  } else if (type->cast<EnumType>()) {
+    const auto& enum_val = node->ival(attr::value);
+    return enum_val;
+  } else if (type->cast<ClassType>() && !type->is_module()) {
+    const auto& class_val = node->ival(attr::value);
+    return class_val;
   } else {
     std::stringstream ss;
     ss << "constant literal not supported for: " << type->str();

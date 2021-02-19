@@ -13,6 +13,7 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
   PRODUCER_INFO = 0,
   MOBILE_RUNTIME_INFO,
   PROFILER_STATE,
+  INFERENCE_CONTEXT, // for inference usage
 
   TEST_INFO, // used only in tests
   TEST_INFO_2, // used only in tests
@@ -32,7 +33,7 @@ class C10_API DebugInfoBase {
 // profiling, etc)
 class C10_API ThreadLocalDebugInfo {
  public:
-  static std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
+  static DebugInfoBase* get(DebugInfoKind kind);
 
   // Get current ThreadLocalDebugInfo
   static std::shared_ptr<ThreadLocalDebugInfo> current();
@@ -46,6 +47,9 @@ class C10_API ThreadLocalDebugInfo {
   // Pop debug info, throws in case the last pushed
   // debug info is not of a given kind
   static std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
+  // Peek debug info, throws in case the last pushed debug info is not of the
+  // given kind
+  static std::shared_ptr<DebugInfoBase> _peek(DebugInfoKind kind);
 
  private:
   std::shared_ptr<DebugInfoBase> info_;

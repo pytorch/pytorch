@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
@@ -39,15 +39,20 @@ static bool indicesValid(const std::vector<const Expr*>& indices) {
   return true;
 }
 
-Load::Load(
-    const Buffer& buffer,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : Load(
-          ChooseDtype(buffer.dtype(), dtypeOfIndices(indices)),
-          buffer.data(),
-          indices,
-          mask) {}
+void Load::verify_dtypes() const {
+  if (indices_.size() > 0 && buf_->base_handle()->dtype() != kHandle) {
+    throw malformed_input(
+        "Load base handle dtype must be Handle", buf_->base_handle());
+  }
+
+  if (!indicesValid(indices_)) {
+    throw malformed_input("invalid indices in Load");
+  }
+  Dtype index_dtype = dtypeOfIndices(indices_);
+  if (index_dtype.lanes() != mask_->dtype().lanes()) {
+    throw malformed_input("lane mismatch in Load mask");
+  }
+}
 
 Load::Load(
     Dtype dtype,
@@ -55,27 +60,19 @@ Load::Load(
     const std::vector<const Expr*>& indices,
     const Expr* mask)
     : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
-  if (buf->base_handle()->dtype() != kHandle) {
-    throw malformed_input(
-        "Load base handle dtype must be Handle", buf->base_handle());
-  }
-
-  if (!indicesValid(indices)) {
-    throw malformed_input("invalid indices in Load");
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (index_dtype.lanes() != mask->dtype().lanes()) {
-    throw malformed_input("lane mismatch in Load mask");
-  }
+  verify_dtypes();
 }
 
-ExprHandle Load::make(
-    const Buffer& buffer,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return ExprHandle(
-      new Load(buffer, ExprHandleVectorToExprVector(indices), mask.node()));
-}
+Load::Load(
+    const Buf* buf,
+    const std::vector<const Expr*>& indices,
+    const Expr* mask)
+    : Load(
+          ChooseDtype(buf->dtype(), dtypeOfIndices(indices)),
+          buf,
+          indices,
+          mask) {}
+
 ExprHandle Load::make(
     Dtype dtype,
     const BufHandle& buf,
@@ -85,15 +82,11 @@ ExprHandle Load::make(
       dtype, buf.node(), ExprHandleVectorToExprVector(indices), mask.node()));
 }
 
-Store::Store(
-    const Buffer& buffer,
-    const std::vector<const Expr*>& indices,
-    const Expr* value,
-    const Expr* mask)
-    : Store(buffer.data(), indices, value, mask) {
-  if (buffer.dtype().scalar_type() != value->dtype().scalar_type()) {
-    throw malformed_input("invalid dtype in Store");
-  }
+ExprHandle Load::make(
+    const BufHandle& buf,
+    const std::vector<ExprHandle>& indices,
+    const ExprHandle& mask) {
+  return Load::make(buf.dtype(), buf, indices, mask);
 }
 
 Store::Store(
@@ -102,7 +95,7 @@ Store::Store(
     const Expr* value,
     const Expr* mask)
     : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
-  if (buf->base_handle()->dtype() != kHandle) {
+  if (indices_.size() > 0 && buf->base_handle()->dtype() != kHandle) {
     throw malformed_input("Store base handle must be Handle");
   }
   /*
@@ -126,15 +119,6 @@ Store::Store(
     throw malformed_input();
   }
   */
-}
-
-Store* Store::make(
-    const Buffer& buffer,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& value,
-    const ExprHandle& mask) {
-  return new Store(
-      buffer, ExprHandleVectorToExprVector(indices), value.node(), mask.node());
 }
 
 Store* Store::make(
@@ -191,6 +175,9 @@ const Expr* flatten_index(
 }
 
 Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1) {
+  if (op_type == kIsNan) {
+    return dt1.cloneWithScalarType(ScalarType::Int);
+  }
   // TODO: check the op_type and make a real decision
   return dt1;
 }
@@ -203,11 +190,15 @@ Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2) {
 Dtype Intrinsics::IntrinsicsDtype(
     IntrinsicsOp op_type,
     const std::vector<const Expr*>& params) {
-  // TODO: check the op_type an dmake a real decision
+  // TODO: check the op_type and make a real decision
+  // Doesnt this fail with kRand?
   if (params.size() == 0) {
     throw malformed_input("invalid params in Intrinsics");
+  } else if (params.size() == 1) {
+    return IntrinsicsDtype(op_type, params[0]->dtype());
+  } else if (params.size() == 2) {
+    return IntrinsicsDtype(op_type, params[0]->dtype(), params[1]->dtype());
   }
-
   return params[0]->dtype();
 }
 
@@ -222,9 +213,10 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kSinh:
     case kCosh:
     case kTanh:
+    case kSigmoid:
     case kExp:
     case kExpm1:
-    case kFabs:
+    case kAbs:
     case kLog:
     case kLog2:
     case kLog10:
@@ -239,6 +231,7 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kTrunc:
     case kFrac:
     case kLgamma:
+    case kIsNan:
       return 1;
     case kRand:
       return 0;
@@ -250,6 +243,20 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     default:
       throw std::runtime_error("invalid op_type: " + c10::to_string(op_type));
   }
+}
+
+ExternalCall* ExternalCall::make(
+    BufHandle buf,
+    const std::string& func_name,
+    const std::vector<BufHandle>& buf_args,
+    const std::vector<ExprHandle>& args) {
+  std::vector<const Buf*> buf_arg_nodes;
+  buf_arg_nodes.reserve(buf_args.size());
+  for (const BufHandle& buf_arg : buf_args) {
+    buf_arg_nodes.push_back(buf_arg.node());
+  }
+  return new ExternalCall(
+      buf.node(), func_name, buf_arg_nodes, ExprHandleVectorToExprVector(args));
 }
 
 std::vector<const Expr*> ExprHandleVectorToExprVector(
