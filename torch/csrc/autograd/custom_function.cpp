@@ -102,7 +102,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   int num_diff_outputs = 0;
 
 
-  size_t num_tensors = 0;
+  uint32_t num_tensors = 0;
   for (auto i = 0; i < num_outputs; ++i) {
     Variable var = raw_outputs[i];
     if (!var.defined()) {

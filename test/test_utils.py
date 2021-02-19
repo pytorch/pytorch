@@ -291,9 +291,11 @@ class TestCheckpoint(TestCase):
         self.assertEqual(t1, res[6])
 
         # Validate running backward.
-        res[1].sum().backward()
-        res[4].sum().backward()
+        res[1].sum().backward(retain_graph=True)
+        res[4].sum().backward(retain_graph=True)
         res[6].sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "Trying to backward through the graph a second time"):
+            res[6].sum().backward()
         t1_grad = t1.grad
         t2_grad = t2.grad
 
