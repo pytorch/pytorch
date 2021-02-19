@@ -4352,6 +4352,8 @@ Computes the logarithm of the gamma function on :attr:`input`.
 """ + """
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
