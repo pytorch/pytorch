@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.modules.utils import _single, _pair
 from torch.nn.parameter import Parameter
+from typing import TypeVar
 
 _BN_CLASS_MAP = {
     1: nn.BatchNorm1d,
@@ -15,9 +16,13 @@ _BN_CLASS_MAP = {
 }
 
 
+MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
+
+
 class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
     _version = 2
+    _FLOAT_MODULE = MOD
 
     def __init__(self,
                  # ConvNd args
@@ -86,6 +91,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         return self
 
     def _forward(self, input):
+        assert isinstance(self.bn.running_var, torch.Tensor)
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
         weight_shape = [1] * len(self.weight.shape)
@@ -204,7 +210,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         qat_convbn.bn.bias = bn.bias
         qat_convbn.bn.running_mean = bn.running_mean
         qat_convbn.bn.running_var = bn.running_var
-        qat_convbn.bn.num_batches_tracked = bn.num_batches_tracked
+        # mypy error: Cannot determine type of 'num_batches_tracked'
+        qat_convbn.bn.num_batches_tracked = bn.num_batches_tracked  # type: ignore[has-type]
         return qat_convbn
 
 class ConvBn1d(_ConvBnNd, nn.Conv1d):
@@ -264,7 +271,8 @@ class ConvBnReLU1d(ConvBn1d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvBnReLU1d
+    # base class defines _FLOAT_MODULE as "ConvBn1d"
+    _FLOAT_MODULE = nni.ConvBnReLU1d  # type: ignore[assignment]
 
     def __init__(self,
                  # Conv1d args
@@ -350,7 +358,8 @@ class ConvBnReLU2d(ConvBn2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvBnReLU2d
+    # base class defines _FLOAT_MODULE as "ConvBn2d"
+    _FLOAT_MODULE = nni.ConvBnReLU2d  # type: ignore[assignment]
 
     def __init__(self,
                  # Conv2d args

@@ -42,6 +42,8 @@ IValue deepCopy(const IValue& self) {
     return IValue(self.toIntList().copy());
   } else if (self.isDoubleList()) {
     return IValue(self.toDoubleList().copy());
+  } else if (self.isComplexDoubleList()) {
+    return IValue(self.toComplexDoubleList().copy());
   } else if (self.isBoolList()) {
     return IValue(self.toBoolList().copy());
   } else if (self.isString()) {

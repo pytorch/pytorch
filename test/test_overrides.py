@@ -3,6 +3,7 @@ import numpy as np
 import inspect
 import functools
 import pprint
+import pickle
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
@@ -776,7 +777,7 @@ class TestEinsumOverride(TestCase):
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
     def test_gradcheck(self):
-        from torch.autograd import gradcheck, gradgradcheck
+        from torch.testing._internal.common_utils import gradcheck, gradgradcheck
 
         a = wrap(torch.tensor(5.0, dtype=torch.double))
         b = wrap(torch.tensor(6.0, dtype=torch.double))
@@ -784,8 +785,8 @@ class TestGradCheckOverride(TestCase):
         a.requires_grad = True
         b.requires_grad = True
 
-        gradcheck(torch.add, (a, b), raise_exception=False)
-        gradgradcheck(torch.add, (a, b), raise_exception=False)
+        gradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
+        gradgradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
 
         total_used_attrs = a.used_attrs.union(b.used_attrs)
         total_used_calls = a.used_calls.union(b.used_calls)
@@ -839,6 +840,14 @@ class TestGradNewOnesOverride(TestCase):
         n = t.new_ones((1, 2))
         self.assertEqual(type(n), SubTensor2)
 
+class TestPickle(TestCase):
+    "Regression test for gh-47051"
+    def test_pickle(self):
+        t = torch.tensor([1]).as_subclass(SubTensor2)
+        t.abcd = "e"
+        t2 = pickle.loads(pickle.dumps(t))
+        self.assertIs(type(t2), SubTensor2)
+        self.assertEqual(t2.abcd, "e")
 
 class TestBroadcastAllOverride(TestCase):
     """ test for gh-37141 """

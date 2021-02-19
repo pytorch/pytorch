@@ -7,6 +7,7 @@ from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
 from functools import partial
 from hypothesis import given, settings
+from typing import Optional, Tuple
 
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -324,9 +325,14 @@ class TestLayerNormOp(serial.SerializedTestCase):
     @settings(deadline=1000)
     def test_layer_norm_op_jit(self, X, eps, elementwise_affine, gc, dc):
         @torch.jit.script
-        def jit_layer_norm(X, gamma=None, beta=None, axis=1, eps=1e-5,
-                           elementwise_affine=False):
-            # type: (Tensor, Optional[Tensor], Optional[Tensor], int, float, bool) -> Tuple[Tensor, Tensor, Tensor]
+        def jit_layer_norm(
+                X: torch.Tensor,
+                gamma: Optional[torch.Tensor] = None,
+                beta: Optional[torch.Tensor] = None,
+                axis: int = 1,
+                eps: float = 1e-5,
+                elementwise_affine: bool = False,
+        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
             return torch.ops._caffe2.LayerNorm(
                 X, gamma, beta, axis, eps, elementwise_affine)
 

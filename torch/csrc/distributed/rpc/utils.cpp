@@ -174,11 +174,19 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       RpcCommandBase& rpc = *rpcPtr;
       auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(rpc);
 
+      // Need to reverse the device map for the backward pass of distributed
+      // autograd.
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+      for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
+        reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
+      }
+
       // Attach 'recv' autograd function.
       addRecvRpcBackward(
           rpcWithAutograd.autogradMetadata(),
           rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
+          rpcWithAutograd.fromWorkerId(),
+          reverseDeviceMap);
 
       wrappedMsgType = rpcWithAutograd.wrappedMessageType();
 

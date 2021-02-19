@@ -1,6 +1,9 @@
 #include <pybind11/operators.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#ifdef USE_CUDA
+#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
+#endif
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
@@ -14,7 +17,7 @@ void initTensorExprBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // Tensor Expr Classes
-  auto te = m.def_submodule("te");
+  auto te = m.def_submodule("_te");
   py::class_<tensorexpr::KernelScope>(te, "KernelScope").def(py::init<>());
 
   auto dtype_class = py::class_<tensorexpr::Dtype>(te, "Dtype");
@@ -411,8 +414,29 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "flatten",
+          [](const tensorexpr::LoopNest& self,
+             const std::vector<tensorexpr::For*>& loops) {
+            tensorexpr::For* flattened;
+            self.flatten(loops, &flattened);
+            return flattened;
+          },
+          py::return_value_policy::reference)
+      .def(
           "reorder",
           &tensorexpr::LoopNest::reorderAxis,
+          py::return_value_policy::reference)
+      .def(
+          "simplify",
+          &tensorexpr::LoopNest::simplify,
+          py::return_value_policy::reference)
+      .def(
+          "set_GPU_block_index",
+          &tensorexpr::LoopNest::setGPUBlockIndex,
+          py::return_value_policy::reference)
+      .def(
+          "set_GPU_thread_index",
+          &tensorexpr::LoopNest::setGPUThreadIndex,
           py::return_value_policy::reference)
       .def(
           "__str__",
@@ -466,6 +490,12 @@ void initTensorExprBindings(PyObject* module) {
           cg = new tensorexpr::LLVMCodeGen(stmt, args);
 #else
           throw std::runtime_error("PyTorch not compiled with LLVM support!");
+#endif
+        } else if (name == "cuda") {
+#ifdef USE_CUDA
+          cg = new tensorexpr::CudaCodeGen(stmt, args);
+#else
+          throw std::runtime_error("PyTorch not compiled with CUDA support!");
 #endif
         } else {
           cg = new tensorexpr::SimpleIREvaluator(stmt, args);

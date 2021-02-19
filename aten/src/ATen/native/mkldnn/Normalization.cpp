@@ -40,6 +40,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 namespace at {
 namespace native {
@@ -53,6 +54,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     bool train,
     double momentum,
     double eps) {
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
   TORCH_CHECK(weight.defined() && bias.defined(),
              "mkldnn_batch_norm: currently mkldnn only support affine model");
 
@@ -64,8 +69,9 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   ideep::tensor y;
 
   if (train) {
+    // TODO: enable 3d batchnorm.
     TORCH_CHECK(input.dim() == 4,
-        "mkldnn_batch_norm: currently mkldnn training only support 2d and 3d batchnorm");
+        "mkldnn_batch_norm: currently mkldnn training only support 2d batchnorm");
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
     ideep::batch_normalization_forward_training::compute(
@@ -97,7 +103,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
       ideep::batch_normalization_forward_inference::compute(
           x, m, v, w, b, y, eps);
     } else {
-      //TODO: keep running estimates.
+      // TODO: keep running estimates.
       TORCH_CHECK(false, "mkldnn_batch_norm: mkldnn inference is not keep running estimates.");
     }
     return std::make_tuple(
