@@ -486,7 +486,8 @@ of a function from ``torch.Tensor`` subclasses, they must use
 
 Subclassing ``torch.Tensor``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-As of version 1.7.0, methods and functions applied on ``torch.Tensor`` subclasses
+As of version 1.7.0, methods on ``torch.Tensor`` and functions in public
+``torch.*`` namespaces applied on ``torch.Tensor`` subclasses
 will return subclass instances instead of ``torch.Tensor`` instances::
 
   >>> class SubTensor(torch.Tensor):

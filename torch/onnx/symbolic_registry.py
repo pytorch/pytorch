@@ -108,6 +108,6 @@ def get_registered_op(opname, domain, version):
         if supported_version is not None:
             msg += "Support for this operator was added in version " + str(supported_version) + ", try exporting with this version."
         else:
-            msg += "Please open a bug to request ONNX export support for the missing operator."
+            msg += "Please feel free to request support or submit a pull request on PyTorch GitHub."
         raise RuntimeError(msg)
     return _registry[(domain, version)][opname]

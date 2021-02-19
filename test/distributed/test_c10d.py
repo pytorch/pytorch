@@ -24,6 +24,7 @@ import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._six import string_classes
+
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -48,6 +49,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     slowTest,
 )
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -338,6 +340,19 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
+    def test_compare_set(self):
+        store = self._create_store()
+        missing_key_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        self.assertEqual(b"wrong_old_value", missing_key_result)
+
+        store.set("key0", "value0")
+        self.assertEqual(b"value0", store.get("key0"))
+        old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        self.assertEqual(b"wrong_old_value", old_value_result)
+        self.assertEqual(b"value0", store.get("key0"))
+        new_value_result = store.compare_set("key0", "value0", "new_value0")
+        self.assertEqual(b"new_value0", new_value_result)
+        self.assertEqual(b"new_value0", store.get("key0"))
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -3824,6 +3839,22 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
+    def test_invalid_powerSGD_state(self):
+        for start_powerSGD_iter, use_error_feedback, warm_start in product([0, 1], [True, False], [True, False]):
+            if not use_error_feedback and not warm_start:
+                continue
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                    "because PowerSGD can only be applied after the first two iterations in DDP."):
+                state = powerSGD.PowerSGDState(
+                    process_group=None,
+                    matrix_approximation_rank=1,
+                    start_powerSGD_iter=start_powerSGD_iter,
+                    use_error_feedback=use_error_feedback,
+                    warm_start=warm_start,
+                )
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_default_ddp_comm_hooks_nccl_is_view(self):
@@ -4618,7 +4649,7 @@ class CommTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     assert (
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"
