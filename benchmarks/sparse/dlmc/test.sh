@@ -7,10 +7,21 @@ DATASET_ROOT_DIR=$HOME/datasets/
 
 echo "!! SPARSE SPMS TIME BENCHMARK!! " 
 
-python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@sparse
-python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@sparse --backward_test
+# cpu
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@sparse
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@sparse --backward_test
 
-python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@dense
-python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@dense --backward_test
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@dense
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@dense --backward_test
 
-python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset random_pruning --operation sparse@vector 
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@vector 
+
+
+# cuda
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@sparse --with_cuda
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@sparse --with_cuda--backward_test
+
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@dense --with_cuda
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@dense --with_cuda --backward_test
+
+python -m dlmc.matmul_bench  --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@vector --with_cuda

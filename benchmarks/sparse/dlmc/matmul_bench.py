@@ -33,26 +33,26 @@ OPS_MAP = {
 def parse_args():
     parser = argparse.ArgumentParser(description='matmul benchmark')
     parser.add_argument('--path', type=str, help='DLMC dataset path')
-    parser.add_argument('--dataset', type=str, default='random_pruning')
-    parser.add_argument('--hidden_size', default=512, type=int)
+    parser.add_argument('--dataset', type=str, default='magnitude_pruning')
+    parser.add_argument('--hidden_size', default=2048, type=int)
     parser.add_argument('--backward_test', action="store_true")
     parser.add_argument('--operation', type=str, help="|".join(OPS_MAP.keys()), default=next(iter(OPS_MAP)))
     parser.add_argument('--with_cuda', action='store_true')
-    parser.add_argument('--timer_min_run_time', default=0.1, type=float)
+    parser.add_argument('--timer_min_run_time', default=1.0, type=float)
     return parser
 
 
 def get_tasks(op, backward_test, device):
     def filter_ops(operation):
         if backward_test:
-            test_name = "matmul-backward"
+            test_name = device + ":matmul-backward"
             return [
                 (test_name, device, "torch:" + operation.replace("sparse", "dense"),
                  "matmul_backward(dx, dy, grad_output)"),
                 (test_name, device, "torch:" + operation, "sparse_matmul_backward(x, y, sparse_grad_output)")
             ]
         else:
-            test_name = "matmul-forward"
+            test_name = device + ":matmul-forward"
             return list(filter(None, [
                 (test_name, device, "torch:" + operation.replace("sparse", "dense"),
                  "{}(dx, dy)".format(OPS_MAP[operation])),
@@ -71,7 +71,6 @@ def get_tasks(op, backward_test, device):
 if __name__ == '__main__':
     parser = parse_args()
     args = parser.parse_args()
-    print(args)
 
     if args.with_cuda and not torch.cuda.is_available():
         raise RuntimeError("No CUDA available")
