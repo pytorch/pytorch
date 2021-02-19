@@ -1798,6 +1798,20 @@ jobs:
     - store_test_results:
         path: bazel-testlogs
 
+  pytorch_windows_vs2019_py36_cuda10_1_test_azure_multi_gpu:
+    <<: *binary_windows_params
+    machine:
+      image: ubuntu-1604:202007-01
+    steps:
+      - checkout
+      - run:
+          name: Test
+          no_output_timeout: "90m"
+          command: |
+            set -e
+            pip install requests
+            python ./.circleci/scripts/trigger_azure_pipeline.py
+
   pytorch_doc_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-test
@@ -7596,6 +7610,19 @@ workflows:
           requires:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test2
+          use_cuda: "1"
+          vc_product: Community
+          vc_version: ""
+          vc_year: "2019"
+      - pytorch_windows_test:
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
+          cuda_version: "10.1"
+          executor: windows-with-nvidia-gpu
+          name: pytorch_windows_vs2019_py36_cuda10.1_test_azure_multi_gpu
+          python_version: "3.6"
+          requires:
+            - pytorch_windows_vs2019_py36_cuda10.1_build
+          test_name: pytorch-windows-test_azure_multi_gpu
           use_cuda: "1"
           vc_product: Community
           vc_version: ""

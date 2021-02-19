@@ -613,6 +613,20 @@
     - store_test_results:
         path: bazel-testlogs
 
+  pytorch_windows_vs2019_py36_cuda10_1_test_azure_multi_gpu:
+    <<: *binary_windows_params
+    machine:
+      image: ubuntu-1604:202007-01
+    steps:
+      - checkout
+      - run:
+          name: Test
+          no_output_timeout: "90m"
+          command: |
+            set -e
+            pip install requests
+            python ./.circleci/scripts/trigger_azure_pipeline.py
+
   pytorch_doc_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-test
