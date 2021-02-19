@@ -6,6 +6,7 @@ import linecache
 from typing import Type, Dict, List, Any, Union, Optional
 from .graph import Graph
 import copy
+import itertools
 import sys
 import traceback
 import math
@@ -35,14 +36,14 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def _forward_from_src(src : str):
+def _forward_from_src(src: str):
     # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
     gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
     exec_with_source(src, gbls)
     return gbls['forward']
 
 
-def deserialize_graphmodule(body : dict) -> torch.nn.Module:
+def deserialize_graphmodule(body: Dict[Any, Any]) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -177,8 +178,8 @@ class GraphModule(torch.nn.Module):
                 self.insert_submodule(target_to_copy, root[target_to_copy])
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
+
         self.graph = graph
-        graph._gm = self
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -201,7 +202,8 @@ class GraphModule(torch.nn.Module):
         corresponds to ``g``
         """
         self._graph = g
-        g._gm = self
+        g._gm = self if not g._owners else None
+        g._owners += 1
         self.recompile()
 
     def to_folder(self, folder: Union[str, os.PathLike], module_name : str = "FxModule"):
@@ -269,21 +271,54 @@ class {module_name}(torch.nn.Module):
         Returns whether or not this GraphModule contains the submodule
         given by ``str``.
 
+        For example, let's say you have an ``nn.Module`` ``A`` that
+        looks like this:
+
+        .. code-block::text
+
+            A(
+                (net_b): Module(
+                    (net_c): Module(
+                        (conv): Conv2d(16, 33, kernel_size=(3, 3), stride=(2, 2))
+                    )
+                    (linear): Linear(in_features=100, out_features=200, bias=True)
+                )
+            )
+
+        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested 
+        submodule ``net_b``, which itself has two submodules ``net_c`` 
+        and ``linear``. ``net_c`` then has a submodule ``conv``.)
+
+        To check whether or not we have the ``linear`` submodule, we
+        would call ``has_submodule("net_b.linear")``. To check whether
+        we have the ``conv`` submodule, we would call
+        ``has_submodule("net_b.net_c.conv")``.
+
         Args:
             target: The fully-qualified string name of the submodule
-                to look for.
+                to look for. (See above example for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            bool: Whether or not the target string referenced an
+                existing submodule. Returns False if the target string
+                resolves to something that is not an ``nn.Module``.
         """
         atoms: List[str] = target.split(".")
-        mod: torch.nn.Module = self
 
         for item in atoms:
-            if not hasattr(mod, item):
+
+            if not hasattr(self, item):
                 return False
-            mod = getattr(mod, item)
+
+            self = getattr(self, item)
+
+            if not isinstance(self, torch.nn.Module):
+                return False
 
         return True
 
-    def insert_submodule(self, target: str, m: torch.nn.Module) -> None:
+    def insert_submodule(self, target: str, m: torch.nn.Module) -> bool:
         """
         Adds the given submodule to ``self``.
 
@@ -292,84 +327,103 @@ class {module_name}(torch.nn.Module):
 
         Args:
             target: The fully-qualified string name of the new submodule
+                (See example in ``has_submodule`` for how to specify a
+                fully-qualified string.)
             m: The submodule itself; the actual object we want to
                 install in the current GraphModule
+
+        Return:
+            bool: Whether or not the submodule could be inserted. For
+                this method to return True, each object in the chain
+                denoted by ``target`` must either a) not exist yet,
+                or b) reference an ``nn.Module`` (not a parameter or
+                other attribute)
+
         """
         *prefix, field = target.split('.')
+        mod: torch.nn.Module = self
 
         for item in prefix:
 
-            t = getattr(self, item, None)
+            submod = getattr(self, item, None)
 
-            if t is None:
-                t = torch.nn.Module()
-                setattr(self, item, t)
+            if submod is None:
+                submod = torch.nn.Module()
+                setattr(mod, item, submod)
 
-            self = t
+            if not isinstance(submod, torch.nn.Module):
+                return False
+
+            mod = submod
 
         setattr(self, field, m)
+        return True
 
     def delete_submodule(self, target: str) -> bool:
         """
         Deletes the given submodule from ``self``.
 
         The module will not be deleted if ``target`` is not a valid
-        target. This method will also delete parent submodules if they
-        if become unused after deleting their child. For example,
-        ``target=foo.baz.bar`` will first cause ``bar`` to be deleted.
-        If deleting ``bar`` means that ``foo.baz`` is unused, then
-        ``foo.baz`` will be deleted. If deleting ``baz`` means that
-        ``foo`` is unused, ``foo`` will be deleted as well. The most
-        deeply-nested submodule will always be deleted, regardless of
-        whether or not it contains other submodules. (So, in the above
-        example, ``foo.bar.baz`` will be deleted even if it contains
-        ``foo.bar.baz.qux``.)
+        target.
 
         Args:
             target: The fully-qualified string name of the new submodule
+                (See example in ``has_submodule`` for how to denote a
+                fully-qualified string.)
 
         Returns:
             bool: Whether or not the target string referenced a
                 submodule we want to delete. A return value of ``False``
-                could mean either a) the submodule doesn't exist or
-                b) the submodule is an intermediary submodule that
-                contains other submodules and thus can't be safely
-                deleted.
+                means that the ``target`` was not a valid reference to
+                a submodule.
         """
+        def find_and_delete(o: Any, target: str) -> bool:
+            atoms = target.split(".", 1)
+            prefix, path = atoms[0], atoms[1] if len(atoms) > 1 else None
 
-        def delete_nested(mod: torch.nn.Module, target: str) -> bool:
-            item, *suffix_list = target.split('.', 1)
-
-            if not hasattr(mod, item):
+            if not hasattr(o, prefix):
                 return False
 
-            # If we've reached the final item in `target`, e.g. `baz` of
-            # `foo.bar.baz`
-            if not suffix_list:
-                delattr(mod, item)
+            # If the submodule we're looking for is on this layer
+            if not path:
+                if not isinstance(getattr(o, prefix), torch.nn.Module):
+                    return False
+
+                delattr(o, prefix)
                 return True
 
-            submod = getattr(mod, item)
+            return find_and_delete(getattr(o, prefix), path)
 
-            if not delete_nested(submod, "".join(suffix_list)):
-                return False
+        return find_and_delete(self, target)
 
-            # We can delete the current module if it doesn't have any
-            # other child modules. `named_children` returns an iterator,
-            # which is why we want to check using a try-except block
-            has_other_submodules = True
-            try:
-                next(submod.named_children())
-            except StopIteration:
-                has_other_submodules = False
+    def delete_all_unused_submodules(self) -> None:
+        """
+        Deletes all unused submodules from ``self``.
 
-            if has_other_submodules:
-                return False
+        A Module is considered "used" if any one of the following is
+        true:
+        1. It has children that are used
+        2. Its forward is called directly via a ``call_module`` node
+        3. It has a non-Module attribute that is used from a 
+           ``get_attr`` node
 
-            delattr(mod, submod)
-            return True
+        This method can be called to clean up a GraphModule without
+        manually calling ``delete_submodule`` on each unused submodule.
+        """
+        # Collect all the call_module and get_attr targets as well as 
+        # the names of their intermediary modules. For example, if we 
+        # have the target `foo.bar.baz`, we'll add `foo`, `foo.bar`,
+        # and `foo.bar.baz` to the list
+        used: List[str] = [name for node in self.graph.nodes 
+                           if node.op == "call_module" or node.op == "get_attr"
+                           for name in itertools.accumulate(node.target.split("."),
+                                                            lambda x, y: x + "." + y if y else x)]
 
-        return delete_nested(self, target)
+        to_delete = [name for name, _ in self.named_modules()
+                     if name not in used]
+
+        for name in to_delete:
+            self.delete_submodule(name)
 
     @property
     def code(self) -> str:
@@ -393,16 +447,45 @@ class {module_name}(torch.nn.Module):
 
         cls_call = cls.__call__
 
-        def print_full_traceback(exctype, value, tb):
-            traceback.print_exception(exctype, value, tb)
+        # Previously, if an error occurred when valid
+        # symbolically-traced code was run with an invalid input, the
+        # user would see the source of the error as coming from
+        # `File "<eval_with_key_N">`, where N is some number. We use
+        # this function to generate a more informative error message. We
+        # return the traceback itself, a message explaining that the
+        # error occurred in a traced Module's generated forward
+        # function, and five lines of context surrounding the faulty
+        # line
+        def generate_error_message(frame_summary: traceback.FrameSummary) -> str:
+            # auxiliary variables (for readability)
+            err_lineno = frame_summary.lineno
+            err_line_len = len(frame_summary.line)
+            all_src_lines = _eval_cache[frame_summary.filename]
+
+            # constiuent substrings of the error message
+            tb_repr = traceback.format_exc()
+            custom_msg = ("Call using an FX-traced Module, "
+                          f"line {err_lineno} of the traced Module’s "
+                          "generated forward function:")
+            before_err = "".join(all_src_lines[err_lineno - 2 : err_lineno])
+            marker = "~" * err_line_len + "~~~ <--- HERE"
+            err_and_after_err = "\n".join(all_src_lines[err_lineno : err_lineno + 2])
+
+            # joined message
+            return "\n".join([tb_repr, custom_msg, before_err, marker, err_and_after_err])
 
         def wrapped_call(self, *args, **kwargs):
-            old_excepthook = sys.excepthook
             try:
-                sys.excepthook = print_full_traceback
                 return cls_call(self, *args, **kwargs)
-            finally:
-                sys.excepthook = old_excepthook
+            except Exception as e:
+                assert e.__traceback__
+                topmost_framesummary: traceback.FrameSummary = \
+                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
+                if "eval_with_key" in topmost_framesummary.filename:
+                    print(generate_error_message(topmost_framesummary),
+                          file=sys.stderr)
+                raise e.with_traceback(None)
+
         cls.__call__ = wrapped_call
 
     def __reduce__(self):

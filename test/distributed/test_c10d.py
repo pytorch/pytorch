@@ -4104,6 +4104,7 @@ class ReducerTest(TestCase):
         batch_size = 10
         model = self._create_mixed_precision_model()
         reducer = self._create_reducer_for_models([model])
+        reducer.prepare_for_forward()
         loss = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.double)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
@@ -4116,6 +4117,7 @@ class ReducerTest(TestCase):
         num_replicas = 2
         models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
         reducer = self._create_reducer_for_models(models)
+        reducer.prepare_for_forward()
         loss = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.double).chunk(num_replicas)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
@@ -4134,6 +4136,7 @@ class ReducerTest(TestCase):
         batch_size = 10
         model = self._create_mixed_precision_model()
         reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
+        reducer.prepare_for_forward()
         loss = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.double)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
@@ -4155,6 +4158,7 @@ class ReducerTest(TestCase):
         batch_size = 10
         model = self._create_mixed_precision_model()
         reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
+        reducer.prepare_for_forward()
         loss = nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters())
         for i in range(3):

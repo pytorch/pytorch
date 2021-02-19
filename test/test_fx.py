@@ -9,6 +9,7 @@ import os
 import pickle
 import sys
 import torch
+import traceback
 import unittest
 from math import sqrt
 from pathlib import Path
@@ -18,6 +19,7 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Trac
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.experimental.rewriter import RewritingTracer
 from copy import deepcopy
 
 from torch.fx.proxy import TraceError
@@ -88,7 +90,7 @@ class TestFX(JitTestCase):
         kwargs = kwargs if kwargs else {}
         ref_outs = m(*args, **kwargs)
         gm = symbolic_trace(m)
-        gm.graph.lint(gm)
+        gm.graph.lint()
         test_outs = gm(*args, **kwargs)
         self.assertEqual(ref_outs, test_outs)
 
@@ -244,7 +246,7 @@ class TestFX(JitTestCase):
         sym = NoLeafModulesTracer().trace(mrm)
         for node in sym.nodes:
             self.assertNotEqual(node.op, 'call_module')
-        sym.lint(sym)
+        sym.lint()
 
     def test_wrap(self):
         self.assertEqual(3 + 4 + 5, a_lifted_leaf((3, 4), 5))
@@ -293,7 +295,7 @@ class TestFX(JitTestCase):
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
-        gm.graph.lint(gm)
+        gm.graph.lint()
         self.assertEqual(gm(3, 4), 14)
 
     def test_graph_unique_names(self):
@@ -351,7 +353,7 @@ class TestFX(JitTestCase):
             quantizer.observe((torch.rand(1, 3, 224, 224),))
 
         qgraph = quantizer.quantize()
-        qgraph.graph.lint(qgraph)
+        qgraph.graph.lint()
         qgraph_script = torch.jit.script(qgraph)
 
         d = qgraph(ip)
@@ -500,7 +502,7 @@ class TestFX(JitTestCase):
             # Register output
             graph.output(output_node)
 
-            graph.lint(wrapper)
+            graph.lint()
 
             # Return final GraphModule!!!
             return GraphModule(wrapper, graph)
@@ -533,7 +535,7 @@ class TestFX(JitTestCase):
 
         m = M()
         m_g = symbolic_trace(m)
-        m_g.graph.lint(m_g)
+        m_g.graph.lint()
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
@@ -552,7 +554,7 @@ class TestFX(JitTestCase):
 
         m = M()
         g = TaggingTracer().trace(m)
-        g.lint(m)
+        g.lint()
         for n in g.nodes:
             self.assertTrue(hasattr(n, 'tag'))
             self.assertEqual(n.tag, 'foo')
@@ -580,7 +582,7 @@ class TestFX(JitTestCase):
 
         wfq = WrapperForQualname()
         traced2 = symbolic_trace(wfq)
-        traced2.graph.lint(traced2)
+        traced2.graph.lint()
         traced2(torch.rand(4, 4))
 
     def test_symbolic_trace_sequential(self):
@@ -594,7 +596,7 @@ class TestFX(JitTestCase):
             Simple()
         )
         traced = symbolic_trace(seq)
-        traced.graph.lint(traced)
+        traced.graph.lint()
         x = torch.rand(3, 4)
         self.assertEqual(traced(x), seq(x))
 
@@ -605,7 +607,7 @@ class TestFX(JitTestCase):
 
         ct = ConstTensor()
         traced = symbolic_trace(ct)
-        traced.graph.lint(traced)
+        traced.graph.lint()
         traced(torch.rand(4, 4))
 
     def test_pickle_graphmodule(self):
@@ -619,10 +621,10 @@ class TestFX(JitTestCase):
 
         n = Nested()
         traced = symbolic_trace(n)
-        traced.graph.lint(traced)
+        traced.graph.lint()
         pickled = pickle.dumps(traced)
         loaded = pickle.loads(pickled)
-        loaded.graph.lint(loaded)
+        loaded.graph.lint()
         x = torch.rand(3, 4)
         self.assertEqual(loaded(x), traced(x))
 
@@ -644,7 +646,7 @@ class TestFX(JitTestCase):
     def test_deepcopy_graphmodule_with_transform(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         def transform(traced):
             new_graph = torch.fx.Graph()
@@ -655,7 +657,7 @@ class TestFX(JitTestCase):
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
-        transformed.graph.lint(transformed)
+        transformed.graph.lint()
         copied = copy.deepcopy(transformed)
         self.assertNotEqual(id(type(transformed)), id(type(copied)))
         x = torch.randn(3, 4)
@@ -681,9 +683,9 @@ class TestFX(JitTestCase):
 
         baz = Baz()
         traced = symbolic_trace(baz)
-        traced.graph.lint(traced)
+        traced.graph.lint()
         copied = copy.deepcopy(traced)
-        copied.graph.lint(copied)
+        copied.graph.lint()
 
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
@@ -827,14 +829,14 @@ class TestFX(JitTestCase):
         input = torch.randn(3)
         ref_out = m(input)
         gm = symbolic_trace(m)
-        gm.graph.lint(gm)
+        gm.graph.lint()
         out = gm(input)
         self.assertEqual(out, ref_out)
 
     def test_pretty_print(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
-        traced.graph.lint(traced)
+        traced.graph.lint()
         printed = str(traced)
         assert 'SimpleTest()' in printed
         assert 'torch.relu' in printed
@@ -845,7 +847,7 @@ class TestFX(JitTestCase):
                 return torch.squeeze(x + 3.0, dim=2)
         st = KwargPrintTest()
         traced = symbolic_trace(st)
-        traced.graph.lint(traced)
+        traced.graph.lint()
         stringed = str(traced.graph)
         for s in ['args', 'kwargs', '#users']:
             assert s in stringed
@@ -862,7 +864,7 @@ class TestFX(JitTestCase):
         mod.linear = torch.nn.Linear(3, 4)
         mod.bias = torch.rand(4)
         gm = GraphModule(mod, g)
-        gm.graph.lint(gm)
+        gm.graph.lint()
         input = torch.rand(3)
         r = gm(input)
         ref = torch.sin(mod.linear(input) + mod.bias)
@@ -896,7 +898,7 @@ class TestFX(JitTestCase):
         add_param : torch.Tensor = torch.rand(3, 4)
         gm : torch.fx.GraphModule = torch.fx.GraphModule(
             {'foo.bar.baz': linear_mod, 'zip.zap.zam' : add_param}, graph)
-        gm.graph.lint(gm)
+        gm.graph.lint()
 
         assert 'self.foo.bar.baz' in gm.code
 
@@ -1681,6 +1683,94 @@ class TestFX(JitTestCase):
         self.assertEqual(mod_true(3), 6)
         self.assertEqual(mod_false(3), 3)
 
+    def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.W = torch.nn.Parameter(torch.randn(5))
+
+            def forward(self, x):
+                return torch.dot(self.W, x)
+
+        traced = torch.fx.symbolic_trace(M())
+
+        out = [n for n in traced.graph.nodes if n.op == "output"][-1]
+        with traced.graph.inserting_before(out):
+            relu_out = traced.graph.call_method(method_name='relu',
+                                                args=(out.args[0],))
+        out.args = (relu_out,)
+
+        traced.recompile()
+
+        with self.capture_stderr() as captured:
+            with self.assertRaises(TypeError):
+                traced(5)
+
+        self.assertIn("Call using an FX-traced Module, line 4 of the "
+                      "traced Module’s generated forward function:",
+                      captured[0])
+
+    def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        traced = torch.fx.symbolic_trace(M())
+
+        # Do not change this to `capture_stderr` or another context
+        # manager without ensuring that the output is as expected
+        try:
+            traced(torch.rand(5, 5))
+        except RuntimeError:
+            captured = traceback.format_exc()
+
+        self.assertNotIn("Call using an FX-traced Module, line 4 of the"
+                         " traced Module’s generated forward function:",
+                         captured)
+
+    def test_ast_rewriter_rewrites_assert(self):
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: int, z: int):
+                assert y == z
+                return torch.add(x, x)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        traced.graph.lint()
+
+    def test_ast_rewriter_rewrites_assert_with_message(self):
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: int, z: int):
+                assert y == z, "msg"
+                return torch.add(x, x)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        traced.graph.lint()
+
+    def test_ast_rewriter_reassigns_submodules(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(100)
+
+            def forward(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        traced.graph.lint()
+
     def test_submodule_manipulation_API(self):
         class C(torch.nn.Module):
             def __init__(self):
@@ -1720,16 +1810,30 @@ class TestFX(JitTestCase):
         a.graph.erase_node(conv)
         a.recompile()
 
+        def module_exists(gm: GraphModule, path: str) -> bool:
+            atoms: List[str] = path.split(".")
+
+            for item in atoms:
+
+                if not hasattr(gm, item):
+                    return False
+
+                gm = getattr(gm, item)
+
+                if not isinstance(gm, torch.nn.Module):
+                    return False
+
+            return True
+
+
         # Test that we added the "dropout" submodule
-        self.assertEqual(hasattr(getattr(getattr(a, "net_b"), "net_c"), "dropout"),    # noqa: B009
-                         True)
+        self.assertEqual(module_exists(a, "net_b.net_c.dropout"), True)
 
         # Test `has_submodule` with an added submodule
         self.assertEqual(a.has_submodule("net_b.net_c.dropout"), True)
 
         # Test that the "conv" submodule is still there
-        self.assertEqual(hasattr(getattr(getattr(a, "net_b"), "net_c"), "conv"),       # noqa: B009
-                         True)
+        self.assertEqual(module_exists(a, "net_b.net_c.conv"), True)
 
         # Test `has_submodule` with an original module
         self.assertEqual(a.has_submodule("net_b.net_c.conv"), True)
@@ -1747,8 +1851,24 @@ class TestFX(JitTestCase):
         # Test `has_submodule` with a deleted submodule
         self.assertEqual(a.has_submodule("net_b.net_c.conv"), False)
 
-        a.graph.lint(a)
+        a.graph.lint()
 
+        # Insert some unused submodules
+        a.insert_submodule("net_b.embedding", torch.nn.Embedding(10, 3))
+        a.insert_submodule("net_b.net_c.embedding", torch.nn.Embedding(10, 3))
+        a.insert_submodule("net_b.net_c.rnn", torch.nn.RNN(10, 20, 2))
+        a.insert_submodule("batch_norm_2d", torch.nn.BatchNorm2d(100))
+
+        # Garbage collection
+        a.delete_all_unused_submodules()
+
+        # Test that all the unused submodules are gone
+        self.assertEqual(module_exists(a, "net_b.embedding"), False)
+        self.assertEqual(module_exists(a, "net_b.net_c.embedding"), False)
+        self.assertEqual(module_exists(a, "net_b.net_c.rnn"), False)
+        self.assertEqual(module_exists(a, "batch_norm_2d"), False)
+
+        a.graph.lint()
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
