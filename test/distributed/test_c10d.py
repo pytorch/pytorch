@@ -51,7 +51,6 @@ from torch.testing._internal.common_utils import (
     CONNECT_TIMEOUT,
     TEST_WITH_TSAN,
     IS_WINDOWS,
-    slowTest,
 )
 
 
