@@ -712,7 +712,7 @@ class QuantizationTestCase(TestCase):
                                expected_node=None,
                                expected_node_occurrence=None,
                                expected_node_list=None,
-                               output_a_reference_model=False,
+                               is_reference=False,
                                print_debug_info=False,
                                custom_qconfig=None,
                                prepare_expected_node=None,
@@ -737,7 +737,7 @@ class QuantizationTestCase(TestCase):
                                 NodeSpec.call_module(nnq.Conv2d),
                                 NodeSpec.call_function(F.hardtanh_),
                                 NodeSpec.call_method('dequantize')]
-                    output_a_reference_model: if True, enables reference mode
+                    is_reference: if True, enables reference mode
                     print_debug_info: if True, prints debug info
                     custom_qconfig: overrides default qconfig
                     prepare_expected_node: same as expected_node, but for prepare
@@ -789,11 +789,11 @@ class QuantizationTestCase(TestCase):
 
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
-            qgraph_reference = convert_fx(prepared_copy, output_a_reference_model=True)
+            qgraph_reference = convert_fx(prepared_copy, is_reference=True)
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
 
-            qgraph_to_check = qgraph_reference if output_a_reference_model else qgraph
+            qgraph_to_check = qgraph_reference if is_reference else qgraph
             if print_debug_info:
                 print()
                 print('quantized model:\n', qgraph_to_check)
