@@ -591,7 +591,6 @@ class TestMkldnn(TestCase):
         self._test_serialization(mkldnn_bn, (input.to_mkldnn(),))
         self._test_tracing(mkldnn_bn, (input.to_mkldnn(),))
 
-
     def _test_batch_norm_train_base(self, dim, channels, input):
         # TODO: support 3d batchnorm training.
         bn_module = {2 : torch.nn.BatchNorm2d}
