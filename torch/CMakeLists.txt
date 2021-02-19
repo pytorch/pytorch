@@ -339,19 +339,16 @@ else()
   set(TORCH_VERSION_DEBUG 0)
 endif()
 
-if(EXISTS "${TORCH_SRC_DIR}/version.py")
-  file(REMOVE "${TORCH_SRC_DIR}/version.py")
-endif()
-
-add_custom_command(
-  OUTPUT ${TORCH_SRC_DIR}/version.py
+execute_process(
   COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
       --is_debug=${TORCH_VERSION_DEBUG}
       --cuda_version=${CUDA_VERSION}
       --hip_version=${HIP_VERSION}
+  OUTPUT_FILE ${TORCH_SRC_DIR}/version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
+
 add_custom_target(
   gen_torch_version ALL
   DEPENDS ${TORCH_SRC_DIR}/version.py
