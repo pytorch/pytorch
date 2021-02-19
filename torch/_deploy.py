@@ -2,7 +2,7 @@ import io
 import torch
 import importlib
 from torch.package._custom_import_pickler import create_custom_import_pickler
-from torch.package.importer import _UnpicklerWrapper
+from torch.package.package_importer import _UnpicklerWrapper
 from torch.package import PackageImporter
 from torch.serialization import _maybe_decode_ascii
 from typing import Callable
