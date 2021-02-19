@@ -1566,7 +1566,9 @@ class TestLinalg(TestCase):
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
             ind = np.argsort(actual[0].cpu().numpy(), axis=-1)[::-1]
             actual_np = [x.cpu().numpy() for x in actual]
-            sorted_actual = (np.take_along_axis(actual_np[0], ind, axis=-1), np.take_along_axis(actual_np[1], ind[:, None], axis=-1))
+            sorted_actual = (
+                np.take_along_axis(actual_np[0], ind, axis=-1),
+                np.take_along_axis(actual_np[1], ind[:, None], axis=-1))
 
             self.assertEqual(expected[0], sorted_actual[0])
             self.assertEqual(abs(expected[1]), abs(sorted_actual[1]))
