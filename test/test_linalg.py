@@ -1566,15 +1566,15 @@ class TestLinalg(TestCase):
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
             ind = np.argsort(actual[0].cpu().numpy(), axis=-1)[::-1]
             actual_np = [x.cpu().numpy() for x in actual]
-            sorted_actual = (np.take_along_axis(actual_np[0], ind, axis=-1), np.take_along_axis(actual_np[1], ind[:,  None], axis=-1))
+            sorted_actual = (np.take_along_axis(actual_np[0], ind, axis=-1), np.take_along_axis(actual_np[1], ind[:, None], axis=-1))
 
             self.assertEqual(expected[0], sorted_actual[0])
             self.assertEqual(abs(expected[1]), abs(sorted_actual[1]))
 
-        shapes = [(0, 0), # Empty matrix
-                  (5, 5), # Single matrix
-                  (0, 0, 0), (0, 5, 5), # Zero batch dimension tensors
-                  (2, 5, 5), # 3-dim tensors
+        shapes = [(0, 0),  # Empty matrix
+                  (5, 5),  # Single matrix
+                  (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
+                  (2, 5, 5),  # 3-dim tensors
                   (2, 1, 5, 5)]  # 4-dim tensors
         for shape in shapes:
             run_test(shape)
@@ -1618,8 +1618,8 @@ class TestLinalg(TestCase):
 
                 # check non-contiguous out
                 if a.numel() > 0:
-                    out0 = torch.empty(2*shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
-                    out1 = torch.empty(2*shape[0], *shape[1:], dtype=complex_dtype, device=device)[::2]
+                    out0 = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
+                    out1 = torch.empty(2 * shape[0], *shape[1:], dtype=complex_dtype, device=device)[::2]
                     self.assertFalse(out0.is_contiguous())
                     self.assertFalse(out1.is_contiguous())
                     ans = torch.linalg.eig(a, out=(out0, out1))
@@ -1628,10 +1628,10 @@ class TestLinalg(TestCase):
                     self.assertEqual(expected[0].to(complex_dtype), out0)
                     self.assertEqual(expected[1].to(complex_dtype), out1)
 
-        shapes = [(0, 0), # Empty matrix
-                  (5, 5), # Single matrix
-                  (0, 0, 0), (0, 5, 5), # Zero batch dimension tensors
-                  (2, 5, 5), # 3-dim tensors
+        shapes = [(0, 0),  # Empty matrix
+                  (5, 5),  # Single matrix
+                  (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
+                  (2, 5, 5),  # 3-dim tensors
                   (2, 1, 5, 5)]  # 4-dim tensors
         for shape in shapes:
             run_test(shape)
@@ -1725,10 +1725,10 @@ class TestLinalg(TestCase):
 
             self.assertEqual(expected, sorted_actual)
 
-        shapes = [(0, 0), # Empty matrix
-                  (5, 5), # Single matrix
-                  (0, 0, 0), (0, 5, 5), # Zero batch dimension tensors
-                  (2, 5, 5), # 3-dim tensors
+        shapes = [(0, 0),  # Empty matrix
+                  (5, 5),  # Single matrix
+                  (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
+                  (2, 5, 5),  # 3-dim tensors
                   (2, 1, 5, 5)]  # 4-dim tensors
         for shape in shapes:
             run_test(shape)
@@ -1768,16 +1768,16 @@ class TestLinalg(TestCase):
 
                 # check non-contiguous out
                 if a.numel() > 0:
-                    out = torch.empty(2*shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
+                    out = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
                     self.assertFalse(out.is_contiguous())
                     ans = torch.linalg.eigvals(a, out=out)
                     self.assertEqual(ans, out)
                     self.assertEqual(expected.to(complex_dtype), out)
 
-        shapes = [(0, 0), # Empty matrix
-                  (5, 5), # Single matrix
-                  (0, 0, 0), (0, 5, 5), # Zero batch dimension tensors
-                  (2, 5, 5), # 3-dim tensors
+        shapes = [(0, 0),  # Empty matrix
+                  (5, 5),  # Single matrix
+                  (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
+                  (2, 5, 5),  # 3-dim tensors
                   (2, 1, 5, 5)]  # 4-dim tensors
         for shape in shapes:
             run_test(shape)
