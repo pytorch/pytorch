@@ -285,7 +285,7 @@ class Node:
     def __repr__(self) -> str:
         if self._repr_fn:
             return self._repr_fn(self)
-        return super().__repr__()
+        return self.name
 
     def _pretty_print_target(self, target):
         """
