@@ -1890,13 +1890,13 @@ struct to_ir {
       auto* rhs = emitExpr(e);
       auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
       entered.push(rhs);
-      auto rhsClass = rhs->type()->expect<ClassType>();
 
-      if (!rhsClass) {
+      if (rhs->type()->kind() != TypeKind::ClassType) {
         throw ErrorReport(e.range())
-            << "With item expression does not return a class type";
+            << "With item expression must return an object";
       }
 
+      auto rhsClass = rhs->type()->expect<ClassType>();
       auto* enterMethod = rhsClass->findMethod("__enter__");
       auto* exitMethod = rhsClass->findMethod("__exit__");
 

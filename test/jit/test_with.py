@@ -507,6 +507,10 @@ class TestWith(JitTestCase):
 
             return x
 
+        def test_enter_without_object():
+            with "not_object" as obj:
+                pass
+
         test_tensor = torch.randn(5, dtype=torch.double)
 
         with self.assertRaisesRegex(
@@ -530,6 +534,9 @@ class TestWith(JitTestCase):
             self.checkScript(
                 test_exit_incorrect_types, (test_tensor, ExitIncorrectTypes())
             )
+
+        with self.assertRaisesRegex(RuntimeError, r"must return an object"):
+            self.checkScript(test_enter_without_object, ())
 
     def test_with_no_grad(self):
         """
