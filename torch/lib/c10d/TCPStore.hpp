@@ -29,6 +29,7 @@ class TCPStoreDaemon {
   void query(int socket);
 
   void setHandler(int socket);
+  void compareSetHandler(int socket);
   void addHandler(int socket);
   void getHandler(int socket) const;
   void checkHandler(int socket) const;
@@ -65,7 +66,7 @@ class TCPStore : public Store {
   explicit TCPStore(
       const std::string& masterAddr,
       PortType masterPort,
-      int numWorkers,
+      c10::optional<int> numWorkers = c10::nullopt_t(-1),
       bool isServer = false,
       const std::chrono::milliseconds& timeout = kDefaultTimeout,
       bool waitWorkers = true);
@@ -73,6 +74,11 @@ class TCPStore : public Store {
   virtual ~TCPStore();
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
+
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) override;
 
   std::vector<uint8_t> get(const std::string& key) override;
 
@@ -110,7 +116,7 @@ class TCPStore : public Store {
   std::string tcpStoreAddr_;
   PortType tcpStorePort_;
 
-  int numWorkers_;
+  c10::optional<int> numWorkers_;
   const std::string initKey_;
   const std::string regularPrefix_;
 

@@ -104,11 +104,26 @@ def mul(g, self, other):
     return g.op("Mul", self, other)
 
 
-def div(g, self, other):
-    return true_divide(g, self, other)
+def div(g, self, other, *args):
+    if len(args) == 0:
+        return true_divide(g, self, other)
+    else:
+        return _div_rounding_mode(g, self, other, *args)
 
 
-def floor_divide(g, self, other):
+@parse_args('v', 'v', 's')
+def _div_rounding_mode(g, self, other, rounding_mode):
+    if rounding_mode == 'true':
+        return true_divide(g, self, other)
+    elif rounding_mode == 'floor':
+        return _floor_divide(g, self, other)
+    elif rounding_mode == 'trunc':
+        return _trunc_divide(g, self, other)
+    else:
+        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected "true", "floor" or "trunc"')
+
+
+def _trunc_divide(g, self, other):
     out = g.op('Div', self, other)
     # the correct operation is truncate, which is not supported in ONNX,
     # we cannot call floor since it will behave differently for negative numbers
@@ -134,6 +149,34 @@ def floor_divide(g, self, other):
     else:
         out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     return out
+
+
+def _floor_divide(g, self, other):
+    if sym_help._is_fp(self) or sym_help._is_fp(other):
+        out = true_divide(g, self, other)
+        return g.op('Floor', out)
+    else:
+        # Integer division does trunction rounding
+        div = g.op('Div', self, other)
+        # Division is negative if: self < 0 != other < 0
+        zero = g.op('Constant', value_t=torch.tensor(0, dtype=torch.int64))
+        negative = g.op('Xor',
+                        g.op('Less', self, zero),
+                        g.op('Less', other, zero))
+
+        # For negative numbers with self % other != 0, subtract 1 to round down instead of up
+        mod = g.op('Sub', self, g.op('Mul', div, other))
+        fixup_mask = g.op('And', negative,
+                          g.op('Not', g.op('Equal', mod, zero)))
+
+        one = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        fixup = g.op('Sub', div, one)
+        return g.op('Where', fixup_mask, fixup, div)
+
+
+def floor_divide(g, self, other):
+    # Deprecated behavior, floor_divide actually truncates
+    return _trunc_divide(g, self, other)
 
 
 def floordiv(g, self, other):
@@ -1319,8 +1362,8 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
     axes = [-i for i in range(len(normalized_shape), 0, -1)]
 
-    two_cst = g.op("Constant", value_t=torch.tensor(2.))
-    eps_cst = g.op("Constant", value_t=torch.tensor(eps))
+    two_cst = sym_help._generate_wrapped_number(g, 2.)
+    eps_cst = sym_help._generate_wrapped_number(g, eps)
 
     mean = g.op("ReduceMean", input, axes_i=axes)
     numerator = sub(g, input, mean)
