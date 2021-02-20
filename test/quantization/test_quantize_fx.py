@@ -294,7 +294,7 @@ class TestQuantizeFx(QuantizationTestCase):
     Unit tests for functionalities
     """
     @skipIfNoFBGEMM
-    def test_functional_no_debug(self):
+    def test_functional_not_reference(self):
         """ Test quantizing functional conv and linear
         """
         tests = self._get_conv_linear_test_cases()
@@ -309,11 +309,11 @@ class TestQuantizeFx(QuantizationTestCase):
                 inputs, quant_type,
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
-                debug=False)
+                is_reference=False)
 
     @skipIfNoFBGEMM
-    def test_functional_debug(self):
-        """ Test quantizing functional conv and linear with debug option
+    def test_functional_reference(self):
+        """ Test quantizing functional conv and linear with reference option
         """
         tests = self._get_conv_linear_test_cases()
         for (is_dynamic, ModuleClass, module_constructor_inputs,
@@ -327,7 +327,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
                 expected_node_occurrence=node_occurrence,
-                debug=True)
+                is_reference=True)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
@@ -346,7 +346,7 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'': qconfig}
         prepared = prepare_fx(m, qconfig_dict)
-        quantized = convert_fx(prepared, debug=True)
+        quantized = convert_fx(prepared, is_reference=True)
         qparams = (quantized._input_scale_0, quantized._input_zero_point_0)
         weight_obs = qconfig.weight()
         weight_obs(quantized.weight)
@@ -465,14 +465,14 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         for (ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
-            for debug in [True, False]:
+            for is_reference in [True, False]:
                 node_occurrence = dict()
                 if weight_prepack_node:
                     node_occurrence[weight_prepack_node] = 0
                 m = ModuleClass(*module_constructor_inputs).eval()
                 qconfig_dict = {"": float16_dynamic_qconfig}
                 m = prepare_fx(m, qconfig_dict)
-                m = convert_fx(m, debug=debug)
+                m = convert_fx(m, is_reference=is_reference)
                 self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 
@@ -1592,6 +1592,38 @@ class TestQuantizeFx(QuantizationTestCase):
         assert hasattr(m, "mods1_1_packed_weight_0")
         assert hasattr(m, "mods2_packed_weight_0")
 
+    def test_mul_add_fp16_config(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+
+            def forward(self, x):
+                x = x * 5
+                x = x + 5
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+        model = M().eval()
+        qconfig_dict = {"": float16_dynamic_qconfig}
+        m = prepare_fx(model, qconfig_dict)
+        m = convert_fx(m)
+        # make sure it runs
+        m(torch.randn(5, 5))
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
@@ -1896,18 +1928,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.op(y, x)
                 return x
 
-        # TODO: decide whether we want to quantize or not
-        # in this case
-        # class NonQuantizedOp(torch.nn.Module):
-        #     def __init__(self, is_inplace, is_scalar):
-        #         super(NonQuantizedOp, self).__init__()
-        #         self.is_scalar = is_scalar
-        #         self.op = ibinary_op if is_inplace else binary_op
+        # This tests the binary op should be quantized even when it is not feed with a
+        # quantized input
+        class NonQuantizedInput(torch.nn.Module):
+            def __init__(self, is_inplace, is_scalar):
+                super(NonQuantizedInput, self).__init__()
+                self.is_scalar = is_scalar
+                self.op = ibinary_op if is_inplace else binary_op
 
-        #     def forward(self, x, y):
-        #         y = 3 if self.is_scalar else y
-        #         x = self.op(x, y)
-        #         return x
+            def forward(self, x, y):
+                y = 3 if self.is_scalar else y
+                x = self.op(x, y)
+                return x
 
         data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
                 torch.randn(1, 1, 1, 1, dtype=torch.float))
@@ -1917,6 +1949,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for is_inplace, is_scalar in options:
             self.checkGraphModeFxOp(
                 Op(is_inplace, is_scalar), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(
+                NonQuantizedInput(is_inplace, is_scalar), data, quant_type, quantized_node, print_debug_info=True)
 
     def _test_quantized_binary_op_relu_impl(self, binary_op, ibinary_op, quantized_op):
         class OpRelu(torch.nn.Module):
@@ -2105,9 +2139,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """ quantization of the output of cat will be depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
-        class QuantizedCat(torch.nn.Module):
+        class QuantizedInput(torch.nn.Module):
             def __init__(self):
-                super(QuantizedCat, self).__init__()
+                super(QuantizedInput, self).__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2116,19 +2150,19 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 y = self.conv2(y)
                 return torch.cat([x, y], 1)
 
-        # TODO: decide whether to quantize in this case
-        # class NonQuantizedCat(torch.nn.Module):
-        #     def __init__(self):
-        #         super(NonQuantizedCat, self).__init__()
+        class NonQuantizedInput(torch.nn.Module):
+            def __init__(self):
+                super(NonQuantizedInput, self).__init__()
 
-        #     def forward(self, x, y):
-        #         return torch.cat([x, y], 1)
+            def forward(self, x, y):
+                return torch.cat([x, y], 1)
 
         data = (torch.randn(1, 2, 5, 5, dtype=torch.float),
                 torch.randn(1, 2, 5, 5, dtype=torch.float))
         quantized_node = ns.call_function(torch.ops.quantized.cat)
         for quant_type in self.static_quant_types:
-            self.checkGraphModeFxOp(QuantizedCat(), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
 
 
     @skipIfNoFBGEMM
