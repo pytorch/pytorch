@@ -601,6 +601,8 @@ at::Tensor convolution_overrideable(
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
+// Function for dynamically dispatching convolution to the appropriate function
+// depending on the type of tensor and the DNN library to be used.
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
@@ -666,7 +668,6 @@ at::Tensor _convolution(
   Tensor output;
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
-
       auto kernel_size = weight.sizes().slice(2);
       auto stride = params.stride;
       auto padding = params.padding;
@@ -694,7 +695,9 @@ at::Tensor _convolution(
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
              ") should be the same");
 
+    std::cout << "---- INSIDE CUDNN -----\n";
     if (params.transposed) {
+      std::cout << "---- PARAM TRANSPOSED ----\n";
       output = at::cudnn_convolution_transpose(
           input.contiguous(cudnn_memory_format), weight,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
@@ -702,6 +705,7 @@ at::Tensor _convolution(
         output.add_(reshape_bias(input.dim(), bias));
       }
     } else {
+      std::cout << "---- PARAM NOT TRANSPOSED ----\n";
       output = at::cudnn_convolution(
           input.contiguous(cudnn_memory_format), weight,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);

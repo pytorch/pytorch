@@ -1763,6 +1763,13 @@ new_module_tests = [
     ),
     dict(
         module_name='ConvTranspose1d',
+        constructor_args=(1, 1, 3),
+        input_size=(0, 1, 1),
+        cudnn=True,
+        desc='zero_batch',
+    ),
+    dict(
+        module_name='ConvTranspose1d',
         constructor_args=(3, 4, 3, 2, 1, 1, 1, False),
         cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
                                 .stride(2).padding(1).output_padding(1).groups(1).bias(false)''',
@@ -1925,6 +1932,14 @@ new_module_tests = [
         check_with_long_tensor=True,
         with_tf32=True,
         tf32_precision=0.005,
+    ),
+    dict(
+        module_name='ConvTranspose2d',
+        constructor_args=(3, 4, (3, 2)),
+        input_size=(0, 3, 7, 5),
+        cudnn=True,
+        desc='zero_batch',
+        check_with_long_tensor=True
     ),
     dict(
         fullname='ConvTranspose2d_groups',
@@ -2300,6 +2315,14 @@ new_module_tests = [
         desc='dilated',
         with_tf32=True,
         tf32_precision=0.05
+    ),
+    dict(
+        module_name='ConvTranspose3d',
+        constructor_args=(3, 4, (2, 3, 4)),
+        input_size=(0, 3, 3, 4, 5),
+        cudnn=True,
+        check_with_long_tensor=True,
+        desc='zero_batch'
     ),
     dict(
         module_name='MaxPool3d',

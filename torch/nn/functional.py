@@ -1995,7 +1995,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
 embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
 
-
 def _verify_batch_size(size):
     # type: (List[int]) -> None
     # XXX: JIT script does not support the reduce from functools, and mul op is a
@@ -2012,7 +2011,6 @@ def _verify_batch_size(size):
         size_prods *= size[i + 2]
     if size_prods == 1:
         raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
-
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
@@ -2052,6 +2050,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
                 running_var=running_var, weight=weight, bias=bias,
                 use_input_stats=use_input_stats, momentum=momentum, eps=eps)
     _verify_batch_size(input.size())
+
     return torch.instance_norm(
         input, weight, bias, running_mean, running_var,
         use_input_stats, momentum, eps, torch.backends.cudnn.enabled
