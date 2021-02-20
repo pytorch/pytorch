@@ -88,7 +88,6 @@ dummy_input = torch.randn(10, 5)
 x = torch.randn(32, 5)
 y = torch.randn(15, 6)
 
-
 print('Start normal model.')
 with torch.no_grad():
     test_module = BadModule(total_input_size, total_hidden_size, total_num_classes)
@@ -175,25 +174,34 @@ print('----End normal model.')
 
 #     [np.testing.assert_allclose(trace_results_all_before, trace_results_new_02, rtol=1e-03, atol=1e-05)]
 
+    result_2 = m_2(result_1)
+    [np.testing.assert_allclose(results_all, result_2, rtol=1e-03, atol=1e-05)]
+    
 print('----End normal model.')
 
 print('----Start script model.')
 with torch.no_grad():
-    trace_m_all = torch.jit.trace(NeuralNet_All(total_input_size, total_hidden_size, total_num_classes), x)
-    print('----Finish trace_m_all.')
+    trace_m_all_01 = torch.jit.trace(NeuralNet_All(total_input_size, total_hidden_size, total_num_classes), x)
+    print('----Finish trace_m_all_01.')
+
+    trace_m_all_02 = torch.jit.trace(NeuralNet_All(total_input_size, total_hidden_size, total_num_classes), x)
+    print('----Finish trace_m_all_02.')
 
     trace_m_1 = torch.jit.trace(NeuralNet_1st(total_input_size, total_hidden_size), x)
     print('----Finish trace_m_1.')
 
-    trace_m_all.load_state_dict(all_params, strict=False)
-    trace_m_all.eval()
+    trace_m_all_01.load_state_dict(all_params, strict=False)
+    trace_m_all_01.eval()
+
+    trace_m_all_02.load_state_dict(all_params, strict=False)
+    trace_m_all_02.eval()    
 
     trace_m_1.load_state_dict(all_params, strict=False)
     trace_m_1.eval()
 
-    trace_results_all_before = trace_m_all(dummy_input)
+    trace_results_all_before = trace_m_all_01(dummy_input)
 
-    torch._C._jit_nezha_update_graph(trace_m_all._c, trace_m_1.graph)
+    torch._C._jit_nezha_update_graph(trace_m_all_01._c, trace_m_all_02._c)
 
     # trace_results_1 = trace_m_1(x)
     # print('----Finish trace_m_1 inference.')
@@ -208,20 +216,18 @@ with torch.no_grad():
     # torch.jit.save(trace_m_all, f)
     # loaded_m_after = torch.jit.load(f)
 
-    # trace_m_2 = torch.jit.trace(NeuralNet_2nd(total_hidden_size, total_num_classes), trace_results_1)
-    # trace_m_2.load_state_dict(all_params, strict=False)
-    # trace_m_2.eval()
-
-    trace_results_all = trace_m_all(dummy_input)
-    # [np.testing.assert_allclose(trace_results_all, dummy_input, rtol=1e-03, atol=1e-05)]
-    # [np.testing.assert_allclose(trace_results_all, trace_results_all_before, rtol=1e-03, atol=1e-05)]
-
+    trace_results_new_01 = trace_m_all_01(dummy_input)
     trace_results_1 = trace_m_1(dummy_input)
-    [np.testing.assert_allclose(trace_results_all, trace_results_1, rtol=1e-03, atol=1e-05)]
+    # [np.testing.assert_allclose(trace_results_new_01, trace_results_1, rtol=1e-03, atol=inliner::inlineCalls(),1e-05)]
 
-    # trace_results_2 = trace_m_2(trace_results_1)
+    # Construct the second part of the module
+    trace_m_2 = torch.jit.trace(NeuralNet_2nd(total_hidden_size, total_num_classes), trace_results_1)
+    trace_m_2.load_state_dict(all_params, strict=False)
+    trace_m_2.eval()
 
-    # [np.testing.assert_allclose(trace_results_all, results_all, rtol=1e-03, atol=1e-05)]
+    trace_results_new_02 = trace_m_all_02(trace_results_new_01)
+    trace_results_2 = trace_m_2(trace_results_1)
+    [np.testing.assert_allclose(trace_results_new_02, trace_results_2, rtol=1e-03, atol=1e-05)]
 
     # [np.testing.assert_allclose(trace_results_all, trace_results_2, rtol=1e-03, atol=1e-05)]
 
