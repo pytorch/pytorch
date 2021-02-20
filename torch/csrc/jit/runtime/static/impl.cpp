@@ -380,6 +380,11 @@ c10::IValue StaticRuntime::run(
     }
     return c10::ivalue::Tuple::create(std::move(outputs));
   }
+
+#ifndef NDEBUG
+  check_for_memory_leak(false);
+#endif
+
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
 }
@@ -526,6 +531,44 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   return results;
 }
 
+void StaticRuntime::check_for_memory_leak(bool output_returned) {
+  if (!opts_.cleanup_activations) {
+    return;
+  }
+
+  // check for inputs
+  for (size_t i = 0; i < inputs_.size(); i++) {
+    TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
+  }
+
+  std::unordered_set<const IValue*> output_ivalues(
+      outputs_.begin(), outputs_.end());
+  for (size_t n = 0; n < nodes_.size(); n++) {
+    auto& node = nodes_[n];
+    for (size_t i = 0; i < node.outputs().size(); i++) {
+      const IValue* ival = &node.Output(i);
+      const std::string error_msg = "Output " + c10::to_string(i) +
+          " of node " + c10::to_string(n) + " was not cleaned up";
+      if (output_ivalues.count(ival) == 0) {
+        // check for intermediates
+        if (!ival->isNone()) {
+          TORCH_CHECK(ival->isTensor(), error_msg);
+          const auto& t = ival->toTensor();
+          if (t.defined()) {
+            const auto* storage_impl = t.storage().unsafeGetStorageImpl();
+            TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+          }
+        }
+      } else {
+        // check for outputs
+        if (output_returned) {
+          TORCH_CHECK(ival->isNone(), error_msg);
+        }
+      }
+    }
+  }
+}
+
 MemoryPlanner::MemoryPlanner(
     StaticRuntime* runtime,
     std::unordered_map<Value*, std::vector<Value*>> should_share) {
@@ -667,7 +710,7 @@ void MemoryPlanner::allocate() {
     void* src = static_cast<void*>(start + offset);
 
     for (auto& impl : impls) {
-      impl->set_data_ptr(at::DataPtr(src, src, nullptr, impl->device()));
+      impl->set_data_ptr_noswap(at::DataPtr(src, src, nullptr, impl->device()));
       impl->set_nbytes(tensor_size);
     }
 
