@@ -17,7 +17,6 @@ class MacOsJob:
         ]
 
         full_job_name = "_".join(list(filter(None, full_job_name_list)))
-        print("full_job_name: ", full_job_name)
 
         # phase_name = "test" if self.is_test else "build"
         # full_job_name = "_".join(non_phase_parts + [extra_name])
