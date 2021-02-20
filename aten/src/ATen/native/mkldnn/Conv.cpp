@@ -107,6 +107,10 @@ Tensor mkldnn_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
   const ideep::tensor mkldnn_input = itensor_from_tensor(input);
   const ideep::tensor mkldnn_weight = itensor_from_tensor(weight);
   c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
@@ -148,6 +152,8 @@ static Tensor mkldnn_convolution_backward_input(
     IntArrayRef padding_l, IntArrayRef padding_r, IntArrayRef stride,
     IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
+  // for training case, grad_output can be cpu tensor or MKLDNN tensor,
+  // but weight and bias always cpu tensor.
   auto mkldnn_grad_output = itensor_from_tensor(grad_output);
   auto mkldnn_weight = itensor_from_tensor(weight);
 
@@ -175,6 +181,8 @@ static std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
     IntArrayRef padding_l, IntArrayRef padding_r, IntArrayRef stride,
     IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
+  // for training case, grad_output and input can be cpu tensor or MKLDNN tensor,
+  // but weight and bias are always cpu tensor.
   const ideep::tensor mkldnn_grad_output = itensor_from_tensor(grad_output);
   const ideep::tensor mkldnn_input = itensor_from_tensor(input);
 
@@ -236,8 +244,7 @@ std::tuple<Tensor,Tensor,Tensor> mkldnn_convolution_backward(
     IntArrayRef padding_l, IntArrayRef padding_r, IntArrayRef stride,
     IntArrayRef dilation, int64_t groups, std::array<bool, 3> output_mask)
 {
-  const Tensor& grad_output = grad_output_t.is_mkldnn() ?
-      grad_output_t : grad_output_t.contiguous();
+  Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous();
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
