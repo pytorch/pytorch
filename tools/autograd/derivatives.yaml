@@ -1005,6 +1005,10 @@
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
 
+- name: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
+  output_differentiability: [True, False]
+
 - name: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 

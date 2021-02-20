@@ -9,6 +9,10 @@
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 namespace at {
 namespace native {
@@ -266,17 +270,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
     at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
   };
 });
-REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    auto& in0_t = p_node->Input(0).toTensor();
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = create_empty_from(in0_t);
-    }
-    auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::native::tanh_out(out_t, in0_t);
-  };
-});
 
 // Split out into a function to appease MSVC's pre-processor
 SROperator aten_stack(Node* n) {
@@ -294,20 +287,6 @@ SROperator aten_stack(Node* n) {
 
 REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack);
 
-REGISTER_OPERATOR_FUNCTOR(
-    aten::sigmoid,
-    aten_sigmoid,
-    [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        auto& in0_t = p_node->Input(0).toTensor();
-        if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = create_empty_from(in0_t);
-        }
-        auto& out_t = p_node->Output(0).toTensor();
-        fastResizeToZero(out_t);
-        at::native::sigmoid_out(out_t, in0_t);
-      };
-    });
 REGISTER_OPERATOR_FUNCTOR(
     aten::leaky_relu,
     aten_leaky_relu,
@@ -335,30 +314,241 @@ REGISTER_OPERATOR_FUNCTOR(
         };
       }
     });
+
+namespace {
+
+// Use the width of an AVX-512 vector by default; this happens to work OK for
+// AVX2 as well. Some ops benefit from using multiple AVX ports, in which case
+// they are vectorized by twice this constant.  An exception is logit, since it
+// contains FP divide, which is single-ported.
+static constexpr int kVectorWidth = 16;
+
+#ifdef TORCH_ENABLE_LLVM
+
+struct TEWrapper {
+  tensorexpr::KernelArena ka;
+  tensorexpr::KernelScope ks;
+  std::unique_ptr<tensorexpr::LLVMCodeGen> cg;
+  TEWrapper() = default;
+  void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
+    cg = std::move(cg_);
+  }
+  template <typename... Ts>
+  void operator()(const Ts&... ts) {
+    std::vector<tensorexpr::CodeGen::CallArg> args(
+        {tensorexpr::CodeGen::CallArg(ts)...});
+    cg->call(args);
+  }
+
+  inline bool supports(const at::Tensor& t) {
+    return t.is_contiguous() && t.dtype().Match<float>();
+  }
+};
+
+void optimizePointwise(
+    tensorexpr::LoopNest* ln,
+    tensorexpr::Tensor* target,
+    int width) {
+  using namespace torch::jit::tensorexpr;
+  std::vector<For*> loops = ln->getLoopStmtsFor(target);
+  For *outer, *inner, *tail;
+  TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
+  ln->splitWithTail(loops[0], width, &outer, &inner, &tail);
+  ln->vectorize(inner);
+}
+
+std::shared_ptr<TEWrapper> wrapTECompute(
+    std::shared_ptr<TEWrapper> wrap,
+    tensorexpr::Placeholder& in,
+    tensorexpr::Tensor* out,
+    tensorexpr::VarHandle& dim,
+    int width = kVectorWidth) {
+  using namespace torch::jit::tensorexpr;
+  LoopNest ln({out});
+  optimizePointwise(&ln, out, width);
+  ln.prepareForCodegen();
+  Stmt* s = ln.root_stmt();
+  s = tensorexpr::IRSimplifier::simplify(s);
+  std::vector<CodeGen::BufferArg> args;
+  args.emplace_back(out);
+  args.emplace_back(in);
+  args.emplace_back(dim);
+  auto cg = std::make_unique<LLVMCodeGen>(s, args);
+  wrap->update(std::move(cg));
+  return wrap;
+};
+
+#else
+
+struct TEWrapper {
+  TEWrapper() = default;
+  template <typename... Ts>
+  void operator()(const Ts&... ts) {
+    DCHECK(0 && "Invalid call");
+  }
+
+  inline bool supports(const at::Tensor& t) {
+    return false;
+  }
+};
+
+std::shared_ptr<TEWrapper> wrapTECompute(
+    std::shared_ptr<TEWrapper> wrap,
+    tensorexpr::Placeholder& in,
+    tensorexpr::Tensor* out,
+    tensorexpr::VarHandle& dim,
+    int width = kVectorWidth) {
+  return wrap;
+};
+
+#endif
+
+} // namespace
+
+std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
+  using namespace torch::jit::tensorexpr;
+  auto wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  Placeholder A("A", kFloat, {N});
+  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+    auto A_elem = [&]() {
+      if (!clamp) {
+        return A.load(i);
+      } else {
+        auto elem = A.load(i);
+        auto min = FloatImm::make(*clamp);
+        auto max = FloatImm::make(1.0f - *clamp);
+        elem = CompareSelect::make(elem, min, min, elem, kLT);
+        return CompareSelect::make(elem, max, max, elem, kGT);
+      }
+    }();
+    return log_vml(A_elem / (FloatImm::make(1.0f) - A_elem));
+  });
+  return wrapTECompute(wrap, A, B, N);
+}
+
+std::shared_ptr<TEWrapper> createRelu() {
+  using namespace torch::jit::tensorexpr;
+  auto wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  Placeholder A("A", kFloat, {N});
+  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+    auto zero = FloatImm::make(0.f);
+    auto a = A.load(i);
+    return ifThenElse(a < zero, zero, a);
+  });
+  return wrapTECompute(wrap, A, B, N);
+}
+
+std::shared_ptr<TEWrapper> createTanh() {
+  using namespace torch::jit::tensorexpr;
+  auto wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  Placeholder A("A", kFloat, {N});
+  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+    auto a = A.load(i);
+    return fast_tanh(a);
+  });
+  return wrapTECompute(wrap, A, B, N);
+}
+
+std::shared_ptr<TEWrapper> createSigmoid() {
+  using namespace torch::jit::tensorexpr;
+  auto wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  Placeholder A("A", kFloat, {N});
+  Tensor* B =
+      Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
+  // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
+  // (Sleef_expf8).
+  constexpr int kSleefWidth = 8;
+  return wrapTECompute(wrap, A, B, N, kSleefWidth);
+}
+
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
+  auto te = createRelu();
+  return [te](ProcessedNode* p_node) {
     auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::native::threshold_out(out_t, in0_t, 0, 0);
+    if (!te->supports(in0_t)) {
+      fastResizeToZero(out_t);
+      at::native::threshold_out(out_t, in0_t, 0, 0);
+    } else {
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+    }
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
+  auto te = createTanh();
+  return [te](ProcessedNode* p_node) {
+    auto& in0_t = p_node->Input(0).toTensor();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    if (!te->supports(in0_t)) {
+      out_t.resize_({0});
+      at::native::tanh_out(out_t, in0_t);
+    } else {
+      out_t.resize_as_(in0_t);
+      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+    }
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::sigmoid,
+    aten_sigmoid,
+    [](Node* n) -> SROperator {
+      auto te = createSigmoid();
+      return [te](ProcessedNode* p_node) {
+        auto& in0_t = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = create_empty_from(in0_t);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        if (!te->supports(in0_t)) {
+          out_t.resize_({0});
+          at::native::sigmoid_out(out_t, in0_t);
+        } else {
+          out_t.resize_as_(in0_t);
+          (*te)(
+              out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+        }
+      };
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
+  c10::optional<float> clamp;
+  if (n->inputs().size() > 1) {
+    TORCH_CHECK(n->inputs().at(1)->node()->kind() == prim::Constant);
+    clamp = toIValue(n->inputs().at(1))->toDouble();
+  }
+  auto te = createLogit(clamp);
+  return [te](ProcessedNode* p_node) {
     auto& in0_t = p_node->Input(0).toTensor();
-    double in1_d =
-        p_node->inputs().size() > 1 ? p_node->Input(1).toDouble() : -1.0;
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::native::logit_out(out_t, in0_t, in1_d);
+    if (!te->supports(in0_t)) {
+      auto in0_t = p_node->Input(0).toTensor();
+      double in1_d =
+          p_node->inputs().size() > 1 ? p_node->Input(1).toDouble() : -1.0;
+      fastResizeToZero(out_t);
+      at::native::logit_out(out_t, in0_t, in1_d);
+    } else {
+      out_t.resize_as_(in0_t);
+      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+    }
   };
 });
+
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     auto& in0_t = p_node->Input(0).toTensor();
