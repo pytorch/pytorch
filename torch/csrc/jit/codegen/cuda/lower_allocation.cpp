@@ -47,7 +47,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
     size_t fl_idx_next = 0;
 
     for (auto fl : for_loops) {
-      if (alloc_pos == fuser_tv->getThisComputeAtAxis()) {
+      if (alloc_pos == fuser_tv->getComputeAtPosition()) {
         break;
       }
 

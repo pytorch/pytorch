@@ -191,7 +191,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
 
   auto loops_it = loops.begin();
   // Look at each axis individually in out's domain
-  for (int64_t tv_i = 0; tv_i < (int64_t)tv->getThisComputeAtAxis(); tv_i++) {
+  for (int64_t tv_i = 0; tv_i < (int64_t)tv->getComputeAtPosition(); tv_i++) {
     // Grab the axis ID
 
     auto local_id = tv->axis(tv_i);
@@ -223,7 +223,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
     ++loops_it;
   }
 
-  return {alloc_loop, (int64_t)tv->getThisComputeAtAxis()};
+  return {alloc_loop, (int64_t)tv->getComputeAtPosition()};
 }
 
 std::pair<kir::ForLoop*, int64_t> getAllocPoint(

@@ -33,67 +33,22 @@ class ComputeAtData {
   // an invalid compute_at that would require tensor replication.
   void setPassPosition(unsigned int pos);
 
-  // Returns if new postion is greater or equal to previous seen, if
-  bool shouldSetComputeAt(unsigned int pos) const {
-    return pos > original_compute_at_position &&
-        pos > new_compute_at_position && pos >= current_traversal_position;
-  }
-
-  // Will return new_compute_at_position, after making sure we cleared out the
-  // last pass
-  unsigned int getNewPosition() const;
-
-  // Will make sure we haven't invalidated previous computeAt calls by
-  // checking that any axes previously in computeAt are still there.
-  void validateNewComputeAt() const;
-
-  // Did we ever compute a value for this TV?
-  bool touched() const {
-    return touched_;
-  }
-
-  TensorDomain* getOriginalDomain() const {
-    return original_domain_;
-  }
-
-  // If we set computeAt, save the domain so we can reset it after traversal.
-  // Traversal state can deviate from the domain we will want to save after the
-  // entire computeAt pass.
-  void setComputeAtDomain(TensorDomain* td);
-
-  // Return domain set in setComputeAtDomain
-  TensorDomain* getComputeAtDomain() const {
-    return new_compute_at_domain_;
+  unsigned int getPassPosition() {
+    return current_traversal_position;
   }
 
  private:
-  // Was the position ever modified?
-  bool touched_ = false;
-
-  // Hold onto the provided TensorView
+  // Hold onto the provided TensorView, only used for error message
   TensorView* tv_ref_ = nullptr;
-
-  // Did this tv have computeAt set before calling this computeAt pass?
-  bool original_has_compute_at_ = false;
 
   // What was the computeAt position before the computeAt pass started
   unsigned int original_compute_at_position = 0;
-
-  // and what was the previous domain that position was set relative to.
-  TensorDomain* original_domain_ = nullptr;
 
   // Position we can update during a traversal
   unsigned int current_traversal_position = 0;
 
   // Did this traversal set a position or not yet
   bool current_traversal_position_set = false;
-
-  // Position to update after a traversal
-  unsigned int new_compute_at_position = 0;
-
-  // Domain when we actually set computeAt, will set back to this after the
-  // pass.
-  TensorDomain* new_compute_at_domain_;
 };
 
 class ComputeAt {
@@ -120,18 +75,18 @@ class ComputeAt {
   ComputeAtRootDomainMap root_map_;
 
   // Runs replayPasC and sets producer computeAt settings. Returns
-  // producer_compute_at_axis.
+  // producer_compute_at_pos.
   unsigned int backwardComputeAt_impl(
       TensorView* producer,
       TensorView* consumer,
-      unsigned int consumer_compute_at_axis);
+      unsigned int consumer_compute_at_pos);
 
   // Runs replayCasP and sets producer computeAt settings. Returns
-  // consumer_compute_at_axis.
+  // consumer_compute_at_pos.
   unsigned int forwardComputeAt_impl(
       TensorView* producer,
       TensorView* consumer,
-      unsigned int producer_compute_at_axis);
+      unsigned int producer_compute_at_pos);
 
   // Look through all the use chains of producer. Check if there's a single
   // consumer for all chains at or after the consumer specified in the computeAt
@@ -148,9 +103,6 @@ class ComputeAt {
 
   // Run the computeAt pass
   void runPass();
-
-  // Set outputs relative to eachother if there is not a common consumer
-  void setupOutputs();
 
   // Common consumer if it exists
   TensorView* common_consumer_ = nullptr;

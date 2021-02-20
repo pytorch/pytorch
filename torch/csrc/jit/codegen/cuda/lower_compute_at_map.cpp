@@ -224,10 +224,6 @@ void ComputeAtMap::build() {
     auto tv_outputs = ir_utils::filterByType<TensorView>(expr->outputs());
     for (auto c_tv : tv_outputs) {
       consumer_tvs.push_back(c_tv);
-      // Iteration domains that mapped from producers into the consumer that
-      // were to the left of respective producer->getThisComputeAtPos in the
-      // producers
-      std::unordered_set<IterDomain*> mapped_c_ids_left_of_ca;
 
       auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
 
@@ -239,16 +235,10 @@ void ComputeAtMap::build() {
         // Mark axes outside compute at point for parallel type tracking
         std::unordered_set<IterDomain*> right_of_ca_point;
         if (mapping_mode_ == MappingMode::PARALLEL &&
-            p_tv->getThisComputeAtAxis() < p_tv->nDims()) {
+            p_tv->getComputeAtPosition() < p_tv->nDims()) {
           right_of_ca_point.insert(
-              p_tv->domain()->domain().begin() + p_tv->getThisComputeAtAxis(),
+              p_tv->domain()->domain().begin() + p_tv->getComputeAtPosition(),
               p_tv->domain()->domain().end());
-        }
-        // if this is a producer tv, (i.e. not a terminating output tv), then
-        // produce at is the same as this compute at position. Loop mode does
-        // its own thing, see below in this function.
-        if (mapping_mode_ != MappingMode::LOOP) {
-          produce_at_map_[p_tv] = p_tv->getThisComputeAtAxis();
         }
 
         auto c2p_root_map =
@@ -276,7 +266,7 @@ void ComputeAtMap::build() {
         // changed computeAt of TensorViews to always have a this computeAt
         // position even for terminating outputs
         std::unordered_set<IterDomain*> within_producer_compute_at;
-        for (unsigned int p_i = 0; p_i < p_tv->getThisComputeAtAxis(); p_i++) {
+        for (unsigned int p_i = 0; p_i < p_tv->getComputeAtPosition(); p_i++) {
           within_producer_compute_at.insert(p_tv->axis((int)p_i));
         }
 
@@ -292,32 +282,7 @@ void ComputeAtMap::build() {
           }
           // Map the id's together
           mapIds(p_id, c_id);
-
-          if (within_producer_compute_at.find(p_id) !=
-              within_producer_compute_at.end()) {
-            mapped_c_ids_left_of_ca.emplace(c_id);
-          }
         }
-      }
-
-      // For expression sorting we want to know the maximum iteration domain
-      // that we might have to map with producers. Consider a simple consumer
-      // with this compute at position as 1, but a producer who's compute at
-      // position maps to the consumers position 2, we need to exprSort starting
-      // with both positions in the consumer available to map to neighbors. We
-      // produce this special produce_at_map in loop mode. Pos is like compute
-      // at position, one above last thing that mapped.
-      unsigned int max_mapped_id_pos = 0;
-      bool terminating_output = c_tv->isFusionOutput() && c_tv->uses().empty();
-      if (terminating_output || mapping_mode_ == MappingMode::LOOP) {
-        for (unsigned int c_i = 0; c_i < (unsigned int)c_tv->nDims(); c_i++) {
-          if (mapped_c_ids_left_of_ca.find(c_tv->axis((int)c_i)) !=
-              mapped_c_ids_left_of_ca.end()) {
-            max_mapped_id_pos = c_i + 1;
-          }
-        }
-        produce_at_map_[c_tv] =
-            std::max(max_mapped_id_pos, c_tv->getThisComputeAtAxis());
       }
     }
   }
@@ -503,12 +468,6 @@ IterDomain* ComputeAtMap::toFusion(kir::IterDomain* kir) const {
 
 std::string ComputeAtMap::toString() {
   std::stringstream ss;
-
-  ss << "produce_at_map_{\n";
-  for (const auto& entry : produce_at_map_) {
-    ss << "  " << entry.first << " -> " << entry.second << "\n";
-  }
-  ss << "} end produce_at_map_\n";
 
   // We may not have cleaned up non active sets as this is intended for debug,
   // so first grab unique entries and iterate over them.

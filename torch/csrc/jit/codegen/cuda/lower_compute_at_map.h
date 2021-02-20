@@ -47,16 +47,6 @@ class TORCH_CUDA_CU_API ComputeAtMap {
 
   void build();
 
-  // Returns the position in tv->domain() that the buffer should be computed at
-  unsigned int producedAt(TensorView* tv) const {
-    auto produce_at_it = produce_at_map_.find(tv);
-    TORCH_INTERNAL_ASSERT(
-        produce_at_it != produce_at_map_.end(),
-        "Could not find a produced at entry for ",
-        tv);
-    return produce_at_it->second;
-  }
-
   //! Returns if id0 and id1 are mapped to eachother, meaning they represent the
   //! same loop nest in the lowered code
   bool areMapped(IterDomain* id0, IterDomain* id1) const;

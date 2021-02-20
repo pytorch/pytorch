@@ -487,11 +487,10 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
   group->exprs().push_back(expr);
   if (ir_utils::isTVOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
-    // Loop map produces a produce_at_map used specifically for expr sorting
-    // when we generate it. Produce at may be a misnomer, as it really marks the
-    // inner most loop that is shared with any producers of a tv.
-    for (size_t tv_i = 0;
-         tv_i < (size_t)GpuLower::current()->caLoopMap().producedAt(out_tv);
+    // Grab all id's that are shared with other tensors.
+    for (size_t tv_i = 0; tv_i <
+         std::max(out_tv->getMaxProducerPosition(),
+                  out_tv->getComputeAtPosition());
          tv_i++) {
       group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
     }
