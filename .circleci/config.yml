@@ -2039,6 +2039,10 @@ jobs:
 ##############################################################################
 # Workflows
 ##############################################################################
+full_job_name:  pytorch_macos_10_15_py3_build
+full_job_name:  pytorch_macos_10_13_py3_build
+full_job_name:  pytorch_macos_10_13_py3_test
+full_job_name:  pytorch_macos_10_13_py3_lite_interpreter_build_test
 workflows:
   binary_builds:
     jobs:
@@ -7232,8 +7236,8 @@ workflows:
           name: pytorch_macos_10_13_py3_test
           requires:
             - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_py3_test_build_lite_interpreter:
-          name: pytorch_macos_10_13_py3_test_build_lite_interpreter
+      - pytorch_macos_10_13_py3_lite_interpreter_build_test:
+          name: pytorch_macos_10_13_py3_lite_interpreter_build_test
           requires:
             - pytorch_macos_10_13_py3_build
       - pytorch_linux_build:

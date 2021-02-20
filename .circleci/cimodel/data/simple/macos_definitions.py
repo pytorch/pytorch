@@ -10,16 +10,16 @@ class MacOsJob:
     def gen_tree(self):
         non_phase_parts = ["pytorch", "macos", self.os_version, "py3"]
 
-        phase_name = "test" if self.is_test else "build"
-        extra_name = phase_name
-        extra_name = "_".join([phase_name] + list(self.extra_props.keys()))
-        extended_name = [
-            'build' if self.is_build else '',
-            'test' if self.is_build else '',
-            list(self.extra_props.keys())
+        extra_name_list = [name for name, exist in self.extra_props.items() if exist]
+        full_job_name_list = non_phase_parts + extra_name_list + [
+            'build' if self.is_build else None,
+            'test' if self.is_test else None,
         ]
-        full_job_name = "_".join(extended_name)
 
+        full_job_name = "_".join(list(filter(None, full_job_name_list)))
+        print("full_job_name: ", full_job_name)
+
+        # phase_name = "test" if self.is_test else "build"
         # full_job_name = "_".join(non_phase_parts + [extra_name])
 
         test_build_dependency = "_".join(non_phase_parts + ["build"])
@@ -37,19 +37,19 @@ class MacOsJob:
 
 
 WORKFLOW_DATA = [
-    MacOsJob("10_15", is_build=miniutils.quote(str(int(True))),
-    MacOsJob("10_13", is_build=miniutils.quote(str(int(True))),
+    MacOsJob("10_15", is_build=True),
+    MacOsJob("10_13", is_build=True),
     MacOsJob(
         "10_13",
-        is_build=miniutils.quote(str(int(False))),
-        is_test=miniutils.quote(str(int(True))),
+        is_build=False,
+        is_test=True,
     ),
     MacOsJob(
         "10_13",
-        is_build=miniutils.quote(str(int(True))),
-        is_test=miniutils.quote(str(int(True))),
+        is_build=True,
+        is_test=True,
         extra_props={
-            "build_lite_interpreter": miniutils.quote(str(int(True))),
+            "lite_interpreter": True,
         },
     )
 ]

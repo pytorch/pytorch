@@ -204,7 +204,7 @@
       - store_test_results:
           path: test/test-reports
 
-  pytorch_macos_10_13_py3_test_build_lite_interpreter:
+  pytorch_macos_10_13_py3_lite_interpreter_build_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
