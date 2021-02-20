@@ -1,8 +1,9 @@
 import cimodel.lib.miniutils as miniutils
 
 class MacOsJob:
-    def __init__(self, os_version, is_test=False, extra_props=None):
+    def __init__(self, os_version, is_build=False, is_test=False, extra_props={}):
         self.os_version = os_version
+        self.is_build = is_build
         self.is_test = is_test
         self.extra_props = extra_props
 
@@ -10,10 +11,16 @@ class MacOsJob:
         non_phase_parts = ["pytorch", "macos", self.os_version, "py3"]
 
         phase_name = "test" if self.is_test else "build"
+        extra_name = phase_name
+        extra_name = "_".join([phase_name] + list(self.extra_props.keys()))
+        extended_name = [
+            'build' if self.is_build else '',
+            'test' if self.is_build else '',
+            list(self.extra_props.keys())
+        ]
+        full_job_name = "_".join(extended_name)
 
-        full_job_name = "_".join(non_phase_parts + [phase_name])
-        if self.extra_props:
-            full_job_name = "_".join([full_job_name] + list(self.extra_props.keys()))
+        # full_job_name = "_".join(non_phase_parts + [extra_name])
 
         test_build_dependency = "_".join(non_phase_parts + ["build"])
         extra_dependencies = [test_build_dependency] if self.is_test else []
@@ -30,13 +37,20 @@ class MacOsJob:
 
 
 WORKFLOW_DATA = [
-    MacOsJob("10_15"),
-    MacOsJob("10_13"),
-    MacOsJob("10_13", True),
+    MacOsJob("10_15", is_build=miniutils.quote(str(int(True))),
+    MacOsJob("10_13", is_build=miniutils.quote(str(int(True))),
     MacOsJob(
         "10_13",
-        True,
-        extra_props={"build_lite_interpreter": miniutils.quote(str(int(True)))}
+        is_build=miniutils.quote(str(int(False))),
+        is_test=miniutils.quote(str(int(True))),
+    ),
+    MacOsJob(
+        "10_13",
+        is_build=miniutils.quote(str(int(True))),
+        is_test=miniutils.quote(str(int(True))),
+        extra_props={
+            "build_lite_interpreter": miniutils.quote(str(int(True))),
+        },
     )
 ]
 
