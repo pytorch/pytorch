@@ -129,8 +129,17 @@ class Graph:
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
-        self._owners: int = 1 if owning_module else 0
-        self._gm = owning_module
+        self._owners = 0
+        self.owning_module = owning_module
+
+    @property
+    def owning_module(self):
+        return self._owning_module
+
+    @owning_module.setter
+    def owning_module(self, mod: "GraphModule"):    # type: ignore[name-defined]
+        self._owning_module = mod if not self._owners else None
+        self._owners += 1
 
     @property
     def nodes(self) -> _node_list:
@@ -344,7 +353,7 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
         """
-        if self._gm and not self._gm.has_submodule(qualified_name):
+        if self._owning_module and not self._owning_module.has_submodule(qualified_name):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
                           "GraphModule! Call "
@@ -387,7 +396,7 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
-        if self._gm and not self._gm.has_submodule(module_name):
+        if self._owning_module and not self._owning_module.has_submodule(module_name):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
                           "GraphModule! Call "
@@ -764,12 +773,12 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             seen_names.add(node.name)
 
         # Check targets are legit
-        if self._gm:
+        if self._owning_module:
             for node in self.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
-                    m_itr = self._gm
+                    m_itr = self._owning_module
                     for i, atom in enumerate(target_atoms):
                         m_itr = getattr(m_itr, atom, None)
                         if m_itr is None:

@@ -1825,18 +1825,17 @@ class TestFX(JitTestCase):
 
             return True
 
-
         # Test that we added the "dropout" submodule
-        self.assertEqual(module_exists(a, "net_b.net_c.dropout"), True)
+        self.assertTrue(module_exists(a, "net_b.net_c.dropout"))
 
         # Test `has_submodule` with an added submodule
-        self.assertEqual(a.has_submodule("net_b.net_c.dropout"), True)
+        self.assertTrue(a.has_submodule("net_b.net_c.dropout"))
 
         # Test that the "conv" submodule is still there
-        self.assertEqual(module_exists(a, "net_b.net_c.conv"), True)
+        self.assertTrue(module_exists(a, "net_b.net_c.conv"))
 
         # Test `has_submodule` with an original module
-        self.assertEqual(a.has_submodule("net_b.net_c.conv"), True)
+        self.assertTrue(a.has_submodule("net_b.net_c.conv"))
 
         # Test that the "conv" node is NOT still there
         conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"]
@@ -1845,11 +1844,10 @@ class TestFX(JitTestCase):
         a.delete_submodule("net_b.net_c.conv")
 
         # Test that the "conv" submodule is now gone
-        self.assertEqual(hasattr(getattr(getattr(a, "net_b"), "net_c"), "conv"),    # noqa: B009
-                         False)
+        self.assertFalse(hasattr(getattr(getattr(a, "net_b"), "net_c"), "conv"))    # noqa: B009
 
         # Test `has_submodule` with a deleted submodule
-        self.assertEqual(a.has_submodule("net_b.net_c.conv"), False)
+        self.assertFalse(a.has_submodule("net_b.net_c.conv"))
 
         a.graph.lint()
 
@@ -1863,10 +1861,10 @@ class TestFX(JitTestCase):
         a.delete_all_unused_submodules()
 
         # Test that all the unused submodules are gone
-        self.assertEqual(module_exists(a, "net_b.embedding"), False)
-        self.assertEqual(module_exists(a, "net_b.net_c.embedding"), False)
-        self.assertEqual(module_exists(a, "net_b.net_c.rnn"), False)
-        self.assertEqual(module_exists(a, "batch_norm_2d"), False)
+        self.assertFalse(module_exists(a, "net_b.embedding"))
+        self.assertFalse(module_exists(a, "net_b.net_c.embedding"))
+        self.assertFalse(module_exists(a, "net_b.net_c.rnn"))
+        self.assertFalse(module_exists(a, "batch_norm_2d"))
 
         a.graph.lint()
 

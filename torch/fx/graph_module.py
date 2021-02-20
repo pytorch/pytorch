@@ -202,8 +202,7 @@ class GraphModule(torch.nn.Module):
         corresponds to ``g``
         """
         self._graph = g
-        g._gm = self if not g._owners else None
-        g._owners += 1
+        g.owning_module = self
         self.recompile()
 
     def to_folder(self, folder: Union[str, os.PathLike], module_name : str = "FxModule"):
@@ -269,7 +268,7 @@ class {module_name}(torch.nn.Module):
     def has_submodule(self, target: str) -> bool:
         """
         Returns whether or not this GraphModule contains the submodule
-        given by ``str``.
+        given by ``target``.
 
         For example, let's say you have an ``nn.Module`` ``A`` that
         looks like this:
@@ -345,7 +344,7 @@ class {module_name}(torch.nn.Module):
 
         for item in prefix:
 
-            submod = getattr(self, item, None)
+            submod = getattr(mod, item, None)
 
             if submod is None:
                 submod = torch.nn.Module()
@@ -356,7 +355,7 @@ class {module_name}(torch.nn.Module):
 
             mod = submod
 
-        setattr(self, field, m)
+        setattr(mod, field, m)
         return True
 
     def delete_submodule(self, target: str) -> bool:
@@ -377,24 +376,28 @@ class {module_name}(torch.nn.Module):
                 means that the ``target`` was not a valid reference to
                 a submodule.
         """
-        def find_and_delete(o: Any, target: str) -> bool:
-            atoms = target.split(".", 1)
-            prefix, path = atoms[0], atoms[1] if len(atoms) > 1 else None
+        atoms = target.split(".")
+        path, target_submod = atoms[:-1], atoms[-1]
 
-            if not hasattr(o, prefix):
+        # Get the parent module
+        for item in path:
+
+            if not hasattr(self, item):
                 return False
 
-            # If the submodule we're looking for is on this layer
-            if not path:
-                if not isinstance(getattr(o, prefix), torch.nn.Module):
-                    return False
+            self = getattr(self, item)
 
-                delattr(o, prefix)
-                return True
+            if not isinstance(self, torch.nn.Module):
+                return False
 
-            return find_and_delete(getattr(o, prefix), path)
+        if not hasattr(self, target_submod):
+            return False
 
-        return find_and_delete(self, target)
+        if not isinstance(getattr(self, target_submod), torch.nn.Module):
+            return False
+
+        delattr(self, target_submod)
+        return True
 
     def delete_all_unused_submodules(self) -> None:
         """
@@ -410,14 +413,31 @@ class {module_name}(torch.nn.Module):
         This method can be called to clean up a GraphModule without
         manually calling ``delete_submodule`` on each unused submodule.
         """
-        # Collect all the call_module and get_attr targets as well as 
-        # the names of their intermediary modules. For example, if we 
-        # have the target `foo.bar.baz`, we'll add `foo`, `foo.bar`,
-        # and `foo.bar.baz` to the list
-        used: List[str] = [name for node in self.graph.nodes 
-                           if node.op == "call_module" or node.op == "get_attr"
-                           for name in itertools.accumulate(node.target.split("."),
-                                                            lambda x, y: x + "." + y if y else x)]
+        used: List[str] = []
+
+        for node in self.graph.nodes:
+
+            if node.op == "call_module" or node.op == "get_attr":
+
+                # A list of strings representing the different parts
+                # of the path. For exmaple, `foo.bar.baz` gives us
+                # ["foo", "bar", "baz"]
+                fullpath = node.target.split(".")
+
+                # If we're looking at multiple parts of a path, join
+                # join them with a dot. Otherwise, return that single
+                # element without doing anything to it.
+                def join_fn(x: str, y: str) -> str:
+                    if y:
+                        return x + "." + y
+                    return x
+
+                # Progressively collect all the names of intermediate
+                # modules. For example, if we have the target 
+                # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and 
+                # `foo.bar.baz` to the list. 
+                for path in itertools.accumulate(fullpath, join_fn):
+                    used.append(path)
 
         to_delete = [name for name, _ in self.named_modules()
                      if name not in used]
