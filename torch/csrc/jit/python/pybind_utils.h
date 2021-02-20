@@ -720,7 +720,6 @@ inline py::object toPyObject(IValue ivalue) {
     if (obj->name().find("__torch__.torch.classes") == 0) {
       return py::cast(Object(obj));
     }
-
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass = getScriptedClassOrError(obj->name());

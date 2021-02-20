@@ -138,27 +138,30 @@ class TestTorchbind(JitTestCase):
             # setX method intentionally adds 2 to x
             fooGetterSetter.x = old + 4
             new = fooGetterSetter.x
-            return fooGetterSetter, old, new
-        scripted = torch.jit.script(foo_getter_setter_full)
-        out, old, new = scripted()
-        self.assertEqual(old, 7)
-        self.assertEqual(new, 15)
-        # check if we can use scripted Torchbind Class
-        self.assertEqual(out.x, 15)
-        out.x = 20
-        self.assertEqual(out.x, 24)
+            return old, new
+        self.checkScript(foo_getter_setter_full, ())
 
+        def foo_getter_setter_script_check_outside():
+            fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
+            return fooGetterSetter
+        scripted_foo_getter_setter = torch.jit.script(foo_getter_setter_script_check_outside)
+        value = scripted_foo_getter_setter()
+        self.assertEqual(value.x, 7)
+        value.x = 9
+        self.assertEqual(value.x, 13)
+
+        fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(1, 2)
+        self.assertEqual(fooGetterSetter.x, 3)
+        fooGetterSetter.x = 5
+        self.assertEqual(fooGetterSetter.x, 9)
 
         def foo_getter_setter_lambda():
             foo = torch.classes._TorchScriptTesting._FooGetterSetterLambda(5)
             old = foo.x
             foo.x = old + 4
             new = foo.x
-            return foo, old, new
-        scripted = torch.jit.script(foo_getter_setter_lambda)
-        out, x, y = scripted()
-        self.assertEqual(x, 5)
-        self.assertEqual(y, 9)
+            return old, new
+        self.checkScript(foo_getter_setter_lambda, ())
 
     def test_torchbind_def_property_just_getter(self):
         def foo_just_getter():
@@ -168,7 +171,7 @@ class TestTorchbind(JitTestCase):
         scripted = torch.jit.script(foo_just_getter)
         out, result = scripted()
         self.assertEqual(result, 10)
-        with self.assertRaisesRegex(AttributeError, 'property y doesn\'t have a setter method'):
+        with self.assertRaisesRegex(RuntimeError, 'Can\'t set value to \'y\' because setter function is not given.'):
             out.y = 5
 
         def foo_not_setter():
@@ -176,7 +179,7 @@ class TestTorchbind(JitTestCase):
             old = fooGetterSetter.y
             fooGetterSetter.y = old + 4
             # getY method intentionally adds 4 to x
-            return fooGetterSetter, fooGetterSetter.y
+            return fooGetterSetter.y
         with self.assertRaisesRegex(RuntimeError, 'Tried to set read-only attribute: y'):
             scripted = torch.jit.script(foo_not_setter)
 
@@ -185,11 +188,8 @@ class TestTorchbind(JitTestCase):
             fooReadWrite = torch.classes._TorchScriptTesting._FooReadWrite(5, 6)
             old = fooReadWrite.x
             fooReadWrite.x = old + 4
-            return fooReadWrite, fooReadWrite.x, fooReadWrite.y
-        scripted = torch.jit.script(foo_readwrite)
-        out, x, y = scripted()
-        self.assertEqual(x, 9)
-        self.assertEqual(y, 6)
+            return fooReadWrite.x, fooReadWrite.y
+        self.checkScript(foo_readwrite, ())
 
         def foo_readwrite_error():
             fooReadWrite = torch.classes._TorchScriptTesting._FooReadWrite(5, 6)

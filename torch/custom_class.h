@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/stack.h>
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
@@ -10,9 +11,8 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
-#include <torch/custom_class_detail.h>
 #include <torch/library.h>
-#include <cstddef>
+#include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
 

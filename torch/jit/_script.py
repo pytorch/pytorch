@@ -72,6 +72,7 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
     torch.jit._state._add_script_class(obj, qualified_name)
 
+
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
 # module with versions that get/set properties inside of Module.
 # This allows us to reuse most of nn.Module while still storing the
@@ -934,6 +935,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
+
     # No-op for modules and functions that are already scripted
     if isinstance(obj, ScriptModule):
         return obj
@@ -996,6 +998,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         fn.__doc__ = obj.__doc__
         _set_jit_function_cache(obj, fn)
         return fn
+
 
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle

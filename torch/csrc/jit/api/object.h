@@ -2,10 +2,17 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/method.h>
 
 namespace torch {
 namespace jit {
+
+struct ObjectProperty {
+  std::string name;
+  Method getter_func;
+  c10::optional<Method> setter_func;
+};
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -103,31 +110,32 @@ struct TORCH_API Object {
   }
 
   // Used as a utility function to find a property
-  using Property = std::tuple<std::string, Method, c10::optional<Method>>;
-  const std::vector<Property> get_properties() const {
-    return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
-      c10::optional<Method> setter = c10::nullopt;
-      if (prop.setter) {
-        setter = Method(_ivalue(), prop.setter);
-      }
-      return std::make_tuple(prop.name, Method(_ivalue(), prop.getter), setter);
-    });
+  const std::vector<ObjectProperty> get_properties() const {
+    return c10::fmap(
+        type()->properties(), [&](const ClassType::Property& prop) {
+          c10::optional<Method> setter = c10::nullopt;
+          if (prop.setter) {
+            setter = Method(_ivalue(), prop.setter);
+          }
+          return ObjectProperty{
+              prop.name, Method(_ivalue(), prop.getter), setter};
+        });
   }
 
   bool has_property(const std::string& name) const {
     auto props = get_properties();
     for (auto prop : props) {
-      if (std::get<0>(prop) == name) {
+      if (prop.name == name) {
         return true;
       }
     }
     return false;
   }
 
-  const Property get_property(const std::string& name) const {
+  const ObjectProperty get_property(const std::string& name) const {
     auto props = get_properties();
     for (auto prop : props) {
-      if (std::get<0>(prop) == name) {
+      if (prop.name == name) {
         return prop;
       }
     }

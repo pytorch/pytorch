@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/python/script_init.h>
 
+#include <python3.8/descrobject.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -788,13 +789,9 @@ void initJitScriptBindings(PyObject* module) {
                   }
                   if (self.has_property(name)) {
                     auto prop = self.get_property(name);
-                    auto getter_func = py::cast(std::get<1>(prop));
-                    auto setter_func = py::cast(std::get<2>(prop));
-                    py::object property_func =
-                        py::module::import("builtins").attr("property");
-                    py::object property =
-                        property_func(getter_func, setter_func);
-                    return property.attr("fget")();
+                    auto getter_func = py::cast(prop.getter_func);
+                    auto setter_func = py::cast(prop.setter_func);
+                    return getter_func();
                   }
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
@@ -807,13 +804,16 @@ void initJitScriptBindings(PyObject* module) {
                 try {
                   if (self.has_property(name)) {
                     auto prop = self.get_property(name);
-                    auto getter_func = py::cast(std::get<1>(prop));
-                    auto setter_func = py::cast(std::get<2>(prop));
-                    py::object property_func =
-                        py::module::import("builtins").attr("property");
-                    py::object property =
-                        property_func(getter_func, setter_func);
-                    property.attr("fset")(value);
+                    auto getter_func = py::cast(prop.getter_func);
+                    if (!prop.setter_func.has_value()) {
+                      TORCH_CHECK(
+                          false,
+                          "Can't set value to '",
+                          name,
+                          "' because setter function is not given.");
+                    }
+                    auto setter_func = py::cast(prop.setter_func);
+                    setter_func(value);
                     return;
                   }
 
@@ -830,9 +830,6 @@ void initJitScriptBindings(PyObject* module) {
                   self.setattr(name, ivalue);
                 } catch (const ObjectAttributeError& err) {
                   throw AttributeError("%s", err.what());
-                } catch (const std::runtime_error& err) {
-                  throw AttributeError(
-                      "property %s doesn't have a setter method", name.c_str());
                 }
               })
           .def(

@@ -276,6 +276,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::sinh:
     case aten::atan:
     case aten::tanh:
+    case aten::hardtanh:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -1274,6 +1275,18 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
         return tanh(promoteIntegerToDefaultType(a));
       });
+    } break;
+
+    case aten::hardtanh: {
+      return computeThreeOperand(
+          "aten_hardtanh",
+          v,
+          [](const ExprHandle& a,
+             const ExprHandle& min_val,
+             const ExprHandle& max_val) {
+            auto mm = CompareSelect::make(a, min_val, min_val, a, kLT);
+            return CompareSelect::make(mm, max_val, max_val, mm, kGT);
+          });
     } break;
 
     case aten::sqrt: {
