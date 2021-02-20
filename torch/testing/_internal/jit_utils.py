@@ -114,6 +114,21 @@ class JitTestCase(JitCommonTestCase):
             del self.stringio
             sys.stdout = self.sys_stdout
 
+    class capture_stderr(list):
+        """
+        Replace sys.stderr with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stderr = sys.stderr
+            self.stringio = StringIO()
+            sys.stderr = self.stringio
+            return self
+
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stderr = self.sys_stderr
+
     def setHooks(self):
         torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
 
@@ -148,7 +163,7 @@ class JitTestCase(JitCommonTestCase):
                 elif node.kind() == 'prim::DifferentiableGraph':
                     get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
                 elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or 
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or
                                                     node.inputs().__next__().node().kind() == 'prim::RequiresGradCheck'):
                     get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
                 else:
@@ -647,10 +662,12 @@ def _trace(*args, **kwargs):
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
         torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
         try:
             fn(*args, **kwargs)
         finally:
             torch._C._jit_override_can_fuse_on_cpu(False)
+            torch._C._jit_set_te_must_use_llvm_cpu(True)
     return wrapper
 
 

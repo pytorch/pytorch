@@ -164,7 +164,7 @@ def gen_build_env_list(smoke):
             c.find_prop("gpu"),
             c.find_prop("package_format"),
             [c.find_prop("pyver")],
-            c.find_prop("smoke"),
+            c.find_prop("smoke") and not (c.find_prop("os_name") == "macos_arm64"),  # don't test arm64
             c.find_prop("libtorch_variant"),
             c.find_prop("gcc_config_variant"),
             c.find_prop("libtorch_config_variant"),
@@ -216,7 +216,9 @@ def get_jobs(toplevel_key, smoke):
     configs = gen_build_env_list(smoke)
     phase = "build" if toplevel_key == "binarybuilds" else "test"
     for build_config in configs:
-        jobs_list.append(build_config.gen_workflow_job(phase, nightly=True))
+        # don't test for macos_arm64 as it's cross compiled
+        if phase != "test" or build_config.os != "macos_arm64":
+            jobs_list.append(build_config.gen_workflow_job(phase, nightly=True))
 
     return jobs_list
 
