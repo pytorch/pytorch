@@ -1,10 +1,5 @@
 set(extra_src)
 
-# IF AVX FOUND
-if(C_AVX_FOUND)
-  list(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
-endif(C_AVX_FOUND)
-
 set(hdr
   THGeneral.h THHalf.h THAllocator.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
   THLapack.h THVector.h )
@@ -21,7 +16,6 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorLapack.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THVector.cpp
   ${extra_src}
   )
 # Remember that PARENT_SCOPE variables are not in the current scope
@@ -82,11 +76,6 @@ install(FILES
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 install(FILES
-  vector/AVX.h
-  ../ATen/native/cpu/avx_mathfun.h
-  DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/vector")
-
-install(FILES
   generic/THBlas.cpp
   generic/THBlas.h
   generic/THLapack.cpp
@@ -104,7 +93,6 @@ install(FILES
   generic/THTensorMath.h
   generic/THTensorRandom.cpp
   generic/THTensorRandom.h
-  generic/THVectorDispatch.cpp
   generic/THVector.h
   # See Note [TH abstraction violation]
   generic/THTensorFastGetSet.hpp
