@@ -13,6 +13,8 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+${static_dispatch_extra_headers}
+
 namespace at {
 
 using Stream = c10::Stream;
@@ -175,15 +177,15 @@ bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
-#define DEFINE_CAST(T, name)                     \
-  template <>                                    \
-  TORCH_API T* Tensor::data_ptr() const {           \
-    TORCH_CHECK(                                 \
-        scalar_type() == ScalarType::name,       \
-        "expected scalar type ",                 \
-        #name,                                   \
-        " but found ",                           \
-        c10::toString(scalar_type()));           \
+#define DEFINE_CAST(T, name)                                        \
+  template <>                                                       \
+  TORCH_API T* Tensor::data_ptr() const {                           \
+    TORCH_CHECK(                                                    \
+        scalar_type() == ScalarType::name,                          \
+        "expected scalar type "                                     \
+        #name                                                       \
+        " but found ",                                              \
+        scalar_type());                                             \
     return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
   }
 
