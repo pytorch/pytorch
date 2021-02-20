@@ -2213,6 +2213,17 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.bfloat16])),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False),
+    UnaryUfuncInfo('square',
+                   ref=np.square,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/52549
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble]),),
+                   supports_tensor_out=False,
+                   decorators=(precisionOverride({torch.bfloat16: 7e-2}),)),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
            op=torch.linalg.inv,
