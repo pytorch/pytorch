@@ -5012,6 +5012,24 @@ class TestTorchDeviceType(TestCase):
         c = torch.randn((0, 1, 2), device=device)
         self.assertEqual(c, c.index_select(0, ind_empty))
 
+    def test_tensor_compare_ops_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        test_functions = [
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {})
+        ]
+
+        for name, fn, identity, dt in test_functions:
+            self.assertEqual(torch.empty((2, 0), device=device,**dt), fn(master_input, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device,**dt), 
+                fn(master_input, dim=2, keepdim=True))
+
+        # Raise error when wanting to reduce on the zero dimension.
+        for fn in [torch.max]:
+            ident_err = 'Expected tensor with non-zero'
+            print("function: ", fn)
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(master_input, dim=1))
+
     def _brute_pdist(self, inp, p=2):
         """Computes the same as torch.pdist using primitives"""
         n = inp.shape[-2]
