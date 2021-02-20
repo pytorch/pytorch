@@ -160,18 +160,11 @@ void initJITBindings(PyObject* module) {
             ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
           })
       .def("_jit_nezha_update_graph", 
-          // [](std::shared_ptr<Graph>& dst_graph,
-          [](Module& dst_module,
-             std::shared_ptr<Graph>& src_graph) {
+          [](Module& module_1st,
+             Module& module_2nd) {
             // return NeZha_TryUpdateGraph(dst_graph, src_graph);
-            return NeZha_TryUpdateModule(dst_module, src_graph);
+            return NeZha_TrySplitModule(module_1st, module_2nd);
           })
-      .def("_jit_nezha_merge_graph", 
-          [](Module& dst_module,
-             std::shared_ptr<Graph>& src_graph_01,
-             std::shared_ptr<Graph>& src_graph_02) {
-            return NeZha_TryMergeModule(dst_module, src_graph_01, src_graph_02);
-          })          
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
