@@ -7405,9 +7405,6 @@ workflows:
           build_environment: libtorch 3.7 cpu debug
           name: binary_windows_libtorch_3_7_cpu_debug_build
       - binary_windows_build:
-          build_environment: libtorch 3.7 cu111 debug
-          name: binary_windows_libtorch_3_7_cu111_debug_build
-      - binary_windows_build:
           build_environment: libtorch 3.7 cpu release
           name: binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_build:
@@ -7424,11 +7421,6 @@ workflows:
           name: binary_windows_libtorch_3_7_cpu_debug_test
           requires:
             - binary_windows_libtorch_3_7_cpu_debug_build
-      - binary_windows_test:
-          build_environment: libtorch 3.7 cu111 debug
-          name: binary_windows_libtorch_3_7_cu111_debug_test
-          requires:
-            - binary_windows_libtorch_3_7_cu111_debug_build
       - binary_windows_test:
           build_environment: libtorch 3.7 cpu release
           name: binary_windows_libtorch_3_7_cpu_release_test
