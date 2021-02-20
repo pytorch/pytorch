@@ -23,6 +23,8 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMP
                                                   IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ROCM, TEST_WITH_TSAN, IS_SANDCASTLE)
 
+from mp_functions import SimpleCustomBatch
+
 try:
     import psutil
     HAS_PSUTIL = True
@@ -2085,22 +2087,6 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertEqual(batch.random_tensor.is_pinned(), TEST_CUDA)
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
-
-
-class SimpleCustomBatch(object):
-    def __init__(self, data):
-        transposed_data = list(zip(*data))
-        self.inp = torch.stack(transposed_data[0], 0)
-        self.tgt = torch.stack(transposed_data[1], 0)
-
-    def pin_memory(self):
-        self.inp = self.inp.pin_memory()
-        self.tgt = self.tgt.pin_memory()
-        return self
-
-    def is_pinned(self):
-        return self.inp.is_pinned() and self.tgt.is_pinned()
-
 
 def collate_wrapper(batch):
     return SimpleCustomBatch(batch)
