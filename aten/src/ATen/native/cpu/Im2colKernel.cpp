@@ -23,26 +23,34 @@ void col2im(
   scalar_t* col_data = col.data_ptr<scalar_t>();
   scalar_t* im_data = im.data_ptr<scalar_t>();
 
-  // col shape: [output_channels * kH * kW, input_height, input_width]
+  // col shape: [output_channels * kH * kW, input_height * input_width]
   // im shape: [output_channels, output_height, output_width]
   int64_t stride_oc = kH * kW * input_height * input_width;
 
   at::parallel_for(0, output_channels, 0, [&](int64_t begin, int64_t end) {
     for (int64_t oc = begin; oc < end; oc++) {
-      // since we are moving from 0, no need to call data_index_init
-      int64_t kh{0}, kw{0}, ih{0}, iw{0};
       scalar_t* col_ptr = col_data + oc * stride_oc;
       scalar_t* im_ptr = im_data + oc * output_height * output_width;
 
-      for (int64_t i = 0; i < stride_oc; i++) {
-        int64_t oh = ih * sH - pH + kh * dH;
-        int64_t ow = iw * sW - pW + kw * dW;
+      // incremental indexing for col
+      int64_t i = 0;
+      for (int64_t kh = 0; kh < kH; kh++) {
+        for (int64_t kw = 0; kw < kW; kw++) {
+          for (int64_t ih = 0; ih < input_height; ih++) {
+            int64_t oh = ih * sH - pH + kh * dH;
+            bool valid_h = oh >= 0 && oh < output_height;
 
-        if (oh >= 0 && oh < output_height && ow >= 0 && ow < output_width) {
-          im_ptr[oh * output_width + ow] += col_ptr[i];
+            for (int64_t iw = 0; iw < input_width; iw++) {
+              int64_t ow = iw * sW - pW + kw * dW;
+              bool valid_w = ow >= 0 && ow < output_width;
+
+              if (valid_h && valid_w) {
+                im_ptr[oh * output_width + ow] += col_ptr[i];
+              }
+              i++;
+            }
+          }
         }
-
-        data_index_step(kh, kH, kw, kW, ih, input_height, iw, input_width);
       }
     }
   });
@@ -62,7 +70,7 @@ void im2col(
   scalar_t* col_data = col.data_ptr<scalar_t>();
   scalar_t* im_data = im.data_ptr<scalar_t>();
 
-  // col shape: [output_channels * kH * kW, input_height, input_width]
+  // col shape: [output_channels * kH * kW, input_height * input_width]
   // im shape: [output_channels, output_height, output_width]
   at::parallel_for(0, col.numel(), 0, [&](int64_t begin, int64_t end) {
     int64_t oc{0}, kh{0}, kw{0}, ih{0}, iw{0};
@@ -72,9 +80,9 @@ void im2col(
       int64_t oh = ih * sH - pH + kh * dH;
       int64_t ow = iw * sW - pW + kw * dW;
 
-      bool need_update = oh >= 0 && ow >= 0 && oh < output_height && ow < output_width;
-      col_data[i] = need_update ? im_data[oc * output_height * output_width + oh * output_width + ow]
-                                : scalar_t(0);
+      bool valid = oh >= 0 && ow >= 0 && oh < output_height && ow < output_width;
+      col_data[i] = valid ? im_data[oc * output_height * output_width + oh * output_width + ow]
+                          : scalar_t(0);
 
       data_index_step(oc, output_channels, kh, kH, kw, kW, ih, input_height, iw, input_width);
     }
@@ -104,29 +112,38 @@ void col2im_channels_last(
   using Vec = vec256::Vec256<scalar_t>;
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (int64_t n = begin; n < end; n++) {
-      int64_t ih{0}, iw{0}, kh{0}, kw{0};
       scalar_t* col_ptr = col_data + n * input_height * input_width * kH * kW * output_channels;
       scalar_t* im_ptr = im_data + n * output_height * output_width * output_channels;
 
-      for (int64_t i = 0; i < input_height * input_width * kH * kW; i++) {
-        int64_t oh = ih * sH - pH + kh * dH;
-        int64_t ow = iw * sW - pW + kw * dW;
+      // incremental indexing for col
+      int64_t i = 0;
+      for (int64_t ih = 0; ih < input_height; ih++) {
+        for (int64_t iw = 0; iw < input_width; iw++) {
+          for (int64_t kh = 0; kh < kH; kh++) {
+          int64_t oh = ih * sH - pH + kh * dH;
+          bool valid_h = oh >= 0 && oh < output_height;
 
-        scalar_t* col_ = col_ptr + i * output_channels;
-        scalar_t* im_ = im_ptr + oh * output_width * output_channels + ow * output_channels;
+            for (int64_t kw = 0; kw <kW; kw++) {
+              int64_t ow = iw * sW - pW + kw * dW;
+              bool valid_w = ow >= 0 && ow < output_width;
 
-        if (oh >= 0 && oh < output_height && ow >= 0 && ow < output_width) {
-          int64_t d = 0;
-          for (; d < size - (size % Vec::size()); d += Vec::size()) {
-            Vec im_vec = Vec::loadu(im_ + d) + Vec::loadu(col_ + d);
-            im_vec.store(im_ + d);
-          }
-          for (; d < size; d++) {
-            im_[d] += col_[d];
+              if (valid_h && valid_w) {
+                scalar_t* col_ = col_ptr + i * output_channels;
+                scalar_t* im_ = im_ptr + oh * output_width * output_channels + ow * output_channels;
+
+                int64_t d = 0;
+                for (; d < size - (size % Vec::size()); d += Vec::size()) {
+                  Vec im_vec = Vec::loadu(im_ + d) + Vec::loadu(col_ + d);
+                  im_vec.store(im_ + d);
+                }
+                for (; d < size; d++) {
+                  im_[d] += col_[d];
+                }
+              }
+              i++;
+            }
           }
         }
-
-        data_index_step(ih, input_height, iw, input_width, kh, kH, kw, kW);
       }
     }
   });
