@@ -6843,7 +6843,7 @@ class TestNN(NNTestCase):
                               bidirectional=bidirectional,
                               batch_first=batch_first,
                               proj_size=proj_size).to(dtype)
-           
+
             outputs_gpu = forward_backward(
                 True, rnn_gpu, input_val, grad_output, rnn.all_weights,
                 hx_val, grad_hy, cx_val, grad_cy)
