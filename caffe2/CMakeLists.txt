@@ -402,7 +402,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
     )
 
-  if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
+  if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND GENERATED_CXX_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
@@ -550,14 +550,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/utils/out_types.cpp
   )
 
-  if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
+  if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
     )
   endif()
 
-  if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
+  if(NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
@@ -634,7 +634,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
-  if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
+  if(NOT NO_API)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
@@ -961,24 +961,14 @@ endif()
 
 
   if(BUILD_TEST)
-    if(BUILD_LITE_INTERPRETER)
-      add_subdirectory(
-        ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
-        ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
-      )
-    else()
-      add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
-        add_subdirectory(
-          ${TORCH_ROOT}/test/cpp/tensorexpr
-          ${CMAKE_BINARY_DIR}/test_tensorexpr
-        )
-        if(USE_DISTRIBUTED AND NOT WIN32)
-          add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
-        endif()
+    add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
+    if(USE_DISTRIBUTED AND NOT WIN32)
+      add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
     endif()
   endif()
 
-  if(BUILD_TEST AND NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
+  if(BUILD_TEST AND NOT NO_API)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
     add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
   endif()
@@ -1092,10 +1082,6 @@ if(USE_ROCM)
     /opt/rocm/rocblas/include
     /opt/rocm/hipsparse/include
     )
-endif()
-
-if(BUILD_LITE_INTERPRETER)
-  target_compile_definitions(torch_cpu PRIVATE DBUILD_LITE_INTERPRETER)
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
@@ -1494,6 +1480,9 @@ if(BUILD_MOBILE_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
   endforeach()
 endif()
+
+add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
+target_link_libraries(lite_interpreter_demo torch_library)
 
 # ---[ Test binaries.
 if(BUILD_TEST)
