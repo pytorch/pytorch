@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import requests
 import time
@@ -12,7 +13,15 @@ s.headers.update({"Authorization": "Basic " + AZURE_DEVOPS_PAT_BASE64})
 
 build_base_url = AZURE_PIPELINE_BASE_URL + "_apis/build/builds?api-version=6.0"
 
-SOURCE_BRANCH = "refs/heads/" + os.environ.get("CIRCLE_BRANCH", "master")
+TARGET_BRANCH = os.environ.get("CIRCLE_BRANCH", "master")
+
+# Convert the branch name for Azure DevOps
+if TARGET_BRANCH.startswith('pull/'):
+    match = re.search('pull/(\d+)', TARGET_BRANCH)
+    pr_num = match.group(1)
+    SOURCE_BRANCH = 'refs/pull/' + str(pr_num) + '/head'
+else:
+    SOURCE_BRANCH = "refs/heads/" + TARGET_BRANCH
 
 print("Submitting build for branch: " + SOURCE_BRANCH)
 
