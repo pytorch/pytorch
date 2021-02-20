@@ -198,10 +198,12 @@ message TensorBoundShapes {
   optional int64 max_feature_len = 3;
 }
 
-message AOTConfig{
+message AOTConfig {
   required int64 max_batch_size = 1;
   required int64 max_seq_size = 2;
   required bool in_batch_broadcast = 3;
+  optional string onnxifi_blacklist_ops = 4;
+  optional int32 onnxifi_min_ops = 5;
 }
 
 // A named argument containing either singular float, integer and string
