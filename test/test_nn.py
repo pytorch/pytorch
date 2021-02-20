@@ -6843,15 +6843,11 @@ class TestNN(NNTestCase):
                               bidirectional=bidirectional,
                               batch_first=batch_first,
                               proj_size=proj_size).to(dtype)
-            if TEST_WITH_ROCM and dtype == torch.float:
-                outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                    hx_val, grad_hy, cx_val, grad_cy)
-            else:
-                outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                    hx_val, grad_hy, cx_val, grad_cy)
-                compare_cpu_gpu(outputs_cpu, outputs_gpu)
+           
+            outputs_gpu = forward_backward(
+                True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                hx_val, grad_hy, cx_val, grad_cy)
+            compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
@@ -13614,10 +13610,7 @@ class TestNNDeviceType(NNTestCase):
         for enforce_sorted, seq_lens, in tests:
             for use_default_hiddens in (True, False):
                 for proj_size in [0, 2]:
-                    if device != 'cpu' and dtype == torch.float32 and TEST_WITH_ROCM and proj_size > 0:
-                        check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
-                    else:
-                        check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
+                    check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
 
     def _test_batchnorm_update_stats(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)

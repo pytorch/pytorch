@@ -1450,7 +1450,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
                 num_layers, dropout_p, train, bidirectional, batch_first);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
     } else {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
     }
   }
@@ -1486,7 +1486,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
               _params, has_biases, num_layers, dropout_p, train, bidirectional);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
     } else {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
     }
   }
