@@ -13,6 +13,3 @@ class SimpleCustomBatch(object):
 
     def is_pinned(self):
         return self.inp.is_pinned() and self.tgt.is_pinned()
-
-
-
