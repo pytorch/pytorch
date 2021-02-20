@@ -100,7 +100,7 @@ struct WelfordOps {
       new_count
     };
   }
-  inline C10_DEVICE res_t project(acc_t acc) const {
+  inline C10_DEVICE res_t project(acc_t acc) const __ubsan_ignore_float_divide_by_zero__ {
     auto mean = acc.mean;
     combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
     auto var = acc.m2 / divisor;
