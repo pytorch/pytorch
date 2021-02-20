@@ -57,12 +57,32 @@ CONFIG_TREE_DATA = [
                     ]),
                 ]),
             ]),
-            ("11.2", [
+            ("11.1", [
                 ("3.8", [
                     X(True),
                     ("libtorch", [
                         (True, [
                             ('build_only', [XImportant(True)]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            ("11.1", [
+                ("3.8", [
+                    X(True),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [X(True)]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            ("11.2", [
+                ("3.8", [
+                    X(True),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [X(True)]),
                         ]),
                     ]),
                 ]),
