@@ -9569,8 +9569,17 @@ dedent """
                 return x - 1
 
         inp = torch.randn(3, 3)
-
         self.checkScript(test_if_tracing, (inp,))
+
+    def test_script_is_tracing(self):
+        def test_is_tracing(x):
+            if torch.jit.is_tracing():
+                return x + 1
+            else:
+                return x - 1
+
+        inp = torch.randn(3, 3)
+        self.checkScript(test_is_tracing, (inp,))
 
     def test_is_scripting(self):
         def foo():
