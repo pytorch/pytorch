@@ -15,6 +15,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
+from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -306,7 +307,7 @@ class TestOptim(TestCase):
             )
 
     @skipIfRocm
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
             return
@@ -380,7 +381,7 @@ class TestOptim(TestCase):
             for p1, p2 in zip(res[0], res[1]):
                 self.assertEqual(p1, p2)
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
             self._test_basic_cases(
@@ -426,7 +427,7 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
             self._test_basic_cases(
@@ -461,7 +462,7 @@ class TestOptim(TestCase):
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_adadelta(self):
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
@@ -538,7 +539,7 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
             self._test_basic_cases(

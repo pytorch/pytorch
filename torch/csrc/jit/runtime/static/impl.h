@@ -165,6 +165,8 @@ class TORCH_API StaticRuntime {
     return outputs_;
   }
 
+  void check_for_memory_leak(bool output_returned = true);
+
  private:
   // Static runtime states
   std::shared_ptr<InferenceModule> module_;
