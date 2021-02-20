@@ -129,6 +129,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/api/object.cpp",
     "torch/csrc/jit/backends/backend_detail.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
+    "torch/csrc/jit/backends/backend_resolver.cpp",
     "torch/csrc/jit/codegen/fuser/codegen.cpp",
     "torch/csrc/jit/codegen/fuser/compiler.cpp",
     "torch/csrc/jit/codegen/fuser/executor.cpp",
@@ -524,7 +525,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
-    "torch/csrc/jit/backends/backend_resolver.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
@@ -585,6 +585,7 @@ libtorch_python_distributed_core_sources = [
     "torch/lib/c10d/default_comm_hooks.cpp",
     "torch/lib/c10d/frontend.cpp",
     "torch/lib/c10d/reducer.cpp",
+    "torch/lib/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
 ]

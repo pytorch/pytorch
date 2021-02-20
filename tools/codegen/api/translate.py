@@ -79,6 +79,17 @@ def translate(
     for b in binding_exprs:
         ctx[b.type] = b.expr
 
+        # While we're at it, do some simple forward inference, looking through
+        # constructors.
+        # TODO: My kingdom for a pattern matcher
+        # https://www.python.org/dev/peps/pep-0634/
+        # TODO: This could get us in recomputation trouble if b.expr is nontrivial
+        t = b.type
+        if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
+                isinstance(t.elem.elem, BaseCType) and t.elem.elem.type == 'Tensor':
+            ctx[ConstRefCType(BaseCType("Tensor", t.elem.elem.name))] = \
+                f'({b.expr}.has_value() ? *{b.expr} : at::Tensor())'
+
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
         ctx[MutRefCType(BaseCType("Tensor", "self"))] = "const_cast<Tensor&>(*this)"
@@ -137,6 +148,10 @@ Check this module for more information.
             memory_format = direct_solve(
                 OptionalCType(BaseCType("MemoryFormat", SpecialArgName.possibly_redundant_memory_format))
             )
+            # No need to join "memory_format" and "options" if the target API takes "options" directly.
+            # Otherwise it will cause the redundant memory_format error.
+            if options_ctype in goal_ctypes:
+                return memory_format
             try:
                 options = direct_solve(options_ctype)
                 return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"
