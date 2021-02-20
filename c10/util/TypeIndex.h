@@ -113,6 +113,15 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
       "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",
       "]",
       __PRETTY_FUNCTION__);
+#elif defined(__EDG__)
+  return extract(
+    #if C10_TYPENAME_SUPPORTS_CONSTEXPR
+      "constexpr c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl() [with T = ",
+    #else
+      "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl() [with T = ",
+    #endif
+      "]",
+      __PRETTY_FUNCTION__);
 #elif defined(__GNUC__)
   return extract(
     #if C10_TYPENAME_SUPPORTS_CONSTEXPR
