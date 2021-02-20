@@ -155,6 +155,9 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
+if(USE_MLCOMPUTE)
+    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
+endif()
 
 if(USE_VALGRIND AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
@@ -216,7 +219,7 @@ add_custom_command(
 #          affect both torch_python and DEPLOY interpreter.
 if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
-  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB")
+  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
 
   target_compile_definitions(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
