@@ -220,6 +220,13 @@ void IRPrinter::visit(const Cast* v) {
   os() << ")";
 }
 
+void IRPrinter::visit(const BitCast* v) {
+  auto dtype = v->dtype();
+  os() << "BitCast<" << dtype.ToCppString() << ">(";
+  v->src_value()->accept(this);
+  os() << ")";
+}
+
 void IRPrinter::visit(const Var* v) {
   os() << name_manager_.get_unique_name(v);
 }
