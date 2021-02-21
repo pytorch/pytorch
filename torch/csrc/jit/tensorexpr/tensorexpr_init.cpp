@@ -226,8 +226,9 @@ void initTensorExprBindings(PyObject* module) {
 
   py::class_<tensorexpr::VarHandle, tensorexpr::ExprHandle>(te, "VarHandle")
       .def(py::init<const std::string&, tensorexpr::Dtype>());
-  py::class_<tensorexpr::BufHandle, tensorexpr::ExprHandle>(
-      te, "BufHandle"); // NOLINT
+  py::class_<tensorexpr::BufHandle, tensorexpr::ExprHandle>( // NOLINT
+      te,
+      "BufHandle");
 
   py::class_<tensorexpr::Placeholder>(te, "Placeholder")
       .def(py::init<
