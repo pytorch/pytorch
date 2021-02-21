@@ -5023,6 +5023,7 @@ class TestTorchDeviceType(TestCase):
             ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
             ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
             ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
+            ('mode', torch.mode, None, {}),
         ]
 
         for name, fn, identity, dtype in test_functions:

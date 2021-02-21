@@ -323,7 +323,11 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
   TORCH_CHECK(self.layout() == Layout::Strided,
               "mode only supports strided layout, got: ", self.layout());
   dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
+  if (self.numel() == 0) {
+    zero_numel_tensor_resize(values, indices, self, dim, keepdim);
+    return std::forward_as_tuple(values, indices);
+  }
+  else if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
     AT_ASSERT(values.dim() == 0);
     indices.resize_({}).fill_(0);
     return std::forward_as_tuple(values, indices);
