@@ -221,8 +221,8 @@
             set -e
             export IN_CI=1
             export BUILD_LITE_INTERPRETER=1
-            chmod a+x macos-lite-interpreter-build-test.sh
-            unbuffer macos-lite-interpreter-build-test.sh 2>&1 | ts
+            chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
+            unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
       - store_test_results:
           path: test/test-reports
 
