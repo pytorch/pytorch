@@ -2477,7 +2477,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('vstack',
            # gradcheck expects the input arguments as a flat list
-           op=lambda *args: torch.vstack([*args]),
+           op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
            supports_tensor_out=False,
