@@ -5023,14 +5023,13 @@ class TestTorchDeviceType(TestCase):
 
         for name, fn, identity, dt in test_functions:
             self.assertEqual(torch.empty((2, 0), device=device,**dt), fn(master_input, dim=2))
-            # self.assertEqual(torch.empty((2, 0, 1), device=device,**dt), 
-            #     fn(master_input, dim=2, keepdim=True))
+            self.assertEqual(torch.empty((2, 0, 1), device=device,**dt), 
+                fn(master_input, dim=2, keepdim=True))
 
         # Raise error when wanting to reduce on the zero dimension.
-        # for fn in [torch.max]:
-        #     ident_err = 'Expected tensor with non-zero'
-        #     print("function: ", fn)
-        #     self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(master_input, dim=1))
+        for fn in [torch.max]:
+            ident_err = 'Expected reduction dim'
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(master_input, dim=1))
 
     def _brute_pdist(self, inp, p=2):
         """Computes the same as torch.pdist using primitives"""

@@ -353,21 +353,23 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
               max_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
 
-  std::cout << "wrap dim: " << dim << std::endl;
   if (self.numel() == 0) {
+    TORCH_CHECK(self.sizes()[dim] != 0, "Expected reduction dim ", dim, " to be non-zero");
+
     if (!keepdim) {
-      max.squeeze_(dim);
       std::vector<int64_t> sizes;
       for (const auto d : c10::irange(self.dim())) {
         if (d != dim) {
-          std::cout << "d: " << d << std::endl;
           sizes.push_back(self.sizes()[d]);
         }
       }
       max.resize_(sizes);
-      // auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
-      // self_sizes[dim] = 1;
-      // max.resize_(self_sizes);
+    }
+    else {
+      auto sizes = ensure_nonempty_vec(self.sizes().vec());
+      sizes[dim] = 1;
+      max.resize_(sizes);
+      std::cout << "max.sizes= "  << max.sizes() << std::endl;
     }
     max_indices.resize_({});
     return std::forward_as_tuple(max, max_indices);
