@@ -1282,6 +1282,13 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
   TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
+  // tau tensor must be contiguous
+  Tensor tau_ = tau;
+  if (!tau.is_contiguous()) {
+    tau_ = at::empty(tau.sizes(), tau.options(), MemoryFormat::Contiguous);
+    tau_.copy_(tau);
+  }
+
   // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
@@ -1290,7 +1297,7 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   infos.fill_(0);
 
   auto n = input.size(-1);
-  result = orgqr_stub(result.device().type(), result, tau, infos, n);
+  result = orgqr_stub(result.device().type(), result, tau_, infos, n);
   return result;
 }
 
