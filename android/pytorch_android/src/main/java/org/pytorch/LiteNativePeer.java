@@ -6,7 +6,9 @@ import com.facebook.soloader.nativeloader.SystemDelegate;
 
 class LiteNativePeer implements INativePeer {
   static {
-    NativeLoader.init(new SystemDelegate());
+    if (!NativeLoader.isInitialized()) {
+      NativeLoader.init(new SystemDelegate());
+    }
     NativeLoader.loadLibrary("pytorch_jni_lite");
     PyTorchCodegenLoader.loadNativeLibs();
   }
