@@ -1011,8 +1011,13 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 
 Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
+  for (const auto d : dim) {
+    TORCH_CHECK(self.sizes()[d] != 0, "Expected reduction dim ", d, " to be non-zero");
+  }
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
-  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
+  if (iter.numel() == 0) {
+    return result;
+  }
   max_values_stub(iter.device_type(), iter);
   return result;
 }

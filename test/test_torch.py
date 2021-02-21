@@ -5027,6 +5027,7 @@ class TestTorchDeviceType(TestCase):
 
         for name, fn, identity, dtype in test_functions:
             # Check if reduction happens along the specified dim with and without keepdim.
+            print("function: ", fn)
             self.assertEqual(torch.empty((2, 0), device=device,**dtype), fn(master_input, dim=2))
             self.assertEqual(torch.empty((2, 0, 1), device=device,**dtype), 
                 fn(master_input, dim=2, keepdim=True))
