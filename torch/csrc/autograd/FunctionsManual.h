@@ -221,6 +221,7 @@ infinitely_differentiable_native_layer_norm_backward(
     IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask);
+std::tuple<Tensor, Tensor> orgqr_backward(const Tensor& grad, const Tensor& self, const Tensor& input2, const Tensor& result);
 
 
 } // namespace details

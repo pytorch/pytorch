@@ -1306,6 +1306,15 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   TORCH_CHECK(input.size(-2) >= input.size(-1), "orgqr: input.shape[-2] must be greater than or equal to input.shape[-1]");
   TORCH_CHECK(input.size(-1) >= tau.size(-1), "orgqr: input.shape[-1] must be greater than or equal to tau.shape[-1]");
 
+  TORCH_CHECK(input.dim() - tau.dim() == 1, "orgqr: Expected tau to have one dimension less than input, but got tau.ndim equal to ",
+              tau.dim(), " and input.ndim is equal to ", input.dim());
+  if (input.dim() > 2) {
+    auto expected_batch_tau_shape = IntArrayRef(input.sizes().data(), input.dim()-2);  // input.shape[:-2]
+    auto actual_batch_tau_shape = IntArrayRef(tau.sizes().data(), tau.dim()-1);  // tau.shape[:-1]
+    TORCH_CHECK(actual_batch_tau_shape.equals(expected_batch_tau_shape), "orgqr: Expected batch dimensions of tau to be equal to input.shape[:-2], but got ",
+                actual_batch_tau_shape);
+  }
+
   TORCH_CHECK(tau.scalar_type() == input.scalar_type(),
     "orgqr: tau dtype ", tau.scalar_type(), " does not match input dtype ", input.scalar_type());
   TORCH_CHECK(input.device() == tau.device(),

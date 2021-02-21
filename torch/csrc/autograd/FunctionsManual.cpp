@@ -2987,6 +2987,89 @@ bool any_variable_defined(variable_list& variables) {
   return false;
 }
 
+std::tuple<Tensor, Tensor> orgqr_backward(const Tensor& grad, const Tensor& self, const Tensor& input2, const Tensor& result) {
+  if (!grad.defined()) {
+    return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
+  }
+
+  // LAPACK's orgqr operation computes a product of Householder matrices.
+  // Each Householder matrix is stored using Householder vectors (columns of 'self') and its scaling factors (scalars of 'input2')
+  // An explicit Householder matrix in code is like this: H_i = eye(self.shape[-1]) - input2[i] * outer(self[:, i], self[:, i])
+  // See "Representation of Orthogonal or Unitary Matrices": https://www.netlib.org/lapack/lug/node128.html
+
+  // In Python code the orgqr operation can be implemented as following:
+  // result = torch.eye(self.shape[-1])
+  // for j in range(input2.shape[-1]):
+  //     v = A[:, j]
+  //     input2j = input2[j]
+  //     v1, v2 = v, v
+  //     result1, result2 = result, result
+  //     v3 = torch.outer(v1, v2)
+  //     v4 = input2[j] * v3
+  //     v5 = result1 @ v4
+  //     result = result2 - v5
+
+  // Differentiating the Python implementation line-by-line gives (sequence of assignments on the right inside the for loop should be applied in reverse order):
+  // result = torch.eye(self.shape[-1])        |  d_self = torch.zeros_like(self)
+  // for j in range(input2.shape[-1]):         |  for j in reversed(range(input2.shape[-1])):
+  //     v = self[:, j]                        |      d_self[:, j] += d_v
+  //     input2j = input2[j]                   |      d_input2[j] += d_input2j.sum(-1).sum(-1)
+  //     v1, v2 = v, v                         |      d_v = d_v1 + d_v2
+  //     result1, result2 = result, result     |      d_result = d_result1 + d_result2
+  //     v3 = input2[j] * torch.outer(v1, v2)  |      d_v1, d_v2 = d_v3 @ v2, v1 @ d_v3
+  //     v4 = input2[j] * v3                   |      d_input2j, d_v3 = d_v4 * v3, dv4 * input2j
+  //     v5 = result1 @ v4                     |      d_result1, d_v4 = d_v5 @ v4.T, result1.T @ d_v5
+  //     result = result2 - v5                 |      d_result2, d_v5 = d_result, -d_result
+
+  // make sure that all elements of Householder vectors including 0's and 1's are stored explicitly
+  // LAPACK assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
+  auto self_ = self.tril(-1);
+  self_.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+
+  auto d_self = at::zeros_like(self);
+  auto d_input2 = at::zeros_like(input2);
+  auto d_result = grad;
+  auto start_j = input2.size(-1) - 1;
+  for (int64_t j = start_j; j >= 0; j--) {
+    auto v = self_.index({"...", at::indexing::Slice(), j});
+    auto v1 = v, v2 = v;
+
+    // we need to recompute input[j] * at::outer(v, v)
+    auto input2_unsqueezed = input2.index({"...", j}).unsqueeze(-1);  // input2[..., j][:, None]
+    auto input2_unsqueezed2 = input2_unsqueezed.unsqueeze(-1);  // input2[..., j][:, None, None]
+    auto v3 = at::matmul(v1.unsqueeze(-1), v2.unsqueeze(-2));  // batch outer product, at::outer doesn't work for batched input
+    auto v4 = input2_unsqueezed2 * v3;
+
+    // we don't have an access to the intermediate results of the product of Householder matrices
+    // so we need to recompute orgqr(self, input2[..., :j])
+    auto result_prev = at::orgqr(self, input2.index({"...", at::indexing::Slice(at::indexing::None, j)}));
+
+    // now the actual derivative computation
+    auto d_result2 = d_result, d_v5 = -d_result;
+
+    auto d_result1 = at::matmul(d_v5, v4.transpose(-2, -1));
+    auto d_v4 = at::matmul(result_prev.transpose(-2, -1), d_v5);
+
+    auto d_input2j = d_v4 * v3;
+    auto d_v3 = d_v4 * input2_unsqueezed2;
+
+    auto d_v1 = at::matmul(d_v3, v2.unsqueeze(-1));
+    auto d_v2 = at::matmul(v1.unsqueeze(-2), d_v3);
+
+    d_result = d_result1 + d_result2;
+    auto d_v = d_v1.squeeze(-1) + d_v2.squeeze(-2);
+
+    d_self.index({"...", at::indexing::Slice(), j}).add_(d_v);
+    d_input2.index({"...", j}).add_(d_input2j.sum(-1).sum(-1));
+  }
+
+  // orgqr assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
+  // but we didn't take this into account in the above code
+  d_self = d_self.tril(-1);
+
+  return std::tuple<Tensor, Tensor>(d_self, d_input2);
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
