@@ -8,6 +8,8 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/NamedTensorUtils.h>
 
+#include <c10/util/irange.h>
+
 #include <iostream>
 
 namespace at { namespace native {
@@ -352,7 +354,25 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
   dim = maybe_wrap_dim(dim, self.dim());
 
   std::cout << "wrap dim: " << dim << std::endl;
-  if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
+  if (self.numel() == 0) {
+    if (!keepdim) {
+      max.squeeze_(dim);
+      std::vector<int64_t> sizes;
+      for (const auto d : c10::irange(self.dim())) {
+        if (d != dim) {
+          std::cout << "d: " << d << std::endl;
+          sizes.push_back(self.sizes()[d]);
+        }
+      }
+      max.resize_(sizes);
+      // auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
+      // self_sizes[dim] = 1;
+      // max.resize_(self_sizes);
+    }
+    max_indices.resize_({});
+    return std::forward_as_tuple(max, max_indices);
+  }
+  else if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     // case where self.numel() == 1. The result does not need to be reshaped
     // as a case of reduction in this case.
     TORCH_CHECK(!self.is_complex(), "max does not support complex inputs.");
