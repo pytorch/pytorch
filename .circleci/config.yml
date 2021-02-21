@@ -308,7 +308,7 @@ pytorch_ios_params: &pytorch_ios_params
     use_metal:
       type: string
       default: "0"
-    build_lite_interpreter:
+    lite_interpreter:
       type: string
       default: "0"
   environment:
@@ -317,7 +317,7 @@ pytorch_ios_params: &pytorch_ios_params
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
     USE_PYTORCH_METAL: << parameters.use_metal >>
-    BUILD_LITE_INTERPRETER: << parameters.build_lite_interpreter >>
+    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
@@ -1678,7 +1678,6 @@ jobs:
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               export USE_PYTORCH_METAL=${USE_METAL}
             fi
-            export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
           name: Run Build Test
@@ -7302,10 +7301,10 @@ workflows:
           name: pytorch_ios_12_0_0_x86_64_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-x86_64_lite_interpreter_build
-          build_lite_interpreter: "1"
           context: org-member
           ios_arch: x86_64
           ios_platform: SIMULATOR
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_x86_64_lite_interpreter_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_build
@@ -7322,10 +7321,10 @@ workflows:
           use_metal: "1"
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_lite_interpreter_build
-          build_lite_interpreter: "1"
           context: org-member
           ios_arch: arm64
           ios_platform: OS
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_arm64_lite_interpreter_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_custom_build

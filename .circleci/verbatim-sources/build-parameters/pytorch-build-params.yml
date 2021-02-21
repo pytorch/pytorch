@@ -39,7 +39,7 @@ pytorch_ios_params: &pytorch_ios_params
     use_metal:
       type: string
       default: "0"
-    build_lite_interpreter:
+    lite_interpreter:
       type: string
       default: "0"
   environment:
@@ -48,7 +48,7 @@ pytorch_ios_params: &pytorch_ios_params
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
     USE_PYTORCH_METAL: << parameters.use_metal >>
-    BUILD_LITE_INTERPRETER: << parameters.build_lite_interpreter >>
+    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
