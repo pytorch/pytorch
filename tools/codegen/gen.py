@@ -995,6 +995,7 @@ def main() -> None:
             Target.DECLARATION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=True), native_functions)),
     })
     cpu_fm.write('RedispatchFunctions.cpp', lambda: {
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_backend),
         'function_redispatch_definitions': list(mapMaybe(ComputeFunction(
             Target.DEFINITION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=True), native_functions)),
     })
