@@ -241,30 +241,36 @@ void IndexCompute::handle(Split* split) {
   const bool outer_bcast = outer_id->isBroadcast();
   const bool inner_bcast = inner_id->isBroadcast();
 
-  // Zero inds because a dim is bcast is part of normal traversal, if it's not
-  // bcast but is zero ind then it's from local or smem. In the latter case we
-  // want to propagate this property.
-  if ((outer_zero && !outer_bcast) || (inner_zero && !inner_bcast) ||
-      hasZeroMerged(inner_id) || hasZeroMerged(outer_id)) {
-    zero_merged_in_.emplace(in_id);
-  } else {
-    // Maybe clear in_id as it could have been mapped over from another
-    // IndexCompute. Uncertain if this is needed but seems to be safe.
-    if (hasZeroMerged(in_id)) {
-      zero_merged_in_.erase(in_id);
-    }
-  }
+  const bool outer_vect = outer_id->parallelType() == ParallelType::Vectorize;
+  const bool inner_vect = inner_id->parallelType() == ParallelType::Vectorize;
 
-  if (outer_zero && inner_zero) {
+  // We want to mark as zero merged in if we're working with shared or local
+  // memory, and the dimension we're working with is not part of the allocation,
+  // as we have special propagation rules for that scenario. If zero indexing is
+  // from a vectorized ID or broadcast do not propagate in zero merged manner,
+  // so don't mark. This logic is important for vector support on global memory.
+
+  // Maybe clear in_id as it could have been mapped over from another
+  // IndexCompute. Uncertain if this is needed but seems to be safe.
+  bool zero_merged_in = hasZeroMerged(in_id);
+  zero_merged_in =
+      zero_merged_in || hasZeroMerged(inner_id) || hasZeroMerged(outer_id);
+  zero_merged_in =
+      zero_merged_in || (outer_zero && (!outer_bcast && !outer_vect));
+  zero_merged_in =
+      zero_merged_in || (inner_zero && (!inner_bcast && !inner_vect));
+
+  if (zero_merged_in) {
+    zero_merged_in_.emplace(in_id);
+  }
+  if (zero_merged_in && outer_zero && inner_zero) {
     index_map_[in_id] = ir_builder.create<kir::Int>(0);
     extent_map_[in_id] = ir_builder.create<kir::Int>(0);
-  } else if (outer_zero) {
+  } else if (zero_merged_in && outer_zero) {
     index_map_[in_id] = inner_ind;
-    zero_merged_in_.emplace(in_id);
     extent_map_[in_id] = getExtent(inner_id);
-  } else if (inner_zero) {
+  } else if (zero_merged_in && inner_zero) {
     index_map_[in_id] = outer_ind;
-    zero_merged_in_.emplace(in_id);
     extent_map_[in_id] = getExtent(outer_id);
   } else {
     index_map_[in_id] = ir_builder.addExpr(
@@ -753,7 +759,8 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
     }
   }
 
-  // Index into the reference tensor
+  // Index into the reference tensor. Reference indexing will handle vectorized
+  // dims where index should be set to 0
   auto ref_compute = getReferenceIndexing(loops, reference_domain);
 
   // Replay producer as reference to get reference to producer ID map
@@ -764,6 +771,15 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
       false);
 
   const auto& ref_2_producer = replay_producer_as_ref.getReplay();
+
+  // Forward vectorized IDs to index into producer correctly
+  for (auto entry : ref_2_producer) {
+    auto ref_id = entry.first;
+    auto p_id = entry.second;
+    if (ref_id->getParallelType() == ParallelType::Vectorize) {
+      p_id->parallelize(ParallelType::Vectorize);
+    }
+  }
 
   // Index into producer using reference indexing
   auto producer_indexing = ref_compute.updateIndexCompute(
@@ -861,7 +877,8 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
       }
     } else if (
         (loop->iter_domain()->isBlockDim() && is_shared) ||
-        (loop->iter_domain()->isThread() && is_local)) {
+        (loop->iter_domain()->isThread() && is_local) ||
+        (loop->iter_domain()->parallelType() == ParallelType::Vectorize)) {
       idx = zero;
     } else {
       idx = loop->index();
@@ -992,6 +1009,15 @@ kir::TensorIndex* Index::getProducerIndex_impl(
 
   const auto& ref_2_producer = replay_producer_as_ref.getReplay();
 
+  // Forward vectorized IDs to index into producer correctly
+  for (auto entry : ref_2_producer) {
+    auto ref_id = entry.first;
+    auto p_id = entry.second;
+    if (ref_id->getParallelType() == ParallelType::Vectorize) {
+      p_id->parallelize(ParallelType::Vectorize);
+    }
+  }
+
   // Index into producer using reference indexing
   auto producer_indexing = ref_compute.updateIndexCompute(
       producer_tv->domain(),
@@ -1112,7 +1138,8 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
 
   const auto& ref_2_consumer = replay_consumer_as_ref.getReplay();
 
-  // Index into the reference tensor
+  // Index into the reference tensor. Reference indexing will handle vectorized
+  // dims where index should be set to 0
   auto ref_compute = getReferenceIndexing(loops, reference_domain);
 
   // Index into consumer using reference indexing
@@ -1419,7 +1446,8 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
     const auto one = ir_builder.create<kir::Int>(1);
     for (auto loop : loops) {
       if (loop->iter_domain()->parallelType() == ParallelType::Unroll ||
-          loop->iter_domain()->parallelType() == ParallelType::Unswitch) {
+          loop->iter_domain()->parallelType() == ParallelType::Unswitch ||
+          loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
         within_unswitch = true;
       }
 

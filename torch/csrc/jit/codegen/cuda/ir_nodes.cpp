@@ -663,15 +663,17 @@ Val* IterDomain::extent() const {
   return extent_;
 }
 
+// TODO: We should change parallelize interface to be on tensorview or at least
+// vectorize should be done on tensorview. This would let us check that we don't
+// vectorize to the left of the computeAt domain, and could allow us to do some
+// simple validation of vectorize as it's inputs are right most and contiguous.
 void IterDomain::parallelize(ParallelType t) {
   parallel_type_ = t;
-
-  TORCH_CHECK(t != ParallelType::Vectorize, "Vectorization not yet supported.");
-
-  if (t == ParallelType::Unroll) {
+  if (t == ParallelType::Unroll || t == ParallelType::Vectorize ||
+      t == ParallelType::Unswitch) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
-        "Unrolling only supported with start = 0 and extent as a const int, but got ",
+        "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",
         "a start of ",
         start(),
         " and extent ",

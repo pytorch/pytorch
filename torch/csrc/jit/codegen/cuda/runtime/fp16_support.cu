@@ -20,3 +20,9 @@ __device__ float __half2float(const __half h) {
   asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(h)));
   return val;
 }
+
+// aligned vector generates vectorized load/store on CUDA
+template <typename scalar_t, int vec_size>
+struct alignas(sizeof(scalar_t) * vec_size) Array {
+  scalar_t val[vec_size];
+};

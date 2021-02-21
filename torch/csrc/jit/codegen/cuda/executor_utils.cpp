@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -211,6 +212,158 @@ void validateKernelOutputs(
   }
   TORCH_INTERNAL_ASSERT(
       !mismatch, "Found one or more invalid arguments: ", msg.str());
+}
+
+bool canVectorize(const IValue& aten_val, int word_size) {
+  if (!aten_val.isTensor()) {
+    return false;
+  }
+
+  const auto& aten_tensor = aten_val.toTensor();
+
+  if (reinterpret_cast<size_t>(aten_tensor.data_ptr()) %
+          (word_size * aten_tensor.dtype().itemsize()) !=
+      0) {
+    return false;
+  }
+
+  for (size_t i = aten_tensor.ndimension(); i > 0; i--) {
+    if (aten_tensor.size(i - 1) != 1) {
+      if (aten_tensor.size(aten_tensor.ndimension() - 1) % word_size != 0 ||
+          aten_tensor.stride(aten_tensor.ndimension() - 1) != 1) {
+        return false;
+      }
+      break;
+    }
+  }
+
+  for (auto stride : aten_tensor.strides()) {
+    if (stride != 1 && stride % word_size != 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool canVectorize(
+    TensorView* fusion_tv,
+    int word_size,
+    GpuLower& lower,
+    kir::ExpressionEvaluator& expr_eval) {
+  IterDomain* last_root_dim = nullptr;
+  // TODO: Should this be rfactor instead of root??
+  for (size_t i = fusion_tv->getRootDomain().size(); i > 0; i--) {
+    auto r_id = fusion_tv->getRootDomain()[i - 1];
+    if (r_id->isReduction() || r_id->isBroadcast()) {
+      continue;
+    }
+    last_root_dim = r_id;
+    break;
+  }
+
+  if (last_root_dim == nullptr) {
+    return false;
+  }
+
+  auto last_dim_size =
+      expr_eval.evaluate(lower.lowerValue(last_root_dim->rawExtent()));
+
+  if (!last_dim_size.has_value()) {
+    return false;
+  }
+
+  if (last_dim_size.value() % word_size != 0) {
+    return false;
+  }
+
+  return true;
+}
+
+void validateVectorizedTensors(
+    Fusion* fusion,
+    const at::ArrayRef<IValue>& inputs,
+    const std::vector<at::Tensor>& outputs,
+    GpuLower& lower,
+    kir::ExpressionEvaluator& expr_eval) {
+  std::unordered_map<TensorView*, int> tv_to_vector_word_size;
+  for (auto expr : fusion->exprs()) {
+    if (!expr->isA<UnaryOp>() ||
+        expr->as<UnaryOp>()->getUnaryOpType() != UnaryOpType::Set) {
+      continue;
+    }
+    auto uop = expr->as<UnaryOp>();
+    if (!uop->out()->isA<TensorView>() || !uop->in()->isA<TensorView>()) {
+      continue;
+    }
+    auto out_tv = uop->out()->as<TensorView>();
+    IterDomain* vector_dim = nullptr;
+    for (auto id : out_tv->domain()->domain()) {
+      if (id->getParallelType() == ParallelType::Vectorize) {
+        vector_dim = id;
+        break;
+      }
+    }
+    if (vector_dim == nullptr) {
+      continue;
+    }
+    auto vector_word_size =
+        expr_eval.evaluate(lower.lowerValue(vector_dim->rawExtent()));
+    TORCH_INTERNAL_ASSERT(
+        vector_word_size.has_value(),
+        "Non constant vector dimension found in ",
+        out_tv);
+    tv_to_vector_word_size[out_tv] = vector_word_size.value();
+    tv_to_vector_word_size[uop->in()->as<TensorView>()] =
+        vector_word_size.value();
+  }
+
+  for (auto entry : tv_to_vector_word_size) {
+    auto tv = entry.first;
+    auto word_size = entry.second;
+    if (tv->isFusionInput()) {
+      auto inp_it =
+          std::find(fusion->inputs().begin(), fusion->inputs().end(), tv);
+      TORCH_INTERNAL_ASSERT(
+          inp_it != fusion->inputs().end(),
+          "Could not find ",
+          tv,
+          " in fusion inputs.");
+      auto inp_pos = std::distance(fusion->inputs().begin(), inp_it);
+
+      auto aten_inp = inputs[inp_pos];
+      TORCH_INTERNAL_ASSERT(
+          canVectorize(aten_inp, word_size),
+          "Error vectorizing, ",
+          tv,
+          " as input provided does not allowed vectorization by word size, ",
+          word_size);
+    } else if (tv->isFusionOutput() && outputs.size() > 0) {
+      auto out_it =
+          std::find(fusion->outputs().begin(), fusion->outputs().end(), tv);
+      TORCH_INTERNAL_ASSERT(
+          out_it != fusion->outputs().end(),
+          "Could not find ",
+          tv,
+          " in provided fusion outputs.");
+      auto out_pos = std::distance(fusion->outputs().begin(), out_it);
+
+      auto aten_out = outputs[out_pos];
+      TORCH_INTERNAL_ASSERT(
+          canVectorize(aten_out, word_size),
+          "Error vectorizing, ",
+          tv,
+          " as output provided does not allowed vectorization by word size, ",
+          word_size);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          canVectorize(tv, word_size, lower, expr_eval),
+          "Could not vectorize ",
+          tv,
+          " it's inner most dim is not a multiple of ",
+          word_size);
+    }
+  }
 }
 
 kir::ExpressionEvaluator bindKernelInputs(

@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 namespace torch {
@@ -211,7 +212,11 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
           // map and loop map do not have the same concrete id mapping.
           if (GpuLower::current()->caLoopMap().areMapped(id, loop_id)) {
             concrete_leaf_ids.erase(id);
-            return concrete_to_id_.at(id);
+            auto replayed_id = concrete_to_id_.at(id);
+            if (loop_id->getParallelType() == ParallelType::Vectorize) {
+              replayed_id->parallelize(ParallelType::Vectorize);
+            }
+            return replayed_id;
           }
         }
 
@@ -244,7 +249,8 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_tensor) {
-  auto gpu_lower = GpuLower::current();
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   // Create a simple index maspping from loop iter domains to their local index.
   // This is only applicable to global memory buffers.
@@ -255,6 +261,10 @@ IndexCompute getReferenceIndexing(
     auto lowered_id = gpu_lower->lowerValue(reference_tensor->axis(loop_i))
                           ->as<kir::IterDomain>();
     initial_index_map[lowered_id] = loop_structure[loop_i]->index();
+    if (loop_structure[loop_i]->iter_domain()->parallelType() ==
+        ParallelType::Vectorize) {
+      initial_index_map[lowered_id] = ir_builder.create<kir::Int>(0);
+    }
   }
 
   // Send to the other version of reference indexing that directly takes the

@@ -40,6 +40,24 @@ void validateKernelOutputs(
     const std::vector<at::Tensor>& outputs,
     const c10::Device& device);
 
+// Returns if vectorizing the aten value by word size is possible
+bool canVectorize(const IValue& aten_val, int word_size);
+
+// Returns if vectorizing the aten value by word size is possible
+bool canVectorize(
+    TensorView* fusion_tv,
+    int word_size,
+    GpuLower& lower,
+    kir::ExpressionEvaluator& expr_eval);
+
+// TODO(kir): rewrite in terms of Kernel tensors
+void validateVectorizedTensors(
+    Fusion* fusion,
+    const at::ArrayRef<IValue>& inputs,
+    const std::vector<at::Tensor>& outputs,
+    GpuLower& lower,
+    kir::ExpressionEvaluator& expr_eval);
+
 //! Bind kernel input values to runtime values
 kir::ExpressionEvaluator bindKernelInputs(
     const at::ArrayRef<IValue>& aten_inputs,

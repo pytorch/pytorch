@@ -43,6 +43,7 @@ namespace torch {
 namespace jit {
 
 using namespace torch::jit::fuser::cuda;
+using namespace at::indexing;
 
 namespace {
 
@@ -12914,6 +12915,211 @@ TEST(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
   testValidate(&fusion, cg_outputs, aten_inputs, {t3}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionVectorization1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  tv2->split(1, 16);
+  tv2->split(1, 64);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  std::vector<TensorView*> vectorized_tvs = {c0, c1, tv2};
+  for (auto tv : vectorized_tvs) {
+    tv->split(-1, 4);
+    tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 128;
+  const int by = 2048;
+  at::Tensor t0 = at::randn({bx, by}, options);
+  at::Tensor t1 = at::randn({bx, by}, options);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0 + t1;
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionVectorization2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  tv2->split(1, 16);
+  tv2->split(1, 64);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  std::vector<TensorView*> vectorized_tvs = {c0, c1, tv2};
+  for (auto tv : vectorized_tvs) {
+    tv->split(-1, 4);
+    // Vectorize the wrong dimension
+    tv->axis(-2)->parallelize(ParallelType::Vectorize);
+  }
+
+  FusionExecutor fe;
+  // Make sure compilation fails
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
+TEST(NVFuserTest, FusionVectorization3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  tv2->split(1, 16);
+  tv2->split(1, 64);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  std::vector<TensorView*> vectorized_tvs = {c0, c1, tv2};
+  for (auto tv : vectorized_tvs) {
+    tv->split(-1, 4);
+    tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 128;
+  const int by = 2049;
+  at::Tensor t0 = at::randn({bx, by}, options);
+  at::Tensor t1 = at::randn({bx, by}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+  ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
+
+  aten_inputs[0] = t0.index({"...", Slice(1)});
+  aten_inputs[1] = t1.index({"...", Slice(1)});
+  ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
+
+  t0 = at::randn({bx, 2048}, options).index({"...", Slice(4)});
+  t1 = at::randn({bx, 2048}, options).index({"...", Slice(4)});
+  aten_inputs = {t0, t1};
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0 + t1;
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionVectorizationRFactor_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+
+  auto tv3 = sum(tv2, {-1});
+
+  fusion.addOutput(tv3);
+
+  tv3->split(-1, 128 * 4);
+  tv3->split(-1, 4);
+  // Reduce outer dim first
+  auto tv4 = tv3->rFactor({-3, -1});
+  // Tv3 will reduce threads
+
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  tv0->computeAt(tv4, -2);
+  tv1->computeAt(tv4, -2);
+
+  auto tv6 = tv0->cache_after();
+  auto tv7 = tv1->cache_after();
+
+  tv6->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv7->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  tv4->axis(-2)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 128;
+  const int by = 2048;
+  at::Tensor t0 = at::randn({bx, by}, options);
+  at::Tensor t1 = at::randn({bx, by}, options);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0.add(t1).sum(1);
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+
+  auto t3 = t0.add(t1).sum(1);
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {t3}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionSizeOneLoop_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -12974,7 +13180,6 @@ TEST(NVFuserTest, FusionSizeOneLoop_CUDA) {
   FusionExecutor fe;
   fe.compileFusion(&fusion);
   auto cg_outputs = fe.runFusion(aten_inputs);
-
   auto t6 = (t0.unsqueeze(-1) + t1).unsqueeze(0) + t2;
 
   testValidate(&fusion, cg_outputs, aten_inputs, {t6}, __LINE__, __FILE__);

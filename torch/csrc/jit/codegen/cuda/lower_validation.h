@@ -11,6 +11,8 @@ namespace cuda {
 
 void validateIr(Fusion* fusion);
 
+void validateVectorize(Fusion* fusion);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

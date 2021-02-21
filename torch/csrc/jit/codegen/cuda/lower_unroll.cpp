@@ -115,7 +115,8 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   // Setup for loop scoping
   const bool is_unroll =
       fl->iter_domain()->parallelType() == ParallelType::Unroll ||
-      fl->iter_domain()->parallelType() == ParallelType::Unswitch;
+      fl->iter_domain()->parallelType() == ParallelType::Unswitch ||
+      fl->iter_domain()->parallelType() == ParallelType::Vectorize;
 
   // If we're not looking for an unroll loop, or didn't find one, process as
   // normal.
@@ -141,6 +142,10 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl);
 
   unroll_ite->thenBody().push_back(unrolled_loop_nest);
+  if (fl->iter_domain()->parallelType() == ParallelType::Vectorize) {
+    loop_replacement_map_.insert({fl, unroll_ite});
+    return;
+  }
 
   // Loop nest for inlined path
   kir::ForLoop* inlined_loop = cloneLoopNest(fl);

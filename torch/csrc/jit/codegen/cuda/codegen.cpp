@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
@@ -297,6 +298,52 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::UnaryOp* node) final {
+    bool is_vector_op = false;
+    size_t vector_word_size = 1;
+
+    if (node->out()->isA<kir::TensorIndex>()) {
+      auto ti = node->out()->as<kir::TensorIndex>();
+      for (auto id : ti->view()->fuserTv()->domain()->domain()) {
+        if (id->getParallelType() != ParallelType::Vectorize) {
+          continue;
+        }
+
+        ExpressionEvaluator expr_eval(id->fusion());
+        auto vector_size_optional = expr_eval.evaluate(id->rawExtent());
+
+        TORCH_INTERNAL_ASSERT(
+            vector_size_optional.has_value(),
+            "Could not evalualte constant value bound to vectorized dim.");
+
+        vector_word_size = vector_size_optional.value();
+
+        is_vector_op = true;
+        break;
+      }
+
+      if (is_vector_op) {
+        TORCH_INTERNAL_ASSERT(
+            node->operation() == UnaryOpType::Set,
+            "Cannot vectorize operations that are not sets. ",
+            "Use cache_before and cache_after to store/load with vectorized reads into buffers.");
+        TORCH_INTERNAL_ASSERT(
+            node->out()->dtype() == node->in()->dtype(),
+            "Vectorized store/load requires input and output datatypes match.");
+      }
+    }
+
+    if (is_vector_op) {
+      indent() << "*reinterpret_cast<"
+               << "Array<" << node->out()->dtype() << ", " << vector_word_size
+               << ">*>"
+               << "(&" << gen(node->out()) << ") = "
+               << "*reinterpret_cast<"
+               << "Array<" << node->in()->dtype() << ", " << vector_word_size
+               << ">*>"
+               << "(&" << gen(node->in()) << ");\n";
+      return;
+    }
+
     if (!print_inline_) {
       indent() << gen(node->out());
       if (!node->out()->isScalar() && !node->in()->isScalar()) {
@@ -820,7 +867,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   void visit(const kir::ForLoop* node) final {
     // TODO(kir): handle this during lowering
-    if (node->iter_domain()->isThread() || node->iter_domain()->isBroadcast()) {
+    if (node->iter_domain()->isThread() || node->iter_domain()->isBroadcast() ||
+        node->iter_domain()->parallelType() == ParallelType::Vectorize) {
       handleScope(node->body());
       return;
     }
