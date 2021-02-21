@@ -134,10 +134,7 @@ Tensor _get_rounded_zero_point(
     int64_t quant_min,
     int64_t quant_max) {
   // This assumes the per channel zero point vector is single-dimensioned.
-  for (int i = 0; i < zero_point.sizes()[0]; ++i) {
-    zero_point[i] = static_cast<int64_t>(zero_point[i].item<float>() + 0.5);
-  }
-  return zero_point.clamp(quant_min, quant_max).to(at::kFloat);
+  return zero_point.round().clamp_(quant_min, quant_max);
 }
 
 Tensor _fake_quantize_learnable_per_channel_affine(
@@ -148,7 +145,7 @@ Tensor _fake_quantize_learnable_per_channel_affine(
     int64_t quant_min,
     int64_t quant_max,
     double grad_factor) {
-  Tensor zero_point_rounded = zero_point.to(at::kLong);
+  Tensor zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max).to(at::kLong);
   return native::fake_quantize_per_channel_affine(
     self, scale, zero_point_rounded, axis, quant_min, quant_max);
 }
@@ -180,6 +177,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
           0 & \text{ else }
         \end{cases}
   */
+  auto zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max);
+
   TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(X.scalar_type() == ScalarType::Float);
   TORCH_CHECK(scale.scalar_type() == ScalarType::Float);
@@ -199,8 +198,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
       "dimensions of scale and zero-point are not consistent with input tensor")
 
   TORCH_CHECK(
-      at::min(zero_point).item().toLong() >= quant_min &&
-          at::max(zero_point).item().toLong() <= quant_max,
+      at::min(zero_point_rounded).item().toLong() >= quant_min &&
+          at::max(zero_point_rounded).item().toLong() <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
   TORCH_CHECK(
@@ -211,7 +210,6 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
     return std::make_tuple(X, scale, zero_point);
   }
 
-  auto zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max);
   auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
   auto dScale_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
   auto dZeroPoint_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
@@ -225,7 +223,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   }
   auto X_shape = X.sizes();
   auto scale_vectorized = scale.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
-  auto zero_point_vectorized = zero_point.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
+  auto zero_point_vectorized = zero_point_rounded.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
 
   auto iter = TensorIteratorConfig()
     .add_output(dX)
