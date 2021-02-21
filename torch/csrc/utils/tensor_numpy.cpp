@@ -40,6 +40,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 #include <vector>
 #include <string.h>
 #include <array>
+#include <algorithm>
 
 using namespace at;
 using namespace torch::autograd;
@@ -399,8 +400,27 @@ std::string get_buffer_str(void* buffer, int64_t start, int64_t end) {
   return output.str();
 }  
 
+inline bool _shape_match(std::vector<int64_t> & shape, PyArrayObject* obj, int64_t shape_idx) {
+  /*
+  A utility function that returns true only if shape[shape_idx:] == obj.shape where obj is a numpy array.
+  Else returns false. This is used in _extract_ndarrays() below for checking whether an embedded numpy array
+  has the target shape.
+  */
+  int64_t ndim = PyArray_NDIM(obj);
+  if ((shape.size() - shape_idx) != ndim) {
+    return false;
+  }
 
-bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<int64_t> & numels, size_t shape_idx, std::vector<PyArrayObject*> & array_ptr_storage) {
+  npy_intp* obj_shape = PyArray_DIMS(obj);
+  for (int64_t i = 0; i < shape.size() - shape_idx; ++i) {
+    if (obj_shape[i] != shape[i+shape_idx]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, int64_t shape_idx, std::vector<PyArrayObject*> & array_ptr_storage) {
   /*
   This is a helper function for extracting all the numpy arrays embedded within PySequences (recursively) representd by obj. This is done recursively in a 
   depth first search style. It puts the numpy array pointers in the array_ptr_storage for later use. In case there is a non numpy array type within obj, 
@@ -411,8 +431,7 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<
     if (PyArray_NDIM((PyArrayObject*) obj) == 0) {
       return false;
     }
-    // This only checks for number of elements since the iterator will treat an array of shape (m x b) or any other the same way it would treat its flattened version.
-    if (numels[shape_idx] != PyArray_SIZE((PyArrayObject*) obj)) {
+    if (!_shape_match(shape, (PyArrayObject*) obj, shape_idx)) {
       auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS((PyArrayObject*) obj)), 0, PyArray_NDIM((PyArrayObject*) obj)) + std::string(")");
       auto expected_shape_str = get_vector_str(shape, shape_idx);
       auto err_str = std::string("expected numpy array of shape ") + expected_shape_str + std::string(" at dim ") + std::to_string(shape_idx) + std::string("(got ") + true_shape_str;
@@ -432,7 +451,7 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<
     }
     PyObject** items = PySequence_Fast_ITEMS(seq.get());
     for (Py_ssize_t i = 0; i < seq_len; ++i) {
-      if (!_extract_ndarrays(items[i], shape, numels, shape_idx+1, array_ptr_storage)) {
+      if (!_extract_ndarrays(items[i], shape, shape_idx+1, array_ptr_storage)) {
         return false;
       }
     }
@@ -457,14 +476,7 @@ bool extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<P
     return false;
   }
 
-  std::vector<int64_t> numels(ndims);
-  numels[ndims-1] = shape[ndims-1];
-
-  for (int64_t i = ndims-2; i >= 0; --i) {
-    numels[i] = shape[i] * numels[i+1];
-  }
-
-  return _extract_ndarrays(obj, shape, numels, 0, array_ptr_storage);
+  return _extract_ndarrays(obj, shape, 0, array_ptr_storage);
 }
 
 
@@ -536,19 +548,28 @@ inline void* store_ndarray(void* tensor_ptr, void* ndarray_ptr, at::ScalarType s
 }
 
 
-Tensor reverse_strides(Tensor & tensor) {
+Tensor to_fortran_strides(Tensor & tensor, int64_t inner_ndim) {
   /*
-  Utility function for reversing the strides of a tensor excluding the outermost dimension.
-  So, a tensor with strides [3200, 1200, 720, 80] will return a tensor with strides reversed: [3200, 80, 720, 1200]
-  This is used when copying F-contiguous numpy arrays to the output tensor in tensor_from_ndarray_batch().
+  Utility function for converting strides of tensor partially into fortran like (as in numpy) based on inner_ndim.
+  So, a tensor with strides [3200, 1200, 720, 80] and inner_ndim = 3 will return a tensor with strides [3200, 1, a, b]
+  where a = 1*tensor.shape[1] and b = a*tensor.shape[2]. inner_ndim is the number of dimensions of each embedded numpy
+  array. This is used when copying F-contiguous numpy arrays to the output tensor in tensor_from_ndarray_batch().
+  This function ensures that the tensor's striding matches with the F-contiguous numpy arrays.
   */
   auto strides = tensor.strides();
-  auto size = strides.size();
-  std::vector<int64_t> new_strides(size);
-  new_strides[0] = strides[0];
-  for (int64_t i = 0; i < size - 1; ++i) {
-    new_strides[i+1] = strides[size-i-1];
+  auto total_ndim = strides.size();
+  auto shape = tensor.sizes();
+  std::vector<int64_t> new_strides(total_ndim);
+
+  int64_t i = 0;
+  for (; i < total_ndim - inner_ndim; ++i) {
+    new_strides[i] = strides[i];
   }
+  new_strides[i] = 1;
+  for (; i < total_ndim - 1; ++i) {
+    new_strides[i+1] = new_strides[i] * shape[i];
+  }
+
   return at::native::set_storage_cpu_(tensor, tensor.storage(), tensor.storage_offset(), tensor.sizes(), new_strides);
 }
 
@@ -564,7 +585,7 @@ at::Tensor tensor_from_ndarray_batch(std::vector<PyArrayObject*> & array_ptr_sto
   bool C_contiguous_majority = true;
 
   for (auto array:array_ptr_storage) {
-    if (PyArray_IS_C_CONTIGUOUS(array)) {
+    if (!PyArray_IS_F_CONTIGUOUS(array)) {
       C_contiguous_count += 1;
     }
   }
@@ -600,8 +621,10 @@ at::Tensor tensor_from_ndarray_batch(std::vector<PyArrayObject*> & array_ptr_sto
     }
   }
 
-  if (!C_contiguous_majority) 
-    tensor = reverse_strides(tensor);
+  if (!C_contiguous_majority) {
+    int64_t inner_ndim = PyArray_NDIM(array_ptr_storage[0]);
+    tensor = to_fortran_strides(tensor, inner_ndim);
+  }
 
   return tensor;
 }
