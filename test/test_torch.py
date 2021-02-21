@@ -5016,7 +5016,9 @@ class TestTorchDeviceType(TestCase):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
         test_functions = [
-            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {})
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
+            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
+            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, None, {}),
         ]
 
         for name, fn, identity, dt in test_functions:

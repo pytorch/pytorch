@@ -8,6 +8,8 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/NamedTensorUtils.h>
 
+#include <iostream>
+
 namespace at { namespace native {
 
 DEFINE_DISPATCH(where_kernel);
@@ -314,15 +316,24 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
 }
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
-  if (self.is_quantized()) {
-    Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-    at::native::max_out(max, max_indices, self.int_repr(), dim, keepdim);
-    // TODO: qscheme
-    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
-  } else {
-    Tensor max = at::empty({0}, self.options());
+  if (self.numel() == 0) {
+    Tensor max = at::zeros(self.sizes(), self.options());
+    Tensor max_indices = at::zeros(self.sizes(), self.options().dtype(kLong));
+
     return at::native::max_out(max, max_indices, self, dim, keepdim);
+  }
+  else {
+    Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
+    if (self.is_quantized()) {
+      Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
+      at::native::max_out(max, max_indices, self.int_repr(), dim, keepdim);
+      // TODO: qscheme
+      return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max,
+        self.q_scale(), self.q_zero_point()), max_indices);
+    } else {
+      Tensor max = at::empty({0}, self.options());
+      return at::native::max_out(max, max_indices, self, dim, keepdim);
+    }
   }
 }
 
@@ -339,7 +350,11 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
               "expected device ", self.device(), " but got ",
               max_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
+
+  std::cout << "wrap dim: " << dim << std::endl;
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
+    // case where self.numel() == 1. The result does not need to be reshaped
+    // as a case of reduction in this case.
     TORCH_CHECK(!self.is_complex(), "max does not support complex inputs.");
     AT_ASSERT(max.dim() == 0);
     max_indices.resize_({}).fill_(0);
