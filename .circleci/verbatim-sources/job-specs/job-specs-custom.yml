@@ -204,28 +204,6 @@
       - store_test_results:
           path: test/test-reports
 
-  pytorch_macos_10_13_py3_lite_interpreter_build_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
-    macos:
-      xcode: "12.0"
-    steps:
-      - checkout
-      - attach_workspace:
-          at: ~/workspace
-      - run_brew_for_macos_build
-      - run:
-          name: Test
-          no_output_timeout: "1h"
-          command: |
-            set -e
-            export IN_CI=1
-            export BUILD_LITE_INTERPRETER=1
-            chmod a+x macos-lite-interpreter-build-test.sh
-            unbuffer macos-lite-interpreter-build-test.sh 2>&1 | ts
-      - store_test_results:
-          path: test/test-reports
-
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
@@ -499,6 +477,7 @@
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
+            echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -510,6 +489,7 @@
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               export USE_PYTORCH_METAL=${USE_METAL}
             fi
+            export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}"
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
           name: Run Build Test
