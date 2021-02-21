@@ -400,27 +400,38 @@ std::string get_buffer_str(void* buffer, int64_t start, int64_t end) {
   return output.str();
 }  
 
-inline bool _shape_match(std::vector<int64_t> & shape, PyArrayObject* obj, int64_t shape_idx) {
+inline bool _shape_match_ndarray(std::vector<int64_t> & shape, PyArrayObject* array, int64_t start) {
   /*
-  A utility function that returns true only if shape[shape_idx:] == obj.shape where obj is a numpy array.
+  A utility function that returns true only if shape[start:] == array.shape where array is a numpy array.
   Else returns false. This is used in _extract_ndarrays() below for checking whether an embedded numpy array
   has the target shape.
   */
-  int64_t ndim = PyArray_NDIM(obj);
-  if ((shape.size() - shape_idx) != ndim) {
+  int64_t ndim = PyArray_NDIM(array);
+  if ((shape.size() - start) != ndim) {
     return false;
   }
 
-  npy_intp* obj_shape = PyArray_DIMS(obj);
-  for (int64_t i = 0; i < shape.size() - shape_idx; ++i) {
-    if (obj_shape[i] != shape[i+shape_idx]) {
+  npy_intp* array_shape = PyArray_DIMS(array);
+  for (int64_t i = 0; i < ndim; ++i) {
+    if (array_shape[i] != shape[i+start]) {
       return false;
     }
   }
   return true;
 }
 
-bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, int64_t shape_idx, std::vector<PyArrayObject*> & array_ptr_storage) {
+void _populate_shape_vector(std::vector<int64_t> & shape, PyArrayObject* array) {
+  /*
+  A utility function for filling up the shape vector with entries from the shape array of the numpy array. 
+  */
+  int64_t ndim = PyArray_NDIM(array);
+  npy_intp* array_shape = PyArray_DIMS(array);
+  for (int64_t i = 0; i < ndim; ++i) {
+    shape.emplace_back(array_shape[i]);
+  }
+}
+
+bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<int64_t> & ndarray_shape, int64_t shape_idx, std::vector<PyArrayObject*> & array_ptr_storage) {
   /*
   This is a helper function for extracting all the numpy arrays embedded within PySequences (recursively) representd by obj. This is done recursively in a 
   depth first search style. It puts the numpy array pointers in the array_ptr_storage for later use. In case there is a non numpy array type within obj, 
@@ -431,11 +442,17 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, int64_t shap
     if (PyArray_NDIM((PyArrayObject*) obj) == 0) {
       return false;
     }
-    if (!_shape_match(shape, (PyArrayObject*) obj, shape_idx)) {
-      auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS((PyArrayObject*) obj)), 0, PyArray_NDIM((PyArrayObject*) obj)) + std::string(")");
-      auto expected_shape_str = get_vector_str(shape, shape_idx);
-      auto err_str = std::string("expected numpy array of shape ") + expected_shape_str + std::string(" at dim ") + std::to_string(shape_idx) + std::string("(got ") + true_shape_str;
-      throw ValueError(err_str);  
+
+    if (ndarray_shape.size() == 0) {
+      ndarray_shape.emplace_back(shape_idx);
+      _populate_shape_vector(ndarray_shape, (PyArrayObject*) obj);
+    }
+    else if ((ndarray_shape[0] != shape_idx) || !_shape_match_ndarray(ndarray_shape, (PyArrayObject*) obj, 1)) {
+      auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS((PyArrayObject*) obj)), 0, PyArray_NDIM((PyArrayObject*) obj));
+      auto expected_shape_str = get_vector_str(ndarray_shape, 1);
+      std::ostringstream err;
+      err << "expected numpy array of shape " << expected_shape_str <<" at dim " << ndarray_shape[0] << " (got " << true_shape_str << " at dim " << shape_idx << ")";
+      throw ValueError(err.str());  
     }
     array_ptr_storage.push_back((PyArrayObject*) obj);
     return true;
@@ -451,7 +468,7 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, int64_t shap
     }
     PyObject** items = PySequence_Fast_ITEMS(seq.get());
     for (Py_ssize_t i = 0; i < seq_len; ++i) {
-      if (!_extract_ndarrays(items[i], shape, shape_idx+1, array_ptr_storage)) {
+      if (!_extract_ndarrays(items[i], shape, ndarray_shape, shape_idx+1, array_ptr_storage)) {
         return false;
       }
     }
@@ -476,7 +493,8 @@ bool extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<P
     return false;
   }
 
-  return _extract_ndarrays(obj, shape, 0, array_ptr_storage);
+  std::vector<int64_t> ndarray_shape;
+  return _extract_ndarrays(obj, shape, ndarray_shape, 0, array_ptr_storage);
 }
 
 

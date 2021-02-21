@@ -2006,6 +2006,40 @@ class TestTensorCreation(TestCase):
                     self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
                                      exact_dtype=True, rtol=1e-05, atol=1e-08)
 
+
+        # Extended tests including fortran layout arrays
+        for dtype in np_types:
+            for _ in range(repeats):
+                stack = []
+                A = np.asfortranarray(np.random.randn(100).astype(dtype))
+                stack.append([[A, 2 * A], [A, A]])
+                A = np.asfortranarray(np.random.randn(10, 5).astype(dtype))
+                stack.append([[A, 2 * A], [A, A]])
+                A = np.asfortranarray(np.random.randn(10, 10).astype(dtype))
+                stack.append([[A.T, A], [A, A.T]])
+                A = np.asfortranarray(np.random.randn(20, 20).astype(dtype))
+                stack.append([[A[5:10, :], A.T[11:16, :]], [A[:5, :], A[15:20, :]]])
+                A = np.asfortranarray(np.random.randn(20, 20, 20).astype(dtype))
+                stack.append([[A[5:10, :, :], A.T[11:16, :, :]], [A[:5, :, :], A[15:20, :, :]]])
+                stack.append([[[[A]]]])
+
+                for arrays in stack:
+                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                                     exact_dtype=True, rtol=1e-05, atol=1e-08)
+
+        # Based on Natalia Gimelshein's test case
+        stack = []
+        A = np.random.rand(2, 3, 4)[:, :, 0]
+        stack.append([A for _ in range(10)])
+        A = np.random.rand(2, 3, 4)[:, 0, 0]
+        stack.append([A for _ in range(10)])
+        A = np.random.rand(2, 3, 4)[:, 0, :]
+        stack.append([A for _ in range(10)])
+
+        for arrays in stack:
+            self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                             exact_dtype=True, rtol=1e-05, atol=1e-08)
+
         return
 
     # TODO: this test should be updated
