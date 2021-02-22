@@ -32,6 +32,15 @@ class TORCH_API LoopNest {
   LoopNest(
       Stmt* stmt,
       const std::unordered_set<const Buf*>& output_bufs,
+      const std::unordered_set<const Buf*>& input_bufs,
+      const std::unordered_set<const Buf*>& intermediate_bufs)
+      : root_stmt_(stmt),
+        input_bufs_(input_bufs),
+        output_bufs_(output_bufs),
+        intermediate_bufs_(intermediate_bufs) {}
+  LoopNest(
+      Stmt* stmt,
+      const std::unordered_set<const Buf*>& output_bufs,
       const std::unordered_set<const Buf*>& intermediate_bufs)
       : root_stmt_(stmt),
         output_bufs_(output_bufs),
