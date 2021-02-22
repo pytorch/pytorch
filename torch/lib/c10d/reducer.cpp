@@ -1259,7 +1259,11 @@ void Reducer::finalize_backward() {
           bucket.future_work,
           "Expected bucket.future_work not to be null. "
           "This may indicate that communication hook was not properly installed.");
-      bucket.future_work->wait();
+      // Normally need to wait until the completion of communication hook,
+      // unless the communication hook skips allreduce and only does local accumulation for (post-)local SGD.
+      if (!bucket.future_work->completed()) {
+        bucket.future_work->wait();
+      }
 
       auto future_result =
           comm_hook_->parseHookResult(bucket.future_work->value());
