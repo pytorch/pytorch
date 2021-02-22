@@ -82,10 +82,13 @@ class _ConvNd(Module):
         if out_channels % groups != 0:
             raise ValueError('out_channels must be divisible by groups')
         valid_padding_strings = {'same', 'valid'}
-        if isinstance(padding, str) and padding not in valid_padding_strings:
-            raise ValueError(
-                "Invalid padding string {!r}, should be one of {}".format(
-                    padding, valid_padding_strings))
+        if isinstance(padding, str):
+            if padding not in valid_padding_strings:
+                raise ValueError(
+                    "Invalid padding string {!r}, should be one of {}".format(
+                        padding, valid_padding_strings))
+            if padding == 'same' and any(s != 1 for s in stride):
+                raise ValueError("padding='same' is not supported for strided convolutions")
 
         valid_padding_modes = {'zeros', 'reflect', 'replicate', 'circular'}
         if padding_mode not in valid_padding_modes:
@@ -200,9 +203,8 @@ class Conv1d(_ConvNd):
 
     Note:
         ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-        the input so the output has shape ``ceil(in_shape / stride)`` in each
-        dimension. For the default ``stride = 1``, the output is the same size
-        as the input.
+        the input so the output has the shape as the input. However, this mode
+        doesn't support any stride values other than 1.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -337,9 +339,8 @@ class Conv2d(_ConvNd):
 
     Note:
         ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-        the input so the output has shape ``ceil(in_shape / stride)`` in each
-        dimension. For the default ``stride = 1``, the output is the same size
-        as the input.
+        the input so the output has the shape as the input. However, this mode
+        doesn't support any stride values other than 1.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -472,9 +473,8 @@ class Conv3d(_ConvNd):
 
     Note:
         ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-        the input so the output has shape ``ceil(in_shape / stride)`` in each
-        dimension. For the default ``stride = 1``, the output is the same size
-        as the input.
+        the input so the output has the shape as the input. However, this mode
+        doesn't support any stride values other than 1.
 
     Args:
         in_channels (int): Number of channels in the input image
