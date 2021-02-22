@@ -111,12 +111,79 @@ void nnc_aten_matmul(
   }
 }
 
+void nnc_aten_adaptive_avg_pool2d(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  int64_t H = extra_args[0];
+  int64_t W = extra_args[1];
+  try {
+    at::adaptive_avg_pool2d_out(r, x, {H, W});
+  } catch (...) {
+  }
+}
+
+void nnc_aten_mean(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  int64_t dim = extra_args[0];
+  try {
+    at::mean_out(r, x, {dim});
+  } catch (...) {
+  }
+}
+
+void nnc_aten_addmm(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  const at::Tensor& y = tensors[2];
+  const at::Tensor& z = tensors[3];
+  try {
+    at::addmm_out(r, x, y, z, extra_args[0], extra_args[1]);
+  } catch (...) {
+  }
+}
+
 static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
 static RegisterNNCExternalFunction nnc_matmul(
     "nnc_aten_matmul",
     nnc_aten_matmul);
+static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
+    "nnc_aten_adaptive_avg_pool2d",
+    nnc_aten_adaptive_avg_pool2d);
+static RegisterNNCExternalFunction nnc_mean("nnc_aten_mean", nnc_aten_mean);
+static RegisterNNCExternalFunction nnc_addmm("nnc_aten_addmm", nnc_aten_addmm);
 
 } // namespace tensorexpr
 } // namespace jit
