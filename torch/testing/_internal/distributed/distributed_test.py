@@ -319,7 +319,7 @@ class TestDistBackend(MultiProcessTestCase):
     def setUpClass(cls):
         os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
         os.environ["MASTER_PORT"] = str(MASTER_PORT)
-        # os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         super().setUpClass()
 
     def setUp(self):
