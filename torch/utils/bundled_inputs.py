@@ -142,7 +142,9 @@ def augment_many_model_functions_with_bundled_inputs(
             parts = []
             for inp_idx, args in enumerate(input_list):
                 if not isinstance(args, Sequence):
-                    raise TypeError("Error bundled input for function {0} idx: {1} is not a Sequence".format(function_name, inp_idx))
+                    raise TypeError(
+                        "Error bundled input for function {0} idx: {1} is not a Sequence".format(function_name, inp_idx)
+                    )
                 deflated_args = []
                 parts.append("(")
                 for arg_idx, arg in enumerate(args):
