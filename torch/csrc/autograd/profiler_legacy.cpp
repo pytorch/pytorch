@@ -230,7 +230,7 @@ void ProfilerThreadLocalState::pushRange(
       evt.setExtraArgs(saveExtraArgs(fn));
       evt.setFlops(computeFlops(std::string(fn.name().str()), evt.extraArgs()));
     }
-#ifndef C10_MOBILE
+#if !defined DBUILD_LITE_INTERPRETER && !defined C10_MOBILE
     // backward nodes source range corresponds to the forward node
     // TODO: consider using C++ stack trace
     if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {

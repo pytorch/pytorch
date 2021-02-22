@@ -48,8 +48,8 @@ inline constexpr bool should_include_kernel_dtype(
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(NAME, enum_type, type, HINT, ...)        \
   case enum_type: {                                                              \
     at::guts::if_constexpr<(!at::should_include_kernel_dtype(NAME, enum_type))>( \
-      [&] {                                                                      \
-        AT_ERROR("dtype '", toString(enum_type), "' not selected for kernel tag ", #NAME); \
+      [] {                                                                       \
+        AT_ERROR("dtype '" #enum_type "' not selected for kernel tag " #NAME);   \
       }                                                                          \
     );                                                                           \
     using HINT = type;                                                           \
