@@ -15,6 +15,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/util/Optional.h>
@@ -1893,7 +1894,7 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   // of freedom we don't want; for example, consider shape [0, 1, 3, 0], with start_dim=1, end_dim=2.
   // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
   // can take on any value and satisfy the constraints.
-  auto slice_numel = prod_intlist(self.sizes().slice(start_dim, end_dim - start_dim + 1));
+  auto slice_numel = c10::multiply_integers(self.sizes().slice(start_dim, end_dim - start_dim + 1));
   std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (const auto i : c10::irange(start_dim)) {
@@ -1942,27 +1943,49 @@ Tensor ravel(const Tensor& self) {
   return self.reshape(-1);
 }
 
+static inline void handle_unflatten_exception(const std::runtime_error &e,
+                                              const Tensor &self,
+                                              int64_t dim,
+                                              IntArrayRef sizes,
+                                              c10::optional <DimnameList> names) {
+  if (!strstr(e.what(), "is invalid for input of size")) {
+    TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
+  }
+
+  if (self.has_names()) {
+    TORCH_CHECK(false,
+                "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
+                dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+
+  } else {
+    TORCH_CHECK(false,
+                "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
+                dim, " (", self.size(dim), ") in the input tensor");
+  }
+}
+
 Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
   TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
-
-  const int64_t numel = prod_intlist(sizes);
   if (self.has_names()) {
-    TORCH_CHECK(numel == self.size(dim),
-      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-      dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
-  } else {
-    TORCH_CHECK(numel == self.size(dim),
-      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-      dim, " (", self.size(dim), ") in the input tensor");
+  }
+
+  std::vector<int64_t> inferred_size;
+  try {
+    inferred_size = at::infer_size(sizes, self.size(dim));
+  } catch (const std::runtime_error& e) {
+    // at::infer_size would throw std::runtime_error for invalid size,
+    // catch the runtime_error and display the error message in a more user-friendly way
+    // for both tensors and named tensors
+    handle_unflatten_exception(e, self, dim, sizes, names);
   }
 
   DimVector shape(self.sizes().begin(), self.sizes().end());
   shape.erase(shape.begin() + dim);
-  shape.insert(shape.begin() + dim, sizes.begin(), sizes.end());
+  shape.insert(shape.begin() + dim, inferred_size.begin(), inferred_size.end());
 
   Tensor result;
   {

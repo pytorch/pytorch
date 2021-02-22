@@ -2065,13 +2065,13 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(np_outcome, pt_outcome)
 
     def test_lerp(self, device):
-        start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]
-        for shapes in product(start_end_shapes, start_end_shapes):
+        start_end_weight_shapes = [(), (5,), (5, 5)]
+        for shapes in product(start_end_weight_shapes, start_end_weight_shapes, start_end_weight_shapes):
             start = torch.randn(shapes[0], device=device)
             end = torch.randn(shapes[1], device=device)
 
             # Tensor weights
-            for weight in [torch.randn(shapes[0], device=device), random.random()]:
+            for weight in [torch.randn(shapes[2], device=device), random.random()]:
                 actual = torch.lerp(start, end, weight)
                 actual_method = start.lerp(end, weight)
                 self.assertEqual(actual, actual_method)
