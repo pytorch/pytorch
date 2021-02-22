@@ -3040,7 +3040,7 @@ new_module_tests = [
         fullname='interpolate_trilinear_3d_alert_nondeterministic',
         pickle=False,
         test_cpu=False,
-        decorator=expectedAlertNondeterministic('upsample_trilinear3d_backward_cuda', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', fn_has_device_arg=False)
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),

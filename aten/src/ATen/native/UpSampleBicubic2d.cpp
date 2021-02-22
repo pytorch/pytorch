@@ -309,6 +309,8 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cpu) (
   upsample_bicubic2d_backward_kernel(grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 }
 
+// vec variants
+
 using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
