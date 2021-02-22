@@ -208,10 +208,17 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should match
-        out = torch.empty_like(A).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+        # dtypes should be compatible
+        out = torch.empty(*A.shape, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
             torch.linalg.cholesky(A, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
+                torch.linalg.cholesky(A, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -598,11 +605,28 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should match
-        out_w = torch.empty_like(a).to(torch.int)
-        out_v = torch.empty_like(a)
-        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match self dtype"):
+        # dtypes should be compatible
+        out_w = torch.empty(0, dtype=real_dtype, device=device)
+        out_v = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected eigenvectors to be compatible with"):
             torch.linalg.eigh(a, out=(out_w, out_v))
+
+        out_w = torch.empty(0, dtype=torch.int, device=device)
+        out_v = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be compatible with"):
+            torch.linalg.eigh(a, out=(out_w, out_v))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out_w = torch.empty(0, device=wrong_device, dtype=dtype)
+            out_v = torch.empty(0, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.eigh(a, out=(out_w, out_v))
+            out_w = torch.empty(0, device=device, dtype=dtype)
+            out_v = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.eigh(a, out=(out_w, out_v))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -724,10 +748,17 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should match
-        out = torch.empty_like(t).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+        # dtypes should be compatible
+        out = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
             torch.linalg.eigvalsh(t, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.eigvalsh(t, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -1125,11 +1156,19 @@ class TestLinalg(TestCase):
                 self.assertEqual(len(w), 1)
                 self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should match
-        out = torch.empty_like(a).to(torch.int)
+        # dtypes should be compatible
+        out = torch.empty(0, dtype=torch.int, device=device)
         for p in ['fro', 2]:
-            with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match"):
+            with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
                 torch.linalg.cond(a, p, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            for p in ['fro', 2]:
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    torch.linalg.cond(a, p, out=out)
 
         # for batched input if at least one matrix in the batch is not invertible,
         # we can't get the result for all other (possibly) invertible matrices in the batch without an explicit for loop.
@@ -1323,6 +1362,7 @@ class TestLinalg(TestCase):
 
     # Test degenerate shape results match numpy for linalg.norm matrix norms
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_matrix_degenerate_shapes(self, device, dtype):
@@ -1932,6 +1972,65 @@ class TestLinalg(TestCase):
         for x, y in zip(cpu_result, device_result):
             self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5, rtol=0)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_svd_errors_and_warnings(self, device, dtype):
+        for svd in [torch.svd, torch.linalg.svd]:
+            # if non-empty out tensor with wrong shape is passed a warning is given
+            a = torch.randn(3, 3, dtype=dtype, device=device)
+            real_dtype = a.real.dtype if dtype.is_complex else dtype
+            out_u = torch.empty(2, 2, dtype=dtype, device=device)
+            out_s = torch.empty(4, 4, dtype=real_dtype, device=device)
+            out_v = torch.empty(6, 6, dtype=dtype, device=device)
+            with warnings.catch_warnings(record=True) as w:
+                # Trigger warning
+                svd(a, out=(out_u, out_s, out_v))
+                # Check warning occurs
+                self.assertEqual(len(w), 3)
+                self.assertTrue("An output with one or more elements was resized" in str(w[-3].message))
+                self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+                self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+            # dtypes should be compatible
+            out_u = torch.empty(0, dtype=torch.int, device=device)
+            out_s = torch.empty(0, dtype=torch.int, device=device)
+            out_v = torch.empty(0, dtype=torch.int, device=device)
+            with self.assertRaisesRegex(RuntimeError, "Expected U to be compatible with"):
+                svd(a, out=(out_u, out_s, out_v))
+
+            out_u = torch.empty(0, dtype=dtype, device=device)
+            if svd == torch.linalg.svd:
+                msg = "Expected VT to be compatible with"
+            else:
+                msg = "Expected V to be compatible with"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                svd(a, out=(out_u, out_s, out_v))
+
+            out_v = torch.empty(0, dtype=dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, "Expected S to be compatible with"):
+                svd(a, out=(out_u, out_s, out_v))
+
+            # device should match
+            if torch.cuda.is_available():
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                out_u = torch.empty(0, device=wrong_device, dtype=dtype)
+                out_s = torch.empty(0, device=wrong_device, dtype=real_dtype)
+                out_v = torch.empty(0, device=wrong_device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    # error from out_u
+                    svd(a, out=(out_u, out_s, out_v))
+
+                out_u = torch.empty(0, device=device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    # error from out_s
+                    svd(a, out=(out_u, out_s, out_v))
+
+                out_s = torch.empty(0, device=device, dtype=real_dtype)
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    # error from out_v
+                    svd(a, out=(out_u, out_s, out_v))
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -2023,18 +2122,6 @@ class TestLinalg(TestCase):
             assert USV.S is out[1]
             assert USV.V is out[2]
             self.assertEqual(USV.S, np_s)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @onlyCUDA
-    @dtypes(torch.float)
-    def test_linalg_svd_out_different_device(self, device, dtype):
-        t = torch.randn(5, 7, device=device, dtype=dtype)  # this is on cuda
-        u = torch.empty((5, 5), device='cpu', dtype=dtype)
-        s = torch.empty((5,), device='cpu', dtype=dtype)
-        v = torch.empty((7, 7), device='cpu', dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, 'svd output tensor U is on the wrong device: expected cuda:.* got cpu'):
-            torch.linalg.svd(t, out=(u, s, v))
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -2161,6 +2248,33 @@ class TestLinalg(TestCase):
                                                           ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
                                                          [True, False]):
             run_test(a_size, b_size, upper)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky_solve_out_errors_and_warnings(self, device, dtype):
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            torch.cholesky_solve(b, a, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.cholesky_solve(b, a, out=out)
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            out = torch.empty(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.cholesky_solve(b, a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -2346,16 +2460,16 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes of out and input should match
+        # dtypes of out and input should be compatible
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match the expected dtype"):
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
             torch.linalg.pinv(a, out=out)
 
         if torch.cuda.is_available():
             # device of out and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty_like(a).to(wrong_device)
-            with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.linalg.pinv(a, out=out)
 
             # device of rcond and input should match
@@ -2595,6 +2709,35 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_solve_errors_and_warnings(self, device, dtype):
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        lu = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected solution to be compatible with"):
+            torch.solve(b, a, out=(out, lu))
+
+        out = torch.empty(0, dtype=dtype, device=device)
+        lu = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected lu to be compatible with"):
+            torch.solve(b, a, out=(out, lu))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            lu = torch.empty_like(a)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.solve(b, a, out=(out, lu))
+            out = torch.empty(0, dtype=dtype, device=device)
+            lu = torch.empty_like(a).to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.solve(b, a, out=(out, lu))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorsolve(self, device, dtype):
@@ -2677,15 +2820,15 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32)
     def test_tensorsolve_errors_and_warnings(self, device, dtype):
         # tensorsolve expects the input that can be reshaped to a square matrix
-        a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
-        b = torch.randn(8, 4)
+        a = torch.eye(2 * 3 * 4, dtype=dtype, device=device).reshape((2 * 3, 4, 2, 3, 4))
+        b = torch.randn(8, 4, dtype=dtype, device=device)
         self.assertTrue(np.prod(a.shape[2:]) != np.prod(b.shape))
         with self.assertRaisesRegex(RuntimeError, r'Expected self to satisfy the requirement'):
             torch.linalg.tensorsolve(a, b)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
         out = torch.empty_like(a)
-        b = torch.randn(6, 4)
+        b = torch.randn(6, 4, dtype=dtype, device=device)
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
             torch.linalg.tensorsolve(a, b, out=out)
@@ -2693,10 +2836,17 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should match
+        # dtypes should be compatible
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
             torch.linalg.tensorsolve(a, b, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.tensorsolve(a, b, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2795,18 +2945,18 @@ class TestLinalg(TestCase):
         def check_shape(a_shape, ind):
             # tensorinv requires the input to satisfy
             # prod(a.shape[ind:]) == prod(a.shape[:ind])
-            a = torch.randn(a_shape)
+            a = torch.randn(a_shape, dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, "Expected self to satisfy the requirement"):
                 torch.linalg.tensorinv(a, ind=ind)
 
         def check_ind(a_shape, ind):
-            a = torch.randn(a_shape)
+            a = torch.randn(a_shape, dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, "Expected a strictly positive integer"):
                 torch.linalg.tensorinv(a, ind=ind)
 
         def check_out(a_shape, ind):
             # if non-empty out tensor with wrong shape is passed a warning is given
-            a = torch.randn(a_shape)
+            a = torch.randn(a_shape, dtype=dtype, device=device)
             out = torch.empty_like(a)
             with warnings.catch_warnings(record=True) as w:
                 # Trigger warning
@@ -2815,10 +2965,17 @@ class TestLinalg(TestCase):
                 self.assertEqual(len(w), 1)
                 self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-            # dtypes should match
-            out = torch.empty_like(a).to(torch.int)
-            with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+            # dtypes should be compatible
+            out = torch.empty(0, dtype=torch.int, device=device)
+            with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
                 torch.linalg.tensorinv(a, ind=ind, out=out)
+
+            # device should match
+            if torch.cuda.is_available():
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                out = torch.empty(0, dtype=dtype, device=wrong_device)
+                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                    torch.linalg.tensorinv(a, ind=ind, out=out)
 
         # test for invalid shape
         check_shape((2, 3, 4), ind=1)
@@ -2997,6 +3154,32 @@ class TestLinalg(TestCase):
             run_test(0, 0, batch)
             run_test(0, 3, batch)
             run_test(3, 0, batch)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_matrix_rank_out_errors_and_warnings(self, device, dtype):
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.bool, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            torch.linalg.matrix_rank(a, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.matrix_rank(a, out=out)
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            out = torch.empty(3, dtype=dtype, device=device)
+            # Trigger warning
+            torch.linalg.matrix_rank(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -3575,6 +3758,46 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_str):
             torch.triangular_solve(b, A)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_triangular_solve_out_errors_and_warnings(self, device, dtype):
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty_like(b).to(torch.int)
+        clone_a = torch.empty_like(a)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            torch.triangular_solve(b, a, out=(out, clone_a))
+
+        out = torch.empty_like(b)
+        clone_a = clone_a.to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "Expected clone_A to be compatible with"):
+            torch.triangular_solve(b, a, out=(out, clone_a))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            clone_a = torch.empty_like(a)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.triangular_solve(b, a, out=(out, clone_a))
+            out = torch.empty(0, dtype=dtype, device=device)
+            clone_a = torch.empty_like(a).to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.triangular_solve(b, a, out=(out, clone_a))
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            out = torch.empty(1, dtype=dtype, device=device)
+            clone_a = torch.empty(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.triangular_solve(b, a, out=(out, clone_a))
+            # Check warning occurs
+            self.assertEqual(len(w), 2)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+
     def check_single_matmul(self, x, y, shape):
         a = np.array(x, copy=False)
         b = np.array(y, copy=False)
@@ -4033,9 +4256,9 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should match
+        # dtypes should be compatible
         out = torch.empty_like(reflectors).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match the expected dtype"):
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
             torch.orgqr(reflectors, tau, out=out)
 
         with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
@@ -5568,14 +5791,14 @@ else:
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should match
+        # dtypes should be compatible
         sign_out = torch.empty_like(a).to(torch.int)
         logabsdet_out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "sign dtype Int does not match input dtype"):
+        with self.assertRaisesRegex(RuntimeError, "Expected sign to be compatible with"):
             torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
         sign_out = torch.empty(0, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "logabsdet dtype Int does not match the expected dtype"):
+        with self.assertRaisesRegex(RuntimeError, "Expected logabsdet to be compatible with"):
             torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
         # device should match
@@ -5583,7 +5806,7 @@ else:
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             sign_out = torch.empty(0, device=wrong_device, dtype=dtype)
             logabsdet_out = torch.empty(0, device=wrong_device, dtype=real_dtype)
-            with self.assertRaisesRegex(RuntimeError, "Expected sign, logabsdet and input to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
     @slowTest
@@ -5883,16 +6106,16 @@ else:
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should match
-        out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match input dtype"):
+        # dtypes should be compatible
+        out = torch.empty(*a.shape, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
             torch.cholesky_inverse(a, out=out)
 
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, device=wrong_device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "does not match input device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.cholesky_inverse(a, out=out)
 
         # cholesky_inverse raises an error for invalid inputs on CPU
@@ -6157,6 +6380,34 @@ else:
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_lu_solve_out_errors_and_warnings(self, device, dtype):
+        # dtypes should be compatible
+        a = torch.eye(2, dtype=dtype, device=device)
+        LU_data, LU_pivots = torch.lu(a, pivot=True)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            torch.lu_solve(b, LU_data, LU_pivots, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.lu_solve(b, LU_data, LU_pivots, out=out)
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            out = torch.empty(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.lu_solve(b, LU_data, LU_pivots, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
     @precisionOverride({torch.float32: 1e-5, torch.complex64: 1e-5})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -6208,6 +6459,48 @@ else:
         batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
         for batch_dims, eigenvectors, upper in itertools.product(batch_dims_set, (True, False), (True, False)):
             run_test((5,) + batch_dims, eigenvectors, upper)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_symeig_out_errors_and_warnings(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = random_hermitian_matrix(3, dtype=dtype, device=device)
+        real_dtype = a.real.dtype if dtype.is_complex else dtype
+        out_w = torch.empty(7, 7, dtype=real_dtype, device=device)
+        out_v = torch.empty(7, 7, dtype=dtype, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.symeig(a, out=(out_w, out_v))
+            # Check warning occurs
+            self.assertEqual(len(w), 2)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should be compatible
+        out_w = torch.empty(0, dtype=real_dtype, device=device)
+        out_v = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected eigenvectors to be compatible with"):
+            torch.symeig(a, out=(out_w, out_v))
+
+        out_w = torch.empty(0, dtype=torch.int, device=device)
+        out_v = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be compatible with"):
+            torch.symeig(a, out=(out_w, out_v))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out_w = torch.empty(0, device=wrong_device, dtype=dtype)
+            out_v = torch.empty(0, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.symeig(a, out=(out_w, out_v))
+            out_w = torch.empty(0, device=device, dtype=dtype)
+            out_v = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.symeig(a, out=(out_w, out_v))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
