@@ -96,7 +96,8 @@ static void sort_kernel(
     Tensor& values,
     Tensor& indices,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    bool stable) {
   dim = maybe_wrap_dim(dim, values.dim());
   _fill_indices(indices, dim);
   _dim_apply(
@@ -116,12 +117,24 @@ static void sort_kernel(
       >(values_accessor, indices_accessor);
 
       if (descending) {
-        std::sort(composite_accessor, composite_accessor + dim_size,
-          KeyValueCompDesc<scalar_t>());
+        if (stable) {
+          std::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
+        }
+        else {
+          std::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
+        }
       }
       else {
-        std::sort(composite_accessor, composite_accessor + dim_size,
-          KeyValueCompAsc<scalar_t>());
+        if (stable) {
+          std::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
+        }
+        else {
+          std::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
+        }
       }
     }
   );
