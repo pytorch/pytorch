@@ -793,6 +793,15 @@ bool LoopNest::computeInline(Stmt* s) {
 }
 
 bool LoopNest::computeInline(const Buf* b) {
+  // If buf is used or defined in an ExternalCall, we cannot inline it
+  auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  for (const auto& use : buf_load_store_uses.at(b)) {
+    Stmt* s = use.s;
+    if (dynamic_cast<ExternalCall*>(s)) {
+      return false;
+    }
+  }
+
   // Find producers.
   Store* relevant_store{nullptr};
   auto stores = NodeFinder<Store>::find(root_stmt_);
@@ -810,6 +819,7 @@ bool LoopNest::computeInline(const Buf* b) {
       relevant_store = s;
     }
   }
+
   TORCH_INTERNAL_ASSERT(relevant_store);
 
   FunctionInliner inliner(relevant_store, output_bufs_);
@@ -894,6 +904,22 @@ class LoadOrStoreUseFinder : public IRVisitor {
     last_stmt_ = (Stmt*)v;
     IRVisitor::visit(v);
   }
+
+  void visit(const ExternalCall* v) override {
+    if (stores_[v->buf()].insert(last_stmt_).second) {
+      uses_[v->buf()].push_back({(Stmt*)v, true});
+    }
+    last_stmt_ = (Stmt*)v;
+
+    for (const Buf* input_buf : v->buf_args()) {
+      if (loads_[input_buf].insert(last_stmt_).second) {
+        uses_[input_buf].push_back({last_stmt_, false});
+      }
+    }
+
+    IRVisitor::visit(v);
+  }
+
   void visit(const Load* v) override {
     if (loads_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({last_stmt_, false});
@@ -926,6 +952,10 @@ class ContainedStmtsFinder : public IRVisitor {
 
  private:
   void visit(const Store* v) override {
+    contained_.insert((Stmt*)v);
+    IRVisitor::visit(v);
+  }
+  void visit(const ExternalCall* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
