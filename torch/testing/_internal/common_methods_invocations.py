@@ -3527,7 +3527,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out')),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('unfold',
-           op=lambda x, args: x.unfold(*args),
+           op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
            supports_tensor_out=False,
@@ -3535,10 +3535,14 @@ op_db: List[OpInfo] = [
     OpInfo('vstack',
            # gradcheck expects the input arguments as a flat list
 <<<<<<< HEAD
+<<<<<<< HEAD
            op=lambda *args, **kwargs: torch.vstack([*args], **kwargs),
 =======
            op=lambda x, *args: x.unfold(*args),
 >>>>>>> final updates
+=======
+           op=lambda *args: torch.vstack([*args]),
+>>>>>>> fixing unfold and vstack confusion
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
