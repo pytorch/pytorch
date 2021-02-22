@@ -865,15 +865,21 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   std::ostringstream oss;
   std::unordered_map<std::string, std::string> extra_files;
   extra_files["metadata.json"] = "abc";
+  extra_files["mobile_info.json"] = "foo";
   module->_save_for_mobile(oss, extra_files);
 
   std::istringstream iss(oss.str());
   caffe2::serialize::IStreamAdapter adapter{&iss};
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
-  auto loaded_module =
-      torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
+  torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+
+  loaded_extra_files.clear();
+  loaded_extra_files["$__get_all_extra__$"] = "";
+  torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "foo");
 }
 
 TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {

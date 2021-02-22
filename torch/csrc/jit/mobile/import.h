@@ -14,7 +14,10 @@ using caffe2::serialize::ReadAdapterInterface;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 // The family of methods below load a serialized Mobile Module
-// into a mobile::Module object.
+// into a mobile::Module object. For the overloads that accept
+// the extra_files map, passing in a map with the special key
+// named "$__get_all_extra__$" causes the method to load all
+// extra files and fill up extra_files with their contents.
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
