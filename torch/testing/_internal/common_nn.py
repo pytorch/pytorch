@@ -2789,7 +2789,7 @@ new_module_tests = [
         fullname='interpolate_bilinear_2d_alert_nondeterministic',
         pickle=False,
         test_cpu=False,
-        decorator=expectedAlertNondeterministic('upsample_bilinear2d_backward_cuda', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', fn_has_device_arg=False)
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
@@ -2895,7 +2895,7 @@ new_module_tests = [
         fullname='interpolate_bicubic_2d_alert_nondeterministic',
         pickle=False,
         test_cpu=False,
-        decorator=expectedAlertNondeterministic('upsample_bicubic2d_backward_cuda', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', fn_has_device_arg=False)
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
