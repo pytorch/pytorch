@@ -2998,7 +2998,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   // See "Representation of Orthogonal or Unitary Matrices": https://www.netlib.org/lapack/lug/node128.html
 
   // In Python code the orgqr operation can be implemented as following:
-  // result = torch.eye(input.shape[-1])
+  // result = torch.eye(input.shape[-2])
   // for j in range(tau.shape[-1]):
   //     v = A[:, j]
   //     tauj = tau[j]
@@ -3010,7 +3010,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   //     result = result2 - v5
 
   // Differentiating the Python implementation line-by-line gives (sequence of assignments on the right inside the for loop should be applied in reverse order):
-  // result = torch.eye(input.shape[-1])       |  d_input = torch.zeros_like(input)
+  // result = torch.eye(input.shape[-2])       |  d_input = torch.zeros_like(input)
   // for j in range(tau.shape[-1]):            |  for j in reversed(range(tau.shape[-1])):
   //     v = input[:, j]                       |      d_input[:, j] += d_v
   //     tauj = tau[j]                         |      d_tau[j] += d_tauj.sum(-1).sum(-1)
@@ -3021,14 +3021,27 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   //     v5 = result1 @ v4                     |      d_result1, d_v4 = d_v5 @ v4.T, result1.T @ d_v5
   //     result = result2 - v5                 |      d_result2, d_v5 = d_result, -d_result
 
+  // in order to support rectangular input we need to expand 'input' and 'd_result' to square matrices
+  auto square_shape = input.sizes().vec();
+  square_shape.back() = input.size(-2);
+
+  auto input_ = at::zeros(square_shape, input.options());
+  ArrayRef<at::indexing::TensorIndex> rectangular_view_indices = {
+    "...", at::indexing::Slice(), at::indexing::Slice(at::indexing::None, input.size(-1))
+  };  // [..., :, :input.shape[-1]]
+  input_.index_put_(rectangular_view_indices, input);
+
   // make sure that all elements of Householder vectors including 0's and 1's are stored explicitly
   // LAPACK assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
-  auto input_ = input.tril(-1);
+  input_.tril_(-1);
   input_.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
 
   auto d_input = at::zeros_like(input);
   auto d_tau = at::zeros_like(tau);
-  auto d_result = grad;
+
+  auto d_result = at::zeros(square_shape, grad.options());
+  d_result.index_put_(rectangular_view_indices, grad);
+
   auto start_j = tau.size(-1) - 1;
   for (int64_t j = start_j; j >= 0; j--) {
     auto v = input_.index({"...", at::indexing::Slice(), j});
@@ -3042,7 +3055,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 
     // we don't have an access to the intermediate results of the product of Householder matrices
     // so we need to recompute orgqr(input, tau[..., :j])
-    auto result_prev = at::orgqr(input, tau.index({"...", at::indexing::Slice(at::indexing::None, j)}));
+    auto result_prev = at::orgqr(input_, tau.index({"...", at::indexing::Slice(at::indexing::None, j)}));
 
     // now the actual derivative computation
     auto d_result2 = d_result, d_v5 = -d_result;

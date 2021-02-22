@@ -968,7 +968,7 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad):
     """
     This function generates input for torch.householder_product (torch.orgqr).
     The first argument should be a square matrix or batch of square matrices, the second argument is a vector or batch of vectors.
-    Empty, normal, and batched input is generated.
+    Empty, square, rectangular, batched square and batched rectangular input is generated.
     """
     samples = (
         SampleInput((make_tensor((0, 0), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -980,7 +980,13 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad):
         SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
                     make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
 
+        SampleInput((make_tensor((S + 1, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
         SampleInput((make_tensor((2, 1, S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((2, 1, S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((2, 1, S + 1, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
                     make_tensor((2, 1, S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
     )
 
