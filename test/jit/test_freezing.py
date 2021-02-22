@@ -1655,6 +1655,7 @@ class TestFrozenOptimizations(JitTestCase):
             # tensor of unknown dtype (getAttr node here) not supported
             test_unsupported(nn.Sequential(lin, Add(torch.tensor([20]))), ['1'])
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_mkldnn_fuser_broadcasting(self):
         class Add(nn.Module):
             def __init__(self, tensor):
