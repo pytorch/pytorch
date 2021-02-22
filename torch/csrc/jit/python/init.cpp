@@ -87,6 +87,7 @@
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <torch/csrc/jit/tensorexpr/fancy_compile.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -432,6 +433,11 @@ void initJITBindings(PyObject* module) {
           },
           py::doc(
               "Interpret a JIT graph with given inputs without running any optimization passes on it"))
+      .def(
+          "_fancy_compile",
+          [](std::shared_ptr<Graph>& graph, std::vector<int> sizes) {
+            tensorexpr::fancy_compile(graph, sizes);
+          })
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
