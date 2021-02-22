@@ -1018,6 +1018,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     out_channels: int 
     kernel_size: Tuple[int, ...]
     weight: UninitializedParameter
+    bias: UninitializedParameter
 
     def reset_parameters(self) -> None:
         # has_uninitialized_params is defined in parent class and it is using a protocol on self
@@ -1041,6 +1042,9 @@ class _LazyConvXdMixin(LazyModuleMixin):
             else:
                 self.weight.materialize((
                     self.out_channels, self.in_channels // self.groups, *self.kernel_size))
+            if self.bias is not None:
+                assert isinstance(self.bias, UninitializedParameter)
+                self.bias.materialize((self.out_channels,))
             self.reset_parameters()
 
 
@@ -1049,6 +1053,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv1d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv1d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1085,16 +1090,21 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             dilation,
             groups,
-            bias,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
+            False,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConv2d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1102,6 +1112,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv2d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv2d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1138,16 +1149,21 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             dilation,
             groups,
-            bias,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
+            False,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConv3d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1155,6 +1171,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv3d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv3d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1191,16 +1208,21 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             dilation,
             groups,
-            bias,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
+            False,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1208,6 +1230,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
     r"""A :class:`torch.nn.ConvTranspose1d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose1d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1242,17 +1265,22 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             output_padding,
             groups,
-            bias,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
+            False,
             dilation,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1260,6 +1288,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
     r"""A :class:`torch.nn.ConvTranspose2d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose2d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1294,17 +1323,22 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             output_padding,
             groups,
-            bias,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
+            False,
             dilation,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
 
 
 # LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UnitializeParameter 
@@ -1312,6 +1346,7 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
     r"""A :class:`torch.nn.ConvTranspose3d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose3d` that is inferred from
     the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight` and `bias`.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1346,14 +1381,19 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
     ) -> None:
         super().__init__(
             0,
-            out_channels,
+            0,
             kernel_size,
             stride,
             padding,
             output_padding,
             groups,
-            bias,
+            # bias is hardcoded to False to avoid creating tensor
+            # that will soon be overwritten.
+            False,
             dilation,
             padding_mode
         )
         self.weight = UninitializedParameter()
+        self.out_channels = out_channels
+        if bias:
+            self.bias = UninitializedParameter()
