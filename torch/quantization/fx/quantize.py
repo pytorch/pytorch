@@ -789,7 +789,11 @@ class Quantizer:
             assert isinstance(node.target, str)
             observer_module = self.modules[node.target]
             prev_node = node.args[0]
-            if isinstance(prev_node, Node) and prev_node.name in quant_env:
+            if observer_module.dtype == torch.float32:
+                # copy the observer for fp32 dtype
+                env[node.name] = self.quantized_graph.node_copy(
+                    node, load_non_quantized)
+            elif isinstance(prev_node, Node) and prev_node.name in quant_env:
                 # if previous node is already quantized, we'll just remove the
                 # activation_post_process
                 quant_env[node.name] = quant_env[prev_node.name]

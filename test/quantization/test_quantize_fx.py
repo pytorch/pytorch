@@ -1767,12 +1767,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # use_bias
             (True, False),  # has_relu
             (True, False),  # functional relu
-            (True, False),  # output_a_reference_model
+            (True, False),  # is_reference
         )
-        for use_bias, has_relu, f_relu, reference in options:
+        for use_bias, has_relu, f_relu, is_reference in options:
             model = FuncLinear(use_bias, has_relu, f_relu)
-            reference = True
-            if reference:
+            if is_reference:
                 qlinear_fun = ns.call_function(torch.nn.functional.linear)
             else:
                 qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
@@ -1782,10 +1781,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
             convert_node_occurrence = {
                 qlinear_fun: 1,
+                # weight
+                ns.call_method("to"): 1 if is_reference else 0
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, qlinear_fun,
-                is_reference=reference,
+                is_reference=is_reference,
                 custom_qconfig=float16_dynamic_qconfig,
                 expected_node_occurrence=convert_node_occurrence)
 
