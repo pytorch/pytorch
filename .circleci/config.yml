@@ -7327,6 +7327,7 @@ workflows:
           use_metal: "1"
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_lite_interpreter_build
+          context: org-member
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "1"
