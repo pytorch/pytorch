@@ -74,7 +74,7 @@ class TestTorchbind(JitTestCase):
         class CustomWrapper(torch.nn.Module):
             def __init__(self, foo):
                 super(CustomWrapper, self).__init__()
-                self.foo = foo 
+                self.foo = foo
 
             def forward(self) -> None:
                 self.foo.increment(1)
@@ -83,7 +83,7 @@ class TestTorchbind(JitTestCase):
             def __prepare_scriptable__(self):
                 int1, int2 = self.foo.return_vals()
                 foo = torch.classes._TorchScriptTesting._Foo(int1, int2)
-                return CustomWrapper(foo) 
+                return CustomWrapper(foo)
 
         foo = CustomWrapper(NonJitableClass(1, 2))
         jit_foo = torch.jit.script(foo)
@@ -349,3 +349,36 @@ class TestTorchbind(JitTestCase):
 
         obj_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, True)
         self.assertEqual(obj_swap.diff(), -1)
+
+    def test_staticmethod(self):
+        def fn(inp: int) -> int:
+            return torch.classes._TorchScriptTesting._StaticMethod.staticMethod(inp)
+
+        self.checkScript(fn, (1,))
+
+    def test_default_args(self):
+        def fn() -> int:
+            obj = torch.classes._TorchScriptTesting._DefaultArgs()
+            obj.increment(5)
+            obj.decrement()
+            obj.decrement(2)
+            obj.divide()
+            obj.scale_add(5)
+            obj.scale_add(3, 2)
+            obj.divide(3)
+            return obj.increment()
+
+        self.checkScript(fn, ())
+
+        def gn() -> int:
+            obj = torch.classes._TorchScriptTesting._DefaultArgs(5)
+            obj.increment(3)
+            obj.increment()
+            obj.decrement(2)
+            obj.divide()
+            obj.scale_add(3)
+            obj.scale_add(3, 2)
+            obj.divide(2)
+            return obj.decrement()
+
+        self.checkScript(gn, ())

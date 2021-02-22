@@ -626,14 +626,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::dict() -> Dict(str, Tensor)",
-         [](Stack* stack) {
-           auto dict =
-               c10::impl::GenericDict(StringType::get(), TensorType::get());
-           push(stack, dict);
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack* stack) {
            auto val = pop(stack);
@@ -1013,6 +1005,58 @@ RegisterOperators reg2({
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.str(str[] self) -> bool",
+        [](Stack* stack) {
+          auto l = pop(stack).toList();
+          for (const auto& elem : l) {
+            if (elem != "") {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.int(int[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.float(float[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.bool(bool[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
         },
         aliasAnalysisFromSchema()),
     Operator(

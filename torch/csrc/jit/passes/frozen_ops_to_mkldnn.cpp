@@ -227,7 +227,7 @@ void moveWeightsToMKLDNN(Node* n) {
 
 void computeSubgraphInMKLDNN(Node* subgraph_node) {
   auto graph = subgraph_node->owningGraph();
-  Value* none_value;
+  Value* none_value = nullptr;
   {
     WithInsertPoint guard(subgraph_node);
     none_value = graph->insertConstant(IValue());
@@ -384,7 +384,7 @@ class MKLDNNSubgraphSlicer {
     while (any_changed) {
       any_changed = false;
       for (auto it = block_->nodes().begin(); it != block_->nodes().end();) {
-        bool changed;
+        bool changed = false;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }
@@ -418,7 +418,8 @@ class MKLDNNSubgraphSlicer {
       return supportedMKLDNNWeight(*const_tensor);
     }
     auto k = v->node()->kind();
-    if (k == prim::MKLDNNGroup || k == prim::ConstantMKLDNNTensor || k == aten::to_mkldnn) {
+    if (k == prim::MKLDNNGroup || k == prim::ConstantMKLDNNTensor ||
+        k == aten::to_mkldnn) {
       return true;
     }
     for (const auto& use : v->uses()) {
