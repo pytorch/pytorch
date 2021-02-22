@@ -4,6 +4,7 @@ import argparse
 import bz2
 import json
 import subprocess
+import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -140,6 +141,7 @@ def display_history(
     mode: str,
     digits: int,
 ) -> None:
+    any_yet = False
     prev_time = datetime.now()
     for sha, time in commits:
         if (prev_time - time).total_seconds() < delta * 3600:
@@ -165,6 +167,10 @@ def display_history(
                 suite_name=suite_name,
                 test_name=test_name,
             )
+        if lines:
+            any_yet = True
+        elif not any_yet:
+            lines = [f'no jobs found with test {suite_name}.{test_name}']
         for line in lines:
             print(f"{time} {sha} {line}".rstrip())
 
@@ -223,6 +229,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    jobs = None if args.all else args.job
+    if jobs == []:  # no jobs, and not None (which would mean all jobs)
+        sys.exit('No jobs specified.')
+
     commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
 
     s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
@@ -231,7 +241,7 @@ if __name__ == "__main__":
     display_history(
         bucket=bucket,
         commits=commits,
-        jobs=None if args.all else args.job,
+        jobs=jobs,
         suite_name=args.suite,
         test_name=args.test,
         delta=args.delta,
