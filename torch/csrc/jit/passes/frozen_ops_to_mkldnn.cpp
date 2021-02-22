@@ -2,7 +2,6 @@
 
 #include <ATen/Config.h>
 #include <ATen/core/interned_strings.h>
-#include <ATen/native/ConvUtils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -22,9 +21,15 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+// clang-format off
+// moving ConvUtils include induces import cycle
+#include <ATen/native/ConvUtils.h>
+// clang-format on
 
 namespace torch {
 namespace jit {
+
+#if AT_MKLDNN_ENABLED()
 
 using Tensor = at::Tensor;
 
@@ -563,7 +568,6 @@ bool containsMKLDNNGroup(Block* b) {
 } // namespace
 
 void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
-#if AT_MKLDNN_ENABLED()
   GRAPH_DUMP("Before convert frozen ops to mkldnn", graph);
   // TODO: replace conv1d with conv2d ?
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
@@ -589,10 +593,15 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
   } else {
     GRAPH_DUMP("No mkldnn compatible frozen nodes", graph);
   }
-#else
-  GRAPH_DUMP("MKLDNN Not enabled", graph);
-#endif
 }
+
+#else
+
+void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("MKLDNN Not enabled", graph);
+}
+
+#endif
 
 } // namespace jit
 } // namespace torch
