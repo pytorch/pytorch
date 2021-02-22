@@ -94,7 +94,9 @@ WORKFLOW_DATA = [
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-lite-interpreter-build-single",
         "pytorch_android_gradle_lite_interpreter_build_single",
-        [DOCKER_REQUIREMENT_NDK]),
+        [DOCKER_REQUIREMENT_NDK],
+        is_master_only=False,
+        is_pr_only=True),
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build",
         "pytorch_android_gradle_build",

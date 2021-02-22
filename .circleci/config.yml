@@ -7314,9 +7314,8 @@ workflows:
           filters:
             branches:
               only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
+                - /gh\/.*\/head/
+                - /pull\/.*/
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-lite-interpreter-build-single
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
