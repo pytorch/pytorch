@@ -111,6 +111,9 @@ def augment_many_model_functions_with_bundled_inputs(
     for function, input_list in inputs.items():
         function_name = function.__name__
 
+        if input_list is not None and not isinstance(input_list, Sequence):
+            raise TypeError("Error inputs for function {0} is not a Sequence".format(function_name))
+
         function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore
         deflated_inputs_type: ListType = ListType(TupleType(function_arg_types))
         inflated_inputs_type: OptionalType[ListType] = OptionalType(deflated_inputs_type)
