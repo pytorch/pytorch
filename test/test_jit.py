@@ -4523,6 +4523,46 @@ a")
         s = torch.rand(1)
         self.assertTrue(foo(s))
 
+    def test_torch_pow(self):
+        def func(a, b):
+            return pow(a, b)
+
+        def func2(a, b, c, d):
+            return pow(pow(c + a, b), d)
+
+        def func3(a : int, b : float):
+            # type: (int, float) -> float
+            return pow(a, b)
+
+        def func4():
+            # type: () -> float
+            return pow(2, -2)
+
+        def func5(x, y):
+            return pow(x.item(), y.item())
+
+        def func6(a : int, b : int):
+            # type: (int, int) -> float
+            return pow(a, b)
+
+        a = torch.rand(1)
+        b = torch.rand(1)
+        c = torch.rand(1)
+        d = torch.rand(1)
+        self.checkScript(func, (a, b))
+        self.checkScript(func2, (a, b, c, d))
+        self.checkScript(func3, (4, -0.5))
+        self.checkScript(func4, ())
+        self.checkScript(func6, (2, 4))
+
+        inputs = [torch.tensor(2), torch.tensor(-2), torch.tensor(.5), torch.tensor(.2)]
+        for x in inputs:
+            for y in inputs:
+                if x < 0:
+                    continue
+                else:
+                    self.checkScript(func5, (x, y))
+
     def test_inf(self):
         @torch.jit.script
         def foo(a):
@@ -9090,6 +9130,51 @@ dedent """
         m.apply(lambda s: s._unpack())
         torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
 
+    def test_torch_any(self):
+        def fn(x):
+            return torch.any(x)
+
+        def fn1(x, dim: int):
+            return torch.any(x, dim)
+
+        self.checkScript(fn, (torch.randn(3, 4), ))
+        self.checkScript(fn, (torch.empty(3), ))
+        self.checkScript(fn, (torch.empty(1), ))
+        self.checkScript(fn, (torch.ones(3, 4),))
+        self.checkScript(fn, (torch.zeros(5, 7, 1),))
+        self.checkScript(fn1, (torch.empty(3, 4), -2))
+        self.checkScript(fn1, (torch.randn(3, 8), 1))
+        self.checkScript(fn1, (torch.zeros(3, 6, 9), -3))
+        self.checkScript(fn1, (torch.empty(5), 0))
+
+    def test_any(self):
+        def fn(x: List[int]):
+            return any(x)
+
+        def fn1(x: List[float]):
+            return any(x)
+
+        def fn2(x: List[bool]):
+            return any(x)
+
+        def fn3(x: List[str]):
+            return any(x)
+
+        self.checkScript(fn, ([0, 0, 0, 0], ))
+        self.checkScript(fn, ([0, 3, 0], ))
+        self.checkScript(fn, ([], ))
+        self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
+        self.checkScript(fn1, ([0.0, 0.0, 0.0], ))
+        self.checkScript(fn1, ([0, 0, 0], ))
+        self.checkScript(fn1, ([], ))
+        self.checkScript(fn2, ([True, False, False], ))
+        self.checkScript(fn2, ([False, False, False], ))
+        self.checkScript(fn2, ([True, True, True, True], ))
+        self.checkScript(fn2, ([], ))
+        self.checkScript(fn3, (["", "", ""], ))
+        self.checkScript(fn3, (["", "", "", "-1"], ))
+        self.checkScript(fn3, ([], ))
+
     def test_script_module_not_tuple(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['mods']
@@ -9569,8 +9654,17 @@ dedent """
                 return x - 1
 
         inp = torch.randn(3, 3)
-
         self.checkScript(test_if_tracing, (inp,))
+
+    def test_script_is_tracing(self):
+        def test_is_tracing(x):
+            if torch.jit.is_tracing():
+                return x + 1
+            else:
+                return x - 1
+
+        inp = torch.randn(3, 3)
+        self.checkScript(test_is_tracing, (inp,))
 
     def test_is_scripting(self):
         def foo():
