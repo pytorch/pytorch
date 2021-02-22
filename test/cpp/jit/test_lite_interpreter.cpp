@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/versioned_operators.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
@@ -903,6 +904,12 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   };
   EXPECT_EQ(operator_names, expected_operator_names)
       << "Expected the root operator lists to be the same";
+}
+
+TEST(LiteInterpreterTest, OpVersionTable) {
+  c10::OperatorName op1_name("aten::_convolution", "");
+  ASSERT_THROWS_WITH(torch::jit::mobile::operator_resolver(op1_name, 3, 4),
+                     "is larger than the maximum version number");
 }
 
 namespace {

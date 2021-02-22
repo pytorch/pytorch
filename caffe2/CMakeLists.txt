@@ -540,6 +540,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/versioned_operators.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()

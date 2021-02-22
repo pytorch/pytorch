@@ -2,12 +2,14 @@
 
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/versioned_operators.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/custom_class_detail.h>
 
 namespace torch {
 namespace jit {
+
 
 char const* toString(OpCode op);
 namespace mobile {
@@ -39,31 +41,9 @@ bool Function::append_operator(
   auto opname = code_->op_names_.back();
 
   const auto& opname_c10 = opname;
-  std::function<void(Stack&)> fn;
-
-  auto jit_op = findOperatorFor(opname);
-  if (jit_op) {
-    fn = [jit_op](Stack& stack) { jit_op->getOperation()(&stack); };
-  } else {
-    auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
-    if (op.has_value()) {
-      fn = [op](Stack& stack) { op->callBoxed(&stack); };
-    } else {
-      return false;
-    }
-  }
-
-  if (model_version == 0x3LL &&
-      opname == c10::OperatorName("aten::_convolution", "")) {
-    // Since byte-code versions 0x4L, convolution has an additional
-    // default-value argument (allow_tf32=True, see
-    // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
-    // backward compatibility with models of byte-code version <= 0x3L, where
-    // this bool argument does not yet exist.
-    fn = [fn](Stack& stack) {
-      stack.push_back(true);
-      fn(stack);
-    };
+  OperatorFunctor fn = operator_resolver(opname, 0, model_version);
+  if (!fn) {
+    return false;
   }
 
   code_->operators_.emplace_back(fn);
