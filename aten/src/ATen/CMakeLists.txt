@@ -441,6 +441,8 @@ install(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
 
 if(ATEN_NO_TEST)
   message("disable test because ATEN_NO_TEST is set")
+elseif(BUILD_LITE_INTERPRETER)
+  message("disable aten test when BUILD_LITE_INTERPRETER is enabled")
 else()
   add_subdirectory(test)
 endif()
