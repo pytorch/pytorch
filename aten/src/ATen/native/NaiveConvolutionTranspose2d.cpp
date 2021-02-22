@@ -905,7 +905,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation,
-    const Tensor& columns) {
+    const Tensor& columns,
+    const Tensor& ones) {
   if (grad_input.defined()) {
     slow_conv_transpose2d_backward_out_cpu_template(
         input,
@@ -958,6 +959,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
     IntArrayRef output_padding,
     IntArrayRef dilation,
     const Tensor& columns,
+    const Tensor& ones,
     std::array<bool, 3> output_mask) {
   Tensor grad_input;
   Tensor grad_weight;
