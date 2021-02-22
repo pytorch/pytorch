@@ -251,6 +251,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
           py::call_guard<py::gil_scoped_release>())
+      .def("prepare_for_forward",
+          &::c10d::Reducer::prepare_for_forward,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
           &::c10d::Reducer::prepare_for_backward,
@@ -279,7 +282,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_local_used_maps",
-          &::c10d::Reducer::get_local_used_maps_on_device);
+          &::c10d::Reducer::get_local_used_maps_on_device)
+      .def(
+          "save_thread_local_state",
+          &::c10d::Reducer::save_thread_local_state,
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
         .def(
@@ -293,6 +300,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("device_ids"),
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
+          py::call_guard<py::gil_scoped_release>())
+        .def(
+          "set_runtime_stats_and_log",
+          &::c10d::Logger::set_runtime_stats_and_log,
           py::call_guard<py::gil_scoped_release>())
         .def(
           "get_ddp_logging_data",
@@ -426,7 +437,7 @@ Example::
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value`` 
+performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value``
 will only be placed if ``old_value`` for the ``key`` already exists in the store.
 
 .. warning::
@@ -672,14 +683,16 @@ Example::
 A TCP-based distributed key-value store implementation. The server store holds
 the data, while the client stores can connect to the server store over TCP and
 perform actions such as :meth:`~torch.distributed.store.set` to insert a key-value
-pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc.
+pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There 
+should always be one server store initialized because the client store(s) will wait for 
+the server to establish a connection.
 
 Arguments:
     host_name (str): The hostname or IP Address the server store should run on.
     port (int): The port on which the server store should listen for incoming requests.
-    world_size (int): The total number of store users (number of clients + 1 for the server).
-    is_master (bool): True when initializing the server store, False for client stores.
-    timeout (timedelta): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`.
+    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
+    is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
+    timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
 
 Example::
     >>> import torch.distributed as dist
@@ -701,10 +714,10 @@ Example::
               std::chrono::milliseconds>(),
           py::arg("host_name"),
           py::arg("port"),
-          py::arg("world_size"),
+          py::arg("world_size") = -1,
           // using noconvert() requires this argument to be True or False
           // prevents accidental implicit conversion to bool
-          py::arg("is_master").noconvert(),
+          py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 
@@ -1242,7 +1255,14 @@ Arguments:
       .def_readwrite("nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
       .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
       .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
-      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout);
+      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
+      .def_readwrite("unused_parameter_size", &c10::DDPLoggingData::unused_parameter_size)
+      .def_readwrite("has_rebuilt_buckets", &c10::DDPLoggingData::has_rebuilt_buckets)
+      .def_readwrite("rebuilt_bucket_sizes", &c10::DDPLoggingData::rebuilt_bucket_sizes)
+      .def_readwrite("avg_forward_compute_time", &c10::DDPLoggingData::avg_forward_compute_time)
+      .def_readwrite("avg_backward_compute_time", &c10::DDPLoggingData::avg_backward_compute_time)
+      .def_readwrite("avg_backward_comm_time", &c10::DDPLoggingData::avg_backward_comm_time)
+      .def_readwrite("avg_backward_compute_comm_overlap_time", &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time);
 
   module.def(
       "_compute_bucket_assignment_by_size",
