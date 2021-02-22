@@ -895,11 +895,10 @@ class TestNN(NNTestCase):
         expect = F.conv1d(x, module.weight, module.bias, padding='same')
         self.assertEqual(expect, module(x))
 
-        # Test strides/dilation, symmetric padding
+        # Test dilation, symmetric padding
         module = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=10,
-                           padding='same', stride=2, dilation=2)
-        expect = F.conv1d(x, module.weight, module.bias, padding='same',
-                          stride=2, dilation=2)
+                           padding='same', dilation=2)
+        expect = F.conv1d(x, module.weight, module.bias, padding='same', dilation=2)
         self.assertEqual(expect, module(x))
 
         # Test non-zero padding_mode, requiring explicit padding
@@ -914,6 +913,10 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
             module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
 
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+
     def test_Conv2d_module_same_padding(self):
         # Compare module against functional:
         # without strides/dilation, both symmetric and asymmetric padding
@@ -923,11 +926,10 @@ class TestNN(NNTestCase):
         expect = F.conv2d(x, module.weight, module.bias, padding='same')
         self.assertEqual(expect, module(x))
 
-        # with strides/dilation, symmetric padding
+        # with dilation, symmetric padding
         module = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(3, 4),
-                           padding='same', stride=(2, 3), dilation=(1, 2))
-        expect = F.conv2d(x, module.weight, module.bias, padding='same',
-                          stride=(2, 3), dilation=(1, 2))
+                           padding='same', dilation=(1, 2))
+        expect = F.conv2d(x, module.weight, module.bias, padding='same', dilation=(1, 2))
         self.assertEqual(expect, module(x))
 
         # Test non-zero padding_mode, requiring explicit padding
@@ -942,20 +944,27 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
             module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
 
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 3))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(4, 1))
+
     def test_Conv3d_module_same_padding(self):
         # Compare module against functional:
         x = torch.rand(1, 1, 4, 4, 4)
-        # without strides/dilation, both symmetric and asymmetric padding
+        # without dilation, both symmetric and asymmetric padding
         module = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=(2, 3, 4),
                            padding='same')
         expect = F.conv3d(x, module.weight, module.bias, padding='same')
         self.assertEqual(expect, module(x))
 
-        # with strides/dilation, both symmetric and asymmetric padding
+        # with dilation, both symmetric and asymmetric padding
         module = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=(2, 3, 4),
-                           padding='same', stride=(1, 2, 3), dilation=(3, 2, 1))
-        expect = F.conv3d(x, module.weight, module.bias, padding='same',
-                          stride=(1, 2, 3), dilation=(3, 2, 1))
+                           padding='same', dilation=(3, 2, 1))
+        expect = F.conv3d(x, module.weight, module.bias, padding='same', dilation=(3, 2, 1))
         self.assertEqual(expect, module(x))
 
         # Test non-zero padding_mode, requiring explicit padding
@@ -969,6 +978,16 @@ class TestNN(NNTestCase):
         # Test connstruction with invalid padding string raises
         with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
             module = nn.Conv3d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 1, 3))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 4, 1))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(5, 1, 1))
 
     def _test_alpha_dropout(self, cls, input):
         mean = input.mean()
@@ -11048,14 +11067,21 @@ class TestNNDeviceType(NNTestCase):
 
     def test_conv1d_same_padding(self, device):
         # Test padding='same' outputs the correct shape
-        for in_size in range(50, 55):
-            for k_size in [1, 2, 3, 8]:
-                for dilation in range(1, 4):
-                    for stride in [1, 5]:
-                        x = torch.rand(1, 1, in_size, device=device)
-                        y = torch.rand(1, 1, k_size, device=device)
-                        z = F.conv1d(x, y, padding='same', dilation=dilation, stride=stride)
-                        self.assertEqual(z.size(2), int(math.ceil(in_size / stride)))
+        test_args = [
+            # in_size
+            range(50, 55),
+            # kernel_size
+            [1, 2, 3, 8],
+            # dilation
+            range(1, 4),
+            # stride
+            [1],
+        ]
+        for in_size, k_size, dilation, stride in itertools.product(*test_args):
+            x = torch.rand(1, 1, in_size, device=device)
+            y = torch.rand(1, 1, k_size, device=device)
+            z = F.conv1d(x, y, padding='same', dilation=dilation, stride=stride)
+            self.assertEqual(z.size(2), int(math.ceil(in_size / stride)))
 
         # Compare F.conv1d padding='same' output against manual padding
         # Without strides/dilation
@@ -11065,16 +11091,16 @@ class TestNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding='same')
         self.assertEqual(expect, actual)
 
-        # With strides/dilation
+        # With dilation
         x = torch.rand(1, 1, 12, device=device)
         y = torch.rand(1, 1, 4, device=device)
-        expect = F.conv1d(x, y, padding=3, dilation=2, stride=2)
-        actual = F.conv1d(x, y, padding='same', dilation=2, stride=2)
+        expect = F.conv1d(x, y, padding=3, dilation=2)
+        actual = F.conv1d(x, y, padding='same', dilation=2)
         self.assertEqual(expect, actual)
 
-        # Strides with asymmetric padding
-        expect = F.conv1d(x, y, padding=5, dilation=3)[..., 1::2]
-        actual = F.conv1d(x, y, padding='same', dilation=3, stride=2)
+        # Dilation with asymmetric padding
+        expect = F.conv1d(x, y, padding=5, dilation=3)[..., 1:]
+        actual = F.conv1d(x, y, padding='same', dilation=3)
         self.assertEqual(expect, actual)
 
 
@@ -11087,16 +11113,16 @@ class TestNNDeviceType(NNTestCase):
         actual = F.conv2d(x, y, padding='same')
         self.assertEqual(expect, actual)
 
-        # With strides/dilation
+        # With dilation
         y = torch.rand(1, 1, 3, 4, device=device)
-        expect = F.conv2d(x, y, padding=(2, 3), stride=3, dilation=2)
-        actual = F.conv2d(x, y, padding='same', stride=3, dilation=2)
+        expect = F.conv2d(x, y, padding=(2, 3), dilation=2)
+        actual = F.conv2d(x, y, padding='same', dilation=2)
         self.assertEqual(expect, actual)
 
-        # Strides with asymmetric padding
+        # Dilation with asymmetric padding
         y = torch.rand(1, 1, 4, 4, device=device)
-        expect = F.conv2d(x, y, padding=5, dilation=3)[..., 1::2, 1::2]
-        actual = F.conv2d(x, y, padding='same', dilation=3, stride=2)
+        expect = F.conv2d(x, y, padding=5, dilation=3)[..., 1:, 1:]
+        actual = F.conv2d(x, y, padding='same', dilation=3)
         self.assertEqual(expect, actual)
 
     def test_conv3d_same_padding(self, device):
@@ -11108,15 +11134,15 @@ class TestNNDeviceType(NNTestCase):
         actual = F.conv3d(x, y, padding='same')
         self.assertEqual(expect, actual)
 
-        # With strides/dilation
-        expect = F.conv3d(x, y, padding=(0, 1, 4), stride=2, dilation=2)
-        actual = F.conv3d(x, y, padding='same', stride=2, dilation=2)
+        # With dilation
+        expect = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
+        actual = F.conv3d(x, y, padding='same', dilation=2)
         self.assertEqual(expect, actual)
 
-        # Strides with asymmetric padding
+        # Dilation with asymmetric padding
         y = torch.rand(1, 1, 4, 4, 4, device=device)
-        expect = F.conv3d(x, y, padding=5, dilation=3)[..., 1::2, 1::2, 1::2]
-        actual = F.conv3d(x, y, padding='same', dilation=3, stride=2)
+        expect = F.conv3d(x, y, padding=5, dilation=3)[..., 1:, 1:, 1:]
+        actual = F.conv3d(x, y, padding='same', dilation=3)
         self.assertEqual(expect, actual)
 
     def test_conv1d_valid_padding(self, device):
@@ -11149,12 +11175,12 @@ class TestNNDeviceType(NNTestCase):
         y = torch.rand(1, 1, 4, device=device, requires_grad=True)
 
         # Symmetric padding
-        z = F.conv1d(x, y, padding=3, dilation=2, stride=2)
+        z = F.conv1d(x, y, padding=3, dilation=2)
         z.sum().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        z = F.conv1d(x, y, padding='same', dilation=2, stride=2)
+        z = F.conv1d(x, y, padding='same', dilation=2)
         z.sum().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
@@ -11177,12 +11203,12 @@ class TestNNDeviceType(NNTestCase):
         y = torch.rand(1, 1, 4, 5, device=device, requires_grad=True)
 
         # Symmetric padding
-        z = F.conv2d(x, y, padding=(3, 4), stride=3, dilation=2)
+        z = F.conv2d(x, y, padding=(3, 4), dilation=2)
         z.sum().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        z = F.conv2d(x, y, padding='same', stride=3, dilation=2)
+        z = F.conv2d(x, y, padding='same', dilation=2)
         z.sum().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
@@ -11206,12 +11232,12 @@ class TestNNDeviceType(NNTestCase):
         y = torch.rand(1, 1, 1, 2, 5, device=device, requires_grad=True)
 
         # Symmetric padding
-        z = F.conv3d(x, y, padding=(0, 1, 4), stride=2, dilation=2)
+        z = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
         z.sum().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        z = F.conv3d(x, y, padding='same', stride=2, dilation=2)
+        z = F.conv3d(x, y, padding='same', dilation=2)
         z.sum().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
