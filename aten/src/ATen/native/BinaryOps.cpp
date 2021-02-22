@@ -209,14 +209,16 @@ Tensor& div_(Tensor& self, Scalar other) {
 }
 
 Tensor& div_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
-  if (rounding_mode == "trunc") {
+  if (rounding_mode == "true") {
+    return div_true_out(self, other, result);
+  } else if (rounding_mode == "trunc") {
     return div_trunc_out(self, other, result);
   } else if (rounding_mode == "floor") {
     return div_floor_out(self, other, result);
   }
 
   TORCH_CHECK(false,
-      "div expected rounding_mode to be either 'trunc', or 'floor' "
+      "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
       "but found '", rounding_mode, "'");
 }
 
