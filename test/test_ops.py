@@ -224,8 +224,14 @@ class TestCommon(JitCommonTestCase):
             expected_grad = None
             try:
                 expected_forward.sum().backward()
-                expected_grad = sample.input[0].grad
-                sample.input[0].grad = None
+                # TODO: fix failures related to this issue
+                # - test_variant_consistency_eager_tile_*
+                # - test_variant_consistency_eager_repeat_*
+                # - test_variant_consistency_eager_index_fill_*
+                # expected_grad = sample.input[0].grad
+                # sample.input[0].grad = None
+                expected_grad = sample.input.grad
+                sample.input.grad = None
             except Exception as e:
                 exception_during_backwards = True
 
@@ -399,9 +405,9 @@ class TestCommon(JitCommonTestCase):
         original_name_inplace = original_name + "_"
         expected_dtype = op(*sample.input, *sample.args, **sample.kwargs).dtype
 
-        for a_op in op.aliases:  
+        for a_op in op.aliases:
             inplace = a_op.inplace_variant
-            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]            
+            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]
             variants = (v for v in (a_op.op, a_op.method_variant, a_op.inplace_variant) if v is not None)
 
             # Test scripting:
