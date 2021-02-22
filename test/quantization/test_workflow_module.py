@@ -876,7 +876,7 @@ class TestFakeQuantize(TestCase):
 
                     Y_test = torch.fake_quantize_per_tensor_affine(
                         X, scale, zero_point, quant_min, quant_max)
-                    Y_ref = _fake_quantize_per_tensor_affine_reference( # torch.round doens't support half precision
+                    Y_ref = _fake_quantize_per_tensor_affine_reference(  # torch.round doens't support half precision
                         X.cpu().to(torch.float32), scale, zero_point, quant_min, quant_max).to(device).to(float_type)
                     self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
 
