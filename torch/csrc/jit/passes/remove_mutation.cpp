@@ -216,7 +216,7 @@ void RemoveListMutation(const std::shared_ptr<Graph>& graph) {
 void RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
     c10::optional<std::function<bool(Node*)>> mutation_filter) {
-  MutationRemover mr(graph, mutation_filter);
+  MutationRemover mr(graph, std::move(mutation_filter));
   mr.removeTensorMutation();
 }
 

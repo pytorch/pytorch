@@ -72,6 +72,7 @@ void testStaticRuntime(
 
   StaticRuntime runtime(module);
   auto actual = runtime.run(args, {});
+  runtime.check_for_memory_leak();
 
   if (expect.isTuple()) {
     compareTensorLists(
@@ -85,6 +86,18 @@ void testStaticRuntime(
   compareTensorLists(args_tensors, args_copy);
 }
 } // namespace
+
+TEST(StaticRuntime, UnaryOps) {
+  auto a = at::ones({2, 3});
+
+  std::vector<IValue> args{a};
+
+  testStaticRuntime(aten_sum, args);
+  testStaticRuntime(aten_sum_0, args);
+  testStaticRuntime(aten_sum_1, args);
+  testStaticRuntime(aten_sum_0_true, args);
+  testStaticRuntime(aten_sum_1_true, args);
+}
 
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
@@ -140,6 +153,7 @@ TEST(StaticRuntime, LongModel) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
+  runtime.check_for_memory_leak();
   EXPECT_TRUE(output_1.equal(output_2));
 }
 
@@ -158,6 +172,7 @@ TEST(StaticRuntime, TrivialModel) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
+  runtime.check_for_memory_leak();
   EXPECT_TRUE(output_1.equal(output_2));
 }
 
@@ -174,6 +189,7 @@ TEST(StaticRuntime, LeakyReLU) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
+  runtime.check_for_memory_leak();
   EXPECT_TRUE(output_1.equal(output_2));
 }
 
@@ -197,6 +213,8 @@ TEST(StaticRuntime, DeepWide) {
       // run static runtime
       std::vector<at::Tensor> input_tensors({ad_emb_packed, user_emb, wide});
       at::Tensor output_2 = runtime.run(input_tensors)[0];
+      runtime.check_for_memory_leak();
+
       EXPECT_TRUE(output_1.equal(output_2));
     }
   }
@@ -213,14 +231,31 @@ TEST(StaticRuntime, KWargsAPI_1) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
+      {
+        std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
 
-      // run jit graph executor
-      std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
-      at::Tensor output_1 = getTensor(module.forward(inputs));
+        // run jit graph executor
+        at::Tensor output_1 = getTensor(module.forward(inputs));
 
-      // run static runtime
-      at::Tensor output_2 = getTensor(runtime.run(inputs, {}));
-      EXPECT_TRUE(output_1.equal(output_2));
+        // run static runtime
+        c10::IValue output_ivalue = runtime.run(inputs, {});
+        runtime.check_for_memory_leak();
+
+        at::Tensor output_2 = getTensor(output_ivalue);
+        EXPECT_TRUE(output_1.equal(output_2));
+
+        // check for output aliasing
+        EXPECT_EQ(output_ivalue.use_count(), 1);
+        output_ivalue = IValue();
+
+        EXPECT_EQ(output_2.getIntrusivePtr().use_count(), 1);
+      }
+
+      // check for input aliasing (deep & wide does not have ops
+      // that create aliases of input tensors)
+      EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(user_emb.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
 }
@@ -237,19 +272,33 @@ TEST(StaticRuntime, KWargsAPI_2) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
+      {
+        // run jit graph executor
+        std::vector<at::IValue> args({ad_emb_packed, user_emb, wide});
+        at::Tensor output_1 = getTensor(module.forward(args));
 
-      // run jit graph executor
-      std::vector<at::IValue> args({ad_emb_packed, user_emb, wide});
-      at::Tensor output_1 = getTensor(module.forward(args));
+        std::unordered_map<std::string, c10::IValue> kwargs(
+            {{"ad_emb_packed", ad_emb_packed},
+             {"user_emb", user_emb},
+             {"wide", wide}});
 
-      std::unordered_map<std::string, c10::IValue> kwargs(
-          {{"ad_emb_packed", ad_emb_packed},
-           {"user_emb", user_emb},
-           {"wide", wide}});
+        // run static runtime
+        c10::IValue output_ivalue = runtime.run({}, kwargs);
+        runtime.check_for_memory_leak();
 
-      // run static runtime
-      at::Tensor output_2 = getTensor(runtime.run({}, kwargs));
-      EXPECT_TRUE(output_1.equal(output_2));
+        at::Tensor output_2 = getTensor(output_ivalue);
+        EXPECT_TRUE(output_1.equal(output_2));
+
+        // check for output aliasing
+        EXPECT_EQ(output_ivalue.use_count(), 1);
+        output_ivalue = IValue();
+
+        EXPECT_EQ(output_2.getIntrusivePtr().use_count(), 1);
+      }
+
+      EXPECT_EQ(ad_emb_packed.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(user_emb.getIntrusivePtr().use_count(), 1);
+      EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
 }
@@ -281,6 +330,8 @@ TEST(StaticRuntime, CleanUpMemory) {
           std::vector<at::Tensor> input_tensors(
               {ad_emb_packed, user_emb, wide});
           at::Tensor output_2 = runtime.run(input_tensors)[0];
+          runtime.check_for_memory_leak();
+
           EXPECT_TRUE(output_1.equal(output_2));
         }
       }

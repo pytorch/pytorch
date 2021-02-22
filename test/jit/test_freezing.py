@@ -1510,7 +1510,7 @@ class TestFrozenOptimizations(JitTestCase):
         bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
         mod = torch.nn.Sequential(conv, bn)
         # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize_numerics=False)
         # inspect frozen mod
         FileCheck().check("batch_norm").run(frozen_mod.graph)
         torch.jit.optimize_frozen_module(frozen_mod)
@@ -1530,18 +1530,14 @@ class TestFrozenOptimizations(JitTestCase):
                 return self.dropout(x)
 
         mod = torch.jit.script(Net())
-        # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
-        # inspect frozen mod
-        FileCheck().check("aten::dropout").run(frozen_mod.graph)
-        torch.jit.optimize_frozen_module(frozen_mod)
+        # inspect mod
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::dropout").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod.eval())
         FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
 
-        script_mod = torch.jit.script(mod)
-        script_mod.eval()
-
         input = torch.randn(2)
-        output_s = script_mod.forward(input)
+        output_s = mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
 
@@ -1554,19 +1550,15 @@ class TestFrozenOptimizations(JitTestCase):
             def forward(self, x):
                 return self.dropout(x)
 
-        mod = torch.jit.script(Net())
-        # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
-        # inspect frozen mod
-        FileCheck().check("aten::feature_dropout").run(frozen_mod.graph)
-        torch.jit.optimize_frozen_module(frozen_mod)
+        mod = torch.jit.script(Net().eval())
+        # inspect mod
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::feature_dropout").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod)
         FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
 
-        script_mod = torch.jit.script(mod)
-        script_mod.eval()
-
         input = torch.randn(2, 2)
-        output_s = script_mod.forward(input)
+        output_s = mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
 
@@ -1604,19 +1596,12 @@ class TestFrozenOptimizations(JitTestCase):
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_linear_to_mkldnn(self):
-        # use until github.com/pytorch/pytorch/pull/50856 land
-        class LinearMod(nn.Linear):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-
-            def forward(self, input):
-                return torch._C._nn.linear(input, self.weight, self.bias)
 
         with set_default_dtype(torch.float):
             # make sure mkldnn handles broadcast rules
             inp_shapes = [[20], [20, 20], [1, 20, 20]]
             for inp_shape in inp_shapes:
-                mod = LinearMod(20, 30).eval()
+                mod = nn.Linear(20, 30).eval()
                 scripted_mod = torch.jit.script(mod)
                 inp = torch.rand(inp_shape)
 
@@ -1635,16 +1620,9 @@ class TestFrozenOptimizations(JitTestCase):
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_collapse_adjacent_conversions(self):
-        # use until github.com/pytorch/pytorch/pull/50856 land
-        class LinearMod(nn.Linear):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-
-            def forward(self, input):
-                return torch._C._nn.linear(input, self.weight, self.bias)
 
         with set_default_dtype(torch.float):
-            mod = nn.Sequential(LinearMod(20, 20), LinearMod(20, 20)).eval()
+            mod = nn.Sequential(nn.Linear(20, 20), nn.Linear(20, 20)).eval()
             scripted_mod = torch.jit.script(mod)
             scripted_mod = torch.jit.freeze(scripted_mod)
             self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
@@ -1669,7 +1647,7 @@ class TestFrozenOptimizations(JitTestCase):
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check("to_mkldnn").check("linear").check("to_dense").check("add").run(mod.graph)
 
-            lin = LinearMod(20, 20)
+            lin = nn.Linear(20, 20)
             # Scalar-Tensor not supported
             test_unsupported(nn.Sequential(lin, Add(.5)))
             # # 0-dim not supported
@@ -1678,13 +1656,6 @@ class TestFrozenOptimizations(JitTestCase):
             test_unsupported(nn.Sequential(lin, Add(torch.tensor([20]))), ['1'])
 
     def test_mkldnn_fuser_broadcasting(self):
-        class LinearMod(nn.Linear):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-
-            def forward(self, input):
-                return torch._C._nn.linear(input, self.weight, self.bias)
-
         class Add(nn.Module):
             def __init__(self, tensor):
                 super().__init__()
@@ -1694,7 +1665,7 @@ class TestFrozenOptimizations(JitTestCase):
                 return x + self.tensor
 
         with set_default_dtype(torch.float):
-            mod = nn.Sequential(LinearMod(20, 20), Add(torch.rand([20]))).eval()
+            mod = nn.Sequential(nn.Linear(20, 20), Add(torch.rand([20]))).eval()
             scripted_mod = torch.jit.script(mod)
             scripted_mod = torch.jit.freeze(scripted_mod)
             self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
@@ -1709,13 +1680,6 @@ class TestFrozenOptimizations(JitTestCase):
                 torch.rand([20, 20]).to_mkldnn() + torch.rand([20]).to_mkldnn()
 
     def test_mkldnn_inplace_removal(self):
-        class LinearMod(nn.Linear):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-
-            def forward(self, input):
-                return torch._C._nn.linear(input, self.weight, self.bias)
-
         class AddMul(nn.Module):
             def __init__(self, tensor):
                 super().__init__()
@@ -1725,7 +1689,7 @@ class TestFrozenOptimizations(JitTestCase):
                 return x.add_(self.tensor).div_(self.tensor) - 4
 
         with set_default_dtype(torch.float):
-            mod = nn.Sequential(LinearMod(20, 20), AddMul(torch.rand([20]))).eval()
+            mod = nn.Sequential(nn.Linear(20, 20), AddMul(torch.rand([20]))).eval()
             scripted_mod = torch.jit.script(mod)
             scripted_mod = torch.jit.freeze(scripted_mod)
             self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
