@@ -47,9 +47,9 @@ Args:
       a one-element tuple `(sW,)`. Default: 1
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
-      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
-      doesn't support any stride values other than 1.
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads the
+      input so the output has shape ``ceil(iW / sW)``.
+      For ``stride=1``, ``'same'`` means the output is the same size as the input.
 
       .. warning::
           For ``padding='same'``, if the ``weight`` is even-length and
@@ -95,9 +95,9 @@ Args:
       tuple `(sH, sW)`. Default: 1
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
-      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
-      doesn't support any stride values other than 1.
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads the
+      input so the output has shape ``ceil(in_shape / stride)`` in each dimension.
+      For ``stride=1``, ``'same'`` means the output is the same size as the input.
 
       .. warning::
           For ``padding='same'``, if the ``weight`` is even-length and
@@ -145,9 +145,9 @@ Args:
       tuple `(sT, sH, sW)`. Default: 1
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
-      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
-      doesn't support any stride values other than 1.
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads the
+      input so the output has shape ``ceil(in_shape / stride)`` in each dimension.
+      For ``stride=1``, ``'same'`` means the output is the same size as the input.
 
       .. warning::
           For ``padding='same'``, if the ``weight`` is even-length and
