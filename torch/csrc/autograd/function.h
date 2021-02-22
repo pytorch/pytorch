@@ -101,11 +101,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// a (currently THE) hint to prioritization in the backward() pass, with
   /// higher sequence numbers prioritized before lower sequence numbers.
   explicit Node(
-      uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
-      : sequence_nr_(sequence_nr),
-      topological_nr_(at::sequence_number::peek()),
-      next_edges_(std::move(next_edges)) {
+    : next_edges_(std::move(next_edges)) {
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
 
@@ -120,9 +117,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       thread_id_ = at::RecordFunction::currentThreadId();
     }
   }
-
-  explicit Node(edge_list&& next_edges = edge_list())
-      : Node(at::sequence_number::get_and_increment(), std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -285,8 +279,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   /// The sequence number of this `Node`.
-  uint64_t sequence_nr() const noexcept {
-    return sequence_nr_;
+  uint64_t virtual sequence_nr() const noexcept {
+    return topological_nr_;
   }
 
   // The topological order number of this `Node`
@@ -419,12 +413,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Calls `apply()`, but instruments it with tracing machinery.
   variable_list traced_apply(variable_list inputs);
 
-  // Since `Node`s are neither copyable nor moveable, we can have const
-  // fields.
-  const uint64_t sequence_nr_;
+  // // Since `Node`s are neither copyable nor moveable, we can have const
+  // // fields.
+  // const uint64_t sequence_nr_;
 
   // Topological ordering of nodes
-  uint64_t topological_nr_;
+  uint64_t topological_nr_ = 0;
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;

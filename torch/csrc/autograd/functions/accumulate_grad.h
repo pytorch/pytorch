@@ -27,6 +27,10 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
+  uint64_t virtual sequence_nr() const noexcept override {
+    return UINT64_MAX;
+  }
+
   static at::Tensor callHooks(
       const Variable& variable,
       at::Tensor new_grad) {
