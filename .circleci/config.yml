@@ -308,12 +308,16 @@ pytorch_ios_params: &pytorch_ios_params
     use_metal:
       type: string
       default: "0"
+    lite_interpreter:
+      type: string
+      default: "0"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
     USE_PYTORCH_METAL: << parameters.use_metal >>
+    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
@@ -1662,6 +1666,7 @@ jobs:
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
+            echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -1679,6 +1684,10 @@ jobs:
           no_output_timeout: "30m"
           command: |
             set -e
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Run Build Test is not for BUILD_LITE_INTERPRETER, skipping."
+              exit 0
+            fi
             PROJ_ROOT=/Users/distiller/project
             PROFILE=PyTorch_CI_2021
             # run the ruby build script
@@ -1703,6 +1712,9 @@ jobs:
             set -e
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
+              exit 0
+            elif [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Run Simulator Tests is not for BUILD_LITE_INTERPRETER, skipping."
               exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
@@ -7134,6 +7146,12 @@ workflows:
           name: pytorch_libtorch_linux_xenial_cuda11_2_cudnn8_py3_gcc7_build
           requires:
             - "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
       - pytorch_linux_build:
@@ -7289,6 +7307,12 @@ workflows:
           ios_platform: SIMULATOR
           name: pytorch_ios_12_0_0_x86_64_build
       - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-x86_64_lite_interpreter_build
+          ios_arch: x86_64
+          ios_platform: SIMULATOR
+          lite_interpreter: "1"
+          name: pytorch_ios_12_0_0_x86_64_lite_interpreter_build
+      - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_build
           context: org-member
           ios_arch: arm64
@@ -7301,6 +7325,13 @@ workflows:
           ios_platform: OS
           name: pytorch_ios_12_0_0_arm64_metal_build
           use_metal: "1"
+      - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-arm64_lite_interpreter_build
+          context: org-member
+          ios_arch: arm64
+          ios_platform: OS
+          lite_interpreter: "1"
+          name: pytorch_ios_12_0_0_arm64_lite_interpreter_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_custom_build
           context: org-member
@@ -7657,6 +7688,12 @@ workflows:
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11.2"
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
           name: pytorch_windows_vs2019_py36_cuda11.2_build
           python_version: "3.6"
           use_cuda: "1"

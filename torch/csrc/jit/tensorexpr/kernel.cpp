@@ -1532,7 +1532,12 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
-  torch::jit::tensorexpr::LoopNest l(tensorOutputs_);
+  // Find all tensors we need to compute (including dependencies) and put them
+  // in a topological order
+  std::vector<Tensor*> tensors_to_compute =
+      findAllNeededTensors(tensorOutputs_);
+
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs_, tensors_to_compute);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
