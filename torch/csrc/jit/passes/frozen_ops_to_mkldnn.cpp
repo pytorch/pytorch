@@ -266,7 +266,7 @@ class MKLDNNSubgraphSlicer {
     while (any_changed) {
       any_changed = false;
       for (auto it = block_->nodes().begin(); it != block_->nodes().end();) {
-        bool changed;
+        bool changed = false;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }

@@ -12,14 +12,22 @@ class InterpolateBenchmark(op_bench.TorchBenchmarkBase):
         if channels_last:
             input_image = input_image.contiguous(memory_format=torch.channels_last)
 
+        ndim_to_mode = {
+            3: 'linear',
+            4: 'bilinear',
+            5: 'trilinear',
+        }
+
         self.inputs = {
             "input_image": input_image,
             "output_size": output_size,
+            "mode": ndim_to_mode[input_image.ndim],
         }
+
         self.set_module_name("interpolate")
 
-    def forward(self, input_image, output_size):
-        return torch.nn.functional.interpolate(input_image, size=output_size, mode='bilinear',
+    def forward(self, input_image, output_size, mode):
+        return torch.nn.functional.interpolate(input_image, size=output_size, mode=mode,
                                                align_corners=False)
 
 

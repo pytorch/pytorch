@@ -1,13 +1,14 @@
-#include <ATen/native/RNN.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/MatrixRef.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/InitialTensorOptions.h>
+#include <ATen/MatrixRef.h>
+#include <ATen/native/RNN.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 
 #if !AT_CUDNN_ENABLED()
@@ -423,7 +424,7 @@ namespace {
     TORCH_INTERNAL_ASSERT(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
     size_t offset = offset_bytes / elem_size;
 
-    int mat_numel = prod_intlist(filter_dim_a, filter_dim_a + nb_dims);
+    int mat_numel = c10::multiply_integers(filter_dim_a, filter_dim_a + nb_dims);
     // Generate a new parameter tensor which is a view into the weight_buf.
     std::initializer_list<int64_t> size = {mat_numel, 1};
     Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
@@ -507,7 +508,7 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
-          int mat_numel = prod_intlist(filter_dim_a, filter_dim_a + nb_dims);
+          int mat_numel = c10::multiply_integers(filter_dim_a, filter_dim_a + nb_dims);
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
             // We could also exclude bias params by restricting cudnn_methods to just { cudnnGetRNNLinLayerMatrixParams }
             // at the very top.  However, to do so would throw off the cur_offset account, which is currently a strict

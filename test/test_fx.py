@@ -9,6 +9,7 @@ import os
 import pickle
 import sys
 import torch
+import traceback
 import unittest
 from math import sqrt
 from pathlib import Path
@@ -18,6 +19,7 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Trac
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.experimental.rewriter import RewritingTracer
 from copy import deepcopy
 
 from torch.fx.proxy import TraceError
@@ -1680,6 +1682,94 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
         self.assertEqual(mod_true(3), 6)
         self.assertEqual(mod_false(3), 3)
+
+    def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.W = torch.nn.Parameter(torch.randn(5))
+
+            def forward(self, x):
+                return torch.dot(self.W, x)
+
+        traced = torch.fx.symbolic_trace(M())
+
+        out = [n for n in traced.graph.nodes if n.op == "output"][-1]
+        with traced.graph.inserting_before(out):
+            relu_out = traced.graph.call_method(method_name='relu',
+                                                args=(out.args[0],))
+        out.args = (relu_out,)
+
+        traced.recompile()
+
+        with self.capture_stderr() as captured:
+            with self.assertRaises(TypeError):
+                traced(5)
+
+        self.assertIn("Call using an FX-traced Module, line 4 of the "
+                      "traced Module’s generated forward function:",
+                      captured[0])
+
+    def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        traced = torch.fx.symbolic_trace(M())
+
+        # Do not change this to `capture_stderr` or another context
+        # manager without ensuring that the output is as expected
+        try:
+            traced(torch.rand(5, 5))
+        except RuntimeError:
+            captured = traceback.format_exc()
+
+        self.assertNotIn("Call using an FX-traced Module, line 4 of the"
+                         " traced Module’s generated forward function:",
+                         captured)
+
+    def test_ast_rewriter_rewrites_assert(self):
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: int, z: int):
+                assert y == z
+                return torch.add(x, x)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        traced.graph.lint(traced)
+
+    def test_ast_rewriter_rewrites_assert_with_message(self):
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: int, z: int):
+                assert y == z, "msg"
+                return torch.add(x, x)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        traced.graph.lint(traced)
+
+    def test_ast_rewriter_reassigns_submodules(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(100)
+
+            def forward(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        traced.graph.lint(traced)
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
