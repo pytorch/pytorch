@@ -2987,7 +2987,7 @@ bool any_variable_defined(variable_list& variables) {
   return false;
 }
 
-std::tuple<Tensor, Tensor> orgqr_backward(const Tensor& grad, const Tensor& input, const Tensor& tau) {
+std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& input, const Tensor& tau) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }

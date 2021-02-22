@@ -416,7 +416,7 @@ class TestCommon(JitCommonTestCase):
                     '''
                     # remove the first input tensor
                     script = fn_template.format(
-                        c=", " if len(args_kw[1:]) > 1 else "",
+                        c=", " if len(args_kw[1:]) > 1 or len(args_annot_kw[1:]) >= 1 else "",
                         args_annot_kw=", ".join(args_annot_kw[1:]),
                         args_kw=", ".join(args_kw[1:]),
                         alias_name=variant_name,

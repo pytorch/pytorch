@@ -1257,7 +1257,7 @@ DEFINE_DISPATCH(orgqr_stub);
 
   For further details, please see the LAPACK/MAGMA documentation.
 */
-Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, Tensor& infos) {
+Tensor& householder_product_out_info(const Tensor& input, const Tensor& tau, Tensor& result, Tensor& infos) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT(input.size(-2) >= input.size(-1));
   TORCH_INTERNAL_ASSERT(input.size(-1) >= tau.size(-1));
@@ -1301,7 +1301,7 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   return result;
 }
 
-Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
+Tensor& householder_product_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   TORCH_CHECK(input.dim() >= 2, "orgqr: input must have at least 2 dimensions.");
   TORCH_CHECK(input.size(-2) >= input.size(-1), "orgqr: input.shape[-2] must be greater than or equal to input.shape[-1]");
   TORCH_CHECK(input.size(-1) >= tau.size(-1), "orgqr: input.shape[-1] must be greater than or equal to tau.shape[-1]");
@@ -1350,12 +1350,12 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   // we have to allocate a temporary tensor
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
-    result_tmp = orgqr_out_info(input, tau, result_tmp, infos);
+    result_tmp = householder_product_out_info(input, tau, result_tmp, infos);
     at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
   } else {
     // use result's storage directly
-    result = orgqr_out_info(input, tau, result, infos);
+    result = householder_product_out_info(input, tau, result, infos);
   }
 
   // Now check LAPACK/MAGMA error codes
@@ -1367,10 +1367,18 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   return result;
 }
 
-Tensor orgqr(const Tensor& input, const Tensor& tau) {
+Tensor householder_product(const Tensor& input, const Tensor& tau) {
   Tensor result = at::empty({0}, input.options());
   result = at::orgqr_outf(input, tau, result);
   return result;
+}
+
+Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
+  return at::householder_product_outf(input, tau, result);
+}
+
+Tensor orgqr(const Tensor& input, const Tensor& tau) {
+  return at::householder_product(input, tau);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

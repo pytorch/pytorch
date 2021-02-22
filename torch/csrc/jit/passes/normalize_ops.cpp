@@ -105,6 +105,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::swapaxes, aten::transpose},
       {aten::swapaxes_, aten::transpose_},
       {aten::moveaxis, aten::movedim},
+      {aten::orgqr, aten::householder_product},
   };
   return alias_map;
 }

@@ -714,7 +714,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.norm_except_dim: lambda v, pow=2, dim=0: -1,
         torch.nuclear_norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
         torch.numel: lambda input: -1,
-        torch.orgqr: lambda input1, input2: -1,
+        torch.householder_product: lambda input, tau: -1,
         torch.ormqr: lambda input, input2, input3, left=True, transpose=False: -1,
         torch.pairwise_distance: lambda x1, x2, p=2.0, eps=1e-06, keepdim=False: -1,
         torch.pca_lowrank: lambda input, q=None, center=True, niter=2: -1,
