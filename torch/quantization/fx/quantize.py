@@ -29,6 +29,8 @@ from ..quantize import (
 from ..utils import (
     get_combined_dict,
     get_swapped_custom_module_class,
+    activation_is_quantized,
+    weight_is_quantized,
     activation_is_statically_quantized,
 )
 
@@ -165,7 +167,8 @@ def insert_observer_for_output_of_the_node(
     # don't need to insert observer for output if activation does not
     # need to be statically quantized
     assert modules is not None
-    if activation_is_statically_quantized(qconfig):
+    # TODO: Add warnings in the quantize handlers that does not support fp16 quantization
+    if activation_is_quantized(qconfig):
         if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) \
                 and model.training:
             # we only insert fake quantize module in qat
@@ -786,16 +789,7 @@ class Quantizer:
             assert isinstance(node.target, str)
             observer_module = self.modules[node.target]
             prev_node = node.args[0]
-            if observer_module.dtype == torch.float16:
-                # activations are not quantized for
-                # fp16 dynamic quantization
-                # copy the activaiton_post_process node here
-                # since we may need it when we insert prepack
-                # op for weight of linear, this will be removed
-                # later in a separate pass
-                env[node.name] = self.quantized_graph.node_copy(
-                    node, load_non_quantized)
-            elif isinstance(prev_node, Node) and prev_node.name in quant_env:
+            if isinstance(prev_node, Node) and prev_node.name in quant_env:
                 # if previous node is already quantized, we'll just remove the
                 # activation_post_process
                 quant_env[node.name] = quant_env[prev_node.name]
@@ -1085,8 +1079,8 @@ class Quantizer:
                 is_activation = not (is_weight or is_bias)
                 should_add_handler = qconfig is not None and (
                     (is_activation and
-                        activation_is_statically_quantized(qconfig)) or
-                    (is_weight and weight_is_statically_quantized(qconfig))
+                        activation_is_quantized(qconfig)) or
+                    (is_weight and weight_is_quantized(qconfig))
                 )
 
                 if should_add_handler:

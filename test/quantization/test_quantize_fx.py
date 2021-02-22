@@ -1771,20 +1771,23 @@ class TestQuantizeFxOps(QuantizationTestCase):
         )
         for use_bias, has_relu, f_relu, reference in options:
             model = FuncLinear(use_bias, has_relu, f_relu)
-            reference = False
+            reference = True
             if reference:
-                qlinear_fun = torch.functional.linear
+                qlinear_fun = ns.call_function(torch.nn.functional.linear)
             else:
-                qlinear_fun = torch.ops.quantized.linear_dynamic_fp16
+                qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
+            prepare_node_occurrence = {
+                # activation, weight, output
+                ns.call_module(torch.quantization.ObserverBase): 3
+            }
             convert_node_occurrence = {
                 qlinear_fun: 1,
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, qlinear_fun,
-                debug=reference,
+                is_reference=reference,
                 custom_qconfig=float16_dynamic_qconfig,
-                expected_node_occurrence=convert_node_occurrence,
-                print_debug_info=True)
+                expected_node_occurrence=convert_node_occurrence)
 
     @skipIfNoFBGEMM
     def test_conv_module(self):
