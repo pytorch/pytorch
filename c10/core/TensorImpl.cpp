@@ -59,7 +59,8 @@ TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
-    : TensorImpl(std::move(storage), key_set, data_type, storage.device()) {}
+    // Use std::forward to suppress static analyzer false positive.
+    : TensorImpl(std::forward<Storage>(storage), key_set, data_type, storage.device()) {}
 
 TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
@@ -242,6 +243,10 @@ bool TensorImpl::has_storage() const {
 }
 #endif
 
+void TensorImpl::throw_storage_access_error() const {
+  TORCH_CHECK(false, "Cannot access storage of ", tensorimpl_type_name());
+}
+
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 #ifdef DEBUG
   AT_ASSERT(compute_contiguous() == is_contiguous_);
@@ -253,10 +258,6 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
       return is_channels_last_3d_contiguous_;
   }
   return is_contiguous_;
-}
-
-const Storage& TensorImpl::storage() const {
-  return storage_;
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
