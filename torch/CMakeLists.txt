@@ -339,16 +339,18 @@ else()
   set(TORCH_VERSION_DEBUG 0)
 endif()
 
-execute_process(
+add_custom_command(
+  OUTPUT ${TORCH_SRC_DIR}/version.py
+  COMMAND
+    touch ${TOOLS_PATH}/generate_torch_version.py
   COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
       --is_debug=${TORCH_VERSION_DEBUG}
       --cuda_version=${CUDA_VERSION}
       --hip_version=${HIP_VERSION}
-  OUTPUT_FILE ${TORCH_SRC_DIR}/version.py
+  DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
-
 add_custom_target(
   gen_torch_version ALL
   DEPENDS ${TORCH_SRC_DIR}/version.py
