@@ -817,6 +817,19 @@ class TestCase(expecttest.TestCase):
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
     _precision: float = 0
 
+    # checker to early terminate test suite if unrecoverable failure occurs.
+    def _should_stop_test_suite(self):
+        if torch.cuda.is_initialized():
+            # CUDA device side error will cause subsequence test cases to fail.
+            # stop entire test suite if catches RuntimeError during torch.cuda.synchronize().
+            try:
+                torch.cuda.synchronize()
+            except RuntimeError as rte:
+                return True
+            return False
+        else:
+            return False
+
     @property
     def precision(self) -> float:
         return self._precision
@@ -877,6 +890,11 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
+    def run(self, result=None):
+        super().run(result=result)
+        # Early terminate test if necessary.
+        if self._should_stop_test_suite():
+            result.stop()
 
     def setUp(self):
 
@@ -2004,3 +2022,12 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.double: 1e-5,
                       torch.half: 1e-2,
                       torch.bfloat16: 1e-1}
+
+
+def _wrap_maybe_warns(regex):
+    def decorator(fn):
+        def inner(self, *args, **kwargs):
+            with self.maybeWarnsRegex(UserWarning, regex):
+                fn(self, *args, **kwargs)
+        return inner
+    return decorator

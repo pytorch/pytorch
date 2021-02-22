@@ -2741,7 +2741,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.div, r"""
-div(input, other, *, rounding_mode='true' out=None) -> Tensor
+div(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -2764,7 +2764,7 @@ Args:
 Keyword args:
     rounding_mode (str, optional): Type of rounding applied to the result:
 
-        * ``"true"`` - default behavior. Performs no rounding and, if both :attr:`input` and
+        * None - default behavior. Performs no rounding and, if both :attr:`input` and
           :attr:`other` are integer types, promotes the inputs to the default scalar type.
           Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
         * ``"trunc"`` - rounds the results of the division towards zero.
@@ -2806,7 +2806,7 @@ Examples::
 """.format(**common_args))
 
 add_docstr(torch.divide, r"""
-divide(input, other, *, rounding_mode='true', out=None) -> Tensor
+divide(input, other, *, rounding_mode=None, out=None) -> Tensor
 
 Alias for :func:`torch.div`.
 """)
@@ -3158,9 +3158,12 @@ add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
 .. warning::
-    This function's name is a misnomer. It actually rounds the
-    quotient towards zero instead of taking its floor. This behavior
-    will be deprecated in a future PyTorch release.
+
+    :func:`torch.floor_divide` is deprecated and will be removed in a future PyTorch
+    release. Its name is a misnomer because it actually rounds the quotient
+    towards zero instead of taking its floor. To keep the current behavior use
+    :func:`torch.div` with ``rounding_mode='trunc'``. To actually perform floor
+    division, use :func:`torch.div` with ``rounding_mode='floor'``.
 
 Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
 quotient towards zero. Equivalently, it truncates the quotient(s):
@@ -7859,7 +7862,7 @@ Example::
 
 add_docstr(torch.sort,
            r"""
-sort(input, dim=-1, descending=False, *, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, stable=False, *, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -7869,14 +7872,21 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
+If :attr:`stable` is ``True`` then the sorting routine becomes stable, preserving
+the order of equivalent elements.
+
 A namedtuple of (values, indices) is returned, where the `values` are the
 sorted values and `indices` are the indices of the elements in the original
 `input` tensor.
+
+.. warning:: `stable=True` only works on the CPU for now.
 
 Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
+       of equivalent elements is preserved.
 
 Keyword args:
     out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
@@ -7904,6 +7914,15 @@ Example::
     tensor([[ 2,  0,  0,  1],
             [ 0,  1,  1,  2],
             [ 1,  2,  2,  0]])
+    >>> x = torch.tensor([0, 1] * 9)
+    >>> x.sort()
+    torch.return_types.sort(
+        values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+        indices=tensor([ 2, 16,  4,  6, 14,  8,  0, 10, 12,  9, 17, 15, 13, 11,  7,  5,  3,  1]))
+    >>> x.sort(stable=True)
+    torch.return_types.sort(
+        values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+        indices=tensor([ 0,  2,  4,  6,  8, 10, 12, 14, 16,  1,  3,  5,  7,  9, 11, 13, 15, 17]))
 """.format(**common_args))
 
 add_docstr(torch.argsort,
@@ -8515,9 +8534,9 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 .. note:: Irrespective of the original strides, the returned matrix `V` will
           be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
 
-.. note:: Extra care needs to be taken when backward through outputs. Such
-          operation is really only stable when all eigenvalues are distinct.
-          Otherwise, ``NaN`` can appear as the gradients are not properly defined.
+.. warning:: Extra care needs to be taken when backward through outputs. Such
+             operation is only stable when all eigenvalues are distinct and becomes
+             less stable the smaller :math:`\min_{i \neq j} |\lambda_i - \lambda_j|` is.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
@@ -9207,7 +9226,7 @@ Example::
 add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
-Alias for :func:`torch.div` with ``rounding_mode='true'``.
+Alias for :func:`torch.div` with ``rounding_mode=None``.
 """.format(**common_args))
 
 add_docstr(torch.trunc,
