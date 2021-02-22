@@ -278,21 +278,14 @@ const Expr* IRMutator::mutate(const MinTerm* v) {
 }
 
 const Expr* IRMutator::mutate(const ReduceOp* v) {
-  const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
-  const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
   const Expr* body_new = v->body()->accept_mutator(this);
 
-  std::vector<const Expr*> new_output_args;
   std::vector<const Var*> new_reduce_args;
-  for (auto* e : v->output_args()) {
-    new_output_args.push_back(e->accept_mutator(this));
-  }
   for (auto* r : v->reduce_args()) {
     new_reduce_args.push_back(static_cast<const Var*>(r->accept_mutator(this)));
   }
 
-  return new ReduceOp(
-      buf_new, body_new, new_output_args, new_reduce_args, v->reducer());
+  return new ReduceOp(body_new, new_reduce_args, v->reducer());
 }
 
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
