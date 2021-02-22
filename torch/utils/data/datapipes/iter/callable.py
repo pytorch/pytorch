@@ -29,7 +29,6 @@ class MapIterDataPipe(IterDataPipe[T_co]):
 
     def __init__(self,
                  datapipe: IterDataPipe,
-                 *,
                  fn: Callable = default_fn,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
@@ -93,7 +92,6 @@ class CollateIterDataPipe(MapIterDataPipe):
     """
     def __init__(self,
                  datapipe: IterDataPipe,
-                 *,
                  collate_fn: Callable = _utils.collate.default_collate,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,

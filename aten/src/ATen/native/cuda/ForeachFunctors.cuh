@@ -99,7 +99,8 @@ __device__ __forceinline__ void binary_op_scalar(
         }
         else {
             for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
-                load_args<depth>(r_args, args, i_start, chunk_size, n);
+                // Regardless if "depth" is 1 (for inplace) or 2 (for out of place), r_args has depth 1
+                load_args<1>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
                 for(int ii = 0; ii < kILP; ii++) {
                     r_args[0][ii] = static_cast<T>(op(static_cast<opmath_t>(r_args[0][ii]),
