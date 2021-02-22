@@ -359,13 +359,14 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         kwargs=dict(dim=1)),)
 
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
-    test_cases = (
-        ((2,), (2,)),
-        ((1, 2), (2, 1)),
-        ((2, 3), (3, 2), (2, 4)),
+    test_cases: Tuple[Tuple[int, ...]] = (
+        ((S,), (S,)),
+        ((1, S), (S, 1)),
+        ((2, S), (S, 2), (2, S)),
     )
 
     result = []
+    test_case: Tuple[int, ...]
     for test_case in test_cases:
         tensors = []
         for size in test_case:
