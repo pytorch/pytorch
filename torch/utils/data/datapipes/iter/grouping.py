@@ -23,7 +23,6 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
-                 *,
                  batch_size: int,
                  drop_last: bool = False,
                  ) -> None:
@@ -80,7 +79,6 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
-                 *,
                  batch_size: int,
                  drop_last: bool = False,
                  bucket_size_mul: int = 100,
