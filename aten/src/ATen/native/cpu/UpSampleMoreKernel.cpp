@@ -39,7 +39,7 @@ static inline void compute_source_index_and_lambda(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_linear(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     bool align_corners,
     const scale_type& scales) {
@@ -349,7 +349,7 @@ void cpu_upsample_linear_channels_last(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_linear_backward(
-    Tensor& grad_input_,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     bool align_corners,
     const scale_type& scales) {
@@ -486,7 +486,7 @@ void cpu_upsample_linear_backward(
 
 using scale_t = std::vector<c10::optional<double>>;
 void upsample_linear1d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     bool align_corners,
     c10::optional<double> scales_w) {
@@ -531,7 +531,7 @@ void upsample_trilinear3d_kernel_impl(
 }
 
 void upsample_linear1d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
     c10::optional<double> scales_w) {
