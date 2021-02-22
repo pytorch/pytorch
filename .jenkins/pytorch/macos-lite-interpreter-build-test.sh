@@ -34,8 +34,9 @@ if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
     # TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
     echo "Finding test_lite_interpreter_runtime"
     find . -regex '.*test_lite_interpreter_runtime'
+    pwd
 
-    $CPP_BUILD/caffe2/bin/test_lite_interpreter_runtime
+    ./torch/bin/test_lite_interpreter_runtime
 
     assert_git_not_dirty
 else
