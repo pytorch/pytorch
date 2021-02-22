@@ -245,24 +245,24 @@ class TestFunctionalIterDataPipe(TestCase):
 
     def test_picklable(self):
         arr = range(10)
-        picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Dict[str, Any]]] = [
-            (dp.iter.Map, IDP(arr), {}),
-            (dp.iter.Map, IDP(arr), {'fn': _fake_fn, 'fn_args': (0), 'fn_kwargs': {'test': True}}),
-            (dp.iter.Collate, IDP(arr), {}),
-            (dp.iter.Collate, IDP(arr), {'collate_fn': _fake_fn, 'fn_args': (0), 'fn_kwargs': {'test': True}}),
-            (dp.iter.Filter, IDP(arr), {'filter_fn': _fake_filter_fn, 'fn_args': (0), 'fn_kwargs': {'test': True}}),
+        picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
+            (dp.iter.Map, IDP(arr), (), {}),
+            (dp.iter.Map, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Collate, IDP(arr), (), {}),
+            (dp.iter.Collate, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Filter, IDP(arr), (_fake_filter_fn, (0, ), {'test': True}), {}),
         ]
-        for dpipe, input_dp, kargs in picklable_datapipes:
-            p = pickle.dumps(dpipe(input_dp, **kargs))  # type: ignore
+        for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
+            p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore
 
-        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Dict[str, Any]]] = [
-            (dp.iter.Map, IDP(arr), {'fn': lambda x: x}),
-            (dp.iter.Collate, IDP(arr), {'collate_fn': lambda x: x}),
-            (dp.iter.Filter, IDP(arr), {'filter_fn': lambda x: x >= 5}),
+        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
+            (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
+            (dp.iter.Collate, IDP(arr), (lambda x: xi, ), {}),
+            (dp.iter.Filter, IDP(arr), (lambda x: x >= 5, ), {}),
         ]
-        for dpipe, input_dp, kargs in unpicklable_datapipes:
+        for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
             with warnings.catch_warnings(record=True) as wa:
-                datapipe = dpipe(input_dp, **kargs)
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)
                 self.assertEqual(len(wa), 1)
                 self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
                 with self.assertRaises(AttributeError):

@@ -311,7 +311,6 @@ class TestOptim(TestCase):
             )
 
     @skipIfRocm
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
             return
@@ -385,7 +384,6 @@ class TestOptim(TestCase):
             for p1, p2 in zip(res[0], res[1]):
                 self.assertEqual(p1, p2)
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_adam(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
@@ -430,7 +428,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.Adam(None, lr=1e-2, weight_decay=-1)
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_adamw(self):
         self._test_basic_cases(
             lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3)
@@ -464,7 +461,6 @@ class TestOptim(TestCase):
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_adadelta(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias])
@@ -539,7 +535,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_rmsprop(self):
         self._test_basic_cases(
             lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
