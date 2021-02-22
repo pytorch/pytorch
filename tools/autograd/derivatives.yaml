@@ -866,7 +866,7 @@
   std: at::zeros(std.sizes(), grad.options())
 
 - name: orgqr(Tensor self, Tensor input2) -> Tensor
-  self, input2: orgqr_backward(grad, self, input2, result)
+  self, input2: orgqr_backward(grad, self, input2)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   self: not_implemented("ormqr")
