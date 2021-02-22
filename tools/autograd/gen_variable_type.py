@@ -91,7 +91,11 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'reflection_pad1d_backward', 'reflection_pad2d_backward',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
+<<<<<<< HEAD
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'unfold'
+=======
+    'diag', 'masked_scatter', 'masked_select', 'masked_fill', 'index_fill', 'trace', 'unfold', 'unfold_backward'
+>>>>>>> 1adcf0617c... fiing errors
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
