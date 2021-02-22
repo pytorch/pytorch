@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
+from typing import Any, TypeVar, Optional, List, NamedTuple, Union, Sequence, Dict, Callable
 import textwrap
 import torch
 from torch._C import TupleType, OptionalType, ListType
@@ -17,7 +17,7 @@ class InflatableArg(NamedTuple):
 
 def augment_model_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
+        inputs: Optional[Sequence[Sequence[Any, ...]]] = None,
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
 ) -> None:
@@ -43,7 +43,7 @@ def augment_model_with_bundled_inputs(
 
 def augment_many_model_functions_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]],
+        inputs: Dict[Callable, Optional[Sequence[Sequence[Any, ...]]]],
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[Dict[Callable, List[str]]] = None,  # Optional argument to provide info about the function or its inputs
 ) -> None:
@@ -85,7 +85,11 @@ def augment_many_model_functions_with_bundled_inputs(
         and cache the value. If the user chooses this method inputs[<function>]
         should map to None
       - The `inputs` argument to this function can be a dictionary mapping functions to a
-        list of tuples, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
+        list of inputs, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
+        The type of the inputs is Sequence[Sequence[Any, ...]]. The outer sequence corresponds with a
+        list of inputs, the inner sequence is the list of args that together make up one input.
+        For inputs of functions that take one arg, this will be a sequence of length one. The Any, ...
+        is the actual data that makes up the args, e.g. a tensor.
 
     Info is an optional parameter that maps functions to a list of strings providing extra information about that
     function's bundled inputs. This could be descriptions, expected outputs, etc.
@@ -134,8 +138,8 @@ def augment_many_model_functions_with_bundled_inputs(
             deflated_inputs = []
             parts = []
             for inp_idx, args in enumerate(input_list):
-                if not isinstance(args, Tuple):
-                    raise TypeError("Error bundled input for function {0} idx: {1} is not a tuple".format(function_name, inp_idx))
+                if not isinstance(args, Sequence):
+                    raise TypeError("Error bundled input for function {0} idx: {1} is not a Sequence".format(function_name, inp_idx))
                 deflated_args = []
                 parts.append("(")
                 for arg_idx, arg in enumerate(args):
