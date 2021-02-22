@@ -116,6 +116,7 @@ namespace c10 {
   _(prim, MMTreeReduce)              \
   _(prim, MMBatchSide)               \
   _(prim, list)                      \
+  _(prim, dict)                      \
   _(prim, min)                       \
   _(prim, max)                       \
   _(prim, abs)                       \
@@ -258,6 +259,7 @@ namespace c10 {
   _(aten, hash)                      \
   _(aten, len)                       \
   _(aten, list)                      \
+  _(aten, dict)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
   _(aten, sub)                       \
