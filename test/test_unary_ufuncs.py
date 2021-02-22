@@ -12,7 +12,7 @@ from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
     suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
-    gradcheck)
+    gradcheck, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
 from torch.testing._internal.common_device_type import (
@@ -465,10 +465,15 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(result, out)
 
     @dtypes(torch.cfloat, torch.cdouble)
-    def test_sqrt_complex_edge_values(self, device, dtype):
-        # Test Reference: https://github.com/pytorch/pytorch/pull/47424
-        x = torch.tensor(0. - 1.0000e+20j, dtype=dtype, device=device)
+    def test_complex_edge_values(self, device, dtype):
+        # sqrt Test Reference: https://github.com/pytorch/pytorch/pull/47424
+        x = torch.tensor(0. - 1.0e+20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+        # acos test reference: https://github.com/pytorch/pytorch/issue/42952
+        # Skip on Windows, as CUDA acos  returns conjugate value
+        # see https://github.com/pytorch/pytorch/issues/52299
+        if not (IS_WINDOWS and dtype == torch.cdouble and "cuda" in device):
+            self.compare_with_numpy(torch.acos, np.arccos, x)
 
         x = torch.tensor((-1.0e+60 if dtype == torch.cdouble else -1.0e+20) - 4988429.2j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)

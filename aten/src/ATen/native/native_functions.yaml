@@ -6391,6 +6391,12 @@
     CPU: sort_out_cpu
     CUDA: legacy::cuda::_th_sort_out
 
+- func: sort.values_stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    CPU: sort_out_cpu_stable
+    CUDA: legacy::cuda::_th_sort_out_stable
+
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
@@ -6398,10 +6404,23 @@
     CUDA: legacy::cuda::_th_sort
     QuantizedCPU: sort_quantized_cpu
 
+- func: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+  variants: method, function
+  dispatch:
+    CPU: sort_cpu_stable
+    CUDA: legacy::cuda::_th_sort_stable
+    QuantizedCPU: sort_quantized_cpu_stable
+
 - func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
+- func: sort.dimname_values_stable(Tensor self, *, bool? stable, Dimname dim, bool descending=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+
 - func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
+  variants: method, function
+
+- func: sort.dimname_stable(Tensor self, *, bool? stable, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
 
 - func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)

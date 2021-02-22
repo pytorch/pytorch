@@ -72,6 +72,7 @@ void testStaticRuntime(
 
   StaticRuntime runtime(module);
   auto actual = runtime.run(args, {});
+  runtime.check_for_memory_leak();
 
   if (expect.isTuple()) {
     compareTensorLists(
@@ -85,6 +86,18 @@ void testStaticRuntime(
   compareTensorLists(args_tensors, args_copy);
 }
 } // namespace
+
+TEST(StaticRuntime, UnaryOps) {
+  auto a = at::ones({2, 3});
+
+  std::vector<IValue> args{a};
+
+  testStaticRuntime(aten_sum, args);
+  testStaticRuntime(aten_sum_0, args);
+  testStaticRuntime(aten_sum_1, args);
+  testStaticRuntime(aten_sum_0_true, args);
+  testStaticRuntime(aten_sum_1_true, args);
+}
 
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
@@ -140,6 +153,7 @@ TEST(StaticRuntime, LongModel) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
+  runtime.check_for_memory_leak();
   EXPECT_TRUE(output_1.equal(output_2));
 }
 
@@ -158,6 +172,7 @@ TEST(StaticRuntime, TrivialModel) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
+  runtime.check_for_memory_leak();
   EXPECT_TRUE(output_1.equal(output_2));
 }
 
@@ -174,6 +189,7 @@ TEST(StaticRuntime, LeakyReLU) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
+  runtime.check_for_memory_leak();
   EXPECT_TRUE(output_1.equal(output_2));
 }
 
@@ -197,6 +213,8 @@ TEST(StaticRuntime, DeepWide) {
       // run static runtime
       std::vector<at::Tensor> input_tensors({ad_emb_packed, user_emb, wide});
       at::Tensor output_2 = runtime.run(input_tensors)[0];
+      runtime.check_for_memory_leak();
+
       EXPECT_TRUE(output_1.equal(output_2));
     }
   }
@@ -221,6 +239,7 @@ TEST(StaticRuntime, KWargsAPI_1) {
 
         // run static runtime
         c10::IValue output_ivalue = runtime.run(inputs, {});
+        runtime.check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(output_1.equal(output_2));
@@ -265,6 +284,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
 
         // run static runtime
         c10::IValue output_ivalue = runtime.run({}, kwargs);
+        runtime.check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(output_1.equal(output_2));
@@ -310,6 +330,8 @@ TEST(StaticRuntime, CleanUpMemory) {
           std::vector<at::Tensor> input_tensors(
               {ad_emb_packed, user_emb, wide});
           at::Tensor output_2 = runtime.run(input_tensors)[0];
+          runtime.check_for_memory_leak();
+
           EXPECT_TRUE(output_1.equal(output_2));
         }
       }

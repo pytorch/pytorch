@@ -447,7 +447,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   AT_ASSERT(weight.dim() == 2);
   AT_ASSERT(weight.size(1) == embedding_features);
 
-  const int threads_per_block = 1024;
+  const int threads_per_block = 512;
   const int warps_per_block = threads_per_block / C10_WARP_SIZE;
 
   dim3 block(threads_per_block);
