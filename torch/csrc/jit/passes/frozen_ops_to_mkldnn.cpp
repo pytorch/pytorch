@@ -379,9 +379,17 @@ class MKLDNNSubgraphSlicer {
     }
     // unary ops we dont need to prove anything else than
     // the input is mkldnn supported
-    if (n->kind() == aten::relu || n->kind() == aten::sigmoid) {
-      return true;
+    switch (n->kind()) {
+      case aten::relu:
+      case aten::sigmoid:
+      // TODO: max_pool on mkldnn can be slower than in eager. ideally, we'd
+      // only fuse it if we knew including max_pool lead to fewer layout
+      // conversions. from initial testing including it speeds up models
+      case aten::max_pool2d:
+      case aten::max_pool3d:
+        return true;
     }
+
     if (n->kind() == aten::add) {
       // mkldnn doesn't currently support Tensor-Scalar add
       for (size_t i = 0; i < 2; i++) {
