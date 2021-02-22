@@ -65,7 +65,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         # TODO: The use of the `_LinearWithBias` increases the quantization noise
         # The `out_proj` in the parent is ``_LinearWithBias`, so need to ignore
         # the type for mypy not to complain.
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)  # type: ignore
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)  # type: ignore
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
@@ -166,7 +166,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         # to deal with them -- might need to ignore the typing checks.
         w, b = self.out_proj._weight_bias()  # type: ignore
         fp.out_proj.weight = nn.Parameter(w.dequantize())
-        fp.out_proj.bias = nn.Parameter(b)
+        fp.out_proj.bias = None if b is None else nn.Parameter(b)
 
         wQ, bQ = self.linear_Q._weight_bias()  # type: ignore
         wQ = wQ.dequantize()
