@@ -1,4 +1,4 @@
-  # C++ API
+#!/bin/bash
 
 echo "BUILD_LITE_INTERPRETER: ${BUILD_LITE_INTERPRETER}"
 if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
