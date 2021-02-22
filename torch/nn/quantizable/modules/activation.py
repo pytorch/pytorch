@@ -166,7 +166,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         # to deal with them -- might need to ignore the typing checks.
         w, b = self.out_proj._weight_bias()  # type: ignore
         fp.out_proj.weight = nn.Parameter(w.dequantize())
-        fp.out_proj.bias = None if b is None else nn.Parameter(b)
+        if b is not None:
+            fp.out_proj.bias = nn.Parameter(b)
 
         wQ, bQ = self.linear_Q._weight_bias()  # type: ignore
         wQ = wQ.dequantize()
