@@ -1985,7 +1985,7 @@ const Expr* buf_flat_size(const Buf* v) {
   std::vector<const Expr*> dims = v->dims();
 
   const Expr* flattened = getImmediateByType(kInt, 1);
-  for (auto & dim : dims) {
+  for (auto& dim : dims) {
     flattened = new Mul(flattened, dim);
   }
   flattened = IRSimplifier::simplify(flattened);
