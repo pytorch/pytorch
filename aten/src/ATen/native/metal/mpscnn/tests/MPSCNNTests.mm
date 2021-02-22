@@ -213,6 +213,18 @@ bool test_max_pool2d() {
   });
 }
 
+bool test_max_pool2d_padding() {
+    __block std::vector<int64_t> size{1, 3, 4, 4};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::native::max_pool2d(X, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false);
+      auto X2 = X.metal();
+      auto Y2 =
+          mpscnn::max_pool2d(X2, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false).cpu();
+      return almostEqual(Y1, Y2);
+    });
+}
+
 bool test_max_pool2d_ceil() {
   __block std::vector<int64_t> size{1, 96, 55, 55};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
