@@ -335,7 +335,7 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
     return buf_;
   }
 
-  Allocate(const Buf* buf) : buf_(buf) {}
+  explicit Allocate(const Buf* buf) : buf_(buf) {}
 
  private:
   const Buf* buf_;
@@ -357,7 +357,7 @@ class TORCH_API Free : public StmtNode<Free> {
     return buf_;
   }
 
-  Free(const Buf* buf) : buf_(buf) {}
+  explicit Free(const Buf* buf) : buf_(buf) {}
 
  private:
   const Buf* buf_;
