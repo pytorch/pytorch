@@ -1,4 +1,11 @@
+#include <ATen/AccumulateType.h>
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/CPUApplyUtils.h>
 #include <ATen/native/group_norm.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <c10/util/accumulate.h>
 
 #include <array>
 #include <functional>
@@ -6,12 +13,6 @@
 #include <tuple>
 #include <vector>
 
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
@@ -107,7 +108,7 @@ Tensor group_norm(
 
   const auto input_shape = input.sizes();
   const int64_t HxW =
-      prod_intlist(input_shape.cbegin() + 2, input_shape.cend());
+      c10::multiply_integers(input_shape.cbegin() + 2, input_shape.cend());
 
   const Tensor kEmpty;
   const auto& X = input.is_contiguous() ? input : input.contiguous();
