@@ -1,3 +1,5 @@
+#include "test_utils.h"
+
 #include <gtest/gtest.h>
 
 #include <c10/core/TensorOptions.h>
@@ -12,14 +14,6 @@
 #include <torch/torch.h>
 
 #include <unordered_set>
-
-#define ASSERT_THROWS_WITH(statement, substring)                         \
-  try {                                                                  \
-    (void)statement;                                                     \
-    ASSERT_TRUE(false);                                                  \
-  } catch (const std::exception& e) {                                    \
-    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
-  }
 
 // Tests go in torch::jit
 namespace torch {

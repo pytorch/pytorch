@@ -5,7 +5,7 @@ namespace jit {
 
 namespace {
 std::vector<std::string> parseBlob(const std::string& blob) {
-  std::vector <std::string> result;
+  std::vector<std::string> result;
   std::stringstream s_stream(blob);
   while (s_stream.good()) {
     std::string substr;
@@ -14,7 +14,7 @@ std::vector<std::string> parseBlob(const std::string& blob) {
   }
   return result;
 }
-}
+} // namespace
 // This test JIT backend is intended to do the minimal amount of work
 // necessary to test that the JIT backend registration endpoints and
 // code generation are working correctly. It is not intended to
@@ -28,13 +28,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
-
-    auto handles = processed.toGenericDict();
-    auto test = c10::impl::toTypedDict<std::string, std::string>(handles);
-    for (const auto& handle : test) {
-      std::cout << handle.key() << ": " << handle.value() << std::endl;
-    }
-    return c10::impl::toGenericDict(test);
+    return processed.toGenericDict();
   }
 
   c10::impl::GenericList execute(
@@ -49,9 +43,11 @@ class BackendWithCompiler : public PyTorchBackendInterface {
 
     c10::List<at::Tensor> output_list;
     auto tokens = parseBlob(handle.toStringRef());
-    for (const auto& token: tokens) {
+    for (const auto& token : tokens) {
       if (token == "aten::add") {
         output_list.emplace_back(x.add_(h, 1.0));
+      } else if (token == "aten::sub") {
+        output_list.emplace_back(x.sub_(h, 1.0));
       }
     }
     return c10::impl::toList(output_list);
@@ -64,10 +60,11 @@ class BackendWithCompiler : public PyTorchBackendInterface {
 c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<IValue, IValue>& method_compile_spec) {
-  // The output of this process would produce a dictionary
-  // Key: method name.
-  // Val: compiled blob (represented by a string).
-  c10:Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
+// The output of this process would produce a dictionary
+// Key: method name.
+// Val: compiled blob (represented by a string).
+c10:
+  Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
   for (const auto& method : mod.get_methods()) {
     auto graph = method.function().graph()->copy();
     auto key = method.name();
@@ -75,15 +72,22 @@ c10::IValue preprocess(
     for (const auto& node : graph->nodes()) {
       switch (node->kind()) {
         case prim::Constant:
-          ss << node->kind().toDisplayString() << "#" << toIValue(node->output()).value();
+          ss << node->kind().toDisplayString() << "#"
+             << toIValue(node->output()).value();
           break;
         case aten::add:
           ss << node->kind().toQualString();
           break;
+        case aten::sub:
+          ss << node->kind().toQualString();
+          break;
         default:
-          TORCH_CHECK(true, "The node of ", node->kind().toQualString(),
-                      " is not supported in this compiler. Source code: ",
-                      node->sourceRange().text());
+          TORCH_CHECK(
+              false,
+              "The node of ",
+              node->kind().toQualString(),
+              " is not supported in this compiler. Source code: ",
+              node->sourceRange().text());
           break;
       }
       ss << ",";
@@ -98,7 +102,9 @@ c10::IValue preprocess(
 }
 
 namespace {
-static auto cls = torch::jit::backend<BackendWithCompiler>("backend_with_compiler_demo", preprocess);
+static auto cls = torch::jit::backend<BackendWithCompiler>(
+    "backend_with_compiler_demo",
+    preprocess);
 }
 
 } // namespace jit

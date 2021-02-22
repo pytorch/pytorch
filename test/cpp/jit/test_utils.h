@@ -5,6 +5,14 @@
 #include "torch/csrc/jit/runtime/autodiff.h"
 #include "torch/csrc/jit/runtime/interpreter.h"
 
+#define ASSERT_THROWS_WITH(statement, substring)                         \
+  try {                                                                  \
+    (void)statement;                                                     \
+    ASSERT_TRUE(false);                                                  \
+  } catch (const std::exception& e) {                                    \
+    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
+  }
+
 namespace torch {
 namespace jit {
 
