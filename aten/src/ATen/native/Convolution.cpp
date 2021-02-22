@@ -1,13 +1,15 @@
-#include <limits>
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
+
+#include <limits>
 
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
@@ -177,10 +179,10 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
   int64_t outsize = 1;
   if (transposed) {
     std::vector<int64_t> o = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
-    outsize = prod_intlist(o.begin() + 1, o.end());
+    outsize = c10::multiply_integers(o.begin() + 1, o.end());
   } else {
     std::vector<int64_t> o = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
-    outsize = prod_intlist(o.begin() + 1, o.end());
+    outsize = c10::multiply_integers(o.begin() + 1, o.end());
   }
   return outsize > int_max;
 }
@@ -238,7 +240,12 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
      (groups > 1
       || (weight.size(-1) > 3 && weight.size(-2) > 3)
       || input.size(0) > 1
-      || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480)); // for some case, native is faster
+      || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480) // for some case, native is faster
+      // OneDNN < 1.8.1 produce incorrect results in this case (see #50042)
+      // TODO(VitalyFedyunin): Remove this patch after OneDNN 1.8.1 merged in
+      && !(groups == 24 && weight.size(0) == 24 && weight.size(1) == 1)
+      ); 
+
 #endif
   return false;
 }
@@ -289,7 +296,7 @@ auto ConvParams::is_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
   return input.is_cuda() &&
          !transposed &&
-         input.ndimension() == 4 &&
+         (input.ndimension() == 4 || input.ndimension() == 5) &&
          input.size(1) == groups &&
          groups > 1 && // no point if there is only a single group
          weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
@@ -418,6 +425,7 @@ auto ConvParams::use_cudnn_depthwise(
                          input.scalar_type() == kHalf && // only for FP16
                          weight.scalar_type() == kHalf &&
                          is_depthwise(input, weight) &&
+                         input.ndimension() == 4 &&
                          weight.size(2) == weight.size(3) && // only square kernels
                          input.size(2) >= 7 && // min width/height 7
                          !is_dilated() && // no dilation supported
@@ -693,7 +701,13 @@ at::Tensor _convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
-          output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+          if (input.ndimension() == 4) {
+              output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+          }
+          else {
+             TORCH_CHECK(input.ndimension() == 5);
+             output = at::conv_depthwise3d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+          }
       }
   } else if (params.use_cudnn(input, weight)) {
     TORCH_CHECK(input.options().type_equal(weight.options()),
@@ -737,12 +751,14 @@ at::Tensor _convolution(
     }
   } else if (params.use_mkldnn(input, weight)) {
 #if AT_MKLDNN_ENABLED()
-    TORCH_CHECK(input.options().type_equal(weight.options()),
+    TORCH_CHECK(input.options().type_equal(weight.options())
+             || (input.is_mkldnn() && weight.type().backend() == at::Backend::CPU && weight.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
-             ") should be the same");
-    TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
+             ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
+    TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
+             || (input.is_mkldnn() && bias.type().backend() == at::Backend::CPU && bias.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
-             ") should be the same");
+             ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
     if (!input_is_mkldnn) {
       output = at::mkldnn_convolution(input.contiguous(), weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
                                       params.padding, params.stride, params.dilation, params.groups);
