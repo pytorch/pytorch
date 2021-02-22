@@ -9,7 +9,6 @@ T = TypeVar("T")
 
 MAX_RAW_TENSOR_SIZE = 16
 
-
 class InflatableArg(NamedTuple):
     value: Any
     fmt: str
@@ -17,7 +16,7 @@ class InflatableArg(NamedTuple):
 
 def augment_model_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Optional[Sequence[Sequence[Any, ...]]] = None,
+        inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
 ) -> None:
@@ -43,7 +42,7 @@ def augment_model_with_bundled_inputs(
 
 def augment_many_model_functions_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Dict[Callable, Optional[Sequence[Sequence[Any, ...]]]],
+        inputs: Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]],
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[Dict[Callable, List[str]]] = None,  # Optional argument to provide info about the function or its inputs
 ) -> None:
@@ -86,9 +85,9 @@ def augment_many_model_functions_with_bundled_inputs(
         should map to None
       - The `inputs` argument to this function can be a dictionary mapping functions to a
         list of inputs, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
-        The type of the inputs is Sequence[Sequence[Any, ...]]. The outer sequence corresponds with a
-        list of inputs, the inner sequence is the list of args that together make up one input.
-        For inputs of functions that take one arg, this will be a sequence of length one. The Any, ...
+        The type of the inputs is List[Tuple[Any, ...]]. The outer list corresponds with a
+        list of inputs, the inner tuple is the list of args that together make up one input.
+        For inputs of functions that take one arg, this will be a tuple of length one. The Any, ...
         is the actual data that makes up the args, e.g. a tensor.
 
     Info is an optional parameter that maps functions to a list of strings providing extra information about that
@@ -141,9 +140,9 @@ def augment_many_model_functions_with_bundled_inputs(
             deflated_inputs = []
             parts = []
             for inp_idx, args in enumerate(input_list):
-                if not isinstance(args, Sequence):
+                if not isinstance(args, Tuple) and not isinstance(args, List):  # type: ignore
                     raise TypeError(
-                        "Error bundled input for function {0} idx: {1} is not a Sequence".format(function_name, inp_idx)
+                        "Error bundled input for function {0} idx: {1} is not a Tuple or a List".format(function_name, inp_idx)
                     )
                 deflated_args = []
                 parts.append("(")
