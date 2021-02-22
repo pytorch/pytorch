@@ -869,8 +869,8 @@ class TestFakeQuantize(TestCase):
         net_prep = torch.quantization.prepare_qat(net)
 
         with torch.cuda.amp.autocast():
-            x=torch.randn(4,1,5,5)
-            out=net_prep(x).sum()
+            x = torch.randn(4, 1, 5, 5)
+            out = net_prep(x).sum()
             out.backward()
             self.assertTrue(net_prep[0].weight.grad is not None)
 
@@ -904,7 +904,6 @@ class TestFakeQuantize(TestCase):
 
     def _test_backward_per_tensor_cachemask_impl(self, device):
         for float_type in (torch.float32, torch.float16, torch.float64):
-            print(float_type)
             for torch_type in (torch.qint8, torch.quint8):
                 X = torch.randn(4, 8).to(device).to(float_type)
                 X.requires_grad_()
