@@ -3016,8 +3016,8 @@ std::tuple<Tensor, Tensor> orgqr_backward(const Tensor& grad, const Tensor& self
   //     input2j = input2[j]                   |      d_input2[j] += d_input2j.sum(-1).sum(-1)
   //     v1, v2 = v, v                         |      d_v = d_v1 + d_v2
   //     result1, result2 = result, result     |      d_result = d_result1 + d_result2
-  //     v3 = input2[j] * torch.outer(v1, v2)  |      d_v1, d_v2 = d_v3 @ v2, v1 @ d_v3
-  //     v4 = input2[j] * v3                   |      d_input2j, d_v3 = d_v4 * v3, dv4 * input2j
+  //     v3 = torch.outer(v1, v2)              |      d_v1, d_v2 = d_v3 @ v2, v1 @ d_v3
+  //     v4 = input2j * v3                     |      d_input2j, d_v3 = d_v4 * v3, dv4 * input2j
   //     v5 = result1 @ v4                     |      d_result1, d_v4 = d_v5 @ v4.T, result1.T @ d_v5
   //     result = result2 - v5                 |      d_result2, d_v5 = d_result, -d_result
 
@@ -3048,6 +3048,9 @@ std::tuple<Tensor, Tensor> orgqr_backward(const Tensor& grad, const Tensor& self
     auto d_result2 = d_result, d_v5 = -d_result;
 
     auto d_result1 = at::matmul(d_v5, v4.transpose(-2, -1));
+    // TODO: at::ormqr could be used here for matrix multiplication of Householder matrices with a matrix
+    // d_v4 = ormqr(self, input2[..., :j], d_v5, left=True, transpose=True)
+    // it would be more efficient, but then gradgradcheck wouldn't pass because derivative computation for ormqr is not implemented yet
     auto d_v4 = at::matmul(result_prev.transpose(-2, -1), d_v5);
 
     auto d_input2j = d_v4 * v3;
