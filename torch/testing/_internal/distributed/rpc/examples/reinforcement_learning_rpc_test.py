@@ -75,17 +75,16 @@ class DummyEnv:
         self.reward_threshold = reward_threshold
 
     def seed(self, manual_seed):
-        np.random.seed(manual_seed)
         torch.manual_seed(manual_seed)
 
     def reset(self):
         self.iter = 0
-        return np.random.randn(self.state_dim)
+        return torch.randn(self.state_dim)
 
     def step(self, action):
         self.iter += 1
-        state = np.random.randn(self.state_dim)
-        reward = np.random.rand() * self.reward_threshold
+        state = torch.randn(self.state_dim)
+        reward = torch.rand(1).item() * self.reward_threshold
         done = self.iter >= self.num_iters
         info = {}
         return state, reward, done, info
@@ -152,8 +151,7 @@ class Agent:
         NB: no need to enforce thread-safety here as GIL will serialize
         executions.
         """
-        state = torch.from_numpy(state).float().unsqueeze(0)
-        probs = self.policy(state)
+        probs = self.policy(state.unsqueeze(0))
         m = Categorical(probs)
         action = m.sample()
         self.saved_log_probs[ob_id].append(m.log_prob(action))
