@@ -582,8 +582,8 @@ class TestUnaryUfuncs(TestCase):
     @skipCUDAIfRocm
     def test_frexp_assert_raises(self, device):
         invalid_input_dtypes = torch.testing.get_all_int_dtypes() + \
-                               torch.testing.get_all_complex_dtypes() \
-                               + [torch.bool]
+            torch.testing.get_all_complex_dtypes() + \
+            [torch.bool]
         for dtype in invalid_input_dtypes:
             input = make_tensor((50, 50), device, dtype, low=-9, high=9)
             with self.assertRaisesRegex(RuntimeError, "frexp only supports floating-point dtypes"):
