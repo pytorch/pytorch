@@ -4523,6 +4523,46 @@ a")
         s = torch.rand(1)
         self.assertTrue(foo(s))
 
+    def test_torch_pow(self):
+        def func(a, b):
+            return pow(a, b)
+
+        def func2(a, b, c, d):
+            return pow(pow(c + a, b), d)
+
+        def func3(a : int, b : float):
+            # type: (int, float) -> float
+            return pow(a, b)
+
+        def func4():
+            # type: () -> float
+            return pow(2, -2)
+
+        def func5(x, y):
+            return pow(x.item(), y.item())
+
+        def func6(a : int, b : int):
+            # type: (int, int) -> float
+            return pow(a, b)
+
+        a = torch.rand(1)
+        b = torch.rand(1)
+        c = torch.rand(1)
+        d = torch.rand(1)
+        self.checkScript(func, (a, b))
+        self.checkScript(func2, (a, b, c, d))
+        self.checkScript(func3, (4, -0.5))
+        self.checkScript(func4, ())
+        self.checkScript(func6, (2, 4))
+
+        inputs = [torch.tensor(2), torch.tensor(-2), torch.tensor(.5), torch.tensor(.2)]
+        for x in inputs:
+            for y in inputs:
+                if x < 0:
+                    continue
+                else:
+                    self.checkScript(func5, (x, y))
+
     def test_inf(self):
         @torch.jit.script
         def foo(a):
