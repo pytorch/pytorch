@@ -373,10 +373,21 @@ class TestCommon(JitCommonTestCase):
         sample = samples[0]
 
         # Prepare data for test scripting
-        args = [f"t{i}" for i in range(len(sample.input))] + \
-               [f"s{i}" for i in range(len(sample.args))]
-        args_annot_kw = args + [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
-        args_kw = args + [f"{k}={v}" for k, v in sample.kwargs.items()]
+        # Below we prepare strings of args/kwargs with and without type annotations.
+        # These strings are inserted into function template strings which is then torch scripted.
+        # - args string is ["t0", "t1", ...] corresponds to the input tensors required by the op
+        # - args_annot_kw is the string for the template function signature, for example,
+        # ["t0", "t1", "s0: float", "s1: bool", "max: float = 1.0", "min: float = 0.0"] ->
+        #    def fn(t0, t1, s0: float, s1: bool, max: float = 1.0, min: float = 0.0)
+        # - args_kw is the string of args/kwargs used to call the op, same as args_annot_kw but
+        # without type annotations
+        args = [f"t{i}" for i in range(len(sample.input))]
+        args_annot_kw = args + \
+            [f"s{i}: {type(v).__name__}" for i, v in enumerate(sample.args)] + \
+            [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
+        args_kw = args + \
+            [f"s{i}" for i in range(len(sample.args))] + \
+            [f"{k}={v}" for k, v in sample.kwargs.items()]
 
         # Prepare data for test tracing
         sample_args_kwargs = ()
