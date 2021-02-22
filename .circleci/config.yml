@@ -7310,7 +7310,7 @@ workflows:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-      - pytorch_android_gradle_lite-interpreter_build_single:
+      - pytorch_android_gradle_lite_interpreter_build_single:
           filters:
             branches:
               only:
