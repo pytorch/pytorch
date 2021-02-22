@@ -7,8 +7,10 @@ import tarfile
 import zipfile
 import numpy as np
 from PIL import Image
+from unittest import skipIf
 
 import torch
+import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterDataPipe, RandomSampler
 from typing import List, Tuple, Dict, Any, Type
@@ -18,6 +20,13 @@ import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler)
+
+try:
+    import torchvision.transforms
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 def create_temp_dir_and_files():
@@ -436,6 +445,48 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp_nolen = IDP_NoLen(range(10))
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
+
+    @skipIfNoTorchVision
+    def test_transforms_datapipe(self):
+        torch.set_default_dtype(torch.float)
+        # A sequence of numpy random numbers representing 3-channel images
+        w = h = 32
+        inputs = [np.random.randint(0, 255, (h, w, 3), dtype=np.uint8) for i in range(10)]
+        tensor_inputs = [torch.tensor(x, dtype=torch.float).permute(2, 0, 1) / 255. for x in inputs]
+
+        input_dp = IDP(inputs)
+        # Raise TypeError for python function
+        with self.assertRaises(TypeError):
+            dp.iter.Transforms(input_dp, _fake_fn)
+
+        # transforms.Compose of several transforms
+        transforms = torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
+        ])
+        tsfm_dp = dp.iter.Transforms(input_dp, transforms)
+        self.assertEqual(len(tsfm_dp), len(input_dp))
+        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
+            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
+
+        # nn.Sequential of several transforms (required to be instances of nn.Module)
+        input_dp = IDP(tensor_inputs)
+        transforms = nn.Sequential(
+            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
+        )
+        tsfm_dp = dp.iter.Transforms(input_dp, transforms)
+        self.assertEqual(len(tsfm_dp), len(input_dp))
+        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
+            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
+
+        # Single transform
+        input_dp = IDP_NoLen(inputs)
+        transform = torchvision.transforms.ToTensor()
+        tsfm_dp = dp.iter.Transforms(input_dp, transform)
+        with self.assertRaises(NotImplementedError):
+            len(tsfm_dp)
+        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
+            self.assertEqual(tsfm_data, input_data)
 
 
 if __name__ == '__main__':

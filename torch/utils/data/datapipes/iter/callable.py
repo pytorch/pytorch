@@ -1,4 +1,5 @@
 import warnings
+import torch.nn as nn
 from torch.utils.data import IterDataPipe, _utils
 from typing import TypeVar, Callable, Iterator, Sized, Optional, Tuple, Dict
 
@@ -97,3 +98,31 @@ class CollateIterDataPipe(MapIterDataPipe):
                  fn_kwargs: Optional[Dict] = None,
                  ) -> None:
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
+
+
+class TransformsIterDataPipe(MapIterDataPipe):
+    r""" :class:`TransformsIterDataPipe`.
+
+    Iterable DataPipe to use transform(s) from torchvision or torchaudio to transform
+    data from datapipe.
+    args:
+        datapipe: Iterable DataPipe being transformed
+        transforms: A transform or a sequence of transforms from torchvision or torchaudio.
+    """
+    def __init__(self,
+                 datapipe: IterDataPipe,
+                 transforms: Callable,
+                 ) -> None:
+        # Type checking for transforms
+        try:
+            import torchvision.transforms as tsfm
+            if not isinstance(transforms, (nn.Module, tsfm.Compose, tsfm.RandomChoice,
+                                           tsfm.RandomOrder, tsfm.ToPILImage,
+                                           tsfm.ToTensor, tsfm.Lambda)):
+                raise TypeError("`transforms` are required to be a callable from"
+                                "torchvision.transforms or torchaudio.transforms")
+        except ImportError:
+            if not isinstance(transforms, nn.Module):
+                raise TypeError("`transforms` are required to be a callable from"
+                                "torchvision.transforms or torchaudio.transforms")
+        super().__init__(datapipe, fn=transforms)
