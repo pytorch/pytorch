@@ -15,6 +15,7 @@ std::vector<std::string> parseBlob(const std::string& blob) {
   return result;
 }
 } // namespace
+
 // This test JIT backend is intended to do the minimal amount of work
 // necessary to test that the JIT backend registration endpoints and
 // code generation are working correctly. It is not intended to
@@ -25,6 +26,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   explicit BackendWithCompiler() {}
   virtual ~BackendWithCompiler() = default;
 
+  // Since the actual compilation is done AOT,
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
@@ -87,7 +89,7 @@ c10:
               "The node of ",
               node->kind().toQualString(),
               " is not supported in this compiler. Source code: ",
-              node->sourceRange().text());
+              node->sourceRange().str());
           break;
       }
       ss << ",";

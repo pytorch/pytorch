@@ -118,12 +118,10 @@ TEST(BackendTest, TestCompilerNotSupport) {
   compile_spec.insert("forward", fake_dict);
   auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
   // lowered module
-  //  auto lm = torch::jit::detail::codegen_backend_module(
-  //      "backend_with_compiler_demo", m, compile_spec, any_dict_ty);
   ASSERT_THROWS_WITH(
       torch::jit::detail::codegen_backend_module(
           "backend_with_compiler_demo", m, compile_spec, any_dict_ty),
-      "The node of aten::mul is not supported in this compiler. Source code: x * h");
+      "The node of aten::mul is not supported in this compiler. Source code:");
 }
 } // namespace jit
 } // namespace torch
