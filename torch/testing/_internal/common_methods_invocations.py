@@ -314,17 +314,17 @@ def sparse_sample_inputs_unary(op_info, device, dtype, requires_grad):
         raise RuntimeError("This op does not support sparse input")
 
     # generate 2D random coalesced/uncoalesced sparse matrix with density of 20%
-    random_shape = torch.randint(100, 200, size=(2, )).tolist()
+    rh, rw = torch.randint(100, 200, size=(2, )).tolist()
     low, high = op_info.domain
     domain = None if (low is None and high is None) else (low + op_info._domain_eps, high - op_info._domain_eps)
     t1 = random_sparse_matrix(
-        *random_shape, density=0.2, device=device, dtype=dtype, requires_grad=requires_grad, 
-        uncoalesced=False, domain=domain
+        rh, rw, density=0.2, device=device, dtype=dtype, requires_grad=requires_grad,
+        uncoalesced=False, domain=domain, diag_dominates=False
     )
     output = (SampleInput(t1), )
     t2 = random_sparse_matrix(
-        *random_shape, density=0.2, device=device, dtype=dtype, requires_grad=requires_grad, 
-        uncoalesced=True, domain=domain
+        rh, rw, density=0.2, device=device, dtype=dtype, requires_grad=requires_grad,
+        uncoalesced=True, domain=domain, diag_dominates=False
     )
     return (SampleInput(t1), SampleInput(t2))
 
@@ -1500,7 +1500,7 @@ op_db: List[OpInfo] = [
                    aliases=('arcsin', ),
                    ref=np.arcsin,
                    domain=(-1, 1),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2, torch.float16: 5e-4}),),
                    safe_casts_outputs=True,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2238,7 +2238,9 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.bfloat16])),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False,
-                   sparse_sample_inputs_func=sparse_sample_inputs_unary),
+                   # Temporarily disable sparse tests on this op as inplace op is not yet coded
+                   # sparse_sample_inputs_func=sparse_sample_inputs_unary
+                   ),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
            op=torch.linalg.inv,

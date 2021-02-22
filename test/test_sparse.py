@@ -3029,48 +3029,8 @@ class TestSparseOneOff(TestCase):
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
-    # def _test_sparse_unary_op_on_input(self, sparse_tensor, device, dtype, op):
-    #     dense_tensor = sparse_tensor.to_dense()
-    #     expected_output = op(dense_tensor)
-    #     out_dtype = expected_output.dtype
-
-    #     sparse_tensor_copy = sparse_tensor.clone()
-    #     self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
-
-    #     sparse_tensor_copy = sparse_tensor.clone()
-    #     self.assertEqual(expected_output, op.method_variant(sparse_tensor_copy).to_dense())
-
-    #     if op.supports_tensor_out:
-    #         sparse_tensor_out = torch.zeros_like(sparse_tensor).to(dtype=out_dtype)
-    #         op(sparse_tensor, out=sparse_tensor_out)
-    #         self.assertEqual(expected_output, sparse_tensor_out.to_dense())
-
-    #     if op.inplace_variant is not None and out_dtype == sparse_tensor.dtype:
-    #         if op.sparse_op_info.get("supports_inplace_on_uncoalesced", False) or sparse_tensor.is_coalesced():
-    #             sparse_tensor_copy = sparse_tensor.clone()
-    #             op.inplace_variant(sparse_tensor_copy)
-    #             self.assertEqual(expected_output, sparse_tensor_copy.to_dense())
-    #         else:
-    #             with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-    #                 op.inplace_variant(sparse_tensor)
-
-    #     if op.operator_variant is not None:
-    #         sparse_tensor_copy = sparse_tensor.clone()
-    #         self.assertEqual(expected_output, op.operator_variant(sparse_tensor_copy).to_dense())
-
-    # def _test_sparse_unary_op(self, sparse_inputs, device, dtype, op):
-    #     for sparse_input in sparse_inputs:
-    #         sparse_tensor = sparse_input.input[0]
-    #         self._test_sparse_unary_op_on_input(sparse_tensor, device, dtype, op)
-
-    #         for a_op in op.aliases:
-    #             # Add required attributes from base op
-    #             a_op.supports_tensor_out = op.supports_tensor_out
-    #             a_op.sparse_op_info = op.sparse_op_info
-    #             self._test_sparse_unary_op_on_input(sparse_tensor, device, dtype, a_op)
-
     def _skip_helper(self, dtype):
-        unsupportedTypes = [torch.bfloat16, torch.bool, torch.complex64, torch.complex128]
+        unsupportedTypes = [torch.bfloat16, torch.float16, torch.bool, torch.complex64, torch.complex128]
         if dtype in unsupportedTypes:
             self.skipTest(f'Skipped! "coalesce" not implemented for {dtype}')
 
@@ -3181,19 +3141,25 @@ class TestSparseUnaryUfuncs(TestCase):
             )
             assert len(sparse_sample_input) == 1, "Unary op should have single input"
 
+            expected_forward = op(*dense_sample_input, *sample.args, **sample.kwargs)
+
             if op.supports_inplace_on_uncoalesced or sparse_sample_input[0].is_coalesced():
-                expected_forward = op(*dense_sample_input, *sample.args, **sample.kwargs)
-                sparse_forward = inplace(*(clone_input_helper(input) for input in sparse_sample_input),
-                                         *sample.args,
-                                         **sample.kwargs)
-                self.assertEqual(sparse_forward.to_dense(), expected_forward)
+                if torch.can_cast(expected_forward.dtype, dtype):
+                    sparse_forward = inplace(*(clone_input_helper(input) for input in sparse_sample_input),
+                                             *sample.args,
+                                             **sample.kwargs)
+                    self.assertEqual(sparse_forward.to_dense(), expected_forward)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "result type cannot be"):
+                        sparse_forward = inplace(*(clone_input_helper(input) for input in sparse_sample_input),
+                                                 *sample.args,
+                                                 **sample.kwargs)
             else:
-                # error_msg = ""
-                # if torch.can_cast(expected_forward.dtype, dtype)
-                with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-                    inplace(*(clone_input_helper(input) for input in sparse_sample_input),
-                            *sample.args,
-                            **sample.kwargs)
+                if torch.can_cast(expected_forward.dtype, dtype):
+                    with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                        inplace(*(clone_input_helper(input) for input in sparse_sample_input),
+                                *sample.args,
+                                **sample.kwargs)
 
             # We can not check grads for sparse yet            
 

@@ -175,8 +175,12 @@ class TestCommon(JitCommonTestCase):
         variant_exception_during_backwards = False
         try:
             forward_result.sum().backward()
-            variant_grad = input[0].grad
-            input[0].grad = None
+            # https://github.com/pytorch/pytorch/issues/52135
+            # TODO: fix failures related to this issue
+            # variant_grad = input[0].grad
+            # input[0].grad = None
+            variant_grad = input.grad
+            input.grad = None
         except Exception as e:
             if not expected_exception:
                 self.fail("Unexpected exception during backwards!")
@@ -224,6 +228,7 @@ class TestCommon(JitCommonTestCase):
             expected_grad = None
             try:
                 expected_forward.sum().backward()
+                # https://github.com/pytorch/pytorch/issues/52135
                 # TODO: fix failures related to this issue
                 # - test_variant_consistency_eager_tile_*
                 # - test_variant_consistency_eager_repeat_*
