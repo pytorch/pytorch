@@ -33,7 +33,7 @@ if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
     # TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
     echo "Finding test_lite_interpreter_runtime"
-    find . -regex '.*apk'
+    find . -regex '.*test_lite_interpreter_runtime'
 
     $CPP_BUILD/caffe2/bin/test_lite_interpreter_runtime
 
