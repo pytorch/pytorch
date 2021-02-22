@@ -3037,7 +3037,7 @@ std::tuple<Tensor, Tensor> orgqr_backward(const Tensor& grad, const Tensor& self
     // we need to recompute input[j] * at::outer(v, v)
     auto input2_unsqueezed = input2.index({"...", j}).unsqueeze(-1);  // input2[..., j][:, None]
     auto input2_unsqueezed2 = input2_unsqueezed.unsqueeze(-1);  // input2[..., j][:, None, None]
-    auto v3 = at::matmul(v1.unsqueeze(-1), v2.unsqueeze(-2));  // batch outer product, at::outer doesn't work for batched input
+    auto v3 = at::matmul(v1.unsqueeze(-1), v2.conj().unsqueeze(-2));  // batch outer product, at::outer doesn't work for batched input
     auto v4 = input2_unsqueezed2 * v3;
 
     // we don't have an access to the intermediate results of the product of Householder matrices
@@ -3047,20 +3047,20 @@ std::tuple<Tensor, Tensor> orgqr_backward(const Tensor& grad, const Tensor& self
     // now the actual derivative computation
     auto d_result2 = d_result, d_v5 = -d_result;
 
-    auto d_result1 = at::matmul(d_v5, v4.transpose(-2, -1));
+    auto d_result1 = at::matmul(d_v5, v4.conj().transpose(-2, -1));
     // TODO: at::ormqr could be used here for matrix multiplication of Householder matrices with a matrix
     // d_v4 = ormqr(self, input2[..., :j], d_v5, left=True, transpose=True)
     // it would be more efficient, but then gradgradcheck wouldn't pass because derivative computation for ormqr is not implemented yet
-    auto d_v4 = at::matmul(result_prev.transpose(-2, -1), d_v5);
+    auto d_v4 = at::matmul(result_prev.conj().transpose(-2, -1), d_v5);
 
-    auto d_input2j = d_v4 * v3;
-    auto d_v3 = d_v4 * input2_unsqueezed2;
+    auto d_input2j = d_v4 * v3.conj();
+    auto d_v3 = d_v4 * input2_unsqueezed2.conj();
 
     auto d_v1 = at::matmul(d_v3, v2.unsqueeze(-1));
-    auto d_v2 = at::matmul(v1.unsqueeze(-2), d_v3);
+    auto d_v2 = at::matmul(v1.conj().unsqueeze(-2), d_v3);
 
     d_result = d_result1 + d_result2;
-    auto d_v = d_v1.squeeze(-1) + d_v2.squeeze(-2);
+    auto d_v = d_v1.squeeze(-1) + d_v2.conj().squeeze(-2);
 
     d_self.index({"...", at::indexing::Slice(), j}).add_(d_v);
     d_input2.index({"...", j}).add_(d_input2j.sum(-1).sum(-1));
