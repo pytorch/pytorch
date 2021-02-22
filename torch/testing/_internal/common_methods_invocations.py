@@ -17,7 +17,7 @@ from torch.testing import \
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
+    (onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
@@ -962,6 +962,29 @@ class TriangularOpInfo(OpInfo):
             out.append(SampleInput(a))
             out.append(SampleInput(a, kwargs=dict(upper=True)))
         return out
+
+
+def sample_inputs_householder_product(op_info, device, dtype, requires_grad):
+    """
+    This function generates input for torch.householder_product (torch.orgqr).
+    The first argument should be a square matrix or batch of square matrices, the second argument is a vector or batch of vectors.
+    Empty, normal, and batched input is generated.
+    """
+    samples = (
+        SampleInput((make_tensor((0, 0), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((2, 1, S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((2, 1, S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+    )
+
+    return samples
 
 
 def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
@@ -1944,6 +1967,17 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
+    OpInfo('orgqr',
+           aten_name='orgqr',
+           op=torch.orgqr,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           # TODO: backward uses in-place operations that vmap doesn't like
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_householder_product,
+           # TODO: remove onlyCPU once https://github.com/pytorch/pytorch/pull/51348 is merged
+           decorators=[onlyCPU, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
