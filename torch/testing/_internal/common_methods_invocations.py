@@ -635,6 +635,21 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+def sample_inputs_amax_amin(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((S, S, S), ()),
+        ((S, S, S), (1,)),
+        ((S, S, S), ((1, 2,),)),
+        ((S, S, S), (1, True,)),
+        ((), (0,)),
+        ((), (0, True,)),
+    )
+    return tuple(SampleInput((make_tensor(size, device, dtype,
+                                          low=None, high=None,
+                                          requires_grad=requires_grad)),
+                             args=args)
+                 for size, args in test_cases)
+
 def sample_inputs_diff(op_info, device, dtype, requires_grad):
     test_cases = (
         ((1,), 0, None, None),
@@ -1462,6 +1477,26 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),),
            sample_inputs_func=sample_inputs_addmm),
+    OpInfo('amax',
+           op=torch.amax,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_amax_amin,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bfloat16]),)),
+    OpInfo('amin',
+           op=torch.amin,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_amax_amin,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bfloat16]),)),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
