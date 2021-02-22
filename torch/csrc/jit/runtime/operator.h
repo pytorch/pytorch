@@ -84,7 +84,6 @@ struct TORCH_API Operator {
                 UnparsedFunctionSchema{std::move(schema), alias_analysis}),
             c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
-
   Operator(
       std::string schema,
       OperationCreator op_creator,
