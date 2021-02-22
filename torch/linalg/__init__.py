@@ -367,6 +367,10 @@ Examples::
             [-3.1113,  2.7381]], dtype=torch.float64)
 """)
 
+matrix_power = _add_docstr(_linalg.linalg_matrix_power, r"""
+matrix_power(input, n, *, out=None) -> Tensor
+""")
+
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 matrix_rank(input, tol=None, hermitian=False, *, out=None) -> Tensor
 

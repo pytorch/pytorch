@@ -9225,6 +9225,18 @@
     CPU: _linalg_qr_helper_cpu
     CUDA: _linalg_qr_helper_cuda
 
+- func: linalg_matrix_power(Tensor self, int n) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_matrix_power
+
+- func: linalg_matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_matrix_power_out
+
 - func: linalg_matrix_rank(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
