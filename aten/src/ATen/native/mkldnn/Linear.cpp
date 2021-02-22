@@ -35,6 +35,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 namespace at {
 namespace native {
@@ -47,6 +48,10 @@ Tensor mkldnn_linear(
       "mkldnn_linear: input needs to has dim at least 2, input dim ", self.dim());
   TORCH_CHECK(self.is_mkldnn(),
       "mkldnn_linear: input needs to be mkldnn layout");
+  if (self.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
 
   // reshape first if input dim is greater than 2 and the reshape will cost a memory copy.
   auto self_reshaped = self.dim() > 2 ? self.reshape({-1, self.size(self.dim() - 1)}) : self;

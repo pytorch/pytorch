@@ -8,6 +8,7 @@ bool test_conv2d();
 bool test_depthwiseConv();
 bool test_max_pool2d();
 bool test_max_pool2d_ceil();
+bool test_max_pool2d_padding();
 bool test_relu();
 bool test_addmm();
 bool test_add();
