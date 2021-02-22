@@ -58,6 +58,8 @@ void Inline(Graph& graph) {
   GRAPH_DUMP("Before Inlining: ", &graph);
   inlineCalls(graph.block());
   GRAPH_DUMP("After Inlining: ", &graph);
+  printf("\n--------inliner::Inline(), graph: \n");
+  graph.dump();
 }
 
 } // namespace jit
