@@ -23,20 +23,6 @@ void CppPrinter::visit(const Broadcast* v) {
        << *v->value() << ", " << v->lanes() << ")";
 }
 
-template <typename Op>
-void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
-  switch (v->lhs()->dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                                      \
-  case ScalarType::Name:                                           \
-    visit_binary_op<Type>(os, v->lhs(), v->rhs(), v->expr_type()); \
-    break;
-    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
-#undef TYPE_CASE
-    default:
-      throw unsupported_dtype();
-  }
-}
-
 template <typename T>
 inline typename std::enable_if<!std::is_floating_point<T>::value, void>::type
 visit_mod(std::ostream& os, const Expr* lhs, const Expr* rhs) {
@@ -99,6 +85,20 @@ void visit_binary_op(
       break;
     default:
       throw std::runtime_error("invalid op type");
+  }
+}
+
+template <typename Op>
+void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
+  switch (v->lhs()->dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                      \
+  case ScalarType::Name:                                           \
+    visit_binary_op<Type>(os, v->lhs(), v->rhs(), v->expr_type()); \
+    break;
+    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      throw unsupported_dtype();
   }
 }
 
