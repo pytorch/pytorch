@@ -165,22 +165,22 @@ static inline void basic_loop(char** data, const int64_t* strides, int64_t n) {
 //
 // The recursive call is implemented with InterpLinear struct using template for
 // the loop unrolling on compile time.
-template <typename scalar_t, typename index_t, int out_ndims>
+template <typename scalar_t, int out_ndims>
 void cpu_upsample_linear(at::TensorIterator& iter)
 {
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     // special-cases to let the compiler apply compile-time input-specific optimizations
     if ((strides[0] == sizeof(scalar_t) && (strides[1] == 0) &&
-        is_all_zero_stride<out_ndims, 1, scalar_t, index_t>(&strides[2]))) {
+        is_all_zero_stride<out_ndims, 1, scalar_t, int64_t>(&strides[2]))) {
       // contiguous channels-first case
-      basic_loop<scalar_t, index_t, out_ndims>(data, strides, n);
+      basic_loop<scalar_t, int64_t, out_ndims>(data, strides, n);
     } else if ((strides[0] == sizeof(scalar_t) && (strides[1] == sizeof(scalar_t)) &&
-               is_all_zero_stride<out_ndims, -1, scalar_t, index_t>(&strides[2]))) {
+               is_all_zero_stride<out_ndims, -1, scalar_t, int64_t>(&strides[2]))) {
       // contiguous channels-last case
-      basic_loop<scalar_t, index_t, out_ndims>(data, strides, n);
+      basic_loop<scalar_t, int64_t, out_ndims>(data, strides, n);
     } else {
       // fallback
-      basic_loop<scalar_t, index_t, out_ndims>(data, strides, n);
+      basic_loop<scalar_t, int64_t, out_ndims>(data, strides, n);
     }
   };
   iter.for_each(loop);
@@ -503,7 +503,7 @@ void cpu_upsample_linear_backward(
 // fit input/output tensors.
 // Indices are already containing the strides to optimize the computations
 //
-template<typename index_t, typename scalar_t>
+template<typename scalar_t>
 std::vector<Tensor> compute_indices_weights_linear(
   int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims, int64_t reshape_dim, 
   bool align_corners, const c10::optional<double> opt_scale
@@ -515,14 +515,14 @@ std::vector<Tensor> compute_indices_weights_linear(
   auto new_shape = std::vector<int64_t>(ndims, 1);
   new_shape[reshape_dim] = output_size;
 
-  output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<index_t>())));
+  output.emplace_back(empty(new_shape, CPU(at::kLong)));
   output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<scalar_t>())));  
-  output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<index_t>())));
+  output.emplace_back(empty(new_shape, CPU(at::kLong)));
   output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<scalar_t>())));
 
-  auto input_index0_ptr = output[0].data_ptr<index_t>();
+  auto input_index0_ptr = output[0].data_ptr<int64_t>();
   auto lambda0_ptr = output[1].data_ptr<scalar_t>();
-  auto input_index1_ptr = output[2].data_ptr<index_t>();
+  auto input_index1_ptr = output[2].data_ptr<int64_t>();
   auto lambda1_ptr = output[3].data_ptr<scalar_t>();
 
   double xd;
@@ -530,7 +530,7 @@ std::vector<Tensor> compute_indices_weights_linear(
   
   for (int64_t i=0; i<output_size; i++) {
 
-    compute_source_index_and_lambda<scalar_t, index_t>(
+    compute_source_index_and_lambda<scalar_t>(
       input_index0_ptr[i], input_index1_ptr[i],
       lambda0_ptr[i], lambda1_ptr[i],
       scale, i, input_size, output_size, align_corners
@@ -550,12 +550,11 @@ std::vector<Tensor> compute_indices_weights_linear(
 // are those from the end up to batch size N and number of channels C.
 //
 // Internally, it uses TensorIterator to optimize the computations.
-// - index_t is template type for input index: int32_t or int64_t
 // - out_ndims is the number of interpolated dims: 1, 2, 3
 // - scale_type is template type for scales, typically c10::optional<double>
 template <typename index_t, int out_ndims, typename scale_type>
 void upsample_linearNd_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     bool align_corners,
     const scale_type& scales) {
@@ -580,7 +579,7 @@ void upsample_linearNd_kernel_impl(
       auto es = input.element_size();
       for (int i=0; i<out_ndims; i++) {
         indices_weights.emplace_back(
-          compute_indices_weights_linear<index_t, scalar_t>(
+          compute_indices_weights_linear<scalar_t>(
             input.size(i + 2), oshape[i + 2], input.stride(i + 2) * es, input.dim(), i + 2, align_corners, scales[i])
         );
       }
@@ -603,7 +602,7 @@ void upsample_linearNd_kernel_impl(
 
   AT_DISPATCH_FLOATING_TYPES(
       iter.dtype(), "upsample_linearNd", [&] {
-      cpu_upsample_linear<scalar_t, index_t, out_ndims>(iter);
+      cpu_upsample_linear<scalar_t, out_ndims>(iter);
   });
 
 }
