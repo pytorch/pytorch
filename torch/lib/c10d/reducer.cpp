@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include <ATen/CPUFunctions.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>

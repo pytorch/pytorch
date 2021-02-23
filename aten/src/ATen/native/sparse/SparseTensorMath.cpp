@@ -703,7 +703,7 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
 }
 
-SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor& src_) {
+SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
   if (src_.dim() == 0) {
     return mul_out_sparse_zerodim(r, t_, src_);
   } else if (t_.dim() == 0) {
@@ -1116,7 +1116,7 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: Argument #1: Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
-  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage  
+  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage
   Tensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 

@@ -2,12 +2,12 @@
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/CUDAFunctions.h>
 
 namespace at { namespace native {
 

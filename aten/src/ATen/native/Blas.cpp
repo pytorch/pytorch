@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/CPUFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
-#include <ATen/CPUFunctions.h>
 
 namespace at { namespace native {
 
