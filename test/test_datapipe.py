@@ -268,6 +268,26 @@ class TestFunctionalIterDataPipe(TestCase):
                 with self.assertRaises(AttributeError):
                     p = pickle.dumps(datapipe)  # type: ignore
 
+    def test_concat_datapipe(self):
+        input_dp1 = IDP(range(10))
+        input_dp2 = IDP(range(5))
+        input_dp_nl = IDP_NoLen(range(5))
+
+        with self.assertRaisesRegex(ValueError, r"Need at least one DataPipe"):
+            dp.iter.Concat()
+
+        with self.assertRaisesRegex(TypeError, r"All inputs are required to be"):
+            dp.iter.Concat(input_dp1, range(5))
+
+        concat_dp = dp.iter.Concat(input_dp1, input_dp2)
+        self.assertEqual(len(concat_dp), 15)
+        self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
+
+        concat_dp = dp.iter.Concat(input_dp1, input_dp_nl)
+        with self.assertRaises(NotImplementedError):
+            len(concat_dp)
+        self.assertEqual(list(d for d in concat_dp), list(range(10)) + list(range(5)))
+
     def test_map_datapipe(self):
         arr = range(10)
         input_dp = IDP(arr)
