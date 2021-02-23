@@ -227,12 +227,18 @@ static void bitwise_not_kernel(TensorIterator& iter) {
 }
 
 static void frac_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
-        [=](Vec256<scalar_t> a) { return a.frac(); });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
+        cpu_kernel_vec(
+            iter,
+            [=](scalar_t a) -> scalar_t {
+              if (std::isinf(a)) {
+                return std::copysign(static_cast<scalar_t>(0), a);
+              }
+              return a - ::trunc(a);
+            },
+            [=](Vec256<scalar_t> a) { return a.frac(); });
+      });
 }
 
 static void logical_not_kernel(TensorIterator& iter) {
