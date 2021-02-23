@@ -8,6 +8,7 @@ functionalities in `torch.jit`.
 """
 import functools
 import collections
+import enum
 import inspect
 import copy
 import pickle
@@ -22,7 +23,7 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_method
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass, get_function_from_type
+from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
 from torch.jit._fuser import _graph_for
@@ -51,6 +52,11 @@ else:
 
     def Attribute(value, type):  # type: ignore
         return value
+
+
+# Gets a function from the name of a method on a type
+def _get_function_from_type(cls, name):
+    return getattr(cls, name, None)
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -629,7 +635,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__dir__"
             ):
                 return super(RecursiveScriptModule, self).__dir__()
@@ -640,7 +646,7 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__bool__"
             ):
                 return True
@@ -929,7 +935,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
+
+    # No-op for modules and functions that are already scripted
     if isinstance(obj, ScriptModule):
+        return obj
+    if isinstance(obj, ScriptFunction):
         return obj
 
     if isinstance(obj, torch.nn.Module):
@@ -948,6 +958,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                 " from nn.Module,"
                 " pass an instance instead".format(obj)
             )
+
+        # Enums are automatically usable in TorchScript, explicitly scripting
+        # is not necessary, but not harmful either.
+        if issubclass(obj, enum.Enum):
+            return obj
 
         if not _is_new_style_class(obj):
             raise RuntimeError(

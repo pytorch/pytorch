@@ -492,10 +492,18 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
 }
 
 std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
+  checkSameDevice("solve", solution, self, "solution");
+  checkSameDevice("solve", lu, self, "lu");
+  checkLinalgCompatibleDtype("solve", solution, self, "solution");
+  checkLinalgCompatibleDtype("solve", lu, self, "lu");
+
   Tensor solution_tmp, lu_tmp;
   std::tie(solution_tmp, lu_tmp) = at::_solve_helper(self, A);
-  solution.resize_as_(solution_tmp).copy_(solution_tmp);
-  lu.resize_as_(lu_tmp).copy_(lu_tmp);
+
+  at::native::resize_output(solution, solution_tmp.sizes());
+  at::native::resize_output(lu, lu_tmp.sizes());
+  solution.copy_(solution_tmp);
+  lu.copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
 }
 
@@ -668,10 +676,11 @@ Tensor inverse(const Tensor &self) {
 }
 
 Tensor& inverse_out(Tensor &result, const Tensor &self) {
-  if (self.size(-1) == 0) {
-    return result.resize_as_(self);
-  }
-  result.copy_(native::inverse(self));
+  checkSameDevice("inverse", result, self);
+  checkLinalgCompatibleDtype("inverse", result, self);
+  Tensor result_tmp = at::inverse(self);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
@@ -801,9 +810,11 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
 }
 
 Tensor& cholesky_solve_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
-  Tensor result_tmp;
-  result_tmp = at::cholesky_solve(self, A, upper);
-  result.resize_as_(result_tmp).copy_(result_tmp);
+  checkSameDevice("cholesky_solve", result, self);
+  checkLinalgCompatibleDtype("cholesky_solve", result, self);
+  Tensor result_tmp = at::cholesky_solve(self, A, upper);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
@@ -863,10 +874,11 @@ Tensor cholesky(const Tensor &self, bool upper) {
 }
 
 Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
-  if (self.size(-1) == 0) {
-    return result.resize_as_(self);
-  }
-  result.copy_(native::cholesky(self, upper));
+  checkSameDevice("cholesky", result, self);
+  checkLinalgCompatibleDtype("cholesky", result, self);
+  Tensor result_tmp = at::cholesky(self, upper);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
@@ -876,8 +888,8 @@ Tensor linalg_cholesky(const Tensor &self) {
 }
 
 Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  checkSameDevice("linalg_cholesky", result, self);
+  checkLinalgCompatibleDtype("linalg_cholesky", result, self);
   Tensor result_tmp = at::linalg_cholesky(self);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
@@ -922,16 +934,25 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
 
 Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   squareCheckInputs(input);
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-    "result device ", result.device(), " does not match input device ", input.device());
+  checkSameDevice("cholesky_inverse", result, input);
+  checkLinalgCompatibleDtype("cholesky_inverse", result, input);
 
   // MAGMA requires 'infos' to reside in CPU memory, therefore we create 'infos' only on CPU for now.
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
-  // if result is not empty and not in batched column major format we have to allocate a temporary tensor
-  if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
+  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+  bool result_equal_expected_shape = result.sizes().equals(input.sizes());
+  bool is_batched_column_major = false;
+  if (result.dim() >= 2) {
+    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+  }
+
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape); // or result does not have the expected shape
+  // we have to allocate a temporary tensor
+  if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = cholesky_inverse_out_info(result_tmp, infos, input, upper);
     at::native::resize_output(result, result_tmp.sizes());
@@ -1074,10 +1095,16 @@ std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
 
 std::tuple<Tensor&, Tensor&> triangular_solve_out(Tensor& result, Tensor& clone_A, const Tensor& self, const Tensor& A,
                                                   bool upper, bool transpose, bool unitriangular) {
+  checkSameDevice("triangular_solve", result, self);
+  checkLinalgCompatibleDtype("triangular_solve", result, self);
+  checkSameDevice("triangular_solve", clone_A, self, "clone_A");
+  checkLinalgCompatibleDtype("triangular_solve", clone_A, self, "clone_A");
   Tensor result_tmp, clone_A_tmp;
   std::tie(result_tmp, clone_A_tmp) = at::_triangular_solve_helper(self, A, upper, transpose, unitriangular);
-  result.resize_as_(result_tmp).copy_(result_tmp);
-  clone_A.resize_as_(clone_A_tmp).copy_(clone_A_tmp);
+  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output(clone_A, clone_A_tmp.sizes());
+  result.copy_(result_tmp);
+  clone_A.copy_(clone_A_tmp);
   return std::tuple<Tensor&, Tensor&>(result, clone_A);
 }
 
@@ -1279,11 +1306,8 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
               "orgqr: Expected input and tau to be on the same device, but found input on ",
               input.device(), " and tau on ", tau.device(), " instead.");
 
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "orgqr: result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-              "orgqr: Expected result and input to be on the same device, but found result on ",
-              result.device(), " and input on ", input.device(), " instead.");
+  checkSameDevice("orgqr", result, input);
+  checkLinalgCompatibleDtype("orgqr", result, input);
 
   // TODO: uncomment the following when passing incorrectly sized 'result' is not allowed
   // if (result.numel() != 0) {
@@ -1297,8 +1321,19 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   // This should be changed if cuSOLVER would be used
   auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
-  // if result is not empty and not in batched column major format we have to allocate a temporary tensor
-  if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
+  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+  bool result_equal_expected_shape = result.sizes().equals(input.sizes());
+  bool is_batched_column_major = false;
+  if (result.dim() >= 2) {
+    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+  }
+
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape); // or result does not have the expected shape
+  // we have to allocate a temporary tensor
+  if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = orgqr_out_info(input, tau, result_tmp, infos);
     at::native::resize_output(result, result_tmp.sizes());
@@ -1434,11 +1469,13 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
-  TORCH_CHECK(eigvecs.scalar_type() == self.scalar_type(),
-    "eigvecs dtype ", eigvecs.scalar_type(), " does not match self dtype ", self.scalar_type());
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(eigvals.scalar_type() == real_dtype,
-    "eigvals dtype ", eigvals.scalar_type(), " does not match self dtype ", real_dtype);
+  checkSameDevice("linalg_eigh", eigvecs, self, "eigenvectors");
+  checkSameDevice("linalg_eigh", eigvals, self, "eigenvalues");
+  checkLinalgCompatibleDtype("linalg_eigh", eigvecs, self, "eigenvectors");
+
+  // eigenvalues are always real-valued here
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_eigh", eigvals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor eigvals_tmp, eigvecs_tmp;
   std::tie(eigvals_tmp, eigvecs_tmp) = at::linalg_eigh(self, uplo);
@@ -1462,9 +1499,9 @@ Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(result.scalar_type() == real_dtype,
-    "result dtype ", result.scalar_type(), " does not match self dtype ", real_dtype);
+  checkSameDevice("linalg_eigvalsh", result, self);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_eigvalsh", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_eigvalsh(self, uplo);
 
@@ -1562,11 +1599,20 @@ std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool up
 }
 
 std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor& self, bool eigenvectors, bool upper) {
-  squareCheckInputs(self);
+  checkSameDevice("symeig", vals, self, "eigenvalues");
+  checkSameDevice("symeig", vecs, self, "eigenvectors");
+  checkLinalgCompatibleDtype("symeig", vecs, self, "eigenvectors");
+  // eigenvalues are always real-valued here
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("symeig", vals.scalar_type(), real_dtype, "eigenvalues");
+
   Tensor vals_tmp, vecs_tmp;
-  std::tie(vals_tmp, vecs_tmp) = at::_symeig_helper(self, eigenvectors, upper);
-  vals.resize_as_(vals_tmp).copy_(vals_tmp);
-  vecs.resize_as_(vecs_tmp).copy_(vecs_tmp);
+  std::tie(vals_tmp, vecs_tmp) = at::symeig(self, eigenvectors, upper);
+
+  at::native::resize_output(vals, vals_tmp.sizes());
+  at::native::resize_output(vecs, vecs_tmp.sizes());
+  vals.copy_(vals_tmp);
+  vecs.copy_(vecs_tmp);
   return std::tuple<Tensor&, Tensor&>(vals, vecs);
 }
 
@@ -1724,13 +1770,24 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
                                               const Tensor& self, bool some, bool compute_uv) {
-  TORCH_CHECK(self.dim() >= 2,
-              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  checkSameDevice("svd", U, self, "U");
+  checkSameDevice("svd", S, self, "S");
+  checkSameDevice("svd", V, self, "V");
+  checkLinalgCompatibleDtype("svd", U, self, "U");
+  checkLinalgCompatibleDtype("svd", V, self, "V");
+  // singular values are always real-valued here
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("svd", S.scalar_type(), real_dtype, "S");
+
   Tensor U_tmp, S_tmp, V_tmp;
   std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
-  U.resize_as_(U_tmp).copy_(U_tmp);
-  S.resize_as_(S_tmp).copy_(S_tmp);
-  V.resize_as_(V_tmp).copy_(V_tmp);
+
+  at::native::resize_output(U, U_tmp.sizes());
+  at::native::resize_output(S, S_tmp.sizes());
+  at::native::resize_output(V, V_tmp.sizes());
+  U.copy_(U_tmp);
+  S.copy_(S_tmp);
+  V.copy_(V_tmp);
   return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, V);
 }
 
@@ -1771,6 +1828,14 @@ static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst
 
 std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
                                                      const Tensor& self, bool full_matrices, bool compute_uv) {
+  checkSameDevice("svd", U, self, "U");
+  checkSameDevice("svd", S, self, "S");
+  checkSameDevice("svd", VT, self, "VT");
+  checkLinalgCompatibleDtype("linalg_svd", U, self, "U");
+  checkLinalgCompatibleDtype("linalg_svd", VT, self, "VT");
+  // singular values are always real-valued here
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_svd", S.scalar_type(), real_dtype, "S");
   Tensor U_tmp, S_tmp, VT_tmp;
   std::tie(U_tmp, S_tmp, VT_tmp) = at::linalg_svd(self, full_matrices, compute_uv);
   svd_resize_and_copy("U", U_tmp, U);
@@ -1865,8 +1930,11 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
 }
 
 Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  checkSameDevice("lu_solve", result, self);
+  checkLinalgCompatibleDtype("lu_solve", result, self);
   Tensor result_tmp = at::lu_solve(self, LU_data, LU_pivots);
-  result.resize_as_(result_tmp).copy_(result_tmp);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 

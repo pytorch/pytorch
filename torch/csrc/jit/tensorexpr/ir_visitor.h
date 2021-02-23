@@ -51,6 +51,7 @@ class MinTerm;
 class ReduceOp;
 class AtomicAdd;
 class SyncThreads;
+class ExternalCall;
 
 class TORCH_API IRVisitor {
  public:
@@ -107,6 +108,7 @@ class TORCH_API IRVisitor {
   virtual void visit(const ReduceOp* v);
   virtual void visit(const AtomicAdd* v);
   virtual void visit(const SyncThreads* v);
+  virtual void visit(const ExternalCall* v);
 };
 
 } // namespace tensorexpr
