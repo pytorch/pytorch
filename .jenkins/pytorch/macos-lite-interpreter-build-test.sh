@@ -31,12 +31,9 @@ if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
     # without these paths being set
     export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    # TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
     echo "Finding test_lite_interpreter_runtime"
     find . -regex '.*test_lite_interpreter_runtime'
     pwd
-
-    ./torch/bin/test_lite_interpreter_runtime
 
     assert_git_not_dirty
 else
