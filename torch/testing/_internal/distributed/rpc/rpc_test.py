@@ -4616,14 +4616,14 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(2)
     def test_device_maps_wrong_worker_name(self):
         options = self.rpc_backend_options
-        options.set_device_map("none_exist", {0: 1})
+        options._set_device_map("none_exist", {0: 1})
         self._test_device_maps(options, "Wrong worker names")
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_invalid_max_local_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {torch.cuda.device_count(): 0})
+        options._set_device_map(dst, {torch.cuda.device_count(): 0})
 
         self._test_device_maps(options)
 
@@ -4631,7 +4631,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_device_maps_invalid_max_remote_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {0: torch.cuda.device_count()})
+        options._set_device_map(dst, {0: torch.cuda.device_count()})
 
         self._test_device_maps(options)
 
@@ -4639,8 +4639,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_device_maps_many_to_one(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {1: 0})
-        options.set_device_map(dst, {0: 0})
+        options._set_device_map(dst, {1: 0})
+        options._set_device_map(dst, {0: 0})
 
         self._test_device_maps(options)
 
@@ -4649,11 +4649,11 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         if self.rank == 0:
             options = self.rpc_backend_options
             dst = worker_name((self.rank + 1) % self.world_size)
-            options.set_device_map(dst, {0: 1})
+            options._set_device_map(dst, {0: 1})
             with self.assertRaisesRegex(
                 ValueError, "`set_device_map` only supports 1-to-1 mapping"
             ):
-                options.set_device_map(dst, {0: 0})
+                options._set_device_map(dst, {0: 0})
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_invalid_min_device(self):
@@ -4662,12 +4662,12 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(
             RuntimeError, "Device index must not be negative"
         ):
-            options.set_device_map(dst, {-1: 0})
+            options._set_device_map(dst, {-1: 0})
 
         with self.assertRaisesRegex(
             RuntimeError, "Device index must not be negative"
         ):
-            options.set_device_map(dst, {0: -1})
+            options._set_device_map(dst, {0: -1})
 
     @staticmethod
     def _gpu_add(x, y):
@@ -4680,7 +4680,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {0: 1, 1: 0})
+        options._set_device_map(dst, {0: 1, 1: 0})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -4717,7 +4717,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size) if dst is None else dst
-        options.set_device_map(dst, device_map)
+        options._set_device_map(dst, device_map)
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -4941,8 +4941,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
     def _test_device_maps_multi_gpu(self, dst):
         options = self.rpc_backend_options
-        options.set_device_map(dst, {0: 1})
-        options.set_device_map(dst, {1: 0})
+        options._set_device_map(dst, {0: 1})
+        options._set_device_map(dst, {1: 0})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -4996,7 +4996,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
                 init_method=options.init_method,
                 num_worker_threads=options.num_worker_threads,
-                device_maps={dst: {0: 1, 1: 0}}
+                _device_maps={dst: {0: 1, 1: 0}}
             )
         )
 
@@ -5014,10 +5014,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def _test_device_maps_return_to_gpu(self, dst):
         options = self.rpc_backend_options
 
-        options.set_device_map(dst, {0: 1})
-        options.set_device_map(dst, {1: 2})
-        options.set_device_map(dst, {2: 3})
-        options.set_device_map(dst, {3: 0})
+        options._set_device_map(dst, {0: 1})
+        options._set_device_map(dst, {1: 2})
+        options._set_device_map(dst, {2: 3})
+        options._set_device_map(dst, {3: 0})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5155,7 +5155,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_device_maps_remote(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {1: 0})
+        options._set_device_map(dst, {1: 0})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5192,7 +5192,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def _test_custom_stream(self, fn, device_map):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, device_map)
+        options._set_device_map(dst, device_map)
 
         rpc.init_rpc(
             name=worker_name(self.rank),
