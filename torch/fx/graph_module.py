@@ -101,7 +101,7 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[
             return True
 
     com = CodeOnlyModule(body)
-    return GraphModule(com, KeepModules().trace(com), _importer=importer)
+    return GraphModule(com, KeepModules().trace(com))
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -172,8 +172,7 @@ class GraphModule(torch.nn.Module):
     def __init__(self,
                  root: Union[torch.nn.Module, Dict[str, Any]],
                  graph: Graph,
-                 class_name: str = 'GraphModule',
-                 _importer: Optional[PackageImporter] = None):
+                 class_name: str = 'GraphModule'):
         """
         Construct a GraphModule.
 
@@ -197,7 +196,6 @@ class GraphModule(torch.nn.Module):
         """
         super().__init__()
         self.__class__.__name__ = class_name
-        self._importer: Optional[PackageImporter] = _importer
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
