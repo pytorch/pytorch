@@ -877,7 +877,11 @@ void initJITBindings(PyObject* module) {
              size_t size) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
-          });
+          })
+      .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def(
+          "get_all_written_records",
+          &PyTorchStreamWriter::getAllWrittenRecords);
 
   py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)

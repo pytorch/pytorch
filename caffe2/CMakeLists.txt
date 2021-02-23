@@ -1095,7 +1095,7 @@ if(USE_ROCM)
 endif()
 
 if(BUILD_LITE_INTERPRETER)
-  target_compile_definitions(torch_cpu PRIVATE DBUILD_LITE_INTERPRETER)
+  target_compile_definitions(torch_cpu PRIVATE BUILD_LITE_INTERPRETER)
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
