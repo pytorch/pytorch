@@ -3,6 +3,7 @@
 
 #include <ATen/cuda/CUDAGraph.h>
 
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAMacros.h>
@@ -124,7 +125,6 @@ C10_CUDA_API void resetPeakStats(int device);
 C10_CUDA_API std::vector<SegmentInfo> snapshot();
 
 // CUDAGraph interactions
-using CaptureId_t = at::cuda::CaptureId_t;
 C10_CUDA_API void notifyCaptureBegin(int device, CaptureId_t graph_id, CaptureId_t mempool_id);
 C10_CUDA_API void notifyCaptureEnd(int device, CaptureId_t graph_id);
 C10_CUDA_API void notifyCaptureDestroy(int device, CaptureId_t mempool_id);

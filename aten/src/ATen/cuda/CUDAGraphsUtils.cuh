@@ -6,6 +6,9 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 
+// CUDA Graphs utils used by aten only.
+// c10/cuda/CUDAGraphsC10Utils has utils used by both c10 and aten.
+
 namespace at {
 namespace cuda {
 namespace philox {
