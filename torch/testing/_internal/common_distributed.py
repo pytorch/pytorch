@@ -355,6 +355,11 @@ class MultiProcessTestCase(TestCase):
         self.rank = rank
         self.file_name = file_name
 
+        self.run_test(test_name, pipe)
+        # exit to avoid run teardown() for fork processes
+        sys.exit(0)
+
+    def run_test(self, test_name, pipe):
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
         try:
@@ -368,8 +373,6 @@ class MultiProcessTestCase(TestCase):
             pipe.send(traceback.format_exc())
             pipe.close()
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
-        # exit to avoid run teardown() for fork processes
-        sys.exit(0)
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
