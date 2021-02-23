@@ -869,7 +869,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         # inspect results
         act_compare_dict = get_matching_activations(
             'fp32_prepared', sparse_nn, 'int8', sparse_nn_q, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 3)
+        self.assertTrue(len(act_compare_dict) == 4)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
     @override_qengines
@@ -903,5 +903,5 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         # check activation result correctness
         act_compare_dict = get_matching_activations_a_shadows_b(
             sparse_nn_q, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 3)
+        self.assertTrue(len(act_compare_dict) == 4)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
