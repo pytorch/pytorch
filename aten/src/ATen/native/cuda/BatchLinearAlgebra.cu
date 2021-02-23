@@ -2101,7 +2101,7 @@ inline void apply_orgqr_batched_magma(Tensor& self, const Tensor& tau, Tensor& i
     // The number of "mini"-batches are floor(batchsize / batch_limit)
     // and these cover floor(batchsize / batch_limit) * batch_limit
     int64_t mini_batches = batchsize / batch_limit, mini_idx;
-    for (auto mini_idx = decltype(batchsize){0}; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+    for (mini_idx = decltype(batchsize){0}; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
       scalar_t** self_array_cur = &self_array[mini_idx];
       scalar_t** tau_array_cur = &tau_array[mini_idx];
       scalar_t** T_array_cur = &T_array[mini_idx];
