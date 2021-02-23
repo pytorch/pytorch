@@ -434,7 +434,7 @@ C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args.
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
+C10_ALWAYS_INLINE Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
