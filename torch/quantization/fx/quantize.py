@@ -32,6 +32,8 @@ from ..utils import (
     activation_is_quantized,
     weight_is_quantized,
     activation_is_statically_quantized,
+    activation_dtype,
+    weight_dtype,
 )
 
 from .pattern_utils import (
@@ -1081,10 +1083,15 @@ class Quantizer:
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
                 is_activation = not (is_weight or is_bias)
+                # bias needs to be quantized if activation is fp16 and weight is fp16
+                # this is the case for glow
                 should_add_handler = qconfig is not None and (
                     (is_activation and
                         activation_is_quantized(qconfig)) or
-                    (is_weight and weight_is_quantized(qconfig))
+                    (is_weight and weight_is_quantized(qconfig) or
+                    (is_bias and
+                     activation_dtype(qconfig) == torch.float16) and
+                     weight_dtype(qconfig) == torch.float16)
                 )
 
                 if should_add_handler:

@@ -440,6 +440,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             (torch.quint8, torch.qint8, None),
             (torch.float32, torch.qint8, torch.quint8),
             (torch.float32, torch.float16, None),
+            # static float16 quantization
+            (torch.float16, torch.float16, None),
         ]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
@@ -449,7 +451,15 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 "dtype combination: {} is not "
                 "supported by Linear "
                 "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+            if self.relu_node:
+                op_out = quantizer.quantized_graph.node_copy(self.linear_node, load_arg(quantized=False))
+                relu_args = [op_out]
+                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                return quantizer.quantized_graph.create_node(
+                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+            else:
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         weight_dtype = dtypes[1]
@@ -520,29 +530,31 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # output for dynamically quantized linear op is not quantized
                     return op_out
             else:  # non-reference option
-                # linear args
-                # (x, weight, bias, ...)
-                weight_quantized = weight_is_statically_quantized(qconfig)
-                linear_weight = load_arg(quantized=weight_quantized)(self.linear_node.args[1])
+                # prepacking weights for static int8 quant and dynamic quant
+                if dtypes != (torch.float16, torch.float16, None):
+                    # linear args
+                    # (x, weight, bias, ...)
+                    weight_quantized = weight_is_statically_quantized(qconfig)
+                    linear_weight = load_arg(quantized=weight_quantized)(self.linear_node.args[1])
 
-                # get other arguments
-                kwargs = {**load_arg(quantized=False)(self.linear_node.kwargs)}
-                # pack weight
-                bias = None
-                # all args after bias, including bias
-                other_args = load_arg(quantized=False)(self.linear_node.args[2:])
-                if len(self.linear_node.args) > 2:
-                    bias = load_arg(quantized=False)(self.linear_node.args[2])
-                    other_args = other_args[1:]  # remove the bias argument
-                else:
-                    assert 'bias' in kwargs, \
-                        'expect bias provided as a keyword argument when it is not a positional argument'
-                    bias = kwargs['bias']
-                    kwargs.pop('bias')
-                prepack_args = (linear_weight, bias)
-                prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
-                packed_weight = quantizer.quantized_graph.create_node(
-                    'call_function', prepack_op, prepack_args, {})
+                    # get other arguments
+                    kwargs = {**load_arg(quantized=False)(self.linear_node.kwargs)}
+                    # pack weight
+                    bias = None
+                    # all args after bias, including bias
+                    other_args = load_arg(quantized=False)(self.linear_node.args[2:])
+                    if len(self.linear_node.args) > 2:
+                        bias = load_arg(quantized=False)(self.linear_node.args[2])
+                        other_args = other_args[1:]  # remove the bias argument
+                    else:
+                        assert 'bias' in kwargs, \
+                            'expect bias provided as a keyword argument when it is not a positional argument'
+                        bias = kwargs['bias']
+                        kwargs.pop('bias')
+                    prepack_args = (linear_weight, bias)
+                    prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
+                    packed_weight = quantizer.quantized_graph.create_node(
+                        'call_function', prepack_op, prepack_args, {})
                 # construct linear input
                 if activation_statically_quantized:
                     qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
@@ -562,7 +574,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # since we might not be able to rely on the name
                     quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.linear_node.name]
                     return op
-                else:
+                elif dtypes in [(torch.float32, torch.qint8, torch.quint8),
+                                (torch.float32, torch.float16, None)]:
                     # choose linear dynamic or linear dynamic fp16 op based on weight dtype
                     qlinear_op = torch.ops.quantized.linear_dynamic \
                         if weight_dtype == torch.qint8 \
@@ -578,6 +591,17 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     if self.relu_node:
                         op_out = quantizer.quantized_graph.create_node("call_function", torch.nn.functional.relu, (op_out,), {})
                     return op_out
+                elif dtypes in [(torch.float16, torch.float16, None)]:
+                    # TODO (refactor) this is duplicated, maybe have a helper function
+                    if self.relu_node:
+                        op_out = quantizer.quantized_graph.node_copy(self.linear_node, load_arg(quantized=False))
+                        relu_args = [op_out]
+                        relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                        relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                        return quantizer.quantized_graph.create_node(
+                            "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                    else:
+                        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 @register_quant_pattern(torch.nn.BatchNorm2d)
 @register_quant_pattern(torch.nn.BatchNorm3d)
