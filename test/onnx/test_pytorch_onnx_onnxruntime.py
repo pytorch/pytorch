@@ -2089,6 +2089,7 @@ class TestONNXRuntime(unittest.TestCase):
                         self._interpolate(xi, mode_i, False, is_upsample, True)
                     self._interpolate(xi, mode_i, False, is_upsample)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
 
@@ -2139,6 +2140,8 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(16, 16, requires_grad=True)
         self.run_test(MyModel(), (x, y))
 
+    # scripting will throw the OnnxRuntimeError
+    @disableScriptTest()
     def test_interpolate_adaptive_pooling_error(self):
         x = torch.randn(1, 2, 6, requires_grad=True)
         with self.assertRaises(RuntimeError) as cm:
