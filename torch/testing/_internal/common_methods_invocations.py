@@ -2210,7 +2210,16 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat, torch.cdouble]),
                        # Reference: https://github.com/pytorch/pytorch/pull/52551#issuecomment-782596181
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.bfloat16]),),
+                                device_type='cuda', dtypes=[torch.bfloat16]),
+                       # Following error in Windows CI
+                       # File "test_unary_ufuncs.py", line 289, in test_reference_numerics
+                       #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
+                       # KeyError: <class 'numpy.intc'>
+                       # Note: numpy.intc is platform defined int.
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.int],
+                                active_if=IS_WINDOWS),
+                   ),
                    supports_tensor_out=False,
                    decorators=(precisionOverride({torch.bfloat16: 7e-2}),)),
     OpInfo('linalg.inv',
