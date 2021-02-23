@@ -207,10 +207,9 @@ TEST(CppPrinter, IfThenElse) {
 
 TEST(CppPrinter, AllocateFree) {
   KernelScope kernel_scope;
-  VarHandle var("x", kHandle);
-  constexpr int dim0 = 2, dim1 = 3;
-  Allocate* alloc = Allocate::make(var, kInt, {dim0, dim1});
-  Free* free = Free::make(var);
+  BufHandle buf("x", {2, 3}, kInt);
+  Allocate* alloc = Allocate::make(buf);
+  Free* free = Free::make(buf);
   Block* block = Block::make({alloc, free});
 
   const std::string pattern = R"(
