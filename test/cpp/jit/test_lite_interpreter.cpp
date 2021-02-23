@@ -876,9 +876,10 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
 
   loaded_extra_files.clear();
-  std::vector<std::string> all_files = caffe2::serialize::PyTorchStreamReader(&iss).getAllRecords();
+  std::vector<std::string> all_files =
+      caffe2::serialize::PyTorchStreamReader(&iss).getAllRecords();
 
-  for (auto &file_name : all_files) {
+  for (auto& file_name : all_files) {
     if (file_name.find("extra/") == 0) {
       loaded_extra_files[file_name.substr(6)] = "";
     }
