@@ -7,6 +7,7 @@ import random
 import math
 from typing import cast, List, Optional, Tuple, Union
 from .check_kernel_launches import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
+import operator
 
 FileCheck = torch._C.FileCheck
 
@@ -31,6 +32,7 @@ def is_quantized(dtype: torch.dtype) -> bool:
 # Helper function that maps a flattened index back into the given shape
 # TODO: consider adding torch.unravel_index
 def _unravel_index(flat_index, shape):
+    flat_index = operator.index(flat_index)
     res = []
 
     # Short-circuits on zero dim tensors
@@ -38,8 +40,8 @@ def _unravel_index(flat_index, shape):
         return 0
 
     for size in shape[::-1]:
-        res.append(int(flat_index % size))
-        flat_index = int(flat_index // size)
+        res.append(flat_index % size)
+        flat_index = flat_index // size
 
     if len(res) == 1:
         return res[0]

@@ -413,6 +413,90 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
   return result.scatter_add_(dim, indices, grad);
 }
 
+static Tensor prepend_append_on_dim(const Tensor& self, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, int64_t dim) {
+  // Helper for diff that handles prepending and appending when at least one is present
+  TORCH_INTERNAL_ASSERT(prepend.has_value() || append.has_value(), "either prepend or append must be have value");
+  if (!prepend.has_value() && append.has_value()) {
+    return at::cat({self, append.value()}, dim);
+  } else if (prepend.has_value() && !append.has_value()) {
+    return at::cat({prepend.value(), self}, dim);
+  } else {
+    return at::cat({prepend.value(), self, append.value()}, dim);
+  }
+}
+
+static inline void diff_check_compatible_shape(const Tensor& self, const c10::optional<Tensor>&other, int64_t dim) {
+  // Helper for diff that checks whether the shape of the tensor to prepend or append
+  // is compatible with that of input
+  if (other.has_value()) {
+    int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim(), false);
+
+    TORCH_CHECK(
+        other.value().dim() == self.dim(),
+        "diff expects prepend or append to be the same dimension as input");
+
+    for (int i = 0; i < other.value().dim(); i++) {
+      TORCH_CHECK(
+          other.value().size(i) == self.size(i) || i == wrapped_dim,
+          "diff expects the shape of tensor to prepend or append to match that of"
+          " input except along the differencing dimension;"
+          " input.size(", i, ") = ", self.size(i), ", but got"
+          " tensor.size(", i, ") = ", other.value().size(i));
+    }
+  }
+}
+
+static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>&prepend, const c10::optional<Tensor>& append) {
+  // Helper for diff that checks whether its parameters are valid
+  TORCH_CHECK(
+      n == 1,
+      "diff only supports n = 1 currently. Please file an issue at"
+      " https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&template=feature-request.md"
+      " if your use case requires supporting higher-order differences");
+
+  TORCH_CHECK(
+      self.dim() >= 1,
+      "diff expects input to be at least one-dimensional");
+
+  diff_check_compatible_shape(self, prepend, dim);
+  diff_check_compatible_shape(self, append, dim);
+}
+
+static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
+  auto out_len = self.size(dim) - 1;
+  if (self.dtype() == at::kBool) {
+    return at::logical_xor(at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+  }
+  return at::narrow(self, dim, 1, out_len) - at::narrow(self, dim, 0, out_len);
+}
+
+Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append) {
+  diff_check(self, n, dim, prepend, append);
+  if (!prepend.has_value() && !append.has_value()) {
+    return diff_helper(self, n, dim);
+  } else {
+    auto a = prepend_append_on_dim(self, prepend, append, dim);
+    return diff_helper(a, n, dim);
+  }
+}
+
+static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
+  auto out_len = self.size(dim) - 1;
+  if (self.dtype() == at::kBool) {
+    return at::logical_xor_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+  }
+  return at::sub_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+}
+
+Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, Tensor& result) {
+  diff_check(self, n, dim, prepend, append);
+  if (!prepend.has_value() && !append.has_value()) {
+    return diff_out_helper(self, n, dim, result);
+  } else {
+    auto a = prepend_append_on_dim(self, prepend, append, dim);
+    return diff_out_helper(a, n, dim, result);
+  }
+}
 
 // ALL REDUCE #################################################################
 
