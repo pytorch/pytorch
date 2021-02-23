@@ -332,20 +332,23 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
   int lwork;
   at::cuda::solver::orgqr_buffersize<scalar_t>(
     at::cuda::getCurrentCUDASolverDnHandle(), m, n, k, self_data, lda, tau_data, &lwork);
-  Tensor work = at::empty({lwork}, self.options());
-  auto work_data = work.data_ptr<scalar_t>();
 
   for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
     int* info_working_ptr = &infos_data[i];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+    // allocate workspace storage
+    auto& allocator = *at::cuda::getCUDADeviceAllocator();
+    auto work_data = allocator.allocate(sizeof(scalar_t)*lwork);
+
     at::cuda::solver::orgqr<scalar_t>(
       handle, m, n, k,
       self_working_ptr,
       lda,
       tau_working_ptr,
-      work_data,
+      static_cast<scalar_t*>(work_data.get()),
       lwork,
       info_working_ptr
     );
