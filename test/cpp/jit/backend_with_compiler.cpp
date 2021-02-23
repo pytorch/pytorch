@@ -3,8 +3,34 @@
 namespace torch {
 namespace jit {
 
+// Implementation of a PyTorch Backend that can process, compile and execute
+// TorchScript Modules composed of 'add' and 'sub' operators. The methods of
+// the models expect 2 inputs of type Tensor. This backend is used to
+// demonstrate the flow of compilation and execution with minimum amount of
+// work. It's not intended to a practical backend that can be used for actual
+// inference.
+
+// Impletation details:
+//
+// Compilation
+// 1. A backend with minimum compilation features, "backend_with_compiler_demo"
+// is added.
+// 2. The compilation happens AOT in the pre_process function registered to this
+// backend.
+// 3. Compiled results are stored in a string blob for each method. They are
+// serialized to the lowered module with __get_state__ function.
+// 4. Error message with model source code is thrown, for features not handled
+// by the backend compiler.
+//
+// Runtime
+// 1. The compiled blob is loaded in __set_state__ method.
+// 2. The compile function of the backend: parse the preprocessed blob to the
+// format (a list of tokens) that the backend can understand.
+// 3. The execute function of the backend executes the specified method
+// (handle).
+
 namespace {
-std::vector<std::string> parseBlob(const std::string& blob) {
+std::vector<std::string> parseMethodHandle(const std::string& blob) {
   std::vector<std::string> result;
   std::stringstream s_stream(blob);
   while (s_stream.good()) {
@@ -16,10 +42,6 @@ std::vector<std::string> parseBlob(const std::string& blob) {
 }
 } // namespace
 
-// This test JIT backend is intended to do the minimal amount of work
-// necessary to test that the JIT backend registration endpoints and
-// code generation are working correctly. It is not intended to
-// produce numerically correct results.
 class BackendWithCompiler : public PyTorchBackendInterface {
  public:
   // Constructor.
@@ -30,13 +52,20 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
-    return processed.toGenericDict();
+    //    return processed.toGenericDict();
+    auto dict = processed.toGenericDict();
+    auto handles = c10::Dict<std::string, std::vector<std::string>>();
+    for (const auto& kv : dict) {
+      auto tokens = parseMethodHandle(kv.value().toStringRef());
+      handles.insert(kv.key().toStringRef(), tokens);
+    }
+    return c10::impl::toGenericDict(handles);
   }
 
   c10::impl::GenericList execute(
       c10::IValue handle,
       c10::impl::GenericList inputs) override {
-    TORCH_INTERNAL_ASSERT(handle.isString());
+    //    TORCH_INTERNAL_ASSERT(handle.isString());
     TORCH_INTERNAL_ASSERT(inputs.size() == 2);
     c10::IValue val0 = inputs[0];
     at::Tensor x = val0.toTensor();
@@ -44,29 +73,46 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     at::Tensor h = val1.toTensor();
 
     c10::List<at::Tensor> output_list;
-    auto tokens = parseBlob(handle.toStringRef());
-    for (const auto& token : tokens) {
-      if (token == "aten::add") {
-        output_list.emplace_back(x.add_(h, 1.0));
+    double scalar_val = 1.0;
+    for (const auto& token : handle.toList()) {
+      IValue val = token;
+      auto instruction = std::string(IValue(token).toStringRef());
+      double const_val = 1.0;
+      if (instruction.rfind("prim::Constant", 0) == 0) {
+        TORCH_CHECK(
+            instruction.size() > 15,
+            "Constant value is expected in ",
+            instruction);
+        auto sub = instruction.substr(15);
+        const_val = stod(sub);
+      } else if (token == "aten::add") {
+        output_list.emplace_back(x.add_(h, const_val));
       } else if (token == "aten::sub") {
-        output_list.emplace_back(x.sub_(h, 1.0));
+        output_list.emplace_back(x.sub_(h, const_val));
+      } else {
+        TORCH_CHECK(
+            false,
+            "Instruction, ",
+            instruction,
+            " is not supported. ",
+            "Contact the backend POC for details. ");
       }
     }
     return c10::impl::toList(output_list);
   }
 };
 
-// Actual AOT compilation function. Put here for demonstration of backend
+// For this backend, the actual compilation happens in preprocess functoin AOT.
+// Put here for demonstration of backend
 // as a whole piece. It's used when compilation is required. A dummy function
 // can be passed when there's no usage of compilation in runtime backend lib.
 c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<IValue, IValue>& method_compile_spec) {
-// The output of this process would produce a dictionary
-// Key: method name.
-// Val: compiled blob (represented by a string).
-c10:
-  Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
+  // The output of this process would produce a dictionary
+  // Key: method name.
+  // Val: compiled blob (represented by a string).
+  c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
   for (const auto& method : mod.get_methods()) {
     auto graph = method.function().graph()->copy();
     auto key = method.name();
