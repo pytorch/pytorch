@@ -72,6 +72,7 @@ void testStaticRuntime(
 
   StaticRuntime runtime(module);
   auto actual = runtime.run(args, {});
+  runtime.check_for_memory_leak();
 
   if (expect.isTuple()) {
     compareTensorLists(
@@ -152,7 +153,8 @@ TEST(StaticRuntime, LongModel) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
-  EXPECT_TRUE(output_1.equal(output_2));
+  runtime.check_for_memory_leak();
+  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
 TEST(StaticRuntime, TrivialModel) {
@@ -170,7 +172,8 @@ TEST(StaticRuntime, TrivialModel) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
-  EXPECT_TRUE(output_1.equal(output_2));
+  runtime.check_for_memory_leak();
+  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
 TEST(StaticRuntime, LeakyReLU) {
@@ -186,7 +189,8 @@ TEST(StaticRuntime, LeakyReLU) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
-  EXPECT_TRUE(output_1.equal(output_2));
+  runtime.check_for_memory_leak();
+  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
 TEST(StaticRuntime, DeepWide) {
@@ -209,7 +213,8 @@ TEST(StaticRuntime, DeepWide) {
       // run static runtime
       std::vector<at::Tensor> input_tensors({ad_emb_packed, user_emb, wide});
       at::Tensor output_2 = runtime.run(input_tensors)[0];
-      EXPECT_TRUE(output_1.equal(output_2));
+      runtime.check_for_memory_leak();
+      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
   }
 }
@@ -233,9 +238,10 @@ TEST(StaticRuntime, KWargsAPI_1) {
 
         // run static runtime
         c10::IValue output_ivalue = runtime.run(inputs, {});
+        runtime.check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(output_1.equal(output_2));
+        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -277,9 +283,10 @@ TEST(StaticRuntime, KWargsAPI_2) {
 
         // run static runtime
         c10::IValue output_ivalue = runtime.run({}, kwargs);
+        runtime.check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(output_1.equal(output_2));
+        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -322,7 +329,8 @@ TEST(StaticRuntime, CleanUpMemory) {
           std::vector<at::Tensor> input_tensors(
               {ad_emb_packed, user_emb, wide});
           at::Tensor output_2 = runtime.run(input_tensors)[0];
-          EXPECT_TRUE(output_1.equal(output_2));
+          runtime.check_for_memory_leak();
+          EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
         }
       }
     }
@@ -354,7 +362,7 @@ TEST(StaticRuntime, FusionPass) {
       }
       EXPECT_TRUE(hit);
       auto output_2 = getTensor(module.forward(inputs));
-      EXPECT_TRUE(output_1.equal(output_2));
+      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
   }
 }

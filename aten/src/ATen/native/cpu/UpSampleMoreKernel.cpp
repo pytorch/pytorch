@@ -15,10 +15,10 @@ namespace {
 using scale_t = std::vector<c10::optional<double>>;
 
 
-template<typename scalar_t, typename index_t>
+template<typename scalar_t>
 static inline void compute_source_index_and_lambda(
-    index_t& input_index0,
-    index_t& input_index1,
+    int64_t& input_index0,
+    int64_t& input_index1,
     scalar_t& lambda0,
     scalar_t& lambda1,
     scalar_t ratio,
@@ -28,17 +28,17 @@ static inline void compute_source_index_and_lambda(
     bool align_corners) {
   if (output_size == input_size) {
     // scale_factor = 1, simply copy
-    input_index0 = static_cast<index_t>(output_index);
-    input_index1 = static_cast<index_t>(output_index);
+    input_index0 = output_index;
+    input_index1 = output_index;
     lambda0 = static_cast<scalar_t>(1);
     lambda1 = static_cast<scalar_t>(0);
   } else {
     const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
         ratio, output_index, align_corners, /*cubic=*/false);
-    input_index0 = static_cast<index_t>(real_input_index);
-    index_t offset = (input_index0 < input_size - 1) ? 1 : 0;
+    input_index0 = static_cast<int64_t>(real_input_index);
+    int64_t offset = (input_index0 < input_size - 1) ? 1 : 0;
     input_index1 = input_index0 + offset;
-    lambda1 = real_input_index - static_cast<scalar_t>(input_index0);
+    lambda1 = real_input_index - input_index0;
     lambda0 = static_cast<scalar_t>(1.) - lambda1;
   }
 }
@@ -188,7 +188,7 @@ void cpu_upsample_linear(at::TensorIterator& iter)
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_linear_channels_last(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     bool align_corners,
     const scale_type& scales) {
@@ -235,10 +235,10 @@ void cpu_upsample_linear_channels_last(
     scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (int64_t n = begin; n < end; n++) {
       for (int64_t oh = 0; oh < output_height; oh++) {
-        compute_source_index_and_lambda<scalar_t, int64_t>(
+        compute_source_index_and_lambda(
             ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
         for (int64_t ow = 0; ow < output_width; ow++) {
-          compute_source_index_and_lambda<scalar_t, int64_t>(
+          compute_source_index_and_lambda(
               iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
 
           scalar_t* out = output_data + n * output_slice_size +
@@ -288,13 +288,13 @@ void cpu_upsample_linear_channels_last(
     scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (int64_t n = begin; n < end; n++) {
       for (int64_t od = 0; od < output_depth; od++) {
-        compute_source_index_and_lambda<scalar_t, int64_t>(
+        compute_source_index_and_lambda(
             id0, id1, d0lambda, d1lambda, depth_scale, od, input_depth, output_depth, align_corners);
         for (int64_t oh = 0; oh < output_height; oh++) {
-          compute_source_index_and_lambda<scalar_t, int64_t>(
+          compute_source_index_and_lambda(
               ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
           for (int64_t ow = 0; ow < output_width; ow++) {
-            compute_source_index_and_lambda<scalar_t, int64_t>(
+            compute_source_index_and_lambda(
                 iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
 
             scalar_t* out = output_data + n * output_slice_size +
@@ -356,7 +356,7 @@ void cpu_upsample_linear_channels_last(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_linear_backward(
-    Tensor& grad_input_,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     bool align_corners,
     const scale_type& scales) {
@@ -395,7 +395,7 @@ void cpu_upsample_linear_backward(
     scalar_t w0lambda, w1lambda;
     for (int64_t c = begin; c < end; c++){
       for (int64_t ow = 0; ow < output_width; ow++) {
-        compute_source_index_and_lambda<scalar_t, int64_t>(
+        compute_source_index_and_lambda(
             iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
         scalar_t grad_output_value = grad_output_data[c * output_slice_size + ow];
         *input_indexr(c, iw0) += w0lambda * grad_output_value; /* i0 */
@@ -418,10 +418,10 @@ void cpu_upsample_linear_backward(
     scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (int64_t c = begin; c < end; c++) {
       for (int64_t oh = 0; oh < output_height; oh++) {
-        compute_source_index_and_lambda<scalar_t, int64_t>(
+        compute_source_index_and_lambda(
             ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
         for (int64_t ow = 0; ow < output_width; ow++) {
-          compute_source_index_and_lambda<scalar_t, int64_t>(
+          compute_source_index_and_lambda(
               iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
           scalar_t grad_output_value = grad_output_data[c * output_slice_size + oh * output_width + ow];
           *input_indexr(c, ih0, iw0) += h0lambda * w0lambda * grad_output_value; /* i00 */
@@ -450,13 +450,13 @@ void cpu_upsample_linear_backward(
     scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (int64_t c = begin; c < end; c++) {
       for (int64_t od = 0; od < output_depth; od++) {
-        compute_source_index_and_lambda<scalar_t, int64_t>(
+        compute_source_index_and_lambda(
             id0, id1, d0lambda, d1lambda, depth_scale, od, input_depth, output_depth, align_corners);
         for (int64_t oh = 0; oh < output_height; oh++) {
-          compute_source_index_and_lambda<scalar_t, int64_t>(
+          compute_source_index_and_lambda(
               ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
           for (int64_t ow = 0; ow < output_width; ow++) {
-            compute_source_index_and_lambda<scalar_t, int64_t>(
+            compute_source_index_and_lambda(
                 iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
             scalar_t grad_output_value = grad_output_data[c * output_slice_size +
                 od *  output_height * output_width + oh * output_width + ow];
@@ -609,17 +609,16 @@ void upsample_linearNd_kernel_impl(
 }
 
 void upsample_linear1d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     bool align_corners,
     c10::optional<double> scales_w) {
-
   upsample_linearNd_kernel_impl<int64_t, 1, scale_t>(
     output, input, align_corners, {scales_w});
 }
 
 void upsample_bilinear2d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     bool align_corners,
     c10::optional<double> scales_h,
@@ -634,7 +633,7 @@ void upsample_bilinear2d_kernel_impl(
 }
 
 void upsample_trilinear3d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     bool align_corners,
     c10::optional<double> scales_d,
@@ -650,7 +649,7 @@ void upsample_trilinear3d_kernel_impl(
 }
 
 void upsample_linear1d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
     c10::optional<double> scales_w) {
@@ -660,7 +659,7 @@ void upsample_linear1d_backward_kernel_impl(
 }
 
 void upsample_bilinear2d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
     c10::optional<double> scales_h,
@@ -671,7 +670,7 @@ void upsample_bilinear2d_backward_kernel_impl(
 }
 
 void upsample_trilinear3d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
     c10::optional<double> scales_d,
