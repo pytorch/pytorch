@@ -3,7 +3,7 @@ import inspect
 from textwrap import dedent
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
-from torch.package import PackageExporter, PackageImporter
+from torch.package import PackageExporter, PackageImporter, OrderedImporter, sys_importer
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -82,6 +82,59 @@ the_math = math
         package_a_i = hi.import_module('package_a')
         self.assertEqual(package_a_i.result, 'package_a')
         self.assertIsNot(package_a_i, package_a)
+
+    def test_file_structure(self):
+        filename = self.temp()
+
+        export_plain = """\
+    ├── main
+    │   └── main
+    ├── obj
+    │   └── obj.pkl
+    ├── package_a
+    │   ├── __init__.py
+    │   └── subpackage.py
+    └── module_a.py
+"""
+        export_include = """\
+    ├── obj
+    │   └── obj.pkl
+    └── package_a
+        └── subpackage.py
+"""
+        import_exclude = """\
+    ├── .data
+    │   ├── extern_modules
+    │   └── version
+    ├── main
+    │   └── main
+    ├── obj
+    │   └── obj.pkl
+    ├── package_a
+    │   ├── __init__.py
+    │   └── subpackage.py
+    └── module_a.py
+"""
+
+        with PackageExporter(filename, verbose=False) as he:
+            import module_a
+            import package_a
+            import package_a.subpackage
+            obj = package_a.subpackage.PackageASubpackageObject()
+            he.save_module(module_a.__name__)
+            he.save_module(package_a.__name__)
+            he.save_pickle('obj', 'obj.pkl', obj)
+            he.save_text('main', 'main', "my string")
+
+            export_file_structure = he.file_structure()
+            # remove first line from testing because WINDOW/iOS/Unix treat the filename differently
+            self.assertEqual('\n'.join(str(export_file_structure).split('\n')[1:]), export_plain)
+            export_file_structure = he.file_structure(include=["**/subpackage.py", "**/*.pkl"])
+            self.assertEqual('\n'.join(str(export_file_structure).split('\n')[1:]), export_include)
+
+        hi = PackageImporter(filename)
+        import_file_structure = hi.file_structure(exclude="**/*.storage")
+        self.assertEqual('\n'.join(str(import_file_structure).split('\n')[1:]), import_exclude)
 
     def test_save_module_binary(self):
         f = BytesIO()
@@ -191,8 +244,7 @@ import module_a
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
 
         f2 = self.temp()
-        pe = PackageExporter(f2, verbose=False)
-        pe.importers.insert(0, importer1.import_module)
+        pe = PackageExporter(f2, verbose=False, importer=(importer1, sys_importer))
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
             pe.require_module(loaded1.__module__)
         with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
@@ -219,9 +271,8 @@ import module_a
         f2 = self.temp()
 
         def make_exporter():
-            pe = PackageExporter(f2, verbose=False)
+            pe = PackageExporter(f2, verbose=False, importer=[importer1, sys_importer])
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
-            pe.importers.insert(0, importer1.import_module)
             return pe
 
         # This should fail. The 'PackageAObject' type defined from 'importer1'
@@ -352,15 +403,12 @@ import module_a
 
         f2 = self.temp()
         # if we are doing transfer learning we might want to re-save
-        # things that were loaded from a package
-        with PackageExporter(f2, verbose=False) as e:
-            # We need to tell the exporter about any modules that
-            # came from imported packages so that it can resolve
-            # class names like torchvision.models.resnet.ResNet
-            # to their source code.
-
-            e.importers.insert(0, i.import_module)
-
+        # things that were loaded from a package.
+        # We need to tell the exporter about any modules that
+        # came from imported packages so that it can resolve
+        # class names like torchvision.models.resnet.ResNet
+        # to their source code.
+        with PackageExporter(f2, verbose=False, importer=(i, sys_importer)) as e:
             # e.importers is a list of module importing functions
             # that by default contains importlib.import_module.
             # it is searched in order until the first success and
@@ -477,7 +525,7 @@ def load():
 
 
     def test_module_glob(self):
-        from torch.package.exporter import _GlobGroup
+        from torch.package.package_exporter import _GlobGroup
 
         def check(include, exclude, should_match, should_not_match):
             x = _GlobGroup(include, exclude)
@@ -527,6 +575,7 @@ def load():
         regular_src = inspect.getsourcelines(regular_class)
         self.assertEqual(packaged_src, regular_src)
 
+class TestPackageResources(TestCase):
     def test_resource_reader(self):
         """Test compliance with the get_resource_reader importlib API."""
         buffer = BytesIO()
@@ -659,6 +708,62 @@ class ManglingTest(TestCase):
         mangled = a.mangle("foo.bar")
         mangle_prefix = get_mangle_prefix(mangled)
         self.assertEqual(mangle_prefix + "." + "foo.bar", mangled)
+
+
+class TestImporter(TestCase):
+    def test_sys_importer(self):
+        import package_a
+        import package_a.subpackage
+        self.assertIs(sys_importer.import_module('package_a'), package_a)
+        self.assertIs(sys_importer.import_module('package_a.subpackage'), package_a.subpackage)
+
+    def test_sys_importer_roundtrip(self):
+        import package_a
+        import package_a.subpackage
+        importer = sys_importer
+        type_ = package_a.subpackage.PackageASubpackageObject
+        module_name, type_name = importer.get_name(type_)
+
+        module = importer.import_module(module_name)
+        self.assertIs(getattr(module, type_name), type_)
+
+    def test_single_ordered_importer(self):
+        import package_a
+        import module_a  # noqa: F401
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_module(package_a.__name__)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+
+        # Construct an importer-only environment.
+        ordered_importer = OrderedImporter(importer)
+
+        # The module returned by this environment should be the same one that's
+        # in the importer.
+        self.assertIs(ordered_importer.import_module('package_a'), importer.import_module('package_a'))
+        # It should not be the one available in the outer Python environment.
+        self.assertIsNot(ordered_importer.import_module('package_a'), package_a)
+
+        # We didn't package this module, so it should not be available.
+        with self.assertRaises(ModuleNotFoundError):
+            ordered_importer.import_module('module_a')
+
+    def test_ordered_importer_basic(self):
+        import package_a
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_module(package_a.__name__)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+
+        ordered_importer_sys_first = OrderedImporter(sys_importer, importer)
+        self.assertIs(ordered_importer_sys_first.import_module('package_a'), package_a)
+
+        ordered_importer_package_first = OrderedImporter(importer, sys_importer)
+        self.assertIs(ordered_importer_package_first.import_module('package_a'), importer.import_module('package_a'))
 
 
 if __name__ == '__main__':
