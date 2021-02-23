@@ -191,7 +191,7 @@ class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
   // Model id
   std::string model_id_;
 
-  // Backned IDs
+  // Backend IDs
   std::vector<onnxBackendID> backend_ids_;
 
   // A cache for ONNX shape hints
