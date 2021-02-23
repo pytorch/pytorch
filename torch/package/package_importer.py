@@ -15,6 +15,8 @@ from pathlib import Path
 
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
+from ._file_structure_representation import _create_folder_from_file_list, Folder
+from ._glob_group import GlobPattern
 from ._mock_zipreader import MockZipReader
 from ._mangling import PackageMangler, demangle
 from .importer import Importer
@@ -191,6 +193,18 @@ class PackageImporter(Importer):
             <torch_package_0>
         """
         return self._mangler.parent_name()
+
+    def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
+        """Returns a file structure representation of package's zipfile. 
+
+        Args:
+            include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
+                for the names of the files to be inluded in the zipfile representation. This can also be 
+                a glob-style pattern, as described in exporter's :meth:`mock`
+
+            exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+        """
+        return _create_folder_from_file_list(self.filename, self.zip_reader.get_all_records(), include, exclude)
 
     def _read_extern(self):
         return self.zip_reader.get_record('.data/extern_modules').decode('utf-8').splitlines(keepends=False)
