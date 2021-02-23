@@ -4268,7 +4268,7 @@ class TestLinalg(TestCase):
             # device of out and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty_like(reflectors).to(wrong_device)
-            with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.orgqr(reflectors, tau, out=out)
 
             # device of tau and input should match
