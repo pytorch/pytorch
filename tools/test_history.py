@@ -4,7 +4,6 @@ import argparse
 import bz2
 import json
 import subprocess
-import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -199,7 +198,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--delta',
         type=int,
-        help='minimum number of hours between rows',
+        help='minimum number of hours between commits',
         default=12,
     )
     parser.add_argument(
@@ -231,7 +230,7 @@ if __name__ == "__main__":
 
     jobs = None if args.all else args.job
     if jobs == []:  # no jobs, and not None (which would mean all jobs)
-        sys.exit('No jobs specified.')
+        parser.error('No jobs specified.')
 
     commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
 
