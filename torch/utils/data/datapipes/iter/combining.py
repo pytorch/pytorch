@@ -13,6 +13,26 @@ class UnzipIterDataPipe(IterDataPipe):
     determines the number of output DataPipe. A :class:`ZipIterDataPipe`
     is often attached later to aggregate these output DataPipes back.
     Return a tuple of split DataPipes.
+
+    Example:
+        >>> print(list(dp))
+        [(1, 2), (3, 4), (5, 6), ...]
+        >>> dp1, dp2 = datapipes.iter.Unzip(dp)
+        >>> print(list(dp1))
+        [1, 3, 5, ...]
+        >>> print(list(dp2))
+        [2, 3, 4, ...]
+        >>> def fn(data):
+        ...     return torch.tensor(data)
+        >>> map_dp = datapipes.iter.Map(dp1, fn=fn)
+        >>> zipped_dp = datapipes.iter.Zip(map_dp, dp2)
+        >>> print(list(zipped_dp))
+        [(tensor(1), 2), (tensor(3), 4), (tensor(5), 6), ...]
+
+    .. note:: This DataPipe may require significant storage, especially
+              when one iterator uses most of the data before another
+              iterator starts.
+
     args:
         datapipe: Iterable DataPipe being disaggregated
     """
@@ -94,11 +114,13 @@ class UnzipIterDataPipe(IterDataPipe):
 class _SplitIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`_SplitIterDataPipe`.
 
-    Iterable DataPipe aggregates elements into a tuple from each of
-    the input DataPipe. The output DataPipe is stopped when the
-    shortest input DataPipe is exhausted.
+    Iterable DataPipe yields data for the corresponding element
+    form the source zipped DataPipe. Only when all splits are
+    exhausted, could the :class:`UnzipIterDataPipe` be reset for
+    a new iteration.
     args:
-        datapipe: Iterable DataPipes being aggregated
+        datapipe: UnzipIterDataPipe as the source for all splits
+        split_id: The i-th element from the zipped DataPipe
     """
     datapipe: UnzipIterDataPipe
     split_id: int
@@ -128,7 +150,9 @@ class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
 
     Iterable DataPipe aggregates elements into a tuple from each of
     the input DataPipe. The output DataPipe is stopped when the
-    shortest input DataPipe is exhausted.
+    shortest input DataPipe is exhausted. This DataPipe is often
+    attached after :class:`UnzipIterDataPipe` to aggregate elements
+    from the source DataPipe.
     args:
         *datapipes: Iterable DataPipes being aggregated
     """
