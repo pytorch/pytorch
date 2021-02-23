@@ -438,8 +438,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 
 def convert(
         module, mapping=None, inplace=False, remove_qconfig=True,
-        convert_custom_config_dict=None,
-        is_reference=False):
+        convert_custom_config_dict=None):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class. And remove qconfig at the
     end if remove_qconfig is set to True.
@@ -471,16 +470,14 @@ def convert(
         module = copy.deepcopy(module)
     _convert(
         module, mapping, inplace=True,
-        convert_custom_config_dict=convert_custom_config_dict,
-        is_reference=is_reference)
+        convert_custom_config_dict=convert_custom_config_dict)
     if remove_qconfig:
         _remove_qconfig(module)
     return module
 
 def _convert(
         module, mapping=None, inplace=False,
-        convert_custom_config_dict=None,
-        is_reference=False):
+        convert_custom_config_dict=None):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class
 
@@ -508,16 +505,15 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     custom_module_class_mapping,
-                     is_reference=is_reference)
-        reassign[name] = swap_module(mod, mapping, custom_module_class_mapping, is_reference)
+                     custom_module_class_mapping)
+        reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
 
     for key, value in reassign.items():
         module._modules[key] = value
 
     return module
 
-def swap_module(mod, mapping, custom_module_class_mapping, is_reference=False):
+def swap_module(mod, mapping, custom_module_class_mapping):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
 
@@ -535,7 +531,7 @@ def swap_module(mod, mapping, custom_module_class_mapping, is_reference=False):
             new_mod = custom_module_class_mapping[type(mod)].from_observed(mod)
             swapped = True
         elif type(mod) in mapping:
-            new_mod = mapping[type(mod)].from_float(mod, is_reference=is_reference)
+            new_mod = mapping[type(mod)].from_float(mod)
             swapped = True
 
         if swapped:
