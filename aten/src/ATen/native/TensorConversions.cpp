@@ -1,82 +1,136 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "c10/util/Optional.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/Optional.h>
+
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 namespace at {
 namespace native {
 
-// Since the given Device may not have device_index set (i.e., having it as -1
-// representing the current device), we need to set the device_index before
-// comparing against the current device object in Tensor.
-// This always **copies** but this is intended because (1) we shouldn't modify
-// input argument, and (2) Device is small anyways.
-// NB: This ONLY works for CUDA device
-static inline Device ensure_has_index(const Device &device) {
-  if (!device.is_cuda() || device.has_index()) {
+// Take a Device that may not have device_index set (i.e., having it as -1
+// representing the current device) and return the corresponding Device
+// according to the actual device at the time of this function call.  No-op
+// if the device_index is set.
+static inline Device ensure_has_index(Device device) {
+  if (device.is_cpu() || device.has_index()) {
     return device;
   }
-  return Device(device.type(), at::current_device());
+  const c10::impl::DeviceGuardImplInterface* impl = c10::impl::getDeviceGuardImpl(device.type());
+  return impl->getDevice();
 }
 
-static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  return self.type().toBackend(options.backend()).toScalarType(typeMetaToScalarType(options.dtype()))
-                    .copy(self, non_blocking, options.device());
+static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
+
+  if (self.dtype() == options.dtype() && self.layout() == options.layout() &&
+      self.device() == options.device() && !copy &&
+      (memory_format == MemoryFormat::Preserve ||
+       self.suggest_memory_format() == memory_format)) {
+    return self;
+  }
+
+  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
+                  (options.layout() == c10::kStrided));
+
+  if (memory_format == MemoryFormat::Preserve) {
+    if (self.is_non_overlapping_and_dense()) {
+      // Copy all strides
+      auto r = at::empty_strided(self.sizes(),
+                                 self.strides(),
+                                 options.memory_format(c10::nullopt).pinned_memory(pin_out));
+      r.copy_(self, non_blocking);
+      return r;
+    } else {
+      memory_format = self.suggest_memory_format();
+    }
+  }
+  // See Note [Explicit nullopt MemoryFormat argument]
+  auto r = at::empty(self.sizes(),
+                     options.memory_format(memory_format).pinned_memory(pin_out),
+                     c10::nullopt);
+  r.copy_(self, non_blocking);
+  return r;
 }
 
-Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
-  AT_CHECK(options.requires_grad_opt() == c10::nullopt,
+Tensor to(
+  const Tensor& self,
+  const TensorOptions& options_,
+  bool non_blocking,
+  bool copy,
+  c10::optional<c10::MemoryFormat> optional_memory_format
+) {
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto options = options_.merge_memory_format(optional_memory_format);
+
+  TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
            "to(options) expects unset requires_grad flag, but got "
            "options.requires_grad set as ", options.requires_grad());
 
-  const auto & layout_opt = options.layout_opt();
-  AT_CHECK(!layout_opt || self.layout() == layout_opt.value(),
+  TORCH_CHECK(!options.has_layout() || self.layout() == options.layout(),
            "to(options) doesn't support converting to a different layout, "
            "but got self.layout being ", self.layout(),
            " and options.layout set as ", options.layout());
 
-  auto device_opt = options.device_opt();
-  if (device_opt) {
-    device_opt = ensure_has_index(device_opt.value());
+  if (options.has_device()) {
+    options = options.device(ensure_has_index(options.device()));
   }
-  const auto & dtype_opt = options.dtype_opt();
-  if ((!device_opt || self.device() == device_opt.value()) &&
-      (!dtype_opt  || self.dtype()  ==  dtype_opt.value()) && !copy) {
-    return self;
-  }
-  auto specified_options = self.options();
-  if (device_opt) {
-    specified_options = specified_options.device(device_opt.value());
-  }
-  if (dtype_opt) {
-    specified_options = specified_options.dtype(dtype_opt.value());
-  }
-  return to_impl(self, specified_options, non_blocking);
+  auto specified_options = self.options().merge_in(options);
+  return to_impl(self, specified_options, non_blocking, copy);
 }
 
-Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy) {
+Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   device = ensure_has_index(device);
-  if (self.device() == device && self.dtype() == dtype && !copy) {
-    return self;
-  }
-  return to_impl(self, self.options().device(device).dtype(dtype), non_blocking);
+  return to_impl(
+      self,
+      self.options().device(device).dtype(dtype).memory_format(optional_memory_format),
+      non_blocking,
+      copy);
 }
 
-Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy) {
-  if (self.dtype() == dtype && !copy) {
-    return self;
-  }
-  return to_impl(self, self.options().dtype(dtype), non_blocking);
+Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return to_impl(
+      self, self.options().dtype(dtype).memory_format(optional_memory_format), non_blocking, copy);
 }
 
-Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy) {
-  auto self_options = self.options();
+Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto options = other.options();
-  // Tensor.options() always have everything filled so we are happy and don't
-  // even need to fill in device index.
-  if (self_options == options && !copy) {
+  return to_impl(self, options.memory_format(optional_memory_format), non_blocking, copy);
+}
+
+Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.layout() != c10::kStrided);
+  if (input_.layout() == c10::kSparse) {
+    auto input = input_.coalesce();
+    return grad.sparse_mask(input);
+  } else if (input_.layout() == c10::kMkldnn) {
+    return grad.to_mkldnn(input_.scalar_type());
+  } else {
+    AT_ERROR("Unsupported input layout: ", input_.layout());
+  }
+}
+
+Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.layout() == c10::kStrided);
+  return grad.to_dense(input_.scalar_type());
+}
+
+Tensor view_dtype(const Tensor& self, ScalarType dtype) {
+  if (self.scalar_type() == dtype) {
     return self;
   }
-  return to_impl(self, options, non_blocking);
+  auto type_meta = c10::scalarTypeToTypeMeta(dtype);
+  TORCH_CHECK(self.element_size() == type_meta.itemsize(),
+    "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
+  Storage storage = self.storage();
+  auto new_tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage), self.key_set(), type_meta);
+  auto* impl = new_tensor.unsafeGetTensorImpl();
+  impl->set_storage_offset(self.storage_offset());
+  impl->set_sizes_and_strides(self.sizes(), self.strides());
+  return new_tensor;
 }
 
 }} // namespace at::native

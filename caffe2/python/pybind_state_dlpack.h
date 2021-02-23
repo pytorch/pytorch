@@ -16,10 +16,11 @@ namespace py = pybind11;
 
 const DLDeviceType* CaffeToDLDeviceType(int device_type);
 
-const DLDataType* CaffeToDLType(const TypeMeta& meta);
+const DLDataType* CaffeToDLType(const TypeMeta meta);
 
-const TypeMeta& DLTypeToCaffe(const DLDataType& dl_type);
+const TypeMeta DLTypeToCaffe(const DLDataType& dl_type);
 
+// TODO: remove context
 template <class Context>
 class DLPackWrapper {
  public:
@@ -39,7 +40,7 @@ class DLPackWrapper {
     if (tensor->numel() <= 0) {
       tensor->Resize(0);
     }
-    if (tensor->dtype().id() == TypeIdentifier::uninitialized()) {
+    if (tensor->dtype() == ScalarType::Undefined) {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }
@@ -61,10 +62,10 @@ class DLPackWrapper {
     dlTensor.strides = nullptr;
     dlTensor.byte_offset = 0;
 
-    managed_tensor.dlTensor = dlTensor;
+    managed_tensor.dl_tensor = dlTensor;
     // C2 Tensor memory is managed by C2
-    managed_tensor.ctx = nullptr;
-    managed_tensor.destructor = [](DLManagedTensor*) {};
+    managed_tensor.manager_ctx = nullptr;
+    managed_tensor.deleter= [](DLManagedTensor*) {};
 
     return py::reinterpret_steal<py::object>(
         PyCapsule_New(&managed_tensor, "dltensor", nullptr));
@@ -75,7 +76,7 @@ class DLPackWrapper {
     DLManagedTensor* dlMTensor =
         (DLManagedTensor*)PyCapsule_GetPointer(obj.ptr(), "dltensor");
     CAFFE_ENFORCE(dlMTensor, "Invalid DLPack capsule");
-    DLTensor* dlTensor = &dlMTensor->dlTensor;
+    DLTensor* dlTensor = &dlMTensor->dl_tensor;
     auto device_type_ptr = CaffeToDLDeviceType(device_option.device_type());
     CAFFE_ENFORCE(
         device_type_ptr,
@@ -116,8 +117,8 @@ class DLPackWrapper {
             static_cast<void*>(dlMTensor),
             [](void* t_ptr) -> void {
               DLManagedTensor* mt_ptr = static_cast<DLManagedTensor*>(t_ptr);
-              if (mt_ptr->destructor) {
-                mt_ptr->destructor(mt_ptr);
+              if (mt_ptr->deleter) {
+                mt_ptr->deleter(mt_ptr);
               }
             },
             device),

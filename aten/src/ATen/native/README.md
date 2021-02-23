@@ -23,7 +23,7 @@ Every native function must have an entry in
 `native_functions.yaml`.  The format can be summarized as:
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
+- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
   variants: function, method
   dispatch:
     CPU: func_cpu
@@ -35,7 +35,7 @@ Each component is described in more detail below:
 ### `func`
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
+- func: func_name[.overload_name](ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
 ```
 
 The `func` entry is a string describing the name of the function and its type
@@ -46,34 +46,33 @@ signature.
 - `Tensor`.  A `Tensor` argument translates into a C++ argument of type `const Tensor&`
   (except when the argument is "inplace"; in this case, it is simply `Tensor&`).
   A trailing `?`, as in `Tensor?`, indicates that the tensor argument is optional
-  and may be omitted by passing an undefined tensor.  When a function takes multiple
+  and may be omitted by passing c10::nullopt.  When a function takes multiple
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
-  to be `FloatTensor`s.)
-- Tensors of specific types.  At the moment, valid type names are:
-    - `IntegerTensor` (a.k.a. `LongTensor`)
-    - `BoolTensor` (a.k.a. `ByteTensor`)
-    - `IndexTensor` (a.k.a. `IntTensor`)
-  These type names were inherited from TH, and may be renamed soon, so
-  don't commit them to memory.
-- `TensorList`.  A `TensorList` argument translates into a C++ argument of type `ArrayRef<Tensor>`
+  to be `FloatTensor`s).
+  `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
+  In general annotations can be defined via the following four situations:
+  - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
+  - `Tensor(a!)` - `a` members of a may be written to thus mutating the underlying data.
+  - `Tensor!` - shorthand for Tensor(fresh\_identifier!)
+  - `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
+  For more details on when and why this needs to happen, please see the section on annotations.
+- `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
-- `IntList`.  `IntList` accepts an optional length specifier, e.g., `IntList[2]`, which
+- `int[]`.  `int[]` accepts an optional length specifier, e.g., `int[2]`, which
   has no effect in C++ but extends our Python bindings to accept a bare number, which will be
   expanded into an appropriately sized list by repeating the number.
-- `int64_t`. There is no `int`; ATen policy is to use `int64_t` in the API anywhere you would
-  have ordinarily passed an `int` or `size_t`.
-- `double`. There is no `float`; ATen policy is to use `double` anywhere you would have used `float`.
+- `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
+- `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
+- `str`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
-  floating point types, and zero dimensional tensors. `int64_t` and `double` can only bind to the
-  corresponding Python numerical types. However, you probably don't want to use `Scalar`. It's
-  really used for binding to TH/THC code "real" types where the Python APIs you are binding to are
-  actually different types. `double` and `int64_t` argument types should suffice for most algorithms.
-- `Generator*`, the state for a random number generator,
-- `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
-  this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
-  argument parser both in ATen and in PyTorch.)
+  floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
+  numerical types. However, you probably don't want to use `Scalar`. It's really used for binding
+  to TH/THC code "real" types where the Python APIs you are binding to are actually different types.
+  `float` and `int` argument types should suffice for most algorithms.
+- `Generator?`, the state for a random number generator,
+- `bool[N]` (where N is `1-4`).
 - `TensorOptions`.  Tensor options provide information about how a
   tensor should be constructed; it is most useful when you are writing a
   factory function, where you have no `Tensor` inputs and thus
@@ -81,32 +80,39 @@ signature.
 - `*` is a special sentinel argument, which doesn't translate into an actual
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
+- `?` is trailing question mark that annotates an argument to be an optional type. Grep for
+  `optional` to find some example usages. In general, most functions will not need to use
+  this, but there are some cases that we want to use optional for the different types:
+    - You want to pass a `None` to an ATen function/method from Python and handle the
+      None type on the C++ side. For example, `clamp(Tensor self, Scalar? min=None, Scalar? max=None)`
+      can take `None` for its `min` and `max` parameter, but does not dispatch to different
+      backends if one of the parameters is `None`. Optional type can accept a `None` type
+      (`nullopt` in C++) from Python and use the [C++ Optional class](https://en.cppreference.com/w/cpp/utility/optional) to interact with the parameters.
+    - You want a default value, which is fine in Python, but would cause ambiguity in C++.
+      For example, `norm(Tensor self, Scalar p=2, int dim, bool keepdim=False)` would
+      cause ambiguity in C++ since its default args must be adjacent (`p` could not
+      have a default value when `dim` does not). Therefore, we need to make `p` as a
+      optional Scalar, and make `p=2` when `p` is not passed in (nullopt).
+    - You want a value to default to the same value as another argument (this cannot be
+      expressed in C++ default arguments).
 
 Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
-factory while another is not.
-
-**Return types.** These types are permissible as ReturnType:
-
-- `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
-  respectively (unless the operation is in-place, in which case the return type
-  is `Tensor&`.
-- A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
-  the C++ `std::tuple<Tensor, Tensor>`.
-
-If you need a type that is not listed in this list, it may be possible to extend ATen's
-code generation to support it.  ATen's philosophy on types to support is that it supports
-only simple, universal types, as well as a handful of fundamental Tensor structures
-(e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
-bound to ATen (in practice, C++ and Python.)
+factory while another is not. In some rare cases, factory function might have a
+tensor argument. In this case mark it with 'category_override: factory'
+explicitly.
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least). In `native_functions.yaml`, if your function (usually functions named with 'out' affix) args
-include the result Tensor, you need to call the argument `Tensor result`. And if there are more
-than one result Tensors, you need to name the args `Tensor result0, Tensor result1, ...`.
+least). For more details please see the section on `variants`.
+
+As a convention we use 'out' to indicate an output argument. This aligns with the
+Python bindings. Even if a function might not be used in the Python bindings, we
+still advise to follow this convention. Check the generated code when making a change
+to make sure you're not breaking the API when renaming an argument name of an
+existing function.
 
 TODO: Do argument names affect Python keyword arguments?
 
@@ -116,17 +122,77 @@ are applied when those positional arguments are not specified.
 
 Here are the supported default values:
 
-* Numbers (e.g., `0` or `5.0` for `int64_t`, `double` and `IntList`
-  with an explicit length (e.g., `IntList[2]`)--in the case of IntList,
-  a number is replicated to fill the length (e.g., `IntList[2] x=2`
-  is equivalent to `IntList[2] x={2,2}`.
-* Lists of numbers (e.g., `{0, 0}`) for `IntList`.
-* Booleans (e.g., `true`) for `bool`.
-* Empty initializer lists (e.g., `{}`) for `Tensor` (this implicitly changes
+* Numbers (e.g., `0` or `5.0` for `int`, `float` and `int[]`
+  with an explicit length (e.g., `int[2]`)--in the case of `int[]`
+  a number is replicated to fill the length (e.g., `int[2] x=2`
+  is equivalent to `int[2] x=[2,2]`).
+* Lists of numbers (e.g., `[0, 0]`) for `IntList`.
+* Booleans (e.g., `True`) for `bool`.
+* Empty initializer lists (e.g., `[]`) for `Tensor` (this implicitly changes
   a `Tensor` argument to accept undefined tensors).
-* `nullptr` for pointer types (e.g., `Generator*`)
+* `None` for pointer types (e.g., `Generator?`)
 
-The declarations also support the following attributes:
+**Returns.** The following are permissible on Return:
+
+Non-tuple return:
+```
+ReturnType [retarg0]
+```
+
+Tuple return:
+```
+(ReturnType [retarg0], ReturnType [retarg1], ...)
+```
+
+The following are permissible on ReturnType:
+- `Tensor` and `Tensor[]`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
+  respectively (unless the operation is in-place, in which case the return type
+  is `Tensor&`.
+- A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
+  the C++ `std::tuple<Tensor, Tensor>`.
+
+If you need a type that is not listed in this list, it may be possible to extend ATen's
+code generation to support it.  ATen's philosophy on types to support is that it supports
+only simple, universal types, as well as a handful of fundamental Tensor structures
+(e.g., `Tensor` and `Generator?`), because these types can be easily ported to any language
+bound to ATen (in practice, C++ and Python.)
+
+Return also supports specifying (optional) return argument names. These serve
+two functions:
+
+- They let you easily write derivatives in terms of return arguments in
+  `tools/autograd/derivatives.yaml`
+
+- They correspond to the named field the output can be referred to from
+  Python.  (This means that changing a return argument name is
+  BC-breaking, be careful!)
+
+Note that argument type modifiers such as defaults and optional are not currently supported on Return.
+
+
+**Overloads.** You can register multiple functions with the same name and different
+function signatures if you give them unique overload names. An overload name
+is specified after the function name, separated by a dot.
+
+Overload names do not have to be globally unique, but must be unique in the set
+of all overloads for the same function. Overload names cannot be changed for
+backwards compatibility reasons. Please try to make overload names semantically
+meaningful. An overload name that just enumerates all the argument types isn't
+helpful. In many cases, a semantic name is clear from what the overload is doing
+differently. As a fallback, you can use the name or type of the first differing
+argument as an overload name.
+
+If you add a new overload to an existing function, please leave the existing
+overload names as they are (for backwards compatibility), but give the new
+overload a new, unique name.
+
+Not specifying an overload name is equivalent to specifying an empty overload
+name. If you add a new function with multiple overloads, give them unique
+overload names, at most one overload is allowed to have an empty overload name.
+
+
+The declarations also support the following attributes.
+
 
 ### `variants`
 
@@ -143,10 +209,55 @@ this generates the function `at::where(cond, self, other)` and the method
 `self.where(cond, other)`.
 
 By default, ATen generates only the function variant for a native function.
-When should you also generate a method variant?  Tensor operations as methods
+When should you also generate a method variant? Tensor operations as methods
 are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
 more complicated neural network layers (e.g., `conv2d`) and internal functions
 designed specifically for binding (e.g., `cudnn_convolution`).
+
+As we progress along our schema unification of the `func` schema with the JIT
+signature schema, we must introduce features that allow us to increase compliance.
+One of these features are Tensor annotations. As of now we use naming conventions
+to indicate whether an argument of a function is going to be mutated and returned.
+
+### `annotations`
+
+There are two typical situations in which we mutate the memory of an argument in the Python
+frontend:
+a) For an inplace operations such as `self.abs_()`
+b) for a function with an output keyword argument such as `torch.abs(input, out=None)`.
+
+In order to provide implementations for these Python functions the legacy schema
+requires C++ implementations for three situations `abs(Tensor self)  -> Tensor`,
+`abs_(Tensor self) -> Tensor` and `abs_out(Tensor out, Tensor self) -> Tensor`.
+
+Now, as we move towards the unification, we start to use a different syntax to represent
+this by using annotations. In the end we still translate to the legacy schema for the downstream
+consumers such as the C++ code generation, but this will soon change.
+
+If two Tensors carry the same annotation, they both *may* represent the same memory.
+A write annotation, as indicated by an exclamation mark, indicates that they both *may*
+also be written to.
+
+Let's revisit the previous native function declarations and see the conventions of adding annotations.
+  - `abs(Tensor self) -> Tensor` stays the same as it will always allocate new memory.
+  - `abs_(Tensor(a!) self) -> Tensor(a!)`
+    `self` may be written to and returned. Further, the annotation indicates that the return value
+    may alias the input. This indicates an inplace function and by convention ends in a single '\_'.
+  - `abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)`
+    In the Python frontend `out` can be passed as a keyword argument and may be written to.
+    In this case it indicates the schema for a function that must accept `out` as this does not
+    provide a default argument. The idea behind representing this as a optional argument is to
+    document the intended usage. This maps to the legacy `abs_out(Tensor out, Tensor self) -> Tensor`.
+    As with the legacy `_out` function you must call the argument `Tensor out` or `Tensor out0`,
+    `Tensor out1` in the context of multiple arguments.
+
+There is also another situation in which we use annotations, namely views.
+  - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
+    An alias to the memory represented by `self` may be also returned, however it is not mutated.
+
+We have some asserts to check whether a developer uses these annotations correctly and throw asserts
+if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
+ If this causes a lot of confusion please add @cpuhrsch to your PR.
 
 ### `dispatch`
 
@@ -157,35 +268,147 @@ dispatch:
 ```
 
 This specifies the actual name of the function you want to dispatch to, so you
-can dispatch to different functions depending on whether or not you have CPU or
-CUDA tensors.  Technically, it is also possible to write `dispatch: func_name`
+can dispatch to different functions depending on which backend the passed tensors
+belong to.  Technically, it is also possible to write `dispatch: func_name`
 to unconditionally dispatch to a native function whose name is different than
 the name in the public ATen API, but this is generally frowned upon (just name
 them the same thing!)
 
-### `python_default_init`
+If two backends have the same dispatch function, you can write `CPU, CUDA: func`
+to reuse the same function name in both cases.
+
+Available backend options can be found by searching `dispatch_keys` in
+[codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
+Among the supported backends, there're a few alias keys that maps to a set of backends:
+  - `DefaultBackend`: an alias that maps to all backends. Functions registered to
+    `DefaultBackend` should work for any backend inference.
+  - `Math`: an alias that maps to all backend and autograd backend keys. Functions
+    registered to `Math` key should be plain mathematical composition of other
+    `at::` functions and support training and inference for any backend.
+
+`DefaultBackend` and `Math` keys act as defaults: for example, you can specify a custom
+kernel for a particular backend using a backend-specific dispatch key, and use
+`DefaultBackend` or `Math` to specify a generic kernel for the others.
+
+Note that like those registered to `Math`, kernels registered to `DefaultBackend` are
+very often implemented as mathematical expressions built up from calls to other `at::`
+functions.  This is because in both cases, the kernel needs to delegate backend-specific
+computation to the functions it calls.  The difference between `DefaultBackend` and `Math`
+is that a `Math` kernel also implicitly defines a derivative formula: to do this, it must
+call only functions that themselves support autograd.
+
+For example, suppose `my_op` can be implemented in the following way:
+```
+at::Tensor my_op(const Tensor& self, const Tensor& other) {
+  return self + 2 * other;
+}
+```
+
+If we already know inference kernels and derivative formulas for operators `+` and `*` in our system,
+you can just register `my_op` to `Math` and both inference & autograd will just work.
+Although it seems we only write down the inference formula here, PyTorch autograd system would correctly
+set up the backward for `my_op` using the chain formula and derivatives of `+` & `*` operators.
+In other words `d_out/d_self = 1; d_out/d_other = 2` can be derived automatically from
+the `my_op` inference kernel. Of course if we don't have derivative formula defined for either `+` or `*`,
+backward of `my_op` can no longer be derived automatically.
+
+Whether to use `Math` or `DefaultBackend` for your kernel can be decided by the following steps:
+1. If you can, always start with a `Math` kernel that's composable from existing operators.
+2. If you don't want to use the derived gradient formula from `Math` kernel for autograd, either to
+   get better performance or better numerical stability, you should put the kernel in `DefaultBackend`
+   so that it's only used in inference.
+   Later for autograd, depending on whether your autograd kernel works for all backends or not,
+   you can put them in alias `Autograd` or specific keys like `AutogradCPU`.
+3. If you prefer to write backend-specific kernels, use reserved dispatch keys for your backend instead,
+   e.g. `CPU/AutogradCPU`.
+
+**Important**: because a `Math` kernel is implicitly registered for ops with no `dispatch:` section,
+when you add a backend-specific kernel (and hence a `dispatch:` section) to one of these, you **must** also
+add a `Math:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
+added if applicable), so that it's still available for other backends to use.
+
+If you implemented a native function in C++ and want to find out which dispatch keyword
+should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
+
+This work is currently WIP and you can find the design proposal in
+https://github.com/pytorch/pytorch/issues/44680.
+
+### `device_guard`
 
 ```
-python_default_init:
-  argument_name: initializing_expression
+device_guard: False
 ```
 
-A map from argument names to default initializing expressions written in C++. Such default
-expressions will only be used in Python API (in the C++ API, these arguments are
-mandatory).
+By default, ATen code generation will generate a DeviceGuard invocation,
+which will ensure that kernel code will run with the current device set
+to match the device of the first Tensor argument (or first tensor of
+the first Tensor[] argument, if the function takes a list of tensors).
+For the most part, this means kernel authors do not have to worry about
+setting devices.
 
-There are a few situations where you might like to use this functionality:
+However, in some cases, setting the device is unnecessary, because,
+e.g., you call a function already manages device guard setting, or
+you're a function that simply does not interact with any devices. In
+that case, code generation of the device guard can be disabled by adding
+`device_guard: False` to your function definition.
 
-- You want a default value which is fine in Python but would cause ambiguity in C++.
-  For example, `norm(Tensor self, real p=2, int64_t dim=1)` would cause ambiguity
-  with long tensors in C++. Therefore, we need to make `p=2` a python only default
-  initialization value.
+**Note.** We are considering eliminating automatic generation of DeviceGuard,
+in which case this field would go away. If you have an opinion on the
+matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 
-- You want a value to default to the same value as another argument (this cannot
-  be expressed in C++ default arguments).
+### `matches_jit_signature`
 
-If you grep for `python_default_init`, you can find examples of this being used;
-in general, most functions will not need to use this.
+```
+matches_jit_signature: False
+```
+
+This will indicate that the func syntax does not follow the JIT signature schema.
+If you are a triggering an assert related to JIT signature compliance
+try adding this field and setting it to False. In general, this serves as a means
+of tracking an ongoing schema unification with the goal of aligning func syntax
+with other components of PyTorch in order to reduce overall complexity.
+If you find yourself having to set this field to False add @gchanan to your PR's
+set of reviewers.
+
+### `use_c10_dispatcher`
+
+```
+use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
+```
+
+This will indicate that the operator implementation is still using a legacy operator signature.
+For any new ops, please don't set this.
+The new, non-legacy operator signature requires the operator function signature to be aligned with the
+function schema in native_functions.yaml, i.e.
+- out arguments have to be in the end of the argument list instead of in the beginning
+- TensorOptions are taken as separate arguments
+```
+  const c10::optional<ScalarType>& dtype,
+  const c10::optional<Layout>& layout,
+  const c10::optional<Device>& device,
+  const c10::optional<bool>& pin_memory
+```
+  instead of one `TensorOptions` argument
+- optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
+Some of our kernels are still written in a legacy way, not doing those things,
+and need an adapter to work with the dispatcher calling convention. For those, we use
+`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
+adapter around them in the operator registration call. Over time, we will migrate all
+those kernels to the new calling convention and hacky_wrapper will die.
+
+### `manual_kernel_registration`
+
+```
+manual_kernel_registration: True
+```
+
+With this flag set, we will not generate code to automatically register the C++ operator implementation
+to TypeDefault (catchAll dispatch key) with the dispatcher.
+It doesn't make sense to have both `dispatch` section and `manual_kernel_registration: True` for the same op.
+You can find the manual registrations in torch/csrc/autograd/VariableTypeManual.cpp.
+Currently ops have this field set to True should match `MANUAL_CATCHALL` in tools/autograd/gen_variable_type.py
+(It can be a superset of `MANUAL_CATCHALL` but we don't have a use case for it).
+This field should only be used rarely.
 
 ## Writing an implementation in C++
 
@@ -198,9 +421,8 @@ implementation (no header necessary) with a matching signature to
 the generated header from the ATen metadata.  There are many
 simple native functions; take a look at some of them to see what to do.
 
-Although, for the most part, writing an ATen function is mostly writing
-the algorithm you want to implement, there are some less obvious details
-you should also consider.
+Although writing an ATen function is mostly writing the algorithm you want
+to implement, there are some less obvious details you should also consider.
 
 ### Will your function be automatically differentiable?
 
@@ -213,9 +435,113 @@ you will have to write an entry correlating them together in
 `tools/autograd/derivatives.yaml`.
 
 However, in some situations, you can write a function in ATen and it
-will be automatically differentiated!  This can be the case if the function implementation
+will be automatically differentiated! This can be the case if the function implementation
 only calls other operations which are themselves differentiable.  In this
 case, you don't have to write an entry in `tools/autograd/derivatives.yaml`.
+
+### Choosing the right dispatch keyword
+
+After writing a native function in C++, it's important to think about which dispatch keyword
+to use in native_functions.yaml as it gives the dispatcher information about backend and autograd support
+of the implementation.
+
+Here're steps to follow to decide the right dispatch keyword:
+
+1. Think about inference: does your kernel work for all backends?
+
+    - No: you're likely providing different kernels for different backends, e.g.
+      backend-dependent logic is used in the implementation or it's implemented through DispatchStub.
+      DispatchStub only support a backend if you explicitly provide a kernel through `REGISTER_DISPATCH`.
+      Typically it only supports a few in-tree backends like CPU, CUDA, QuantizedCPU etc but not
+      out-of-tree backends like XLA.
+      Write a dispatch section, enumerate all supported backends and point them to the implementations.
+      ```
+      dispatch:
+        CPU: kernel_cpu
+        CUDA: kernel_cuda
+        QuantizedCPU: kernel_quantized_cpu
+      ```
+
+      You're done. Now this op will be called in `CPU/CUDA/QuantizedCPU` backend inference!
+
+      Note: to support training, you're required to write a formula in
+      derivatives.yaml since your backend implementations don't support autograd.
+
+    - Yes: you're likely calling other `at::` ops in the implemetation. Go to step 2.
+
+2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
+    - Yes: in other words, you're providing a `Math` kernel which supports both inference and autograd.
+      To use autograd support for training, simply skip adding a dispatch section or write
+      ```
+      dispatch:
+        Math: kernel
+      ```
+
+      You're done. This will allow this op to be correctly registered for both inference and training.
+
+    - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
+      ```
+      dispatch:
+        DefaultBackend: kernel
+      ```
+
+      You're done. This op will be called in inference for all backends.
+
+      Note: to support training you're required to add a autograd formula,
+      or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
+
+    - No: ops in this category are mainly using `_out` boilerplate where its out version doesn't have a derivative
+      formula defined. For example:
+      ```
+      Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
+      Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
+      Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
+      ```
+
+      `sign_out` uses DispatchStub so the supported backends are enumerated in its dispatch section.
+      For `sign` and `sign_`, write
+      ```
+      dispatch:
+        DefaultBackend: kernel
+      ```
+
+      You're done. This op will be called in inference for all backends.
+
+      Note: to support training you're required to add an autograd formula for `sign`,
+      or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
+
+      Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
+      the implementations and add dispatch section with device keywords instead.
+3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispacher.py).
+It shows for a certain operator, what the computed dispatch table looks like after your registrations.
+
+    ```
+    dispatcher = PythonDispatcher()
+    dispatcher.register(["CPU", "XLA", "AutogradCPU", "Math"])
+    print(dispatcher.dispatchTable()) # Tells you exactly which kernel is used for certain backend.
+    ```
+
+4. TODO: AutogradCPUOrCUDA
+
+Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
+  - direct registration to backend always has higher precendence than alias
+  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > Math`,
+    e.g. adding both `Math` and `DefaultBackend` kernels for one op will completely ignore `Math` kernel for
+    both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
+
+
+
+### Will this function be exposed to python? What are the namespaces?
+
+We don't generate python bindings for all functions. There're certain patterns in function
+name that we skip in python binding generation, e.g. `*_backward`. Check
+`tools/autograd/gen_python_functions.py` for the latest rules.
+
+The generated bindings are either exposed as methods on python_variable or functions on
+the torch._C._nn (marked with `python_module: nn`),
+torch._C._fft (marked with `python_module: fft`),
+or torch._C._linalg (marked with `python_module: linalg`) objects.
 
 ### Can it handle being passed Variables?
 
@@ -248,49 +574,12 @@ is that if you know that you will only ever be called with `Tensor`, a
 direct `at::native` call will be more efficient (as it avoids a dynamic
 dispatch).
 
-### How to handle broadcasting?
-
-Unlike our legacy TH bindings, ATen native functions do not automatically
-handle broadcasting; you will have to insert the necessary broadcasting
-calls yourself.
-
-When writing broadcasting code, we obey the convention that `op` is
-broadcasting, while `s_op` (with the `s_` prefix) is not broadcasting.  The
-relationship is best seen by an example of how you would implement broadcasting
-addition out of non-broadcasting addition:
-
-```
-#include <ATen/ExpandUtils.h>
-
-Tensor add(const Tensor& self, const Tensor& other) {
-  Tensor b_self, b_other;
-  std::tie(b_self, b_other) = expand_outplace(self, other, "add");
-  return s_add(b_self, b_other);
-}
-
-Tensor s_add(const Tensor& self, const Tensor& other) {
-  // non-broadcasting implementation of addition
-}
-```
-
-For inplace operations, the convention looks like this:
-
-```
-Tensor& add_(Tensor& self, const Tensor& other) {
-  Tensor b_other = expand_inplace(self, other, "add_");
-  return s_add_(self, b_other);
-}
-
-Tensor& s_add_(Tensor& self, const Tensor& other) {
-  // non-broadcasting implementation of inplace addition
-}
-```
-
 ### Undefined tensor conventions
 
 By default, `Tensor` arguments to ATen functions are always defined, unless
 you explicitly specified that an undefined tensor was permissible by writing
-`Tensor?` or `Tensor x={}`.
+`Tensor?` or `Tensor? x=[]`, the latter one is needed when you have to assign
+a default value in C++ (e.g. in the middle of other parameters with default values).
 
 The rules for returning undefined Tensors are a bit more subtle, but there
 is only one case you have to remember:

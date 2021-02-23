@@ -6,8 +6,6 @@ namespace caffe2 {
 
 namespace {
 
-constexpr int kFp16CUDADevicePropMajor = 6;
-
 template <class FullyConnectedOp>
 bool RunFullyConnectedOpOnCUDADevice(
     const bool float16_compute,
@@ -140,7 +138,8 @@ bool FullyConnectedGradientOp<
   return RunFullyConnectedGradientOpOnCUDADevice(float16_compute_, this);
 }
 
-#if CUDA_VERSION >= 9000
+
+#ifndef __HIP_PLATFORM_HCC__
 
 // Require these to be defined otherwise TensorCore FC ops will end
 // up calling the default FC implementation which doesn't have
@@ -192,7 +191,8 @@ REGISTER_CUDA_OPERATOR(
         DefaultEngine,
         false /* don't transpose weight */>);
 
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
+
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(
     FC,
     TENSORCORE,
@@ -216,6 +216,7 @@ REGISTER_CUDA_OPERATOR_WITH_ENGINE(
         CUDAContext,
         TensorCoreEngine,
         false /* don't transpose weight */>);
+
 #endif
 
 } // namespace caffe2

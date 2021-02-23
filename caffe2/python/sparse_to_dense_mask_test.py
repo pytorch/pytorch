@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
 
@@ -35,7 +35,8 @@ class TestSparseToDenseMask(TestCase):
             'SparseToDenseMask',
             ['indices', 'values', 'default', 'lengths'],
             ['output'],
-            mask=[999999999, 2])
+            mask=[999999999, 2],
+            max_skipped_indices=3)
         workspace.FeedBlob(
             'indices',
             np.array([2000000000000, 999999999, 2, 3, 4, 5], dtype=np.int32))
@@ -48,11 +49,13 @@ class TestSparseToDenseMask(TestCase):
             workspace.RunOperatorOnce(op)
         except RuntimeError:
             self.fail("Exception raised with only one negative index")
+
+        # 3 invalid inputs should throw.
         workspace.FeedBlob(
             'indices',
-            np.array([2000000000000, 999999999, -2, -3, -4, -5], dtype=np.int32))
+            np.array([-1, 1, 2, 3, 4, 5], dtype=np.int32))
         with self.assertRaises(RuntimeError):
-            workspace.RunOperatorOnce(op)
+            workspace.RunOperatorMultiple(op, 3)
 
     def test_sparse_to_dense_mask_subtensor(self):
         op = core.CreateOperator(

@@ -69,15 +69,13 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
   static constexpr int kNeonNoiseReadSize = kOutputChannels * 16;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
+  explicit PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& mean = Input(1);
-    auto* Y = Output(0);
+
     auto* noiseBlob = ws_->CreateBlob("__CAFFE2_STYLIZER_NOISE__");
     auto defaultNoiseSize = OperatorBase::GetSingleArgument<int>(
         "noise_size", 491 /* prime to avoid artifacts */);
@@ -104,7 +102,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     CAFFE_ENFORCE(mean.numel() == kOutputChannels);
 
     CAFFE_ENFORCE(C == kInputChannels);
-    Y->Resize(N, kOutputChannels, H, W);
+    auto* Y = Output(0, {N, kOutputChannels, H, W}, at::dtype<float>());
 
     runBatch(
         N,
@@ -138,7 +136,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     // For ARM NEON, we read in multiples of kNeonNoiseReadSize since
     // the inner loop is vectorized. Round up to the next highest
     // multiple of kNeonNoiseReadSize
-    size = math::roundUp(size, kNeonNoiseReadSize) + size;
+    size = math::RoundUp(size, kNeonNoiseReadSize) + size;
     noise->Resize(size);
 
     math::RandGaussian<float, CPUContext>(
@@ -410,17 +408,17 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
   // Expect this many channels as output
   static constexpr int kOutputChannels = 4;
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& mean = Input(1);
-    auto* Y = Output(0);
+
     CAFFE_ENFORCE(X.dim() == 4);
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     // Assume BGR or BGRA
     CAFFE_ENFORCE(mean.numel() == kInputChannels);
     CAFFE_ENFORCE(C == kInputChannels);
     // RGB
-    Y->Resize(N, H, W, kOutputChannels);
+    auto* Y = Output(0, {N, H, W, kOutputChannels}, at::dtype<uint8_t>());
 
     runBatch(
         N,

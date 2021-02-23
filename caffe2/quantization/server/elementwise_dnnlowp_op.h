@@ -1,5 +1,4 @@
-#ifndef CAFFE2_OPERATORS_ELEMENTWISE_DNNLOWP_OP_H_
-#define CAFFE2_OPERATORS_ELEMENTWISE_DNNLOWP_OP_H_
+#pragma once
 
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/elementwise_ops.h"
@@ -14,9 +13,9 @@ class UnaryElementwiseWithArgsDNNLowPOp : public Operator<CPUContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
   UnaryElementwiseWithArgsDNNLowPOp(
-    const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws), functor_() {
-  }
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), functor_() {}
 
   bool RunOnDevice() override {
     if (!arguments_parsed_) {
@@ -26,7 +25,7 @@ class UnaryElementwiseWithArgsDNNLowPOp : public Operator<CPUContext> {
       arguments_parsed_ = true;
     }
 
-    auto& input = OperatorBase::Input<int8::Int8TensorCPU>(0).t;
+    auto& input = this->template Input<int8::Int8TensorCPU>(0).t;
     auto& output = Outputs()[0]->template GetMutable<int8::Int8TensorCPU>()->t;
     output.ResizeLike(input);
     functor_(
@@ -34,7 +33,7 @@ class UnaryElementwiseWithArgsDNNLowPOp : public Operator<CPUContext> {
         input.template data<T>(),
         output.template mutable_data<T>());
 
-    PropagateOutputTensorQuantizationParams(
+    dnnlowp::PropagateOutputTensorQuantizationParams(
         this, 0, functor_.GetOutputQuantizationParams());
     return true;
   }
@@ -49,12 +48,11 @@ class BinaryElementwiseDNNLowPOp : public DNNLowPOp<T, FP32_OP> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
   BinaryElementwiseDNNLowPOp(const OperatorDef& operator_def, Workspace* ws)
-    : DNNLowPOp<T, FP32_OP>(operator_def, ws),
-      OP_SINGLE_ARG(bool, "broadcast", enable_broadcast_, 0),
-      OP_SINGLE_ARG(int, "axis", axis_, -1),
-      OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
-      OP_SINGLE_ARG(string, "order", order_, "NCHW") {
-
+      : DNNLowPOp<T, FP32_OP>(operator_def, ws),
+        OP_SINGLE_ARG(bool, "broadcast", enable_broadcast_, 0),
+        OP_SINGLE_ARG(int, "axis", axis_, -1),
+        OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
+        OP_SINGLE_ARG(string, "order", order_, "NCHW") {
     // Figure out the correct axis to use.
     if (enable_broadcast_) {
       if (axis_ != -1) {
@@ -137,5 +135,3 @@ class BinaryElementwiseDNNLowPOp : public DNNLowPOp<T, FP32_OP> {
     }                                                                        \
   };
 } // namespace caffe2
-
-#endif // CAFFE2_OPERATORS_ELEMENTWISE_DNNLOWP_OP_H_

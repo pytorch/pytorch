@@ -1,9 +1,5 @@
 ## @package task
 # Module caffe2.python.task
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 from caffe2.python import core, context
 from caffe2.python.schema import Field, from_blob_list
@@ -23,8 +19,7 @@ def _merge_node_kwargs(a, b):
     return c
 
 
-@context.define_context(allow_default=True)
-class Cluster(object):
+class Cluster(context.DefaultManaged):
     """
     Context that keeps track of all the node names used.
     Users shouldn't have to use them directly, since a Cluster is automatically
@@ -52,9 +47,12 @@ class Cluster(object):
     def node_kwargs(self):
         return self._node_kwargs
 
+    def __repr__(self):
+        return "Cluster(nodes={}, node_kwargs={})".format(
+            self.nodes(), self.node_kwargs())
 
-@context.define_context(allow_default=True)
-class Node(object):
+
+class Node(context.DefaultManaged):
     """
     A Node context is used to indicate that all Tasks instantiated within will
     run on the given node name. (Only the name of the node actually counts.)
@@ -84,6 +82,9 @@ class Node(object):
 
     def __str__(self):
         return self._name
+
+    def __repr__(self):
+        return "Node(name={}, kwargs={})".format(self._name, self._kwargs)
 
     def kwargs(self):
         return self._kwargs
@@ -155,8 +156,7 @@ def add_setup_steps(step, init_nets, exit_nets, name):
     return core.execution_step(name, steps)
 
 
-@context.define_context(allow_default=False)
-class TaskGroup(object):
+class TaskGroup(context.Managed):
     """
     Context that gathers tasks which will run concurrently, potentially on
     multiple nodes. All tasks in the same node will share the same workspace
@@ -167,7 +167,7 @@ class TaskGroup(object):
     will finish execution when the last task of the group finishes.
 
     Example:
-        # supose that s1 ... s5 are execution steps or nets.
+        # suppose that s1 ... s5 are execution steps or nets.
         with TaskGroup() as tg:
             # these tasks go to default node 'local'
             Task(step=s1)
@@ -198,6 +198,13 @@ class TaskGroup(object):
         self._report_steps = []
         self._workspace_type = workspace_type
         self._tasks_by_node = None
+        self._remote_nets = []
+
+    def add_remote_net(self, net):
+        self._remote_nets.append(net)
+
+    def remote_nets(self):
+        return self._remote_nets
 
     def add(self, task):
         assert not self._already_used, (
@@ -338,6 +345,12 @@ class TaskGroup(object):
     def workspace_type(self):
         return self._workspace_type
 
+    def __repr__(self):
+        return "TaskGroup(tasks={}, workspace_type={}, remote_nets={})".format(
+            self._tasks + self._tasks_to_add,
+            self.workspace_type(),
+            self.remote_nets())
+
 
 class TaskOutput(object):
     """
@@ -382,6 +395,9 @@ class TaskOutput(object):
         else:
             return fetched_vals
 
+    def __repr__(self):
+        return "TaskOutput(names={}, values={})".format(self.names, self._values)
+
 
 def final_output(blob_or_record):
     """
@@ -417,9 +433,11 @@ class TaskOutputList(object):
             offset += num
         assert offset == len(values), 'Wrong number of output values.'
 
+    def __repr__(self):
+        return "TaskOutputList(outputs={})".format(self.outputs)
 
-@context.define_context()
-class Task(object):
+
+class Task(context.Managed):
     """
     A Task is composed of an execution step and zero or more outputs.
     Tasks are executed in the context of a TaskGroup, which, in turn, can
@@ -441,7 +459,7 @@ class Task(object):
             with ops.task_instance_exit():
                 ops.Add([globl, local], [globl])
             with ops.task_exit():
-                ops.Mul([globl, globl], [blobl])
+                ops.Mul([globl, globl], [globl])
 
     The task above will create 2 instances that will run in parallel.
     Each instance will copy `local` to `globl` 100 times, Then Add `local`
@@ -518,6 +536,8 @@ class Task(object):
         self._num_instances = num_instances
 
     def __enter__(self):
+        super(Task, self).__enter__()
+
         # temporarily remove from _tasks_to_add to ensure correct order
         if self.group is not None:
             self.group._tasks_to_add.remove(self)
@@ -529,6 +549,8 @@ class Task(object):
         return self
 
     def __exit__(self, type, value, traceback):
+        super(Task, self).__exit__(type, value, traceback)
+
         self._net_builder.__exit__(type, value, traceback)
         if type is None:
             self.set_step(self._net_builder)
@@ -618,6 +640,10 @@ class Task(object):
         self.get_step()
         self._already_used = True
 
+    def __repr__(self):
+        return "Task(name={}, node={}, outputs={})".format(
+            self.name, self.node, self.outputs())
+
 
 class SetupNets(object):
     """
@@ -661,3 +687,7 @@ class SetupNets(object):
 
     def exit(self, exit_net):
         return self.exit_nets
+
+    def __repr__(self):
+        return "SetupNets(init_nets={}, exit_nets={})".format(
+            self.init_nets, self.exit_nets)

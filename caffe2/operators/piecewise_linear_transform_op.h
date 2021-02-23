@@ -2,7 +2,10 @@
 #define CAFFE2_OPERATORS_PIECEWISE_LINEAR_TRANSFORM_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/operator.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(PiecewiseLinearTransform);
 
 namespace caffe2 {
 
@@ -11,8 +14,9 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  PiecewiseLinearTransformOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit PiecewiseLinearTransformOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     binary_ = this->template GetSingleArgument<bool>("binary", false);
 
     // Retrieve transform params (i.e., the linear functions).
@@ -132,11 +136,11 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
 
   bool TransformGeneral() {
     auto& X = Input(0);
-    auto* Y = Output(0);
+
     CAFFE_ENFORCE_EQ(X.dim(), 2);
     int64_t N = X.dim32(0);
     int64_t M = X.dim32(1);
-    Y->ResizeLike(X);
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
     const auto* Xdata = X.template data<T>();
     T* Ydata = Y->template mutable_data<T>();
 
@@ -167,14 +171,14 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
 
   bool TransformBinary() {
     auto& X = Input(PREDICTIONS);
-    auto* Y = Output(0);
+
     CAFFE_ENFORCE(X.dim() == 1 || X.dim() == 2);
     int64_t N = X.dim32(0);
     int64_t M = X.dim() == 2 ? X.dim32(1) : 1;
     CAFFE_ENFORCE(
         M == 1 || M == 2,
         "If binary is set to true, the input must be Nx2 or Nx1 tensor");
-    Y->ResizeLike(X);
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
     const auto* Xdata = X.template data<T>();
     T* Ydata = Y->template mutable_data<T>();
 

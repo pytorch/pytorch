@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, schema
 import numpy as np
@@ -9,6 +9,31 @@ import numpy as np
 import unittest
 import pickle
 import random
+
+class TestField(unittest.TestCase):
+    def testInitShouldSetEmptyParent(self):
+        f = schema.Field([])
+        self.assertTupleEqual(f._parent, (None, 0))
+
+    def testInitShouldSetFieldOffsets(self):
+        f = schema.Field([
+            schema.Scalar(dtype=np.int32),
+            schema.Struct(
+                ('field1', schema.Scalar(dtype=np.int32)),
+                ('field2', schema.List(schema.Scalar(dtype=str))),
+            ),
+            schema.Scalar(dtype=np.int32),
+            schema.Struct(
+                ('field3', schema.Scalar(dtype=np.int32)),
+                ('field4', schema.List(schema.Scalar(dtype=str)))
+            ),
+            schema.Scalar(dtype=np.int32),
+        ])
+        self.assertListEqual(f._field_offsets, [0, 1, 4, 5, 8, 9])
+
+    def testInitShouldSetFieldOffsetsIfNoChildren(self):
+        f = schema.Field([])
+        self.assertListEqual(f._field_offsets, [0])
 
 
 class TestDB(unittest.TestCase):
@@ -25,6 +50,16 @@ class TestDB(unittest.TestCase):
 
     def testListSubclassClone(self):
         class Subclass(schema.List):
+            pass
+
+        s = Subclass(schema.Scalar())
+        clone = s.clone()
+        self.assertIsInstance(clone, Subclass)
+        self.assertEqual(s, clone)
+        self.assertIsNot(clone, s)
+
+    def testListWithEvictedSubclassClone(self):
+        class Subclass(schema.ListWithEvicted):
             pass
 
         s = Subclass(schema.Scalar())
@@ -114,6 +149,20 @@ class TestDB(unittest.TestCase):
         )
         self.assertEquals(s['field2:lengths'], a.lengths)
         self.assertEquals(s['field2:values'], a.items)
+        with self.assertRaises(KeyError):
+            s['fields2:items:non_existent']
+        with self.assertRaises(KeyError):
+            s['fields2:non_existent']
+
+    def testListWithEvictedInStructIndexing(self):
+        a = schema.ListWithEvicted(schema.Scalar(dtype=str))
+        s = schema.Struct(
+            ('field1', schema.Scalar(dtype=np.int32)),
+            ('field2', a)
+        )
+        self.assertEquals(s['field2:lengths'], a.lengths)
+        self.assertEquals(s['field2:values'], a.items)
+        self.assertEquals(s['field2:_evicted_values'], a._evicted_values)
         with self.assertRaises(KeyError):
             s['fields2:items:non_existent']
         with self.assertRaises(KeyError):
@@ -388,6 +437,15 @@ class TestDB(unittest.TestCase):
         assert t.get('field_0', None) == s1
         assert t.get('field_1', None) == s2
         assert t.get('field_2', None) is None
+
+    def testScalarForVoidType(self):
+        s0_good = schema.Scalar((None, (2, )))
+        with self.assertRaises(TypeError):
+            s0_bad = schema.Scalar((np.void, (2, )))
+
+        s1_good = schema.Scalar(np.void)
+        s2_good = schema.Scalar(None)
+        assert s1_good == s2_good
 
     def testScalarShape(self):
         s0 = schema.Scalar(np.int32)

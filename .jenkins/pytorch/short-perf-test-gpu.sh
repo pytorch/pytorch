@@ -1,13 +1,17 @@
 #!/bin/bash
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME="short-perf-test-gpu"
+
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 pushd .jenkins/pytorch/perf_test
 
 echo "Running GPU perf test for PyTorch..."
 
-pip install awscli
+# Trying to uninstall PyYAML can cause problem. Workaround according to:
+# https://github.com/pypa/pip/issues/5247#issuecomment-415571153
+pip install -q awscli --ignore-installed PyYAML
 
 # Set multipart_threshold to be sufficiently high, so that `aws s3 cp` is not a multipart read
 # More info at https://github.com/aws/aws-cli/issues/2321
@@ -22,13 +26,12 @@ fi
 git remote add upstream https://github.com/pytorch/pytorch.git
 git fetch upstream
 IFS=$'\n'
-master_commit_ids=($(git rev-list upstream/master))
-for commit_id in "${master_commit_ids[@]}"; do
+while IFS='' read -r commit_id; do
     if aws s3 ls s3://ossci-perf-test/pytorch/gpu_runtime/${commit_id}.json; then
         LATEST_TESTED_COMMIT=${commit_id}
         break
     fi
-done
+done < <(git rev-list upstream/master)
 aws s3 cp s3://ossci-perf-test/pytorch/gpu_runtime/${LATEST_TESTED_COMMIT}.json gpu_runtime.json
 
 if [[ "$COMMIT_SOURCE" == master ]]; then

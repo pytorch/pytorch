@@ -1,13 +1,15 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
-from caffe2.python import core
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, utils
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.hip_test_util as hiputl
 
 
 class TestConvolutionTranspose(hu.HypothesisTestCase):
@@ -18,7 +20,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
@@ -37,6 +39,11 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         outputs = {}
         for order in ["NCHW", "NHWC"]:
+            # MIOPEN doesn't work with NHWC, fallback to use normal hip
+            if hiputl.run_in_hip(gc, dc) and order == "NHWC":
+                tmp_engine = ""
+            else:
+                tmp_engine = engine
             op = core.CreateOperator(
                 "ConvTranspose",
                 ["X", "w", "b"] if use_bias else ["X", "w"],
@@ -46,13 +53,13 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 pad=pad,
                 adj=adj,
                 order=order,
-                engine=engine,
+                engine=tmp_engine,
                 shared_buffer=int(shared_buffer),
                 device_option=gc,
             )
             if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
+                X_f = utils.NHWC2NCHW(X)
+                w_f = utils.NHWC2NCHW(w)
             else:
                 X_f = X
                 w_f = w
@@ -72,7 +79,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             (batch_size, output_channels, output_size, output_size))
         np.testing.assert_allclose(
             outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
@@ -83,7 +90,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
@@ -102,6 +109,11 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         outputs = {}
         for order in ["NCHW", "NHWC"]:
+            if hiputl.run_in_hip(gc, dc) and order == "NHWC":
+                # MIOPEN doesn't work with NHWC, fallback to use normal hip
+                tmp_engine = ""
+            else:
+                tmp_engine = engine
             op = core.CreateOperator(
                 "ConvTranspose",
                 ["X", "w", "b"] if use_bias else ["X", "w"],
@@ -111,13 +123,13 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 pads=[pad] * 4,
                 adjs=[adj] * 2,
                 order=order,
-                engine=engine,
+                engine=tmp_engine,
                 shared_buffer=int(shared_buffer),
                 device_option=gc,
             )
             if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
+                X_f = utils.NHWC2NCHW(X)
+                w_f = utils.NHWC2NCHW(w)
             else:
                 X_f = X
                 w_f = w
@@ -137,7 +149,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             (batch_size, output_channels, output_size, output_size))
         np.testing.assert_allclose(
             outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
@@ -154,7 +166,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            engine=st.sampled_from(["", "BLOCK"]),
            use_bias=st.booleans(),
            **hu.gcs)
@@ -190,8 +202,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 device_option=gc,
             )
             if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
+                X_f = utils.NHWC2NCHW(X)
+                w_f = utils.NHWC2NCHW(w)
             else:
                 X_f = X
                 w_f = w
@@ -212,7 +224,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             (batch_size, output_channels, output_h, output_w))
         np.testing.assert_allclose(
             outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
@@ -223,19 +235,21 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
            use_bias=st.booleans(),
            compute_dX=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2, deadline=None)
     def test_convolution_transpose_gradients(self, stride, pad, kernel, adj,
                                              size, input_channels,
                                              output_channels, batch_size,
                                              order, engine, use_bias,
                                              compute_dX, gc, dc):
         assume(adj < stride)
+        if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
+            assume(order == "NCHW")
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -255,8 +269,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             no_gradient_to_input=not compute_dX,
         )
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
         self.assertDeviceChecks(dc, op, inputs, [0])
@@ -289,13 +303,13 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "BLOCK"]),
            use_bias=st.booleans(),
            compute_dX=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2, deadline=None)
     def test_convolution_transpose_separate_stride_pad_adj_gradient(
             self, stride_h, stride_w, pad_t, pad_l, pad_b, pad_r, kernel,
             adj_h, adj_w, size, input_channels, output_channels, batch_size,
@@ -326,8 +340,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             no_gradient_to_input=not compute_dX,
         )
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
         self.assertDeviceChecks(dc, op, inputs, [0])
@@ -346,6 +360,69 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             outputs_to_check = [1]
         for i in outputs_to_check:
             self.assertGradientChecks(gc, op, inputs, i, [0])
+
+    @given(stride=st.integers(1, 3),
+           pad=st.integers(0, 3),
+           kernel=st.integers(1, 3),
+           adj=st.integers(0, 2),
+           size=st.integers(7, 10),
+           input_channels=st.integers(1, 8),
+           output_channels=st.integers(1, 8),
+           batch_size=st.integers(0, 4),
+           group=st.integers(1, 4),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
+           shared_buffer=st.booleans(),
+           use_bias=st.booleans(),
+           **hu.gcs)
+    @settings(max_examples=2, deadline=None)
+    def test_convolution_transpose_with_group(
+            self, stride, pad, kernel, adj, size, input_channels,
+            output_channels, batch_size, group, order, engine, shared_buffer,
+            use_bias, gc, dc):
+        assume(adj < stride)
+        # TODO: Group conv_transpose in NHWC not implemented for GPU yet.
+        assume(group == 1 or order == "NCHW" or
+               gc.device_type == caffe2_pb2.CPU)
+        if group != 1 and order == "NHWC":
+            dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
+
+        if hiputl.run_in_hip(gc, dc) and order == "NHWC":
+            engine = ""
+
+        op = core.CreateOperator(
+            "ConvTranspose",
+            ["X", "w", "b"] if use_bias else ["X", "w"],
+            ["Y"],
+            stride=stride,
+            kernel=kernel,
+            pad=pad,
+            adj=adj,
+            group=group,
+            order=order,
+            engine=engine,
+            shared_buffer=int(shared_buffer),
+            device_option=gc,
+        )
+
+        input_channels *= group
+        output_channels *= group
+
+        X = np.random.rand(
+            batch_size, size, size, input_channels).astype(np.float32) - 0.5
+        w = np.random.rand(
+            input_channels, kernel, kernel, int(output_channels / group)) \
+            .astype(np.float32) - 0.5
+        b = np.random.rand(output_channels).astype(np.float32) - 0.5
+        if order == "NCHW":
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
+
+        inputs = [X, w, b] if use_bias else [X, w]
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        for i in range(len(inputs)):
+            self.assertGradientChecks(gc, op, inputs, i, [0])
+
 
 if __name__ == "__main__":
     import unittest

@@ -5,18 +5,14 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-// Disable strict aliasing errors for CUDA 9.
-// The cuda_fp16.h header in CUDA 9 RC triggers this diagnostic.
-// It is included by cusparse.h as well, so guarding the
-// inclusion of that header here is not enough.
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic push
 #endif
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif // __GNUC__
-#endif // CUDA_VERSION >= 9000
+#endif // __HIP_PLATFORM_HCC__
 
 #include <cublas_v2.h>
 #include <curand.h>
@@ -25,42 +21,21 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
-#include "c10/cuda/math_compat.h"
+#include "c10/cuda/CUDAMacros.h"
+#include "c10/cuda/CUDAMathCompat.h"
+#include <c10/cuda/CUDAGuard.h>
 
-// Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
-// corresponds to different declarations (dllexport and dllimport). On
-// Linux/Mac, it just resolves to the same "default visibility" setting.
-#if defined(_MSC_VER)
-#if defined(CAFFE2_BUILD_SHARED_LIBS)
-#define CAFFE2_CUDA_EXPORT __declspec(dllexport)
-#define CAFFE2_CUDA_IMPORT __declspec(dllimport)
-#else
-#define CAFFE2_CUDA_EXPORT
-#define CAFFE2_CUDA_IMPORT
-#endif
-#else
-#if defined(__GNUC__)
-#define CAFFE2_CUDA_EXPORT __attribute__((__visibility__("default")))
-#else
-#define CAFFE2_CUDA_EXPORT
-#endif
-#define CAFFE2_CUDA_IMPORT CAFFE2_CUDA_EXPORT
-#endif
+#define CAFFE2_CUDA_EXPORT C10_EXPORT
 
-// CAFFE2_CUDA_API is a macro that, depends on whether you are building the
-// main caffe2 library or not, resolves to either CAFFE2_CUDA_EXPORT or
-// CAFFE2_CUDA_IMPORT.
-//
-// This is used in e.g. Caffe2's protobuf files: when building the main library,
-// it is defined as CAFFE2_CUDA_EXPORT to fix a Windows global-variable-in-dll
-// issue, and for anyone dependent on Caffe2 it will be defined as
-// CAFFE2_CUDA_IMPORT.
+// CAFFE2_CUDA_API gets translated to CAFFE2_HIP_API in hipify script, which
+// causes a marco redefinition issue with the later definition of
+// CAFFE2_HIP_API, so we exclude this definition when HIP is specified
+#ifndef __HIP_PLATFORM_HCC__
+#define CAFFE2_CUDA_API TORCH_CUDA_CPP_API
+#endif // __HIP_PLATFORM_HCC__
 
-#ifdef CAFFE2_CUDA_BUILD_MAIN_LIB
-#define CAFFE2_CUDA_API CAFFE2_CUDA_EXPORT
-#else
-#define CAFFE2_CUDA_API CAFFE2_CUDA_IMPORT
-#endif
+#define CAFFE2_HIP_EXPORT C10_EXPORT
+#define CAFFE2_HIP_API TORCH_HIP_API
 
 // This is a macro defined for cuda fp16 support. In default, cuda fp16 is
 // supported by NVCC 7.5, but it is also included in the Tegra X1 platform with
@@ -69,28 +44,29 @@
 // CAFFE_HAS_CUDA_FP16 manually.
 
 #ifndef CAFFE_HAS_CUDA_FP16
-#if CUDA_VERSION >= 7050
 #define CAFFE_HAS_CUDA_FP16
-#endif // CUDA_VERSION >= 7050
 #endif // CAFFE_HAS_CUDA_FP16
 
 #ifdef CAFFE_HAS_CUDA_FP16
 #include <cuda_fp16.h>
 #endif
 
+// cuda major revision number below which fp16 compute is not supoorted
+#ifndef __HIP_PLATFORM_HCC__
+constexpr int kFp16CUDADevicePropMajor = 6;
+#else
+constexpr int kFp16CUDADevicePropMajor = 3;
+#endif
+
 // Re-enable strict aliasing diagnostic if it was disabled.
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic pop
 #endif
 #endif // __GNUC__
-#endif // CUDA_VERSION >= 9000
+#endif // __HIP_PLATFORM_HCC__
 
-/**
- * The maximum number of GPUs that caffe2 recognizes.
- */
-#define CAFFE2_COMPILE_TIME_MAX_GPUS 16
 /**
  * The maximum number of peers that each gpu can have when doing p2p setup.
  * Currently, according to NVidia documentation, each device can support a
@@ -102,12 +78,12 @@
 
 namespace caffe2 {
 
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
 /**
  * Empty class to identify TensorCore-based math
  */
 class TensorCoreEngine {};
-#endif
+#endif // __HIP_PLATFORM_HCC__
 
 #if CUDA_VERSION >= 10000
 #define CAFFE2_CUDA_PTRATTR_MEMTYPE type
@@ -162,6 +138,8 @@ CAFFE2_CUDA_API int GetGPUIDForPointer(const void* ptr);
 
 /**
  * Gets the device property for the given device. This function is thread safe.
+ * The initial run on this function is ~1ms/device; however, the results are
+ * cached so subsequent runs should be much faster.
  */
 CAFFE2_CUDA_API const cudaDeviceProp& GetDeviceProperty(const int device);
 
@@ -279,14 +257,11 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
   for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); \
        i += blockDim.x * gridDim.x)
 
-// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
-// kernels. This is not supported by Apple platforms so we special case it.
-// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if defined(__APPLE__) || defined(__HIPCC__)
-#define CUDA_KERNEL_ASSERT(...)
-#else // __APPLE__
-#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
-#endif // __APPLE__
+#define CUDA_2D_KERNEL_LOOP(i, n, j, m)                             \
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n);   \
+       i += blockDim.x * gridDim.x)                                 \
+    for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
+         j += blockDim.y * gridDim.y)
 
 // The following helper functions are here so that you can write a kernel call
 // when you are not particularly interested in maxing out the kernels'
@@ -302,13 +277,22 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
 // The number of cuda threads to use. Since work is assigned to SMs at the
 // granularity of a block, 128 is chosen to allow utilizing more SMs for
 // smaller input sizes.
+// 1D grid
 constexpr int CAFFE_CUDA_NUM_THREADS = 128;
+// 2D grid
+constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMX = 16;
+constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMY = 16;
+
 // The maximum number of blocks to use in the default kernel call. We set it to
 // 4096 which would work for compute capability 2.x (where 65536 is the limit).
 // This number is very carelessly chosen. Ideally, one would like to look at
 // the hardware at runtime, and pick the number of blocks that makes most
 // sense for the specific runtime environment. This is a todo item.
+// 1D grid
 constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 4096;
+// 2D grid
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX = 128;
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMY = 128;
 
 constexpr int kCUDAGridDimMaxX = 2147483647;
 constexpr int kCUDAGridDimMaxY = 65535;
@@ -326,21 +310,33 @@ inline int CAFFE_GET_BLOCKS(const int N) {
       1);
 }
 
-class DeviceGuard {
- public:
-  explicit DeviceGuard(int newDevice) : previous_(CaffeCudaGetDevice()) {
-    if (previous_ != newDevice) {
-      CaffeCudaSetDevice(newDevice);
-    }
-  }
+/**
+ * @brief Compute the number of blocks needed to run N threads for a 2D grid
+ */
+inline dim3 CAFFE_GET_BLOCKS_2D(const int N, const int /* M */) {
+  dim3 grid;
+  // Not calling the 1D version for each dim to keep all constants as literals
 
-  ~DeviceGuard() noexcept {
-    CaffeCudaSetDevice(previous_);
-  }
+  grid.x = std::max(
+      std::min(
+          (N + CAFFE_CUDA_NUM_THREADS_2D_DIMX - 1) /
+              CAFFE_CUDA_NUM_THREADS_2D_DIMX,
+          CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX),
+      // Use at least 1 block, since CUDA does not allow empty block
+      1);
 
- private:
-  int previous_;
-};
+  grid.y = std::max(
+      std::min(
+          (N + CAFFE_CUDA_NUM_THREADS_2D_DIMY - 1) /
+              CAFFE_CUDA_NUM_THREADS_2D_DIMY,
+          CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMY),
+      // Use at least 1 block, since CUDA does not allow empty block
+      1);
+
+  return grid;
+}
+
+using CUDAGuard = c10::cuda::CUDAGuard;
 
 template <typename T, int N>
 struct SimpleArray {

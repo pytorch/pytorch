@@ -78,6 +78,7 @@ from .categorical import Categorical
 from .cauchy import Cauchy
 from .chi2 import Chi2
 from .constraint_registry import biject_to, transform_to
+from .continuous_bernoulli import ContinuousBernoulli
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exp_family import ExponentialFamily
@@ -90,15 +91,18 @@ from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
 from .independent import Independent
 from .kl import kl_divergence, register_kl
+from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
+from .lkj_cholesky import LKJCholesky
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import LowRankMultivariateNormal
+from .mixture_same_family import MixtureSameFamily
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
 from .negative_binomial import NegativeBinomial
 from .normal import Normal
-from .one_hot_categorical import OneHotCategorical
+from .one_hot_categorical import OneHotCategorical, OneHotCategoricalStraightThrough
 from .pareto import Pareto
 from .poisson import Poisson
 from .relaxed_bernoulli import RelaxedBernoulli
@@ -107,7 +111,9 @@ from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
 from .uniform import Uniform
+from .von_mises import VonMises
 from .weibull import Weibull
+from . import transforms
 
 __all__ = [
     'Bernoulli',
@@ -116,6 +122,7 @@ __all__ = [
     'Categorical',
     'Cauchy',
     'Chi2',
+    'ContinuousBernoulli',
     'Dirichlet',
     'Distribution',
     'Exponential',
@@ -124,22 +131,28 @@ __all__ = [
     'Gamma',
     'Geometric',
     'Gumbel',
+    'HalfCauchy',
+    'HalfNormal',
     'Independent',
+    'Kumaraswamy',
     'Laplace',
     'LogNormal',
     'LogisticNormal',
     'LowRankMultivariateNormal',
+    'MixtureSameFamily',
     'Multinomial',
     'MultivariateNormal',
     'NegativeBinomial',
     'Normal',
     'OneHotCategorical',
+    'OneHotCategoricalStraightThrough',
     'Pareto',
     'RelaxedBernoulli',
     'RelaxedOneHotCategorical',
     'StudentT',
     'Poisson',
     'Uniform',
+    'VonMises',
     'Weibull',
     'TransformedDistribution',
     'biject_to',

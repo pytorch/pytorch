@@ -1,11 +1,11 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 
@@ -72,6 +72,7 @@ class TestAffineChannelOp(serial.SerializedTestCase):
            H=st.integers(1, 3), W=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]), is_learnable=st.booleans(),
            in_place=st.booleans(), **hu.gcs)
+    @settings(deadline=10000)
     def test_affine_channel_3d(
             self, N, C, T, H, W, order, is_learnable, in_place, gc, dc):
         op = core.CreateOperator(

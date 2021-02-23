@@ -5,7 +5,13 @@
 
 #define THBlas_(NAME) TH_CONCAT_4(TH,Real,Blas_,NAME)
 
-#include "generic/THBlas.h"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THBlas.h>
+#include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THBlas.h>
+#include <TH/THGenerateBFloat16Type.h>
+
+#include <TH/generic/THBlas.h>
+#include <TH/THGenerateHalfType.h>
 
 #endif

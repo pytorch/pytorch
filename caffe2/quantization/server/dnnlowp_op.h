@@ -8,6 +8,7 @@
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/dnnlowp.h"
+#include "caffe2/quantization/server/fbgemm_pack_blob.h"
 #include "caffe2/quantization/server/op_wrapper.h"
 #include "caffe2/quantization/server/sigmoid.h"
 #include "caffe2/quantization/server/tanh.h"
@@ -44,7 +45,12 @@ namespace caffe2 {
  *        C2 operators with DNNLOWP engine have the following arguments:
  *        - dequantize_output (default=false): when true, output is dequantized
  *          as fp32. Useful when we're only quantizing individual operators
- *          rather than doing end-to-end quantization.
+ *          rather than doing end-to-end quantization. Conv operators don't
+            support dequantize_output option as an exception because doing so
+            complicate the implementation significantly and having a separate
+            Dequantize operator doesn't add much overhead because Conv ops are
+            usually used in deep networks where regions of quantization are
+            long chains.
  *        - followed_by (default=null): can be relu, sigmoid, or tanh. When
  *          specified, the current operator is only followed by relu, sigmoid,
  *          or tanh, and this fact can be used for more accurate output
@@ -55,14 +61,15 @@ namespace caffe2 {
  *          this option is intended for debugging accuracy issues.
  *
  *        For the following quantization method related options, please refer
- *        to deeplearning/quantization/dnnlowp/dnnlowp.cc for more details.
+ *        to caffe2/quantization/server/dnnlowp.cc for more details.
  *
  *        - activation_quantization_precision (default=8)
  *        - weight_quantization_precision (default=8)
  *        - requantization_multiplier_precision (default=32)
  *        - eltwise_quantization_precision (default=16)
  *        - force_scale_power_of_two (default=0)
- *        - preserve_sparsity (default=0)
+ *        - preserve_activation_sparsity (default=0)
+ *        - preserve_weight_sparsity (default=0)
  *        - activation_quantization_kind (default=min_max)
  *        - weight_quantization_kind (default=min_max)
  */
@@ -72,16 +79,22 @@ class DNNLowPOp : public Operator<CPUContext> {
 
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  DNNLowPOp(const OperatorDef& operator_def, Workspace *ws)
-    : Operator<CPUContext>(operator_def, ws),
-      in_qparams_(InputSize()),
-      qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
-
+  DNNLowPOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        in_qparams_(InputSize()),
+        qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
 #ifdef _OPENMP
     if (FLAGS_caffe2_omp_num_threads > 0) {
       omp_set_num_threads(FLAGS_caffe2_omp_num_threads);
     }
 #endif
+    if (this->debug_def().engine() == "DNNLOWP_16" ||
+        this->debug_def().engine() == "DNNLOWP_ROWWISE_16") {
+      LOG(WARNING)
+          << this->debug_def().engine()
+          << " is an experimental feature mostly for testing accuracy with "
+             "fixed-point precision higher than 8 and performance is very slow";
+    }
   }
 
   virtual ~DNNLowPOp() {
@@ -92,9 +105,13 @@ class DNNLowPOp : public Operator<CPUContext> {
 
  protected:
   const TensorCPU& InputTensorCPU_(int idx) {
-    return InputIsType<int8::Int8TensorCPU>(idx)
-        ? OperatorBase::Input<int8::Int8TensorCPU>(idx).t
-        : Input(idx);
+    if (InputIsType<int8::Int8TensorCPU>(idx)) {
+      return this->Input<int8::Int8TensorCPU>(idx).t;
+    } else if (InputIsType<Int8FCDNNLowPPackedWeightBlob>(idx)) {
+      return this->Input<Int8FCDNNLowPPackedWeightBlob>(idx).original_tensor;
+    } else {
+      return Input(idx);
+    }
   }
 
   TensorCPU* OutputTensorCPU_(int idx) {
@@ -102,6 +119,17 @@ class DNNLowPOp : public Operator<CPUContext> {
       return Output(idx);
     } else {
       return &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
+    }
+  }
+
+  Tensor*
+  OutputTensorCPU_(int idx, at::IntArrayRef dims, at::TensorOptions options) {
+    if (dequantize_output_) {
+      return Output(idx, dims, options.device(CPU));
+    } else {
+      auto* t = &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
+      ReinitializeTensor(t, dims, options.device(CPU));
+      return t;
     }
   }
 
@@ -119,23 +147,36 @@ class DNNLowPOp : public Operator<CPUContext> {
       return;
     }
 
-    const float *actual = nullptr;
-    vector<float> actual_temp;
+    const float* actual = nullptr;
+    std::vector<float> actual_temp;
     if (OutputTensorCPU_(0)->template IsType<float>()) {
       actual = OutputTensorCPU_(0)->template data<float>();
+      std::string op_type = this->debug_def().type();
+      bool relu_fused = op_type.length() >= 4 &&
+          op_type.compare(op_type.length() - 4, 4, "Relu") == 0;
+      if (GetSingleArgument<std::string>("followed_by", "") == "Relu" &&
+          !relu_fused) {
+        // If dequantize_output_ is true and relu is not fused,
+        // dnnlowp op won't clip negative values. Do it here.
+        actual_temp.resize(OutputTensorCPU_(0)->numel());
+        for (int i = 0; i < Output(0)->numel(); ++i) {
+          actual_temp[i] = std::max(0.f, actual[i]);
+        }
+        actual = actual_temp.data();
+      }
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
-      Dequantize(
-          OutputTensorCPU_(0)->template data<float>(),
+      fbgemm::Dequantize<T>(
+          OutputTensorCPU_(0)->template data<T>(),
           actual_temp.data(),
           OutputTensorCPU_(0)->numel(),
           out_qparams_);
       actual = actual_temp.data();
     }
 
-    float *ref = Fp32Op_()->Get()->Output(0)->template mutable_data<float>();
+    float* ref = Fp32Op_()->Get()->Output(0)->template mutable_data<float>();
     if (followed_by_ == "Relu") {
-      for (int i = 0; i < Output(0)->numel(); ++i) {
+      for (int i = 0; i < OutputTensorCPU_(0)->numel(); ++i) {
         ref[i] = std::max(0.f, ref[i]);
       }
     }
@@ -146,13 +187,13 @@ class DNNLowPOp : public Operator<CPUContext> {
 
   void RunOnDeviceEpilogue_() {
     if (dequantize_output_) {
-      Dequantize(
+      fbgemm::Dequantize<T>(
           out_temp_.data(),
           OutputTensorCPU_(0)->template mutable_data<float>(),
           OutputTensorCPU_(0)->numel(),
           out_qparams_);
     } else {
-      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+      dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
     }
 
     MeasureQuantizationError_();
@@ -174,13 +215,18 @@ class DNNLowPOp : public Operator<CPUContext> {
     }
   }
 
-  void GetOutputQuantizationParams_() {
+  void GetOutputQuantizationParams_(
+      dnnlowp::TensorQuantizationParams* out_qparams_overwrite = nullptr) {
     using namespace dnnlowp;
 
     ParseDNNLowPOperatorArguments_();
 
     if (HasStaticQuantization(this)) {
-      out_qparams_ = GetStaticQuantizationParamsOf(this, 0);
+      if (out_qparams_overwrite != nullptr) {
+        out_qparams_ = *out_qparams_overwrite;
+      } else {
+        out_qparams_ = GetStaticQuantizationParamsOf(this, 0);
+      }
 
       if (measure_quantization_error_) {
         // To measure quantization error, run ref fp32 impl.
@@ -196,7 +242,11 @@ class DNNLowPOp : public Operator<CPUContext> {
       // though it never actually uses it.
       Fp32Op_()->DequantizeInput();
       Fp32Op_()->Get()->RunOnDevice();
-      out_qparams_ = Fp32Op_()->GetOutputQuantizationParams(qfactory_.get());
+      if (out_qparams_overwrite != nullptr) {
+        out_qparams_ = *out_qparams_overwrite;
+      } else {
+        out_qparams_ = Fp32Op_()->GetOutputQuantizationParams(qfactory_.get());
+      }
     }
   }
 
@@ -217,8 +267,8 @@ class DNNLowPOp : public Operator<CPUContext> {
   std::unique_ptr<dnnlowp::QuantizationFactory> qfactory_;
 
   std::vector<T> out_temp_;
-    // Buffer to store quantized output temporarily
-    // when we output dequantized values.
+  // Buffer to store quantized output temporarily
+  // when we output dequantized values.
 
   dnnlowp::QuantizationErrorStats quantization_error_stats_;
 

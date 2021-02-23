@@ -9,7 +9,7 @@
 namespace caffe2 {
 namespace predictor_utils {
 
-CAFFE2_API const NetDef& getNet(
+TORCH_API const NetDef& getNet(
     const MetaNetDef& def,
     const std::string& name) {
   for (const auto& n : def.nets()) {
@@ -37,7 +37,7 @@ std::unique_ptr<MetaNetDef> extractMetaNetDef(
     Blob blob;
     DeserializeBlob(proto, &blob);
     CAFFE_ENFORCE(blob.template IsType<string>());
-    auto def = caffe2::make_unique<MetaNetDef>();
+    auto def = std::make_unique<MetaNetDef>();
     CAFFE_ENFORCE(def->ParseFromString(blob.template Get<string>()));
     return def;
   }

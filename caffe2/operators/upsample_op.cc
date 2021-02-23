@@ -24,7 +24,6 @@ namespace caffe2 {
 template <>
 bool UpsampleBilinearOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
 
   if (InputSize() == 2) {
     const auto& scales = Input(1);
@@ -41,7 +40,10 @@ bool UpsampleBilinearOp<float, CPUContext>::RunOnDevice() {
   const int input_width = X.dim32(3);
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
-  Y->Resize(batch_size, num_channels, output_height, output_width);
+  auto* Y = Output(
+      0,
+      {batch_size, num_channels, output_height, output_width},
+      at::dtype<float>());
 
   const float* input = X.data<float>();
   float* output = Y->mutable_data<float>();
@@ -84,7 +86,6 @@ template <>
 bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
-  auto* dX = Output(0);
 
   if (InputSize() == 3) {
     const auto& scales = Input(2);
@@ -103,7 +104,10 @@ bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   const int input_width = dY.dim32(3);
   const int output_height = X.dim32(2);
   const int output_width = X.dim32(3);
-  dX->Resize(batch_size, num_channels, output_height, output_width);
+  auto* dX = Output(
+      0,
+      {batch_size, num_channels, output_height, output_width},
+      at::dtype<float>());
   math::Set<float, CPUContext>(
       dX->numel(), 0.0f, dX->mutable_data<float>(), &context_);
 

@@ -24,10 +24,10 @@ bool SwishGradientOp<CPUContext>::DoRunWithType() {
   auto& Xin = Input(X);
   auto& Yin = Input(Y);
   auto& DYin = Input(DY);
-  auto* DXout = Output(DX);
+
   CAFFE_ENFORCE_EQ(Xin.numel(), Yin.numel());
   CAFFE_ENFORCE_EQ(DYin.numel(), Yin.numel());
-  DXout->ResizeLike(Yin);
+  auto* DXout = Output(DX, Yin.sizes(), at::dtype<float>());
 
   const float* Xdata = Xin.template data<float>();
   const float* Ydata = Yin.template data<float>();

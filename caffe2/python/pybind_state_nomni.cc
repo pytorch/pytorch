@@ -205,14 +205,14 @@ void addNomnigraphMethods(pybind11::module& m) {
           "createNode",
           [](NNGraph* g, GenericOperator& op) {
             return g->createNode(
-                nom::util::make_unique<GenericOperator>(op.getName()));
+                std::make_unique<GenericOperator>(op.getName()));
           },
           py::return_value_policy::reference_internal)
       .def(
           "createNode",
           [](NNGraph* g, nom::repr::Tensor& tensor) {
             return g->createNode(
-                nom::util::make_unique<nom::repr::Tensor>(tensor.getName()));
+                std::make_unique<nom::repr::Tensor>(tensor.getName()));
           },
           py::return_value_policy::reference_internal)
       .def(
@@ -300,7 +300,7 @@ void addNomnigraphMethods(pybind11::module& m) {
   };
   auto setAnnotation = [](NNGraph::NodeRef n, Caffe2Annotation& annot) {
     auto* nnOp = nn::get<NeuralNetOperator>(n);
-    nnOp->setAnnotation(nom::util::make_unique<Caffe2Annotation>(annot));
+    nnOp->setAnnotation(std::make_unique<Caffe2Annotation>(annot));
   };
   auto getAnnotation = [](NNGraph::NodeRef n) {
     return getOrAddCaffe2Annotation(n);
@@ -328,6 +328,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           "tensor", getTensor, py::return_value_policy::reference)
       .def("getInputs", getInputs, py::return_value_policy::reference)
       .def("getOutputs", getOutputs, py::return_value_policy::reference)
+      .def("hasProducer", [](NNGraph::NodeRef n) { return nn::hasProducer(n); })
       .def("getProducer", getProducer, py::return_value_policy::reference)
       .def("getConsumers", getConsumers, py::return_value_policy::reference)
       .def_property_readonly(
@@ -382,7 +383,19 @@ void addNomnigraphMethods(pybind11::module& m) {
 
   // Subgraph matching API
   py::class_<NNSubgraph> nnsubgraph(m, "NNSubgraph");
-  nnsubgraph.def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
+  nnsubgraph.def(py::init<>())
+      .def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
+      .def(
+          "__repr__",
+          [](NNSubgraph* g) {
+            return nom::converters::convertToDotString<NNGraph>(*g, NNPrinter);
+          })
+      .def(
+          "addNode",
+          [](NNSubgraph* sg, NNGraph::NodeRef node) { sg->addNode(node); })
+      .def(
+          "induceEdges",
+          [](NNSubgraph* sg) { nom::algorithm::induceEdges(sg); })
       .def_property_readonly(
           "nodes",
           [](NNSubgraph& s) {

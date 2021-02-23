@@ -1,51 +1,62 @@
-ir_version: 3
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "0.4"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "1"
+    name: "Constant_0"
     op_type: "Constant"
     attribute {
       name: "value"
       t {
         dims: 4
-        data_type: INT64
+        data_type: 7
         raw_data: "\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000"
       }
       type: TENSOR
     }
   }
   node {
-    output: "2"
-    op_type: "Constant"
+    input: "6"
+    output: "3"
+    name: "ConstantOfShape_1"
+    op_type: "ConstantOfShape"
     attribute {
       name: "value"
       t {
-        dims: 4
-        data_type: INT64
-        raw_data: "\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000"
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
       }
       type: TENSOR
     }
   }
   node {
     input: "0"
-    input: "2"
-    output: "3"
-    op_type: "Reshape"
+    input: "3"
+    output: "4"
+    name: "Expand_2"
+    op_type: "Expand"
   }
   node {
-    input: "3"
+    input: "4"
     input: "1"
-    output: "4"
+    output: "5"
+    name: "Tile_3"
     op_type: "Tile"
   }
   name: "torch-jit-export"
+  initializer {
+    dims: 1
+    data_type: 7
+    name: "6"
+    raw_data: "\004\000\000\000\000\000\000\000"
+  }
   input {
     name: "0"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 1
@@ -58,10 +69,10 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "5"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 1

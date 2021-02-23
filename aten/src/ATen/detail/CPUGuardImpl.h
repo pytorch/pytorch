@@ -1,12 +1,12 @@
 #pragma once
 
-#include <c10/detail/DeviceGuardImplInterface.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
 namespace at {
 namespace detail {
 
-struct CPUGuardImpl final : public c10::detail::DeviceGuardImplInterface {
+struct CPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   CPUGuardImpl() {}
   DeviceType type() const override {
     return DeviceType::CPU;
@@ -27,13 +27,35 @@ struct CPUGuardImpl final : public c10::detail::DeviceGuardImplInterface {
   }
   Stream getStream(Device d) const noexcept override {
     // no-op
-    return Stream(Device(DeviceType::CPU, -1), 0);
+    return Stream(Stream::DEFAULT, Device(DeviceType::CPU, -1));
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     // no-op
-    return Stream(Device(DeviceType::CPU, -1), 0);
+    return Stream(Stream::DEFAULT, Device(DeviceType::CPU, -1));
   }
+  DeviceIndex deviceCount() const noexcept override {
+    return 1;
+  }
+
+  // Event-related functions
+  void record(void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const EventFlag flag) const override {
+    TORCH_CHECK(false, "CPU backend doesn't support events.");
+  }
+  void block(
+    void* event,
+    const Stream& stream) const override {
+    TORCH_CHECK(false, "CPU backend doesn't support events.")
+  }
+  bool queryEvent(void* event) const override {
+    TORCH_CHECK(false, "CPU backend doesn't support events.")
+  }
+  void destroyEvent(
+    void* event,
+    const DeviceIndex device_index) const noexcept override { }
 };
 
 }} // namespace at::detail

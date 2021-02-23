@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import (
     core, gradient_checker, rnn_cell, workspace, scope, utils
@@ -923,7 +923,7 @@ class RNNCellTest(hu.HypothesisTestCase):
             [[0], [1], [0, 1]]
         ),
     )
-    @ht_settings(max_examples=10)
+    @ht_settings(max_examples=10, deadline=None)
     def test_unroll_mul(self, input_tensor, num_layers, outputs_with_grad):
         outputs = []
         nets = []
@@ -956,7 +956,7 @@ class RNNCellTest(hu.HypothesisTestCase):
             [[0], [1], [0, 1], [0, 2], [0, 1, 2, 3]]
         )
     )
-    @ht_settings(max_examples=10)
+    @ht_settings(max_examples=10, deadline=None)
     @utils.debug
     def test_unroll_lstm(self, input_tensor, dim_out, outputs_with_grads,
                          **kwargs):
@@ -989,7 +989,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         residual=st.booleans(),
         final_dropout=st.booleans(),
     )
-    @ht_settings(max_examples=10)
+    @ht_settings(max_examples=10, deadline=None)
     @utils.debug
     def test_unroll_attention(self, input_tensor, encoder_length,
                                     encoder_dim, hidden_units,
@@ -1060,7 +1060,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         forward_only=st.booleans(),
         drop_states=st.booleans(),
     )
-    @ht_settings(max_examples=10)
+    @ht_settings(max_examples=10, deadline=None)
     def test_layered_lstm(self, input_tensor, **kwargs):
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
             for memory_optim in [False, True]:
@@ -1102,6 +1102,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         memory_optim=st.booleans(),
         outputs_with_grads=st.sampled_from([[0], [1], [0, 1, 2, 3]]),
     )
+    @ht_settings(max_examples=10, deadline=None)
     def lstm_base(self, seed, lstm_type, outputs_with_grads, memory_optim,
                   input_tensor, forget_bias, fwd_only, drop_states):
         np.random.seed(seed)
@@ -1280,6 +1281,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            decoder_state_dim=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            **hu.gcs)
+    @ht_settings(max_examples=10, deadline=None)
     def test_lstm_with_regular_attention(
         self,
         encoder_output_length,
@@ -1310,6 +1312,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            decoder_state_dim=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            **hu.gcs)
+    @ht_settings(max_examples=10, deadline=None)
     def test_lstm_with_recurrent_attention(
         self,
         encoder_output_length,
@@ -1340,6 +1343,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            decoder_state_dim=st.integers(4, 4),
            batch_size=st.integers(5, 5),
            **hu.gcs)
+    @ht_settings(max_examples=2, deadline=None)
     def test_lstm_with_dot_attention_same_dim(
         self,
         encoder_output_length,
@@ -1370,6 +1374,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            decoder_state_dim=st.integers(5, 5),
            batch_size=st.integers(1, 3),
            **hu.gcs)
+    @ht_settings(max_examples=2, deadline=None)
     def test_lstm_with_dot_attention_different_dim(
         self,
         encoder_output_length,
@@ -1400,6 +1405,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            decoder_state_dim=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            **hu.gcs)
+    @ht_settings(max_examples=5, deadline=None)
     def test_lstm_with_coverage_attention(
         self,
         encoder_output_length,
@@ -1561,13 +1567,14 @@ class RNNCellTest(hu.HypothesisTestCase):
            dtype=st.sampled_from([np.float32, np.float16]),
            use_sequence_lengths=st.booleans(),
            **hu.gcs)
+    @ht_settings(max_examples=10, deadline=None)
     def test_lstm_unit_recurrent_network(
             self, seed, n, d, t, dtype, dc, use_sequence_lengths, gc):
         np.random.seed(seed)
         if dtype == np.float16:
-            # only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [do for do in dc if do.device_type == caffe2_pb2.CUDA]
+            # only supported with CUDA/HIP
+            assume(gc.device_type == workspace.GpuDeviceType)
+            dc = [do for do in dc if do.device_type == workspace.GpuDeviceType]
 
         if use_sequence_lengths:
             op_inputs = ['hidden_t_prev', 'cell_t_prev', 'gates_t',
@@ -1621,6 +1628,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            max_num_units=st.integers(1, 3),
            num_layers=st.integers(2, 3),
            batch_size=st.integers(1, 3))
+    @ht_settings(max_examples=10, deadline=None)
     def test_multi_lstm(
         self,
         input_length,

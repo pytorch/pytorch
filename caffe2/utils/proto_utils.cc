@@ -1,6 +1,6 @@
 #include "caffe2/utils/proto_utils.h"
 
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 
 #include <fcntl.h>
 #include <cerrno>
@@ -10,11 +10,11 @@
 #include <google/protobuf/io/coded_stream.h>
 
 #ifndef CAFFE2_USE_LITE_PROTO
-#include <google/protobuf/text_format.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
+#include <google/protobuf/text_format.h>
 #else
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
-#endif  // !CAFFE2_USE_LITE_PROTO
+#endif // !CAFFE2_USE_LITE_PROTO
 
 #include "caffe2/core/logging.h"
 
@@ -53,7 +53,6 @@ C10_EXPORT bool IsCPUDeviceType(int device_type) {
       PROTO_CPU,
       PROTO_MKLDNN,
       PROTO_IDEEP,
-      PROTO_ONLY_FOR_TEST,
   };
   return cpu_types.count(device_type);
 }
@@ -104,7 +103,9 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
  public:
   explicit IfstreamInputStream(const string& filename)
       : ifs_(filename.c_str(), std::ios::in | std::ios::binary) {}
-  ~IfstreamInputStream() { ifs_.close(); }
+  ~IfstreamInputStream() {
+    ifs_.close();
+  }
 
   int Read(void* buffer, int size) {
     if (!ifs_) {
@@ -117,10 +118,16 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
  private:
   std::ifstream ifs_;
 };
-}  // namespace
+} // namespace
 
 C10_EXPORT string ProtoDebugString(const MessageLite& proto) {
-  return proto.SerializeAsString();
+  string serialized = proto.SerializeAsString();
+  for (char& c : serialized) {
+    if (c < 0x20 || c >= 0x7f) {
+      c = '?';
+    }
+  }
+  return serialized;
 }
 
 C10_EXPORT bool ParseProtoFromLargeString(
@@ -152,17 +159,17 @@ C10_EXPORT void WriteProtoToBinaryFile(
   LOG(FATAL) << "Not implemented yet.";
 }
 
-#else  // CAFFE2_USE_LITE_PROTO
+#else // CAFFE2_USE_LITE_PROTO
 
 // Full protocol buffer.
 
+using ::google::protobuf::Message;
+using ::google::protobuf::io::CodedInputStream;
+using ::google::protobuf::io::CodedOutputStream;
 using ::google::protobuf::io::FileInputStream;
 using ::google::protobuf::io::FileOutputStream;
 using ::google::protobuf::io::ZeroCopyInputStream;
-using ::google::protobuf::io::CodedInputStream;
 using ::google::protobuf::io::ZeroCopyOutputStream;
-using ::google::protobuf::io::CodedOutputStream;
-using ::google::protobuf::Message;
 
 namespace TextFormat {
 C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
@@ -172,8 +179,7 @@ C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
     auto num_replaced = c10::ReplaceAll(bc_spec, "cuda_gpu_id", "device_id");
     if (num_replaced) {
       LOG(ERROR) << "Your model was serialized in Protobuf TextFormat and "
-                 << "it has "
-                 << num_replaced
+                 << "it has " << num_replaced
                  << " places using the deprecated field name 'cuda_gpu_id'!\n"
                  << spec
                  << "\nPlease re-export your model in Protobuf binary format "
@@ -181,7 +187,8 @@ C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
     }
   }
 
-  return ::google::protobuf::TextFormat::ParseFromString(std::move(bc_spec), proto);
+  return ::google::protobuf::TextFormat::ParseFromString(
+      std::move(bc_spec), proto);
 }
 } // namespace TextFormat
 
@@ -209,10 +216,17 @@ C10_EXPORT bool ReadProtoFromTextFile(const char* filename, Message* proto) {
 
 C10_EXPORT void WriteProtoToTextFile(
     const Message& proto,
-    const char* filename) {
+    const char* filename,
+    bool throwIfError) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
-  CAFFE_ENFORCE(google::protobuf::TextFormat::Print(proto, output));
+  if(!google::protobuf::TextFormat::Print(proto, output)) {
+     if (throwIfError) {
+       CAFFE_THROW("Cannot write proto to text file: ", filename);
+     } else {
+       LOG(ERROR) << "Cannot write proto to text file: " << filename;
+     }
+  }
   delete output;
   close(fd);
 }
@@ -220,7 +234,7 @@ C10_EXPORT void WriteProtoToTextFile(
 C10_EXPORT bool ReadProtoFromBinaryFile(
     const char* filename,
     MessageLite* proto) {
-#if defined (_MSC_VER)  // for MSC compiler binary flag needs to be specified
+#if defined(_MSC_VER) // for MSC compiler binary flag needs to be specified
   int fd = open(filename, O_RDONLY | O_BINARY);
 #else
   int fd = open(filename, O_RDONLY);
@@ -253,7 +267,7 @@ C10_EXPORT void WriteProtoToBinaryFile(
   close(fd);
 }
 
-#endif  // CAFFE2_USE_LITE_PROTO
+#endif // CAFFE2_USE_LITE_PROTO
 
 C10_EXPORT ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
   for (auto& arg : def.arg()) {
@@ -268,8 +282,7 @@ C10_EXPORT ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
             ProtoDebugString(def));
       } else {
         LOG(WARNING) << "Duplicated argument name [" << arg.name()
-                     << "] found in operator def: "
-                     << ProtoDebugString(def);
+                     << "] found in operator def: " << ProtoDebugString(def);
       }
     }
     arg_map_[arg.name()] = arg;
@@ -280,7 +293,9 @@ C10_EXPORT ArgumentHelper::ArgumentHelper(const NetDef& netdef) {
   for (auto& arg : netdef.arg()) {
     CAFFE_ENFORCE(
         arg_map_.count(arg.name()) == 0,
-        "Duplicated argument name [", arg.name(), "] found in net def: ",
+        "Duplicated argument name [",
+        arg.name(),
+        "] found in net def: ",
         ProtoDebugString(netdef));
     arg_map_[arg.name()] = arg;
   }
@@ -297,8 +312,23 @@ template <typename InputType, typename TargetType>
 bool SupportsLosslessConversion(const InputType& value) {
   return static_cast<InputType>(static_cast<TargetType>(value)) == value;
 }
+} // namespace
+bool operator==(const TensorProto& l, const TensorProto& r) {
+  return l.SerializeAsString() == r.SerializeAsString();
 }
 
+std::ostream& operator<<(std::ostream& output, const TensorProto& n) {
+  output << n.SerializeAsString();
+  return output;
+}
+bool operator==(const QTensorProto& l, const QTensorProto& r) {
+  return l.SerializeAsString() == r.SerializeAsString();
+}
+
+std::ostream& operator<<(std::ostream& output, const QTensorProto& n) {
+  output << n.SerializeAsString();
+  return output;
+}
 bool operator==(const NetDef& l, const NetDef& r) {
   return l.SerializeAsString() == r.SerializeAsString();
 }
@@ -398,6 +428,8 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(uint16_t, ints, true)
 INSTANTIATE_GET_REPEATED_ARGUMENT(size_t, ints, true)
 INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings, false)
 INSTANTIATE_GET_REPEATED_ARGUMENT(NetDef, nets, false)
+INSTANTIATE_GET_REPEATED_ARGUMENT(TensorProto, tensors, false)
+INSTANTIATE_GET_REPEATED_ARGUMENT(QTensorProto, qtensors, false)
 #undef INSTANTIATE_GET_REPEATED_ARGUMENT
 
 #define CAFFE2_MAKE_SINGULAR_ARGUMENT(T, fieldname)                      \
@@ -415,6 +447,14 @@ CAFFE2_MAKE_SINGULAR_ARGUMENT(int, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int64_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
+
+template <>
+C10_EXPORT Argument MakeArgument(const string& name, const NetDef& value) {
+  Argument arg;
+  arg.set_name(name);
+  *arg.mutable_n() = value;
+  return arg;
+}
 
 template <>
 C10_EXPORT bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);
@@ -507,6 +547,28 @@ C10_EXPORT const Argument& GetArgument(const NetDef& def, const string& name) {
   }
 }
 
+C10_EXPORT const Argument* GetArgumentPtr(
+    const OperatorDef& def,
+    const string& name) {
+  int index = GetArgumentIndex(def.arg(), name);
+  if (index != -1) {
+    return &def.arg(index);
+  } else {
+    return nullptr;
+  }
+}
+
+C10_EXPORT const Argument* GetArgumentPtr(
+    const NetDef& def,
+    const string& name) {
+  int index = GetArgumentIndex(def.arg(), name);
+  if (index != -1) {
+    return &def.arg(index);
+  } else {
+    return nullptr;
+  }
+}
+
 C10_EXPORT bool GetFlagArgument(
     const google::protobuf::RepeatedPtrField<Argument>& args,
     const string& name,
@@ -533,10 +595,11 @@ GetFlagArgument(const NetDef& def, const string& name, bool default_value) {
   return GetFlagArgument(def.arg(), name, default_value);
 }
 
-C10_EXPORT Argument* GetMutableArgument(
+template <typename Def>
+Argument* GetMutableArgumentImpl(
     const string& name,
     const bool create_if_missing,
-    OperatorDef* def) {
+    Def* def) {
   for (int i = 0; i < def->arg_size(); ++i) {
     if (def->arg(i).name() == name) {
       return def->mutable_arg(i);
@@ -552,4 +615,70 @@ C10_EXPORT Argument* GetMutableArgument(
   }
 }
 
-}  // namespace caffe2
+C10_EXPORT Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    OperatorDef* def) {
+  return GetMutableArgumentImpl(name, create_if_missing, def);
+}
+
+C10_EXPORT Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    NetDef* def) {
+  return GetMutableArgumentImpl(name, create_if_missing, def);
+}
+
+C10_EXPORT void cleanupExternalInputsAndOutputs(NetDef* net) {
+  std::vector<std::string> oldExternalInputs;
+  for (const auto& input : net->external_input()) {
+    oldExternalInputs.emplace_back(input);
+  }
+  std::vector<std::string> oldExternalOutputs;
+  for (const auto& output : net->external_output()) {
+    oldExternalOutputs.emplace_back(output);
+  }
+
+  net->clear_external_input();
+  net->clear_external_output();
+
+  std::set<std::string> inputSet;
+  for (const auto& input : oldExternalInputs) {
+    if (inputSet.count(input)) {
+      // Prevent duplicate external inputs.
+      continue;
+    }
+    inputSet.insert(input);
+    net->add_external_input(input);
+  }
+
+  // Set of blobs that are external inputs or outputs of some operators.
+  std::set<std::string> allOutputs(inputSet.begin(), inputSet.end());
+  for (const auto& op : net->op()) {
+    for (const auto& input : op.input()) {
+      if (inputSet.count(input) || allOutputs.count(input)) {
+        continue;
+      }
+      // Add missing external inputs.
+      inputSet.insert(input);
+      net->add_external_input(input);
+    }
+    for (const auto& output : op.output()) {
+      allOutputs.insert(output);
+    }
+  }
+
+  std::set<std::string> outputSet;
+  for (const auto& output : oldExternalOutputs) {
+    if (!allOutputs.count(output)) {
+      continue;
+    }
+    if (outputSet.count(output)) {
+      continue;
+    }
+    outputSet.insert(output);
+    net->add_external_output(output);
+  }
+}
+
+} // namespace caffe2

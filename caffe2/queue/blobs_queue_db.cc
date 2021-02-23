@@ -10,6 +10,11 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/queue/blobs_queue.h"
 
+#ifdef CAFFE2_USE_MKLDNN
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
+
 namespace caffe2 {
 namespace db {
 
@@ -20,7 +25,7 @@ class CreateBlobsQueueDBOp : public Operator<CPUContext> {
       : Operator<CPUContext>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    std::unique_ptr<db::DB> db = caffe2::make_unique<BlobsQueueDB>(
+    std::unique_ptr<db::DB> db = std::make_unique<BlobsQueueDB>(
         "",
         db::READ,
         OperatorBase::Input<std::shared_ptr<BlobsQueue>>(0),
@@ -36,6 +41,12 @@ class CreateBlobsQueueDBOp : public Operator<CPUContext> {
 };
 
 REGISTER_CPU_OPERATOR(CreateBlobsQueueDB, CreateBlobsQueueDBOp<CPUContext>);
+
+#ifdef CAFFE2_USE_MKLDNN
+REGISTER_IDEEP_OPERATOR(
+    CreateBlobsQueueDB,
+    IDEEPFallbackOp<CreateBlobsQueueDBOp<CPUContext>, SkipIndices<0>>);
+#endif
 
 OPERATOR_SCHEMA(CreateBlobsQueueDB)
     .NumInputs(1)

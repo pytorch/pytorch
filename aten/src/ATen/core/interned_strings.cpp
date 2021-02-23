@@ -1,4 +1,4 @@
-#include "ATen/core/interned_strings.h"
+#include <ATen/core/interned_strings.h>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -7,11 +7,17 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "ATen/core/interned_strings_class.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Optional.h"
+#include <c10/util/Exception.h>
+#include <ATen/core/interned_strings_class.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
+
+const std::string& domain_prefix() {
+  static const std::string _domain_prefix = "org.pytorch.";
+  return _domain_prefix;
+}
 
 Symbol InternedStrings::symbol(const std::string& s) {
   std::lock_guard<std::mutex> guard(mutex_);
@@ -23,6 +29,9 @@ std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
   // we can bypass the need to acquire a lock
   // to read the map for Builtins because we already
   // know their string value
+#if defined C10_MOBILE
+  return customString(sym);
+#else
   switch (sym) {
 #define DEFINE_CASE(ns, s) \
   case static_cast<unique_t>(ns::s): \
@@ -32,9 +41,14 @@ std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
     default:
       return customString(sym);
   }
+#endif
 }
 
 Symbol InternedStrings::ns(Symbol sym) {
+#if defined C10_MOBILE
+  std::lock_guard<std::mutex> guard(mutex_);
+  return sym_to_info_.at(sym).ns;
+#else
   switch (sym) {
 #define DEFINE_CASE(ns, s) \
   case static_cast<unique_t>(ns::s): \
@@ -46,6 +60,7 @@ Symbol InternedStrings::ns(Symbol sym) {
       return sym_to_info_.at(sym).ns;
     }
   }
+#endif
 }
 
 Symbol InternedStrings::_symbol(const std::string& s) {
@@ -103,17 +118,17 @@ Symbol Symbol::ns() const {
 }
 
 std::string Symbol::domainString() const {
-  return domain_prefix + ns().toUnqualString();
+  return domain_prefix() + ns().toUnqualString();
 }
 
 Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::string & s) {
-  if (d.compare(0, domain_prefix.size(), domain_prefix) != 0) {
+  if (d.compare(0, domain_prefix().size(), domain_prefix()) != 0) {
     std::ostringstream ss;
     ss << "Symbol: domain string is expected to be prefixed with '"
-       << domain_prefix << "', e.g. 'org.pytorch.aten'";
+       << domain_prefix() << "', e.g. 'org.pytorch.aten'";
     throw std::runtime_error(ss.str());
   }
-  std::string qualString = d.substr(domain_prefix.size()) + "::" + s;
+  std::string qualString = d.substr(domain_prefix().size()) + "::" + s;
   return fromQualString(qualString);
 }
 

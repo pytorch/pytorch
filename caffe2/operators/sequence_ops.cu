@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <cub/cub.cuh>
 
 #include "caffe2/core/context_gpu.h"
@@ -202,8 +204,7 @@ bool AddPaddingOp<CUDAContext>::MakePadding(
 
   int32_t* lengths_out_ptr = nullptr;
   if (OutputSize() > 1) {
-    auto* lengths_out = Output(1);
-    lengths_out->Resize(lengths_size);
+    auto* lengths_out = Output(1, {lengths_size}, at::dtype<int32_t>());
     lengths_out_ptr = lengths_out->template mutable_data<int32_t>();
   }
 
@@ -225,6 +226,8 @@ bool AddPaddingOp<CUDAContext>::MakePadding(
           endPaddingWidth_,
           out_ptr,
           lengths_out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -234,10 +237,10 @@ template <>
 template <typename T>
 bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   const auto& in = Input(0);
-  CAFFE_ENFORCE_GE(in.ndim(), 1);
-  const int32_t outer_size = in.dims()[0];
+  CAFFE_ENFORCE_GE(in.dim(), 1);
+  const int32_t outer_size = in.sizes()[0];
   const auto block_size = std::accumulate(
-      in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<int64_t>());
+      in.sizes().begin() + 1, in.sizes().end(), 1, std::multiplies<int64_t>());
 
   // if no lengths is provided, assume it is a single full-span entry
   const int32_t* lengths_ptr = nullptr;
@@ -245,15 +248,12 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   if (InputSize() > 1) {
     const auto& lengths = Input(1);
     lengths_ptr = lengths.data<int32_t>();
-    lengths_size = lengths.size();
+    lengths_size = lengths.numel();
   }
 
-  auto* out = Output(0);
-  {
-    auto out_dims = in.dims().vec();
-    out_dims[0] -= (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
-    out->Resize(std::move(out_dims));
-  }
+  auto out_dims = in.sizes().vec();
+  out_dims[0] -= (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
+  auto* out = Output(0, out_dims, at::dtype<T>());
   const auto* in_ptr = in.template data<T>();
   auto* out_ptr = out->template mutable_data<T>();
 
@@ -272,8 +272,7 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
 
   int32_t* lengths_out_ptr = nullptr;
   if (OutputSize() > 1) {
-    auto* lengths_out = Output(1);
-    lengths_out->Resize(lengths_size);
+    auto* lengths_out = Output(1, {lengths_size}, at::dtype<int32_t>());
     lengths_out_ptr = lengths_out->template mutable_data<int32_t>();
   }
 
@@ -293,6 +292,8 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
           endPaddingWidth_,
           out_ptr,
           lengths_out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -355,7 +356,7 @@ void GatherPaddingOp<CUDAContext>::GatherPadding(
         &lengths_prefix_sum_,
         &context_);
     gather_padding_kernel<T>
-        <<<min(block_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+        <<<std::min(block_size, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
@@ -368,6 +369,7 @@ void GatherPaddingOp<CUDAContext>::GatherPadding(
             lengths_prefix_sum_.template data<int>(),
             padding_start_ptr,
             padding_end_ptr);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 REGISTER_CUDA_OPERATOR(RemovePadding, RemovePaddingOp<CUDAContext>);

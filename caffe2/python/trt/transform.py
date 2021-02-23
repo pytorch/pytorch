@@ -6,15 +6,13 @@ TensorRT related transformation
 Note that ONNX-TRT enforce an NCHW input!
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
-from caffe2.python import core, workspace
-import caffe2.python.onnx.frontend as c2_front
+from caffe2.python import workspace
 import caffe2.python._import_c_extension as C
 import numpy as np
 
@@ -35,7 +33,7 @@ def check_gpu_():
        raise Exception("TensorRT related functions require CUDA support")
 
 def convert_onnx_model_to_trt_op(onnx_model,
-        max_batch_size=50,
+        max_batch_size=64,
         max_workspace_size=2*1024*1024,
         verbosity=1,
         debug_builder=False):
@@ -77,13 +75,13 @@ def transform_caffe2_net(
         pred_net,
         input_shapes,
         populate_shapes = False,
-        max_batch_size=50,
+        max_batch_size=64,
         max_workspace_size=2*1024*1024,
         verbosity=1,
         debug_builder=False,
         build_serializable_op=True):
     """
-    Transfrom the caffe2_net by collapsing TRT-runnable nodes into trt c2 ops
+    Transform the caffe2_net by collapsing TRT-runnable nodes into trt c2 ops
     """
     check_gpu_()
 

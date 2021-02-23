@@ -93,7 +93,8 @@ __global__ void RoIAlignBackwardFeature(
     const int pooled_width,
     const int sampling_ratio,
     T* bottom_diff,
-    const T* bottom_rois) {
+    const T* bottom_rois,
+    bool continuous_coordinate) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // (n, c, ph, pw) is an element in the pooled output
     int pw = index % pooled_width;
@@ -105,18 +106,19 @@ __global__ void RoIAlignBackwardFeature(
     int roi_batch_ind = offset_bottom_rois[0];
 
     // Do not using rounding; this implementation detail is critical
-    T roi_start_w = offset_bottom_rois[1] * spatial_scale;
-    T roi_start_h = offset_bottom_rois[2] * spatial_scale;
-    T roi_end_w = offset_bottom_rois[3] * spatial_scale;
-    T roi_end_h = offset_bottom_rois[4] * spatial_scale;
-    // T roi_start_w = roundf(offset_bottom_rois[1] * spatial_scale);
-    // T roi_start_h = roundf(offset_bottom_rois[2] * spatial_scale);
-    // T roi_end_w = roundf(offset_bottom_rois[3] * spatial_scale);
-    // T roi_end_h = roundf(offset_bottom_rois[4] * spatial_scale);
+    T roi_offset = continuous_coordinate ? T(0.5) : 0;
+    T roi_start_w = offset_bottom_rois[1] * spatial_scale - roi_offset;
+    T roi_start_h = offset_bottom_rois[2] * spatial_scale - roi_offset;
+    T roi_end_w = offset_bottom_rois[3] * spatial_scale - roi_offset;
+    T roi_end_h = offset_bottom_rois[4] * spatial_scale - roi_offset;
 
-    // Force malformed ROIs to be 1x1
-    T roi_width = c10::cuda::compat::max(roi_end_w - roi_start_w, (T)1.);
-    T roi_height = c10::cuda::compat::max(roi_end_h - roi_start_h, (T)1.);
+    T roi_width = roi_end_w - roi_start_w;
+    T roi_height = roi_end_h - roi_start_h;
+    if (!continuous_coordinate) { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_width = c10::cuda::compat::max(roi_width, (T)1.);
+      roi_height = c10::cuda::compat::max(roi_height, (T)1.);
+    }
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
@@ -188,28 +190,28 @@ __global__ void RoIAlignBackwardFeature(
 } // namespace
 
 template <>
-bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to
-                        // "forward" op (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
 
   // Must zero-out dX before accumulating gradients
   // (TODO): Kaiming - is this safe?
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
 
-  if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
+  if (dY.numel() > 0) { // Handle possibly empty gradient if there were no rois
     RoIAlignBackwardFeature<float>
-        <<<CAFFE_GET_BLOCKS(dY.size()),
+        <<<CAFFE_GET_BLOCKS(dY.numel()),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
-            dY.size(),
+            dY.numel(),
             dY.data<float>(),
             R.dim32(0),
             spatial_scale_,
@@ -220,7 +222,9 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
             pooled_width_,
             sampling_ratio_,
             dX->template mutable_data<float>(),
-            R.data<float>());
+            R.data<float>(),
+            aligned_);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -228,4 +232,12 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
 REGISTER_CUDA_OPERATOR(
     RoIAlignGradient,
     RoIAlignGradientOp<float, CUDAContext>);
+
+template <typename T>
+using RoIAlignGradientCUDAOp = RoIAlignGradientOp<T, CUDAContext>;
+
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
+    RoIAlignGradient,
+    caffe2::RoIAlignGradientCUDAOp<float>);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/core/common.h"
+#include <cstdint>
 
 namespace caffe2 {
 
@@ -17,7 +17,7 @@ namespace caffe2 {
  * Behavior is roughly equivalent to pseudocode:
  *
  * pos = 0
- * for (i = 0..index_size-1)
+ * for (i = 0..output_size-1)
  *   for (k = 0..block_size-1)
  *     out[i*block_size + k] = 0
  *   for (j = 0..lengths[i]-1)
@@ -29,6 +29,8 @@ namespace caffe2 {
  *     for (k = 0..block_size-1)
  *       out[i*block_size + k] /= lengths[i]
  *
+ * TODO: make this API also take "offsets" rather than "lengths" to match the
+ *       API for PyTorch's EmbeddingBag
  */
 template <
     typename IndexType,
@@ -36,10 +38,10 @@ template <
     typename OutType,
     bool IS_WEIGHT_POSITIONAL = false>
 void EmbeddingLookup(
-    const int64_t block_size,
-    const int64_t output_size,
-    const int64_t index_size,
-    const int64_t data_size,
+    const std::int64_t block_size,
+    const std::int64_t output_size,
+    const std::int64_t index_size,
+    const std::int64_t data_size,
     const InType* input,
     const IndexType* indices,
     const int* lengths,

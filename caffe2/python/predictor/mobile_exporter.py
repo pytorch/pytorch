@@ -1,10 +1,10 @@
 ## @package mobile_exporter
 # Module caffe2.python.mobile_exporter
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.python import core, utils
 from caffe2.proto import caffe2_pb2
 import numpy as np
@@ -92,9 +92,14 @@ def Export(workspace, net, params):
 
     # Now we make input/output_blobs line up with what Predictor expects.
     del predict_net.external_input[:]
-    predict_net.external_input.extend(input_blobs)
+
+    new_external_inputs = input_blobs
+    for external_input in proto.external_input:
+        if external_input not in new_external_inputs:
+            new_external_inputs.append(external_input)
+
     # For populating weights
-    predict_net.external_input.extend(proto.external_input)
+    predict_net.external_input.extend(new_external_inputs)
     # Ensure the output is also consistent with what we want
     del predict_net.external_output[:]
     predict_net.external_output.extend(output_blobs)

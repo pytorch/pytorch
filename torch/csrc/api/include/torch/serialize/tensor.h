@@ -1,25 +1,20 @@
 #pragma once
 
-namespace at {
-class Tensor;
-} // namespace at
+#include <torch/serialize/archive.h>
+#include <torch/types.h>
 
 namespace torch {
-using at::Tensor;
-namespace serialize {
-class OutputArchive;
-class InputArchive;
-} // namespace serialize
-} // namespace torch
-
-namespace torch {
-/// Serializes a `Tensor` into an `OutputArchive`.
-serialize::OutputArchive& operator<<(
+inline serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const Tensor& tensor);
+    const Tensor& tensor) {
+  archive.write("0", tensor);
+  return archive;
+}
 
-/// Deserializes a `Tensor` from an `InputArchive`.
-serialize::InputArchive& operator>>(
+inline serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
-    Tensor& tensor);
+    Tensor& tensor) {
+  archive.read("0", tensor);
+  return archive;
+}
 } // namespace torch

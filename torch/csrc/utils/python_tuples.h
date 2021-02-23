@@ -1,9 +1,9 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_numbers.h"
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 inline void THPUtils_packInt64Array(PyObject *tuple, size_t size, const int64_t *sizes) {
   for (size_t i = 0; i != size; ++i) {

@@ -1,0 +1,7 @@
+scheme("TestAppTests")
+open_report(false)
+clean(true)
+suppress_xcode_output(true)
+force_quit_simulator(true)
+include_simulator_logs(false)
+device('iPhone 11 (13.2.2)')

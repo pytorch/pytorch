@@ -1,27 +1,27 @@
 // updateOutput, updateGradInput Kernels ported from Sergey Zagoruyko's pyinn, which itself was a
 // port from Caffe
 
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCNumerics.cuh"
-#include "THCReduceApplyUtils.cuh"
-#include "THCSortUtils.cuh"
-#include "THCTensorMathReduce.cuh"
-#include "SharedMem.cuh"
-#include "common.h"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCSortUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>
+#include <THCUNN/SharedMem.cuh>
+#include <THCUNN/common.h>
 #include <algorithm>
+#include <c10/macros/Macros.h>
 
 
-const int WARP_SIZE = 32;
 // Crude benchmarks suggest 256 is better than 512 and 1024
 // TODO: Autotune/use better heuristics, improve speed more.
 const int MAX_BLOCK_SIZE = 256;
 
 static int getGradParamsNumThreads(int batchSize){
 //warp per item in a batch, up to a maximum
-   return std::min(batchSize * WARP_SIZE, MAX_BLOCK_SIZE);
+   return std::min(batchSize * C10_WARP_SIZE, MAX_BLOCK_SIZE);
 
 }
 
@@ -76,9 +76,13 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
     const IndexType offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
         const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
@@ -134,13 +138,19 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
 
     AccT value = ScalarConvert<int, AccT>::to(0);
 
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
+#ifdef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {
           int h_out = h + padHeight - kh * dilationHeight;
           int w_out = w + padWidth - kw * dilationWidth;
@@ -203,9 +213,9 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
 
   AccT grad = ScalarConvert<float, AccT>::to(0.0);
 
-  const int laneId = threadIdx.x % WARP_SIZE;
-  const int batch = threadIdx.x / WARP_SIZE;
-  const int nwarps = blockDim.x / WARP_SIZE;
+  const int laneId = threadIdx.x % C10_WARP_SIZE;
+  const int batch = threadIdx.x / C10_WARP_SIZE;
+  const int nwarps = blockDim.x / C10_WARP_SIZE;
   const int imageElements = outputWidth * outputHeight;
   // Use warp per item.  In the original kernel, a threadblock was used to sum over NHW.
   // Here, we use a warp to sum values over HW dimension, and if batchSize is larger than the
@@ -217,7 +227,7 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   // bring a nice speed-up.
   for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){
     // Warp-stride loop over elements in a batch item
-    for (IndexType idx = laneId; idx < imageElements; idx += WARP_SIZE) {
+    for (IndexType idx = laneId; idx < imageElements; idx += C10_WARP_SIZE) {
     // Need to calculate the following: batch position, and offset into the gradOutput
     // in height, and width. We can intuit the corresponding position in the input from
     // the other parameters we have
@@ -254,5 +264,8 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   }
 }
 
-#include "generic/SpatialDepthwiseConvolution.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialDepthwiseConvolution.cu>
+#include <THC/THCGenerateFloatTypes.h>
+
+#include <THCUNN/generic/SpatialDepthwiseConvolution.cu>
+#include <THC/THCGenerateBFloat16Type.h>

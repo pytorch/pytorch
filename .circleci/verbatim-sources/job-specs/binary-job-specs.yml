@@ -1,0 +1,394 @@
+  binary_linux_build:
+    <<: *binary_linux_build_params
+    steps:
+    - checkout
+    - calculate_docker_image_tag
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+            source "/pytorch/.circleci/scripts/binary_linux_build.sh"
+            # Preserve build log
+            if [ -f /pytorch/build/.ninja_log ]; then
+              cp /pytorch/build/.ninja_log /final_pkgs
+            fi
+    - run:
+        name: Output binary sizes
+        no_output_timeout: "1m"
+        command: |
+            ls -lah /final_pkgs
+    - run:
+        name: save binary size
+        no_output_timeout: "5m"
+        command: |
+            source /env
+            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            python3 -mpip install requests && \
+            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
+            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+    - persist_to_workspace:
+        root: /
+        paths: final_pkgs
+
+    - store_artifacts:
+        path: /final_pkgs
+
+    # This should really just be another step of the binary_linux_build job above.
+    # This isn't possible right now b/c the build job uses the docker executor
+    # (otherwise they'd be really really slow) but this one uses the macine
+    # executor (b/c we have to run the docker with --runtime=nvidia and we can't do
+    # that on the docker executor)
+  binary_linux_test:
+    <<: *binary_linux_test_upload_params
+    machine:
+        image: ubuntu-1604:202007-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - checkout
+    - attach_workspace:
+        at: /home/circleci/project
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        name: Prepare test code
+        no_output_timeout: "1h"
+        command: .circleci/scripts/binary_linux_test.sh
+    - run:
+        <<: *binary_run_in_docker
+
+  binary_upload:
+    parameters:
+      package_type:
+        type: string
+        description: "What type of package we are uploading (eg. wheel, libtorch, conda)"
+        default: "wheel"
+      upload_subfolder:
+        type: string
+        description: "What subfolder to put our package into (eg. cpu, cudaX.Y, etc.)"
+        default: "cpu"
+    docker:
+      - image: continuumio/miniconda3
+    environment:
+      - DRY_RUN: disabled
+      - PACKAGE_TYPE: "<< parameters.package_type >>"
+      - UPLOAD_SUBFOLDER: "<< parameters.upload_subfolder >>"
+    steps:
+      - attach_workspace:
+          at: /tmp/workspace
+      - checkout
+      - designate_upload_channel
+      - run:
+          name: Install dependencies
+          no_output_timeout: "1h"
+          command: |
+            conda install -yq anaconda-client
+            pip install -q awscli
+      - run:
+          name: Do upload
+          no_output_timeout: "1h"
+          command: |
+            AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}" \
+              AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}" \
+              ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
+              .circleci/scripts/binary_upload.sh
+
+  # Nighlty build smoke tests defaults
+  # These are the second-round smoke tests. These make sure that the binaries are
+  # correct from a user perspective, testing that they exist from the cloud are
+  # are runnable. Note that the pytorch repo is never cloned into these jobs
+  ##############################################################################
+  smoke_linux_test:
+    <<: *binary_linux_test_upload_params
+    machine:
+      image: ubuntu-1604:202007-01
+    steps:
+    - checkout
+    - calculate_docker_image_tag
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        name: Test
+        no_output_timeout: "1h"
+        command: |
+          set -ex
+          cat >/home/circleci/project/ci_test_script.sh \<<EOL
+          # The following code will be executed inside Docker container
+          set -eux -o pipefail
+          /builder/smoke_test.sh
+          # The above code will be executed inside Docker container
+          EOL
+    - run:
+        <<: *binary_run_in_docker
+
+  smoke_mac_test:
+    <<: *binary_linux_test_upload_params
+    macos:
+      xcode: "12.0"
+    steps:
+      - checkout
+      - run:
+          <<: *binary_checkout
+      - run:
+          <<: *binary_populate_env
+      - brew_update
+      - run:
+          <<: *binary_install_miniconda
+      - run:
+          name: Build
+          no_output_timeout: "1h"
+          command: |
+            set -ex
+            source "/Users/distiller/project/env"
+            export "PATH=$workdir/miniconda/bin:$PATH"
+            # TODO unbuffer and ts this, but it breaks cause miniconda overwrites
+            # tclsh. But unbuffer and ts aren't that important so they're just
+            # disabled for now
+            ./builder/smoke_test.sh
+
+  binary_mac_build:
+    <<: *binary_mac_params
+    macos:
+      xcode: "12.0"
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - checkout
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - brew_update
+    - run:
+        <<: *binary_install_miniconda
+
+    - run:
+        name: Build
+        no_output_timeout: "90m"
+        command: |
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
+          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
+          cat "$script"
+          source "$script"
+
+    - run:
+        name: Test
+        no_output_timeout: "1h"
+        command: |
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
+          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
+          cat "$script"
+          source "$script"
+
+    - persist_to_workspace:
+        root: /Users/distiller/project
+        paths: final_pkgs
+
+    - store_artifacts:
+        path: /Users/distiller/project/final_pkgs
+
+  binary_macos_arm64_build:
+    <<: *binary_mac_params
+    macos:
+      xcode: "12.3.0"
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - checkout
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - brew_update
+    - run:
+        <<: *binary_install_miniconda
+
+    - run:
+        name: Build
+        no_output_timeout: "90m"
+        command: |
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
+          export CROSS_COMPILE_ARM64=1
+          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
+          cat "$script"
+          source "$script"
+
+    - persist_to_workspace:
+        root: /Users/distiller/project
+        paths: final_pkgs
+
+    - store_artifacts:
+        path: /Users/distiller/project/final_pkgs
+
+
+  binary_ios_build:
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "12.0"
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - checkout
+    - run_brew_for_ios_build
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
+          cat "$script"
+          source "$script"
+    - run:
+        name: Test
+        no_output_timeout: "30m"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_test.sh"
+          cat "$script"
+          source "$script"
+    - persist_to_workspace:
+        root: /Users/distiller/workspace/
+        paths: ios
+
+  binary_ios_upload:
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "12.0"
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - checkout
+    - run_brew_for_ios_build
+    - run:
+        name: Upload
+        no_output_timeout: "1h"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_upload.sh"
+          cat "$script"
+          source "$script"
+
+  binary_windows_build:
+    <<: *binary_windows_params
+    parameters:
+      build_environment:
+        type: string
+        default: ""
+      executor:
+        type: string
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
+    executor: <<parameters.executor>>
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - checkout
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+          set -eux -o pipefail
+          script="/c/w/p/.circleci/scripts/binary_windows_build.sh"
+          cat "$script"
+          source "$script"
+    - persist_to_workspace:
+        root: "C:/w"
+        paths: final_pkgs
+    - store_artifacts:
+        path: C:/w/final_pkgs
+
+  binary_windows_test:
+    <<: *binary_windows_params
+    parameters:
+      build_environment:
+        type: string
+        default: ""
+      executor:
+        type: string
+        default: "windows-medium-cpu-with-nvidia-cuda"
+    executor: <<parameters.executor>>
+    steps:
+    - checkout
+    - attach_workspace:
+        at: c:/users/circleci/project
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        name: Test
+        no_output_timeout: "1h"
+        command: |
+          set -eux -o pipefail
+          script="/c/w/p/.circleci/scripts/binary_windows_test.sh"
+          cat "$script"
+          source "$script"
+
+  smoke_windows_test:
+    <<: *binary_windows_params
+    parameters:
+      build_environment:
+        type: string
+        default: ""
+      executor:
+        type: string
+        default: "windows-medium-cpu-with-nvidia-cuda"
+    executor: <<parameters.executor>>
+    steps:
+    - checkout
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        name: Test
+        no_output_timeout: "1h"
+        command: |
+          set -eux -o pipefail
+          export TEST_NIGHTLY_PACKAGE=1
+          script="/c/w/p/.circleci/scripts/binary_windows_test.sh"
+          cat "$script"
+          source "$script"
+
+  anaconda_prune:
+    parameters:
+      packages:
+        type: string
+        description: "What packages are we pruning? (quoted, space-separated string. eg. 'pytorch', 'torchvision torchaudio', etc.)"
+        default: "pytorch"
+      channel:
+        type: string
+        description: "What channel are we pruning? (eq. pytorch-nightly)"
+        default: "pytorch-nightly"
+    docker:
+      - image: continuumio/miniconda3
+    environment:
+      - PACKAGES: "<< parameters.packages >>"
+      - CHANNEL: "<< parameters.channel >>"
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          no_output_timeout: "1h"
+          command: |
+            conda install -yq anaconda-client
+      - run:
+          name: Prune packages
+          no_output_timeout: "1h"
+          command: |
+              ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
+              scripts/release/anaconda-prune/run.sh

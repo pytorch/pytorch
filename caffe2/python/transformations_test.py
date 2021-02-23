@@ -13,10 +13,10 @@
 # limitations under the License.
 ##############################################################################
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from hypothesis import given
 import hypothesis.strategies as st
@@ -107,14 +107,6 @@ class TestTransformations(tu.TestCase):
         self._fuse_nnpack_convrelu(net, 2)
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
         assert net.Proto().op[1].output[0] != net.Proto().op[1].input[0]
-
-    def test_transformer_SinkMaxPool(self):
-        net = self._base_test_net()
-        net.MaxPool(["Y"], ["Y1"], kernel=3)
-        net.Relu(["Y1"], ["Y1"])
-        transformer.SinkMaxPool(net)
-        assert tu.str_compare(net.Proto().op[1].type, "Relu")
-        assert tu.str_compare(net.Proto().op[2].type, "MaxPool")
 
     @given(
         size=st.integers(7, 10),
@@ -328,16 +320,15 @@ class TestTransformations(tu.TestCase):
             atol=1e-04
         )
 
-    def test_converterEnforceUnusedInputs(self):
+    def test_converterDontEnforceUnusedInputs(self):
         net = core.Net("net")
         net.Relu(["X"], ["Y"])
         net.Proto().external_input.extend(["fake"])
         # This should now work
         transformer.AddNNPACK(net)  # just testing the converter
 
-    def test_converterEnforceUnusedOutputs(self):
+    def test_converterDontEnforceUnusedOutputs(self):
         net = core.Net("net")
         net.Relu(["X"], ["Y"])
         net.Proto().external_output.extend(["fake"])
-        with self.assertRaises(Exception):
-            transformer.AddNNPACK(net)  # just testing the converter
+        transformer.AddNNPACK(net)  # just testing the converter

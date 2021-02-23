@@ -21,7 +21,7 @@ class ExpRelaxedCategorical(Distribution):
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
     (Maddison et al, 2017)
@@ -30,8 +30,8 @@ class ExpRelaxedCategorical(Distribution):
     (Jang et al, 2017)
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
-    support = constraints.real
+                       'logits': constraints.real_vector}
+    support = constraints.real_vector  # The true support is actually a submanifold of this.
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
@@ -77,7 +77,7 @@ class ExpRelaxedCategorical(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        log_scale = (self.temperature.new_tensor(float(K)).lgamma() -
+        log_scale = (torch.full_like(self.temperature, float(K)).lgamma() -
                      self.temperature.log().mul(-(K - 1)))
         score = logits - value.mul(self.temperature)
         score = (score - score.logsumexp(dim=-1, keepdim=True)).sum(-1)
@@ -101,10 +101,10 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     support = constraints.simplex
     has_rsample = True
 

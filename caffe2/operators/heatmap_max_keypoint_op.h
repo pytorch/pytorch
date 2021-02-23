@@ -4,17 +4,21 @@
 #define HEATMAP_MAX_KEYPOINT_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(HeatmapMaxKeypoint)
 
 namespace caffe2 {
 
 template <typename T, class Context>
 class HeatmapMaxKeypointOp final : public Operator<Context> {
  public:
-  HeatmapMaxKeypointOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit HeatmapMaxKeypointOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         should_output_softmax_(this->template GetSingleArgument<bool>(
             "should_output_softmax",
             false)) {}

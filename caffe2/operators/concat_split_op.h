@@ -5,23 +5,9 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
-
-namespace {
-inline int GetDimFromOrderString(const string& str) {
-  auto order = StringToStorageOrder(str);
-  switch (order) {
-    case StorageOrder::NHWC:
-      return 3;
-    case StorageOrder::NCHW:
-      return 1;
-    default:
-      CAFFE_THROW("Unsupported storage order: ", str);
-      return -1;
-  }
-}
-} // namespace
 
 template <class Context>
 class SplitOp final : public Operator<Context> {
@@ -29,8 +15,9 @@ class SplitOp final : public Operator<Context> {
   static const int kSplitOpInputSize = 2;
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SplitOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SplitOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         split_(this->template GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
@@ -62,8 +49,9 @@ template <class Context>
 class SplitByLengthsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SplitByLengthsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit SplitByLengthsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
           OperatorBase::HasArgument("order")),
@@ -75,24 +63,28 @@ class SplitByLengthsOp final : public Operator<Context> {
       axis_ = GetDimFromOrderString(
           this->template GetSingleArgument<string>("order", "NCHW"));
     }
+     scaling_ = this->template GetSingleArgument<bool>("use_scaling_lengths", false);
   }
 
   bool RunOnDevice() override;
 
  protected:
   int axis_;
+  bool scaling_;
   Tensor inclusive_scan_buffer_{Context::GetDeviceType()};
   Tensor inclusive_scan_length_buffer_{Context::GetDeviceType()};
   // Input: X, optionally split
   // The split tensor is stored in CPU.
+  Tensor lengths_host_{CPU};
 };
 
 template <class Context>
 class ConcatOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConcatOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit ConcatOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
           OperatorBase::HasArgument("order")),
@@ -199,31 +191,59 @@ bool SplitOp<Context>::RunOnDevice() {
 template <class Context>
 bool SplitByLengthsOp<Context>::RunOnDevice() {
   auto& input = Input(0);
-  auto& length = this->template Input<Tensor>(1, CPU);
-  auto length_length = length.numel();
+  auto lengths_length = Input(1).dim(0);
+  int32_t* length_data;
+
+  if (this->InputIsTensorType(1, CPU)) {
+      length_data = Input(1).template data<int32_t>();
+    } else {
+      // Length input in CUDA context
+      auto& input_length = Input(1);
+      lengths_host_ = TensorCPU(input_length, CPU);
+      length_data = lengths_host_.template data<int32_t>();
+  }
+
   CAFFE_ENFORCE_EQ(
-      length_length % OutputSize(),
+      lengths_length % OutputSize(),
       0,
-      "len(Lengths) should be divisible by OutputSize().");
+      "len(Lengths) ", lengths_length, "should be divisible by OutputSize() ", OutputSize(), ".");
   int canonical_axis = input.canonical_axis_index(axis_);
   CAFFE_ENFORCE_LT(
       canonical_axis, input.dim(), "Axis not in input ndim range.");
   const int input_channels = input.dim32(canonical_axis);
-  const auto* axis_data = length.template data<int>();
-  CAFFE_ENFORCE_EQ(
-      std::accumulate(axis_data, axis_data + length.numel(), 0),
-      input_channels,
-      "Sum of split dimensions do not match: should be ",
-      input_channels);
+  const auto* axis_data = length_data;
+
+  auto sum_lengths = std::accumulate(axis_data, axis_data + lengths_length, 0);
+
+  if (scaling_) {
+    CAFFE_ENFORCE_EQ(
+        input_channels % (sum_lengths ? sum_lengths : 1),
+        0,
+        "Input channels ", input_channels, " should be divisible by ",
+        sum_lengths);
+  } else {
+    CAFFE_ENFORCE_EQ(
+        sum_lengths,
+        input_channels,
+        "Input channels should be equal to split dimensions sum, ",
+        input_channels, " vs ", sum_lengths
+        );
+  }
   vector<int64_t> output_dims(input.sizes().vec());
   int before = input.size_to_dim(canonical_axis);
   int after = input.size_from_dim(canonical_axis + 1);
   size_t input_offset = 0;
+  auto dim_multiplier = sum_lengths ? (input_channels / sum_lengths): 1;
+
+  if (!scaling_) {
+    dim_multiplier = 1;
+  }
+
   for (int i = 0; i < OutputSize(); ++i) {
     auto* output = Output(i);
-    const auto* axis_offset = axis_data + length_length / OutputSize() * i;
-    auto axis_dim = std::accumulate(
-        axis_offset, axis_offset + length_length / OutputSize(), 0);
+    const auto* axis_offset = axis_data + lengths_length / OutputSize() * i;
+    auto axis_dim = dim_multiplier * std::accumulate(
+        axis_offset, axis_offset + lengths_length / OutputSize(), 0);
     output_dims[canonical_axis] = axis_dim;
     output->Resize(output_dims);
     math::CopyMatrix<Context>(
@@ -244,16 +264,20 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
 template <class Context>
 bool ConcatOp<Context>::RunOnDevice() {
   auto* output = Output(0);
-  Tensor* split = this->template Output<Tensor>(1, CPU);
-  split->Resize(vector<int64_t>(1, InputSize()));
+
+  // We can override default options(Context::GetDeviceType())
+  // by explicitly passing in device type we want
+  Tensor* split = Output(
+      1, std::vector<int64_t>(1, InputSize()), at::dtype<int>().device(CPU));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (int i = 1; i < InputSize(); ++i) {
-    CAFFE_ENFORCE(
-        Input(i).dtype() == input_zero.dtype(),
+    CAFFE_ENFORCE_EQ(
+        Input(i).dtype(),
+        input_zero.dtype(),
         "All inputs must have the same type, expected: ",
         input_zero.dtype().name(),
         " but got: ",
@@ -277,8 +301,9 @@ bool ConcatOp<Context>::RunOnDevice() {
     // check the input dims are compatible.
     for (int j = 1; j < InputSize(); ++j) {
       int dim_j = Input(j).dim32(i);
-      CAFFE_ENFORCE(
-          dim == dim_j,
+      CAFFE_ENFORCE_EQ(
+          dim,
+          dim_j,
           "Expect dimension = ",
           dim,
           " got ",
@@ -328,6 +353,14 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
   return true;
 }
+
+OpSchema::Cost CostInferenceForConcat(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in);
+
+std::vector<TensorShape> TensorInferenceForConcat(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in);
 
 } // namespace caffe2
 

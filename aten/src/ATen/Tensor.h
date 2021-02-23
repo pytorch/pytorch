@@ -1,2 +1,3 @@
 #pragma once
-#include <ATen/core/Tensor.h>
+
+#include <ATen/core/TensorBody.h>

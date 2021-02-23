@@ -2,7 +2,7 @@
 #define CAFFE2_OPERATORS_RECURRENT_OP_MIOPEN_H_
 
 #include "caffe2/core/context.h"
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"

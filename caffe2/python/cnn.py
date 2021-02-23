@@ -1,11 +1,11 @@
 ## @package cnn
 # Module caffe2.python.cnn
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from caffe2.python import brew
+
+
+
+
+from caffe2.python import brew, workspace
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 import logging
@@ -235,6 +235,6 @@ class CNNModelHelper(ModelHelper):
     @property
     def GPU(self, gpu_id=0):
         device_option = caffe2_pb2.DeviceOption()
-        device_option.device_type = caffe2_pb2.CUDA
+        device_option.device_type = workspace.GpuDeviceType
         device_option.device_id = gpu_id
         return device_option

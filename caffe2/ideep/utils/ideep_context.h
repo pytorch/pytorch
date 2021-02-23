@@ -77,13 +77,13 @@ class IDEEPContext final : public BaseContext {
 
   template <typename T, class SrcContext, class DstContext>
   inline void Copy(size_t n, const T* src, T* dst) {
-    if (std::is_fundamental<T>::value) {
+    if (c10::guts::is_fundamental<T>::value) {
       CopyBytes<SrcContext, DstContext>(
           n * sizeof(T),
           static_cast<const void*>(src),
           static_cast<void*>(dst));
     } else {
-      for (int i = 0; i < n; ++i) {
+      for (size_t i = 0; i < n; ++i) {
         dst[i] = src[i];
       }
     }
@@ -91,7 +91,7 @@ class IDEEPContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     if (meta.copy()) {
       meta.copy()(src, dst, n);
     } else {

@@ -15,19 +15,26 @@ MKL and MAGMA. Here are the steps to build with them.
     REM Make sure you have 7z and curl installed.
 
     REM Download MKL files
-    curl https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z -k -O
-    7z x -aoa mkl_2018.2.185.7z -omkl
+    curl https://s3.amazonaws.com/ossci-windows/mkl_2020.0.166.7z -k -O
+    7z x -aoa mkl_2020.0.166.7z -omkl
 
     REM Download MAGMA files
-    REM cuda90/cuda91 is also available in the following line.
-    set CUDA_PREFIX=cuda80 
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_%CUDA_PREFIX%_release_mkl_2018.2.185.7z -o magma.7z
+    REM version available:
+    REM 2.5.4 (CUDA 10.1 10.2 11.0 11.1) x (Debug Release)
+    REM 2.5.3 (CUDA 10.1 10.2 11.0) x (Debug Release)
+    REM 2.5.2 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
+    REM 2.5.1 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
+    REM 2.5.0 (CUDA 9.0 9.2 10.0 10.1) x (Debug Release)
+    REM 2.4.0 (CUDA 8.0 9.2) x (Release)
+    set CUDA_PREFIX=cuda101
+    set CONFIG=release
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_%CUDA_PREFIX%_%CONFIG%.7z -o magma.7z
     7z x -aoa magma.7z -omagma
     
     REM Setting essential environment variables
-    set "CMAKE_INCLUDE_PATH=%cd%\\mkl\\include"
-    set "LIB=%cd%\\mkl\\lib;%LIB%"
-    set "MAGMA_HOME=%cd%\\magma"
+    set "CMAKE_INCLUDE_PATH=%cd%\mkl\include"
+    set "LIB=%cd%\mkl\lib;%LIB%"
+    set "MAGMA_HOME=%cd%\magma"
 
 Speeding CUDA build for Windows
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -74,7 +81,7 @@ object to make it build on Windows.
        relative_to=__file__,
        with_cuda=with_cuda,
        extra_compile_args=["-std=c99"],
-       libraries=['ATen', '_C'] # Append cuda libaries when necessary, like cudart
+       libraries=['ATen', '_C'] # Append cuda libraries when necessary, like cudart
    )
 
 Second, here is a workground for "unresolved external symbol 
@@ -113,9 +120,7 @@ This type of extension has better support compared with
 the previous one. However, it still needs some manual
 configuration. First, you should open the
 **x86_x64 Cross Tools Command Prompt for VS 2017**.
-And then, you can open the Git-Bash in it. It is
-usually located in ``C:\Program Files\Git\git-bash.exe``.
-Finally, you can start your compiling process.
+And then, you can start your compiling process.
 
 Installation
 ------------
@@ -148,16 +153,11 @@ Package not found in win-32 channel.
 PyTorch doesn't work on 32-bit system. Please use Windows and
 Python 64-bit version.
 
-Why are there no Python 2 packages for Windows?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Because it's not stable enough. There're some issues that need to
-be solved before we officially release it. You can build it by yourself.
 
 Import error
 ^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     from torch._C import *
 
@@ -174,7 +174,7 @@ You can resolve this by typing the following command.
     conda install -c peterjc123 vc vs2017_runtime
     conda install mkl_fft intel_openmp numpy mkl
 
-As for the wheels package, since we didn't pack some libaries and VS2017 
+As for the wheels package, since we didn't pack some libraries and VS2017 
 redistributable files in, please make sure you install them manually.
 The `VS 2017 redistributable installer
 <https://aka.ms/vs/15/release/VC_redist.x64.exe>`_ can be downloaded.
@@ -188,7 +188,7 @@ uses MKL instead of OpenBLAS. You may type in the following command.
 Another possible cause may be you are using GPU version without NVIDIA
 graphics cards. Please replace your GPU package with the CPU one.
 
-.. code-block:: py3tb
+.. code-block:: python
 
     from torch._C import *
 
@@ -210,11 +210,11 @@ Usage (multiprocessing)
 Multiprocessing error without if-clause protection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     RuntimeError:
-   	An attempt has been made to start a new process before the
-   	current process has finished its bootstrapping phase.
+           An attempt has been made to start a new process before the
+           current process has finished its bootstrapping phase.
 
        This probably means that you are not using fork to start your
        child processes and you have forgotten to use the proper idiom
@@ -247,7 +247,7 @@ your code into the following structure.
 Multiprocessing error "Broken pipe"
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     ForkingPickler(file, protocol).dump(obj)
 
@@ -261,7 +261,7 @@ can debug your code by reducing the ``num_worker`` of
 Multiprocessing error "driver shut down"
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+::
 
     Couldn’t open shared file mapping: <torch_14808_1591070686>, error code: <1455> at torch\lib\TH\THAllocator.c:154
 
@@ -275,7 +275,7 @@ update the TDR settings according to this `post
 CUDA IPC operations
 ^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
    THCudaCheck FAIL file=torch\csrc\generic\StorageSharing.cpp line=252 error=63 : OS call failed or operation not supported on this OS
 
@@ -287,4 +287,3 @@ tensors cannot succeed, there are two alternatives for this.
 
 2. Share CPU tensors instead. Make sure your custom
 :class:`~torch.utils.data.DataSet` returns CPU tensors.
-

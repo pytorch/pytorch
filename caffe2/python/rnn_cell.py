@@ -1,17 +1,15 @@
 ## @package rnn_cell
 # Module caffe2.python.rnn_cell
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import functools
 import inspect
-import itertools
 import logging
 import numpy as np
 import random
-import six
 from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
@@ -32,7 +30,7 @@ from caffe2.python.model_helper import ModelHelper
 def _RectifyName(blob_reference_or_name):
     if blob_reference_or_name is None:
         return None
-    if isinstance(blob_reference_or_name, six.string_types):
+    if isinstance(blob_reference_or_name, str):
         return core.ScopedBlobReference(blob_reference_or_name)
     if not isinstance(blob_reference_or_name, core.BlobReference):
         raise Exception("Unknown blob reference type")
@@ -42,7 +40,7 @@ def _RectifyName(blob_reference_or_name):
 def _RectifyNames(blob_references_or_names):
     if blob_references_or_names is None:
         return None
-    return list(map(_RectifyName, blob_references_or_names))
+    return [_RectifyName(i) for i in blob_references_or_names]
 
 
 class RNNCell(object):
@@ -236,7 +234,7 @@ class RNNCell(object):
         '''
         Returns recurrent state names with self.name scoping applied
         '''
-        return list(map(self.scope, self.get_state_names_override()))
+        return [self.scope(name) for name in self.get_state_names_override()]
 
     def get_state_names_override(self):
         '''
@@ -912,7 +910,7 @@ class MultiRNNCell(RNNCell):
     '''
     Multilayer RNN via the composition of RNNCell instance.
 
-    It is the resposibility of calling code to ensure the compatibility
+    It is the responsibility of calling code to ensure the compatibility
     of the successive layers in terms of input/output dimensiality, etc.,
     and to ensure that their blobs do not have name conflicts, typically by
     creating the cells with names that specify layer number.
@@ -1314,7 +1312,7 @@ class AttentionCell(RNNCell):
         )
         if (
             scope.CurrentDeviceScope() is not None and
-            scope.CurrentDeviceScope().device_type == caffe2_pb2.CUDA
+            core.IsGPUDeviceType(scope.CurrentDeviceScope().device_type)
         ):
             encoder_length = model.net.CopyGPUToCPU(
                 encoder_length,
@@ -1644,9 +1642,16 @@ class UnrolledCell(RNNCell):
                 axis=0)[0]
             for full_output in all_states
         ]
+        # Interleave the state values similar to
+        #
+        #   x = [1, 3, 5]
+        #   y = [2, 4, 6]
+        #   z = [val for pair in zip(x, y) for val in pair]
+        #   # z is [1, 2, 3, 4, 5, 6]
+        #
+        # and returns it as outputs
         outputs = tuple(
-            six.next(it) for it in
-            itertools.cycle([iter(all_states), iter(states)])
+            state for state_pair in zip(all_states, states) for state in state_pair
         )
         outputs_without_grad = set(range(len(outputs))) - set(
             outputs_with_grads)

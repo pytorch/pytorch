@@ -246,12 +246,14 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 template <>
 bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(
-      dY.dim32(0),
-      dY.dim32(1),
-      dY.dim32(2) - pad_t() - pad_b(),
-      dY.dim32(3) - pad_l() - pad_r());
+
+  auto* dX = Output(
+      0,
+      {dY.dim32(0),
+       dY.dim32(1),
+       dY.dim32(2) - pad_t() - pad_b(),
+       dY.dim32(3) - pad_l() - pad_r()},
+      at::dtype<float>());
   int padded_height = dY.dim32(2);
   int padded_width = dY.dim32(3);
   int channels = dX->dim32(1);
@@ -326,12 +328,14 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(
-      dY.dim32(0),
-      dY.dim32(1) - pad_t() - pad_b(),
-      dY.dim32(2) - pad_l() - pad_r(),
-      dY.dim32(3));
+
+  auto* dX = Output(
+      0,
+      {dY.dim32(0),
+       dY.dim32(1) - pad_t() - pad_b(),
+       dY.dim32(2) - pad_l() - pad_r(),
+       dY.dim32(3)},
+      at::dtype<float>());
   int padded_height = dY.dim32(1);
   int padded_width = dY.dim32(2);
   int channels = dY.dim32(3);

@@ -7,7 +7,7 @@ namespace {
 const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
   const auto dims = tensor.sizes();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
-  int offset = (t * dims[1] + n) * dims[2];
+  int64_t offset = (t * dims[1] + n) * dims[2];
   CAFFE_ENFORCE_LT(offset, tensor.numel());
   return tensor.template data<float>() + offset;
 }
@@ -19,9 +19,8 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   // [max_time_step, batch_size, num_classes]
   auto& inputs = Input(INPUTS);
   // [batch_size]
-  auto* output_len = Output(OUTPUT_LEN);
+
   // [total_decoded_output]
-  auto* values = Output(VALUES);
 
   const auto inputs_dims = inputs.sizes();
   int32_t max_time_step = inputs_dims[0];
@@ -32,7 +31,8 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
       (InputSize() == 2) ? Input(SEQ_LEN).data<int>() : nullptr;
 
   vector<int> values_cach;
-  output_len->Resize(vector<int64_t>{batch_size});
+  auto* output_len =
+      Output(OUTPUT_LEN, vector<int64_t>{batch_size}, at::dtype<int>());
   int* output_len_data = output_len->template mutable_data<int>();
 
   for (int32_t i = 0; i < batch_size; ++i) {
@@ -54,9 +54,10 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   }
 
   int32_t values_cach_size = values_cach.size();
-  values->Resize(vector<int64_t>{values_cach_size});
+  auto* values =
+      Output(VALUES, vector<int64_t>{values_cach_size}, at::dtype<int>());
   int* values_data = values->mutable_data<int>();
-  for (int i = 0; i < values_cach.size(); ++i) {
+  for (size_t i = 0; i < values_cach.size(); ++i) {
     values_data[i] = values_cach.at(i);
   }
   values_cach.clear();

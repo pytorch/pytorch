@@ -11,13 +11,12 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
   auto& weights = Input(0);
   int batch_size = weights.size(0);
   int weights_dim = weights.size(1);
-  auto* out_idx = Output(0);
 
   if (batch_size > 0 && weights_dim > 0) {
     cum_mass_.resize(weights_dim);
     const float* mat_weights = weights.template data<float>();
     const float* mat_values = nullptr;
-    out_idx->Resize(batch_size, 1);
+    auto* out_idx = Output(0, {batch_size, 1}, at::dtype<int>());
     int* output_indices = out_idx->template mutable_data<int>();
     float* output_values = nullptr;
 
@@ -28,8 +27,8 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
           values.sizes(),
           "The sampling weights tensor and the sampling values tensor must have the same dimensions.");
       mat_values = values.template data<float>();
-      auto* out_value = Output(1);
-      out_value->Resize(batch_size, 1);
+
+      auto* out_value = Output(1, {batch_size, 1}, at::dtype<float>());
       output_values = out_value->template mutable_data<float>();
     }
 
@@ -57,11 +56,9 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
       }
     }
   } else {
-    out_idx->Resize(0);
-    out_idx->template mutable_data<int>();
+    auto* out_idx = Output(0, {0}, at::dtype<int>());
     if (OutputSize() == 2) {
-      auto* out_value = Output(1);
-      out_value->Resize(0);
+      auto* out_value = Output(1, {0}, at::dtype<float>());
       out_value->template mutable_data<float>();
     }
   }

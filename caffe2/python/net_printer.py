@@ -1,9 +1,9 @@
 ## @package net_printer
 # Module caffe2.python.net_printer
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto.caffe2_pb2 import OperatorDef, NetDef
 from caffe2.python.checkpoint import Job
@@ -150,7 +150,7 @@ def analyze_job(analyzer, job):
 def analyze(obj):
     """
     Given a Job, visits all the execution steps making sure that:
-      - no undefined blobs will be found during excution
+      - no undefined blobs will be found during execution
       - no blob with same name is defined in concurrent steps
     """
     Analyzer()(obj)

@@ -5,14 +5,8 @@
 
 To run this, you will need to have Caffe2 installed as well.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
-import os
 import collections
-from subprocess import Popen, PIPE
+import sys
 import zipfile
 import itertools
 
@@ -22,16 +16,13 @@ import itertools
 # importing onnx first, which will cause it to go out and pick up the
 # system protobuf.
 import onnx.backend
-
-import caffe2
 from caffe2.python import core, workspace, rnn_cell, gru_cell
-from caffe2.python.compatibility import container_abcs
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
 import numpy as np
 import onnx
-from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
+from onnx import TensorProto
 import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
@@ -41,7 +32,6 @@ from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.onnx.backend_rep import Caffe2Rep
-from caffe2.python.onnx.backend_cpp_rep import Caffe2CppRep
 
 import caffe2.python._import_c_extension as C
 
@@ -55,7 +45,7 @@ def force_unicode(s):
 
 def get_device_option(device):
     m = {DeviceType.CPU: caffe2_pb2.CPU,
-         DeviceType.CUDA: caffe2_pb2.CUDA}
+         DeviceType.CUDA: workspace.GpuDeviceType}
     return core.DeviceOption(m[device.type], device.device_id)
 
 
@@ -172,6 +162,7 @@ class Caffe2Backend(Backend):
         'Loop':                  'ONNXWhile',
         'Tile':                  'NumpyTile',
         'RandomNormal':          'GaussianFill',
+        'RandomUniform':         'UniformFill',
     }
 
     _global_renamed_attrs = {'kernel_shape': 'kernels'}
@@ -184,7 +175,9 @@ class Caffe2Backend(Backend):
         'ConvTranspose':        {'output_padding': 'adjs'},
         'Selu':                 {'gamma': 'scale'},
         'If':                   {'then_branch': 'then_net',
-                                 'else_branch': 'else_net'}
+                                 'else_branch': 'else_net'},
+        'RandomUniform':        {'low': 'min',
+                                 'high': 'max'}
     }
 
     # operators whose behavior is different beyond renaming
@@ -392,7 +385,7 @@ class Caffe2Backend(Backend):
         direction = force_unicode(attrs.pop('direction', 'forward'))
 
         if n.op_type == 'RNN':
-            activation = force_unicode(attrs.pop('activations', ('tanh',))[0])
+            activation = force_unicode(attrs.pop('activations', ('tanh',))[0].lower())
         elif n.op_type == 'GRU':
             linear_before_reset = attrs.pop('linear_before_reset', 0)
 
@@ -644,7 +637,10 @@ class Caffe2Backend(Backend):
             if value_info.name in initialized:
                 continue
             shape = list(d.dim_value for d in value_info.type.tensor_type.shape.dim)
-            ws.FeedBlob(value_info.name, np.ones(shape), device_option)
+            ws.FeedBlob(
+                value_info.name,
+                np.ones(shape, dtype=onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]),
+                device_option)
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):
@@ -698,7 +694,13 @@ class Caffe2Backend(Backend):
             else:
                 opset_version = 1
 
-        model = onnx.shape_inference.infer_shapes(model)
+        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
+        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # is added around the infer_shapes call to avoid these failures and preserve status
+        try:
+            model = onnx.shape_inference.infer_shapes(model)
+        except RuntimeError:
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
 
         ws = Workspace()
         device_option = get_device_option(Device(device))
@@ -768,7 +770,7 @@ class Caffe2Backend(Backend):
         ops = translator(init_model, pred_model, OnnxNode(node_def), opset_version)
         if isinstance(ops, Caffe2Ops):
             return ops
-        if not isinstance(ops, container_abcs.Iterable):
+        if not isinstance(ops, collections.abc.Iterable):
             ops = [ops]
         return Caffe2Ops(ops, [], [])
 
@@ -866,7 +868,13 @@ class Caffe2Backend(Backend):
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
         device_option = get_device_option(Device(device))
 
-        onnx_model = onnx.utils.polish_model(onnx_model)
+        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
+        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # is added around the infer_shapes call to avoid these failures and preserve status
+        try:
+            onnx_model = onnx.utils.polish_model(onnx_model)
+        except RuntimeError:
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
         init_model = cls.optimize_onnx(onnx_model, init=True)
         pred_model = cls.optimize_onnx(onnx_model, predict=True)
 
@@ -881,7 +889,7 @@ class Caffe2Backend(Backend):
 
         cls._dummy_name.reset(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))
 
-        success = True
+        errors = []
         for net, model in ( (init_net, init_model), (pred_net, pred_model) ):
             net.device_option.CopyFrom(device_option)
             for node in model.graph.node:
@@ -889,8 +897,9 @@ class Caffe2Backend(Backend):
                     c2ops = cls._onnx_node_to_caffe2_op(
                         init_model, pred_model, node, opset_version)
                 except Exception as e:
-                    success = False
-                    print('ONNX FATAL:', e)
+                    msg = 'Error while processing node: {}. Exception: {}'.format(node, e)
+                    errors.append(msg)
+                    print('ONNX FATAL:', msg, file=sys.stderr)
                     continue
                 init_net.op.extend(c2ops.init_ops)
                 net.op.extend(c2ops.ops)
@@ -900,12 +909,14 @@ class Caffe2Backend(Backend):
             net.external_input.extend(
                 value_info.name for value_info in model.graph.input)
 
-        if not success:
-            raise RuntimeError('ONNX conversion failed')
+        if len(errors) > 0:
+            raise RuntimeError(
+                "ONNX conversion failed, encountered {} errors:\n\n{}".format(
+                    len(errors), "\n\n".join(errors)))
 
         return init_net, pred_net
 
-    # wrapper for backwards compatability
+    # wrapper for backwards compatibility
     @classmethod
     def onnx_graph_to_caffe2_net(cls, model, device="CPU", opset_version=_known_opset_version):
         return cls._onnx_model_to_caffe2_net(model, device=device, opset_version=opset_version, include_initializers=True)
@@ -915,7 +926,7 @@ class Caffe2Backend(Backend):
         device = Device(device_str)
         if device.type == DeviceType.CPU:
             return True
-        elif device.type == DeviceType.CUDA:
+        elif core.IsGPUDeviceType(device.type):
             return workspace.has_gpu_support
         return False
 

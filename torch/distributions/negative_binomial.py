@@ -8,16 +8,16 @@ from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_prope
 class NegativeBinomial(Distribution):
     r"""
     Creates a Negative Binomial distribution, i.e. distribution
-    of the number of independent identical Bernoulli trials
-    needed before :attr:`total_count` failures are achieved. The probability
-    of success of each Bernoulli trial is :attr:`probs`.
+    of the number of successful independent and identical Bernoulli trials
+    before :attr:`total_count` failures are achieved. The probability
+    of failure of each Bernoulli trial is :attr:`probs`.
 
     Args:
         total_count (float or Tensor): non-negative number of negative Bernoulli
             trials to stop, although the distribution is still valid for real
             valued count
-        probs (Tensor): Event probabilities of success in the half open interval [0, 1)
-        logits (Tensor): Event log-odds for probabilities of success
+        probs (Tensor): Event probabilities of failure in the half open interval [0, 1)
+        logits (Tensor): Event log-odds for probabilities of failure
     """
     arg_constraints = {'total_count': constraints.greater_than_eq(0),
                        'probs': constraints.half_open_interval(0., 1.),
@@ -45,7 +45,7 @@ class NegativeBinomial(Distribution):
         if 'probs' in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
             new._param = new.probs
-        else:
+        if 'logits' in self.__dict__:
             new.logits = self.logits.expand(batch_shape)
             new._param = new.logits
         super(NegativeBinomial, new).__init__(batch_shape, validate_args=False)
@@ -77,8 +77,10 @@ class NegativeBinomial(Distribution):
 
     @lazy_property
     def _gamma(self):
+        # Note we avoid validating because self.total_count can be zero.
         return torch.distributions.Gamma(concentration=self.total_count,
-                                         rate=torch.exp(-self.logits))
+                                         rate=torch.exp(-self.logits),
+                                         validate_args=False)
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():

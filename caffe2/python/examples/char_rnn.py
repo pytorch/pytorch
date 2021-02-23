@@ -1,9 +1,9 @@
 ## @package char_rnn
 # Module caffe2.python.examples.char_rnn
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, workspace, model_helper, utils, brew
 from caffe2.python.rnn_cell import LSTM
@@ -264,7 +264,7 @@ def main():
     args = parser.parse_args()
 
     device = core.DeviceOption(
-        caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 0)
+        workspace.GpuDeviceType if args.gpu else caffe2_pb2.CPU, 0)
     with core.DeviceScope(device):
         model = CharRNN(args)
         model.CreateModel()

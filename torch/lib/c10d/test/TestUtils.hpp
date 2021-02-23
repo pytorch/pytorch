@@ -1,8 +1,13 @@
 #pragma once
 
-#include <sys/types.h>
+#ifndef _WIN32
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#include <sys/types.h>
+#include <cstring>
 
 #include <condition_variable>
 #include <mutex>
@@ -35,6 +40,28 @@ class Semaphore {
   std::condition_variable cv_;
 };
 
+#ifdef _WIN32
+std::string autoGenerateTmpFilePath() {
+  char tmp[L_tmpnam_s];
+  errno_t err;
+  err = tmpnam_s(tmp, L_tmpnam_s);
+  if (err != 0)
+  {
+    throw std::system_error(errno, std::system_category());
+  }
+  return std::string(tmp);
+}
+
+std::string tmppath() {
+  const char* tmpfile = getenv("TMPFILE");
+  if (tmpfile) {
+    return std::string(tmpfile);
+  }
+  else {
+    return autoGenerateTmpFilePath();
+  }
+}
+#else
 std::string tmppath() {
   // TMPFILE is for manual test execution during which the user will specify
   // the full temp file path using the environmental variable TMPFILE
@@ -61,7 +88,12 @@ std::string tmppath() {
   close(fd);
   return std::string(tmp.data(), tmp.size());
 }
+#endif
 
+bool isTSANEnabled() {
+  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+  return s && strcmp(s, "1") == 0;
+}
 struct TemporaryFile {
   std::string path;
 
@@ -74,6 +106,7 @@ struct TemporaryFile {
   }
 };
 
+#ifndef _WIN32
 struct Fork {
   pid_t pid;
 
@@ -95,6 +128,7 @@ struct Fork {
     return pid == 0;
   }
 };
+#endif
 
 } // namespace test
 } // namespace c10d

@@ -20,6 +20,18 @@ void DummyName::Reset(const std::unordered_set<std::string> &used_names) {
   counter_ = 0;
 }
 
+::ONNX_NAMESPACE::TypeProto ExtraTypeProto(
+    const ::ONNX_NAMESPACE::TensorProto& tensor) {
+  ::ONNX_NAMESPACE::TypeProto t;
+  auto* tensor_type = t.mutable_tensor_type();
+  tensor_type->set_elem_type(tensor.data_type());
+  auto* shape = tensor_type->mutable_shape();
+  for (const auto d : tensor.dims()) {
+    shape->add_dim()->set_dim_value(d);
+  }
+  return t;
+}
+
 NodeProto MakeNode(
     const std::string& type,
     const std::vector<std::string>& inputs,

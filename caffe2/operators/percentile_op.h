@@ -6,10 +6,13 @@
 #define CAFFE2_OPERATORS_PERCENTILE_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(Percentile);
 
 namespace caffe2 {
 
@@ -17,16 +20,17 @@ template <class Context>
 class PercentileOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  PercentileOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit PercentileOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override;
 
  protected:
   INPUT_TAGS(X, VAL_PCT_PAIRS, LENS);
   OUTPUT_TAGS(PCT);
-  Tensor values_tensor{Context::GetDeviceType()};
-  Tensor percentiles_tensor{Context::GetDeviceType()};
+  Tensor values_tensor;
+  Tensor percentiles_tensor;
 };
 
 } // namespace caffe2

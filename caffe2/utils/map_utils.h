@@ -2,7 +2,7 @@
 
 namespace caffe2 {
 
-// Get value from map given key. Return suppiled default value if not found
+// Get value from map given key. Return supplied default value if not found
 // This is a stripped down version from folly:
 // https://github.com/facebook/folly/blob/5a07e203d79324b68d69f294fa38e43b9671e9b1/folly/MapUtil.h#L35-L45
 template <

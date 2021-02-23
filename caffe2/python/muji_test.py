@@ -38,36 +38,36 @@ class TestMuji(test_util.TestCase):
 
     def testAllreduceFallback(self):
         self.RunningAllreduceWithGPUs(
-            list(range(workspace.NumCudaDevices())), muji.AllreduceFallback
+            list(range(workspace.NumGpuDevices())), muji.AllreduceFallback
         )
 
     def testAllreduceSingleGPU(self):
-        for i in range(workspace.NumCudaDevices()):
+        for i in range(workspace.NumGpuDevices()):
             self.RunningAllreduceWithGPUs([i], muji.Allreduce)
 
     def testAllreduceWithTwoGPUs(self):
-        pattern = workspace.GetCudaPeerAccessPattern()
+        pattern = workspace.GetGpuPeerAccessPattern()
         if pattern.shape[0] >= 2 and np.all(pattern[:2, :2]):
             self.RunningAllreduceWithGPUs([0, 1], muji.Allreduce2)
         else:
             print('Skipping allreduce with 2 gpus. Not peer access ready.')
 
     def testAllreduceWithFourGPUs(self):
-        pattern = workspace.GetCudaPeerAccessPattern()
+        pattern = workspace.GetGpuPeerAccessPattern()
         if pattern.shape[0] >= 4 and np.all(pattern[:4, :4]):
             self.RunningAllreduceWithGPUs([0, 1, 2, 3], muji.Allreduce4)
         else:
             print('Skipping allreduce with 4 gpus. Not peer access ready.')
 
     def testAllreduceWithFourGPUsAndTwoGroups(self):
-        pattern = workspace.GetCudaPeerAccessPattern()
+        pattern = workspace.GetGpuPeerAccessPattern()
         if pattern.shape[0] >= 4 and np.all(pattern[:2, :2]) and np.all(pattern[2:4, 2:4]):
             self.RunningAllreduceWithGPUs([0, 1, 2, 3], muji.Allreduce4Group2)
         else:
             print('Skipping allreduce with 4 gpus and 2 groups. Not peer access ready.')
 
     def testAllreduceWithEightGPUs(self):
-        pattern = workspace.GetCudaPeerAccessPattern()
+        pattern = workspace.GetGpuPeerAccessPattern()
         if (
             pattern.shape[0] >= 8 and np.all(pattern[:4, :4]) and
             np.all(pattern[4:, 4:])

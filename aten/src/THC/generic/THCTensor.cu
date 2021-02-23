@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensor.cu"
 #else
 
 int THCTensor_(getDevice)(THCState* state, const THCTensor* tensor) {

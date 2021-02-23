@@ -16,10 +16,6 @@ Modern infrastructure:
     them to the PYTHONPATH first.
 
 Legacy infrastructure (we should kill this):
-
-* [nnwrap](nnwrap) - Generates the THNN/THCUNN wrappers which make
-  legacy functionality available.  (TODO: What exactly does this
-  implement?)
 * [cwrap](cwrap) - Implementation of legacy code generation for THNN/THCUNN.
   This is used by nnwrap.
 
@@ -27,15 +23,17 @@ Build system pieces:
 
 * [setup_helpers](setup_helpers) - Helper code for searching for
   third-party dependencies on the user system.
-* [build_pytorch_libs.sh](build_pytorch_libs.sh) - Script that
-  builds all of the constituent libraries of PyTorch, but not the
-  PyTorch Python extension itself.  We are working on eliminating this
-  script in favor of a unified cmake build.
-* [build_pytorch_libs.bat](build_pytorch_libs.bat) - Same as
-  above, but for Windows.
+* [build_pytorch_libs.py](build_pytorch_libs.py) - cross-platform script that
+  builds all of the constituent libraries of PyTorch,
+  but not the PyTorch Python extension itself.
 * [build_libtorch.py](build_libtorch.py) - Script for building
   libtorch, a standalone C++ library without Python support.  This
   build script is tested in CI.
+* [fast_nvcc](fast_nvcc) - Mostly-transparent wrapper over nvcc that
+  parallelizes compilation when used to build CUDA files for multiple
+  architectures at once.
+  * [fast_nvcc.py](fast_nvcc/fast_nvcc.py) - Python script, entrypoint to the
+    fast nvcc wrapper.
 
 Developer tools which you might find useful:
 
@@ -47,6 +45,8 @@ Developer tools which you might find useful:
   can conveniently run diffs on them when working on code-generation.
   (See also [generated_dirs.txt](generated_dirs.txt) which
   specifies the list of directories with generated files.)
+* [test_history.py](test_history.py) - Query S3 to display history of a single
+  test across multiple jobs over time.
 
 Important if you want to run on AMD GPU:
 
@@ -54,15 +54,11 @@ Important if you want to run on AMD GPU:
   into AMD HIP.  Right now, PyTorch and Caffe2 share logic for how to
   do this transpilation, but have separate entry-points for transpiling
   either PyTorch or Caffe2 code.
-  * [build_caffe2_amd.py](amd_build/build_caffe2_amd.py) - Script
-    for HIPifying the Caffe2 codebase.
-  * [build_pytorch_amd.py](amd_build/build_pytorch_amd.py) - Script
-    for HIPifying the PyTorch codebase.
+  * [build_amd.py](amd_build/build_amd.py) - Top-level entry
+    point for HIPifying our codebase.
 
 Tools which are only situationally useful:
 
-* [aten_mirror.sh](aten_mirror.sh) - Mirroring script responsible
-  for keeping https://github.com/zdevito/ATen up-to-date.
 * [docker](docker) - Dockerfile for running (but not developing)
   PyTorch, using the official conda binary distribution.  Context:
   https://github.com/pytorch/pytorch/issues/1619

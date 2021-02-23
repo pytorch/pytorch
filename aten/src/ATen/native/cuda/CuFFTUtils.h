@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
 
 #include <string>
 #include <stdexcept>

@@ -1,8 +1,9 @@
-from numbers import Integral
-import warnings
-
 from .module import Module
 from .. import functional as F
+
+from torch import Tensor
+from typing import Optional
+from ..common_types import _size_2_t, _ratio_2_t, _size_any_t, _ratio_any_t
 
 
 class Upsample(Module):
@@ -12,21 +13,25 @@ class Upsample(Module):
     `minibatch x channels x [optional depth] x [optional height] x width`.
     Hence, for spatial inputs, we expect a 4D Tensor and for volumetric inputs, we expect a 5D Tensor.
 
-    The algorithms available for upsampling are nearest neighbor and linear, bilinear and trilinear
-    for 3D, 4D and 5D input Tensor, respectively.
+    The algorithms available for upsampling are nearest neighbor and linear,
+    bilinear, bicubic and trilinear for 3D, 4D and 5D input Tensor,
+    respectively.
 
     One can either give a :attr:`scale_factor` or the target output :attr:`size` to
     calculate the output size. (You cannot give both, as it is ambiguous)
 
     Args:
-        size (tuple, optional): a tuple of ints `([optional D_out], [optional H_out], W_out)` output sizes
-        scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
-        mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear` and `trilinear`.
-                                    Default: `nearest`
-        align_corners (bool, optional): if True, the corner pixels of the input
+        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int], optional):
+            output spatial sizes
+        scale_factor (float or Tuple[float] or Tuple[float, float] or Tuple[float, float, float], optional):
+            multiplier for spatial size. Has to match input size if it is a tuple.
+        mode (str, optional): the upsampling algorithm: one of ``'nearest'``,
+            ``'linear'``, ``'bilinear'``, ``'bicubic'`` and ``'trilinear'``.
+            Default: ``'nearest'``
+        align_corners (bool, optional): if ``True``, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
-            those pixels. This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, or `trilinear`. Default: False
+            those pixels. This only has effect when :attr:`mode` is
+            ``'linear'``, ``'bilinear'``, or ``'trilinear'``. Default: ``False``
 
     Shape:
         - Input: :math:`(N, C, W_{in})`, :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`
@@ -34,28 +39,29 @@ class Upsample(Module):
           or :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
     .. math::
-        D_{out} = \left\lfloor D_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-3]
+        D_{out} = \left\lfloor D_{in} \times \text{scale\_factor} \right\rfloor
 
     .. math::
-        H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-2]
+        H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor
 
     .. math::
-        W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-1]
+        W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
-        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
-        output and input pixels, and thus the output values can depend on the
-        input size. This was the default behavior for these modes up to version
-        0.3.1. Since then, the default behavior is ``align_corners = False``.
-        See below for concrete examples on how this affects the outputs.
+        (`linear`, `bilinear`, `bicubic`, and `trilinear`) don't proportionally
+        align the output and input pixels, and thus the output values can depend
+        on the input size. This was the default behavior for these modes up to
+        version 0.3.1. Since then, the default behavior is
+        ``align_corners = False``. See below for concrete examples on how this
+        affects the outputs.
 
     .. note::
         If you want downsampling/general resizing, you should use :func:`~nn.functional.interpolate`.
 
     Examples::
 
-        >>> input = torch.arange(1, 5).view(1, 1, 2, 2).float()
+        >>> input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 2, 2)
         >>> input
         tensor([[[[ 1.,  2.],
                   [ 3.,  4.]]]])
@@ -112,18 +118,29 @@ class Upsample(Module):
                   [ 1.2000,  1.3600,  1.5200,  1.2800,  0.6400,  0.0000],
                   [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
     """
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
+    name: str
+    size: Optional[_size_any_t]
+    scale_factor: Optional[_ratio_any_t]
+    mode: str
+    align_corners: Optional[bool]
 
-    def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
+    def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
+                 mode: str = 'nearest', align_corners: Optional[bool] = None) -> None:
         super(Upsample, self).__init__()
+        self.name = type(self).__name__
         self.size = size
-        self.scale_factor = scale_factor
+        if isinstance(scale_factor, tuple):
+            self.scale_factor = tuple(float(factor) for factor in scale_factor)
+        else:
+            self.scale_factor = float(scale_factor) if scale_factor else None
         self.mode = mode
         self.align_corners = align_corners
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         if self.scale_factor is not None:
             info = 'scale_factor=' + str(self.scale_factor)
         else:
@@ -139,11 +156,12 @@ class UpsamplingNearest2d(Upsample):
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
     as it's constructor argument.
 
-    When `size` is given, it is the output size of the image `(h, w)`.
+    When :attr:`size` is given, it is the output size of the image `(h, w)`.
 
     Args:
-        size (tuple, optional): a tuple of ints `(H_out, W_out)` output sizes
-        scale_factor (int, optional): the multiplier for the image height or width
+        size (int or Tuple[int, int], optional): output spatial sizes
+        scale_factor (float or Tuple[float, float], optional): multiplier for
+            spatial size.
 
     .. warning::
         This class is deprecated in favor of :func:`~nn.functional.interpolate`.
@@ -160,7 +178,7 @@ class UpsamplingNearest2d(Upsample):
 
     Examples::
 
-        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
+        >>> input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 2, 2)
         >>> input
         tensor([[[[ 1.,  2.],
                   [ 3.,  4.]]]])
@@ -172,12 +190,8 @@ class UpsamplingNearest2d(Upsample):
                   [ 3.,  3.,  4.,  4.],
                   [ 3.,  3.,  4.,  4.]]]])
     """
-    def __init__(self, size=None, scale_factor=None):
+    def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
-
-    def forward(self, input):
-        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.functional.interpolate instead.")
-        return super(UpsamplingNearest2d, self).forward(input)
 
 
 class UpsamplingBilinear2d(Upsample):
@@ -187,11 +201,12 @@ class UpsamplingBilinear2d(Upsample):
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
     as it's constructor argument.
 
-    When `size` is given, it is the output size of the image `(h, w)`.
+    When :attr:`size` is given, it is the output size of the image `(h, w)`.
 
     Args:
-        size (tuple, optional): a tuple of ints `(H_out, W_out)` output sizes
-        scale_factor (int, optional): the multiplier for the image height or width
+        size (int or Tuple[int, int], optional): output spatial sizes
+        scale_factor (float or Tuple[float, float], optional): multiplier for
+            spatial size.
 
     .. warning::
         This class is deprecated in favor of :func:`~nn.functional.interpolate`. It is
@@ -209,7 +224,7 @@ class UpsamplingBilinear2d(Upsample):
 
     Examples::
 
-        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
+        >>> input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 2, 2)
         >>> input
         tensor([[[[ 1.,  2.],
                   [ 3.,  4.]]]])
@@ -221,9 +236,5 @@ class UpsamplingBilinear2d(Upsample):
                   [ 2.3333,  2.6667,  3.0000,  3.3333],
                   [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
     """
-    def __init__(self, size=None, scale_factor=None):
+    def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
-
-    def forward(self, input):
-        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.functional.interpolate instead.")
-        return super(UpsamplingBilinear2d, self).forward(input)

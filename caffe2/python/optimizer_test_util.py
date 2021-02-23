@@ -1,14 +1,13 @@
 ## @package optimizer_test_util
 # Module caffe2.python.optimizer_test_util
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import numpy as np
 from caffe2.python import brew, core, workspace, cnn, optimizer
-from caffe2.proto import caffe2_pb2
 from caffe2.python.modeling.initializers import (
     Initializer, PseudoFP16Initializer)
 
@@ -70,7 +69,7 @@ class OptimizerTestBase(object):
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     def testGPUDense(self, dtype=core.DataType.FLOAT):
-        device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        device_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
         with core.DeviceScope(device_opt):
             model, _perfect_model, data, label = self._createDense(dtype)
             if dtype == core.DataType.FLOAT16:
@@ -231,7 +230,7 @@ class LRModificationTestBase(object):
         optimizer.set_lr_injection(0)
         self.assertEqual(optimizer.get_lr_injection(), 0)
 
-        # Test that setting the lr_injector properly propogates to the
+        # Test that setting the lr_injector properly propagates to the
         # lr_multiplier. Here, we have both lr_injector and norm_ratio that
         # affect the lr_multiplier
         workspace.RunNet(model.net.Proto().name)

@@ -3,63 +3,72 @@ set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}
   "${CMAKE_CURRENT_SOURCE_DIR}"
 PARENT_SCOPE)
 
-CONFIGURE_FILE(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
+configure_file(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
 set(extra_src)
 # loop over all types
 foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    # loop over files which need to be split between types (because of long compile times)
-   foreach(THC_FILE TensorSort TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
+   foreach(THC_FILE TensorSort TensorMathPointwise TensorMathReduce TensorTopK)
       if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
-         FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
-           "#include \"../THC${THC_FILE}.cuh\"\n#include \"THCTensor.hpp\"\n#include \"../generic/THC${THC_FILE}.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
+         file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
+           "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerate${THC_TYPE}Type.h>\n")
       endif()
-      LIST(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
+      list(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
    endforeach()
 endforeach()
 
+foreach(THC_FILE TensorMathPointwise TensorMathReduce)
+   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
+      file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu"
+        "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBoolType.h>\n")
+   endif()
+   list(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
+endforeach()
+
+foreach(THC_FILE TensorMathReduce TensorSort TensorTopK)
+   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu")
+      file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu"
+        "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBFloat16Type.h>\n")
+   endif()
+   list(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu")
+endforeach()
+
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingHostAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCStream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorCopy.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cpp
 
   ${CMAKE_CURRENT_SOURCE_DIR}/THCReduceApplyUtils.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCBlas.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSleep.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorage.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorCopy.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMath.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathBlas.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathScan.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorIndex.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorTopK.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSortUtils.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMode.cu
   ${extra_src}
   PARENT_SCOPE)
 
-INSTALL(FILES
+set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY}
+  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMode.cu
+  PARENT_SCOPE)
+
+install(FILES
           THC.h
           ${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h
           THCGeneral.hpp
-          THCBlas.h
           THCSleep.h
           THCStorage.h
           THCStorageCopy.h
-          THCStream.h
           THCTensor.h
           THCTensorCopy.h
           THCTensorCopy.hpp
@@ -75,7 +84,6 @@ INSTALL(FILES
           THCScanUtils.cuh
           THCSortUtils.cuh
           THCAllocator.h
-          THCCachingAllocator.h
           THCCachingHostAllocator.h
           THCDeviceUtils.cuh
           THCDeviceTensor.cuh
@@ -83,6 +91,8 @@ INSTALL(FILES
           THCDeviceTensorUtils.cuh
           THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
+          THCGenerateBFloat16Type.h
+          THCGenerateBoolType.h
           THCGenerateByteType.h
           THCGenerateCharType.h
           THCGenerateShortType.h
@@ -92,6 +102,9 @@ INSTALL(FILES
           THCGenerateFloatType.h
           THCGenerateFloatTypes.h
           THCGenerateDoubleType.h
+          THCGenerateComplexFloatType.h
+          THCGenerateComplexTypes.h
+          THCGenerateComplexDoubleType.h
           THCIntegerDivider.cuh
           THCNumerics.cuh
           THCTensorSort.cuh
@@ -103,14 +116,12 @@ INSTALL(FILES
           THCThrustAllocator.cuh
           THCTensorMode.cuh
           THCTensorTopK.cuh
-          THCCachingAllocator.h
           # See Note [TH abstraction violation]
-          THCGenerator.hpp
           THCTensor.hpp
           THCStorage.hpp
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC")
 
-INSTALL(FILES
+install(FILES
           generic/THCStorage.cpp
           generic/THCStorage.cu
           generic/THCStorage.h
@@ -121,19 +132,10 @@ INSTALL(FILES
           generic/THCStorageCopy.cpp
           generic/THCStorageCopy.cu
           generic/THCStorageCopy.h
-          generic/THCTensorCopy.cpp
           generic/THCTensorCopy.cu
           generic/THCTensorCopy.h
-          generic/THCTensorMasked.h
-          generic/THCTensorMasked.cu
           generic/THCTensorMath.h
           generic/THCTensorMath.cu
-          generic/THCTensorMathBlas.cu
-          generic/THCTensorMathBlas.h
-          generic/THCTensorMathCompare.h
-          generic/THCTensorMathCompare.cu
-          generic/THCTensorMathCompareT.h
-          generic/THCTensorMathCompareT.cu
           generic/THCTensorMathMagma.h
           generic/THCTensorMathMagma.cu
           generic/THCTensorMathPairwise.h
@@ -142,8 +144,6 @@ INSTALL(FILES
           generic/THCTensorMathPointwise.cu
           generic/THCTensorMathReduce.h
           generic/THCTensorMathReduce.cu
-          generic/THCTensorMathScan.h
-          generic/THCTensorMathScan.cu
           generic/THCTensorScatterGather.h
           generic/THCTensorScatterGather.cu
           generic/THCTensorIndex.h

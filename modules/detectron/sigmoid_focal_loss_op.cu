@@ -17,7 +17,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "sigmoid_focal_loss_op.h"
+#include "modules/detectron/sigmoid_focal_loss_op.h"
 
 namespace caffe2 {
 
@@ -45,7 +45,7 @@ __global__ void SigmoidFocalLossKernel(
     float c1 = (t == (d + 1));
     float c2 = (t != -1 & t != (d + 1));
 
-    float Np = max(weight_pos[0], 1.0);
+    float Np = c10::cuda::compat::max(weight_pos[0], static_cast<float>(1.0));
     float zn = (1.0 - alpha) / Np;
     float zp = alpha / Np;
 
@@ -53,7 +53,7 @@ __global__ void SigmoidFocalLossKernel(
     float p = 1. / (1. + expf(-logits[i]));
 
     // (1 - p)**gamma * log(p) where
-    float term1 = powf((1. - p), gamma) * logf(max(p, FLT_MIN));
+    float term1 = powf((1. - p), gamma) * logf(c10::cuda::compat::max(p, FLT_MIN));
     // p**gamma * log(1 - p)
     float term2 =
         powf(p, gamma) *
@@ -82,7 +82,7 @@ __global__ void SigmoidFocalLossGradientKernel(
       int a = c / num_classes;   // current anchor
       int d = c % num_classes;   // current class
 
-      float Np = max(weight_pos[0], 1.0);
+      float Np = c10::cuda::compat::max(weight_pos[0], static_cast<float>(1.0));
       float zn = (1.0 - alpha) / Np;
       float zp = alpha / Np;
       int t = targets[n * (H * W * A) + a * (H * W) + y * W + x];
@@ -94,7 +94,7 @@ __global__ void SigmoidFocalLossGradientKernel(
       // (1-p)**g * (1 - p - g*p*log(p))
       float term1 =
           powf((1. - p), gamma) *
-          (1. - p - (p * gamma * logf(max(p, FLT_MIN))));
+          (1. - p - (p * gamma * logf(c10::cuda::compat::max(p, FLT_MIN))));
       // (p**g) * (g*(1-p)*log(1-p) - p)
       float term2 =
           powf(p, gamma) *
@@ -118,14 +118,14 @@ bool SigmoidFocalLossOp<float, CUDAContext>::RunOnDevice() {
   // Number of positive examples: scalar
   auto& wp = Input(2);
   // output avg Sigmoid focal loss as mentioned in RetinaNet paper
-  auto* avg_loss = Output(0);
+
 
   int N = X.dim32(0);
   int D = X.dim32(1);
   int H = X.dim32(2);
   int W = X.dim32(3);
 
-  avg_loss->Resize(vector<int64_t>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   losses_.ResizeLike(X);
   float* avg_loss_data = avg_loss->mutable_data<float>();
 
@@ -134,6 +134,7 @@ bool SigmoidFocalLossOp<float, CUDAContext>::RunOnDevice() {
       N, D, H, W, X.data<float>(), T.data<int>(),
       wp.data<float>(), gamma_, alpha_, num_classes_,
       losses_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   math::Sum<float, CUDAContext>(
       losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
@@ -150,7 +151,7 @@ bool SigmoidFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& T = Input(1);
   auto& wp = Input(2);
   auto& d_avg_loss = Input(InputSize() - 1);
-  auto* dX = Output(0);
+
 
   // get input shape
   int N = X.dim32(0);
@@ -158,13 +159,14 @@ bool SigmoidFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
   int H = X.dim32(2);
   int W = X.dim32(3);
 
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
 
   SigmoidFocalLossGradientKernel<<<CAFFE_GET_BLOCKS(X.size()),
           CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
       N, D, H, W, X.data<float>(), T.data<int>(), dX->mutable_data<float>(),
       wp.data<float>(), gamma_, alpha_, num_classes_,
       d_avg_loss.data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   math::Scale<float, float, CUDAContext>(
       dX->size(),
       scale_,

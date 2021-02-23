@@ -16,7 +16,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
-#include "spatial_narrow_as_op.h"
+#include "modules/detectron/spatial_narrow_as_op.h"
 
 namespace caffe2 {
 
@@ -76,17 +76,17 @@ bool SpatialNarrowAsOp<CUDAContext>::DoRunWithType() {
   // Narrows input 0 (A) spatially to match input 1 (B)
   auto& A = Input(0);
   auto& B = Input(1);
-  auto* C = Output(0);
+
 
   CAFFE_ENFORCE_EQ(A.dim32(0), B.dim32(0), "Input dim 0 must be equal.");
+  std::vector<int64_t> sizes;
   if (A.ndim() == B.ndim()) {
     CAFFE_ENFORCE_EQ(A.dim32(1), B.dim32(1), "Input dim 1 must be equal.");
     CAFFE_ENFORCE_GE(
         A.dim32(2), B.dim32(2), "Input 0 height must be >= input 1 height.");
     CAFFE_ENFORCE_GE(
         A.dim32(3), B.dim32(3), "Input 0 width must be >= input 1 width.");
-
-    C->ResizeLike(B);
+    sizes = B.sizes().vec();
   } else {
     // For (N, H, W) case
     CAFFE_ENFORCE_EQ(A.ndim() - 1, B.ndim(), "Dimension mismatch.");
@@ -94,8 +94,9 @@ bool SpatialNarrowAsOp<CUDAContext>::DoRunWithType() {
         A.dim32(2), B.dim32(1), "Input 0 height must be >= input 1 height.");
     CAFFE_ENFORCE_GE(
         A.dim32(3), B.dim32(2), "Input 0 width must be >= input 1 width.");
-    C->Resize(A.dim32(0), A.dim32(1), B.dim32(1), B.dim32(2));
+    sizes = {A.dim32(0), A.dim32(1), B.dim32(1), B.dim32(2)};
   }
+  auto* C = Output(0, sizes, at::dtype<T>());
   int out_width = C->dim32(3);
   int out_height = C->dim32(2);
   int in_width = A.dim32(3);
@@ -114,6 +115,7 @@ bool SpatialNarrowAsOp<CUDAContext>::DoRunWithType() {
       out_width,
       A.template data<T>(),
       C->template mutable_data<T>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -129,9 +131,8 @@ bool SpatialNarrowAsGradientOp<CUDAContext>::DoRunWithType() {
   auto& A = Input(0);
   auto& B = Input(1);
   auto& dC = Input(2); // Gradient of net w.r.t. output of forward op
-  auto* dA = Output(0); // Gradient of net w.r.t. input to forward op
+  auto* dA = Output(0, A.sizes(), at::dtype<T>()); // Gradient of net w.r.t. input to forward op
 
-  dA->ResizeLike(A);
   math::Set<T, CUDAContext>(
       dA->size(), 0.f, dA->template mutable_data<T>(), &context_);
   int out_width = dA->dim32(3);
@@ -152,6 +153,7 @@ bool SpatialNarrowAsGradientOp<CUDAContext>::DoRunWithType() {
       out_width,
       dC.template data<T>(),
       dA->template mutable_data<T>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

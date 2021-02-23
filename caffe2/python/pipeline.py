@@ -1,9 +1,9 @@
 ## @package pipeline
 # Module caffe2.python.pipeline
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, queue_util
 from caffe2.python.dataio import Reader, Writer
@@ -111,9 +111,9 @@ def pipe(
                      until a stop is signaled either by the reader or the
                      writer.
         output:      either a Writer, a Queue or a DataStream that will be
-                     writen to as long as neither reader nor writer signal
+                     written to as long as neither reader nor writer signal
                      a stop condition. If output is not provided or is None,
-                     a Queue is created with given `capacity` and writen to.
+                     a Queue is created with given `capacity` and written to.
         num_threads: number of concurrent threads used for processing and
                      piping. If set to 0, no Task is created, and a
                      reader is returned instead -- the reader returned will
@@ -374,7 +374,7 @@ class ProcessingReader(Reader):
         # from it.
         with NetBuilder() as nb:
             # Current NetBuilder is optionally used inside the processor,
-            # then its children are retrived inside of
+            # then its children are retrieved inside of
             # normalize_processor_output.
             # Once readers and writers also use NetBuilder,
             # this logic will be more natural.

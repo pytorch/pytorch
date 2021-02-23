@@ -1,28 +1,36 @@
 ---
-# NOTE there must be no spaces before the '-', so put the comma first.
+# NOTE there must be no spaces before the '-', so put the comma last.
+InheritParentConfig: true
 Checks: '
-  -*
-  ,bugprone-*
-  ,-bugprone-macro-parentheses
-  ,-bugprone-forward-declaration-namespace
-  ,cppcoreguidelines-*
-  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
-  ,-cppcoreguidelines-pro-type-static-cast-downcast
-  ,-cppcoreguidelines-pro-bounds-pointer-arithmetic
-  ,-cppcoreguidelines-pro-bounds-constant-array-index
-  ,-cppcoreguidelines-pro-type-reinterpret-cast
-  ,-cppcoreguidelines-special-member-functions
-  ,-cppcoreguidelines-interfaces-global-init
-  ,-cppcoreguidelines-owning-memory
-  ,hicpp-signed-bitwise
-  ,hicpp-exception-baseclass
-  ,hicpp-avoid-goto
-  ,modernize-*
-  ,-modernize-use-default-member-init
-  ,-modernize-return-braced-init-list
-  ,-modernize-use-auto
-  '
-WarningsAsErrors: '*'
+bugprone-*,
+-bugprone-forward-declaration-namespace,
+-bugprone-macro-parentheses,
+-bugprone-lambda-function-name,
+cppcoreguidelines-*,
+-cppcoreguidelines-interfaces-global-init,
+-cppcoreguidelines-owning-memory,
+-cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+-cppcoreguidelines-pro-bounds-constant-array-index,
+-cppcoreguidelines-pro-bounds-pointer-arithmetic,
+-cppcoreguidelines-pro-type-cstyle-cast,
+-cppcoreguidelines-pro-type-reinterpret-cast,
+-cppcoreguidelines-pro-type-static-cast-downcast,
+-cppcoreguidelines-pro-type-union-access,
+-cppcoreguidelines-pro-type-vararg,
+-cppcoreguidelines-special-member-functions,
+-facebook-hte-RelativeInclude,
+hicpp-exception-baseclass,
+hicpp-avoid-goto,
+modernize-*,
+-modernize-concat-nested-namespaces,
+-modernize-return-braced-init-list,
+-modernize-use-auto,
+-modernize-use-default-member-init,
+-modernize-use-using,
+-modernize-use-trailing-return-type,
+performance-*,
+-performance-noexcept-move-constructor,
+'
 HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false
 CheckOptions:

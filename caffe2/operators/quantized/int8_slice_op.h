@@ -13,8 +13,8 @@ namespace int8 {
 
 class Int8SliceOp final : public SliceOp<CPUContext> {
  public:
-  Int8SliceOp(const OperatorDef& operator_def, Workspace* ws)
-      : SliceOp(operator_def, ws) {}
+  template <class... Args>
+  explicit Int8SliceOp(Args&&... args) : SliceOp(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     if (InputSize() > 1) {
@@ -27,16 +27,38 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
   template <typename SIndex>
   bool DoRunWithType() {
     if (InputSize() > 1) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(
+          &starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(
+          &ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
-        CAFFE_ENFORCE(HasArgument("starts"));
-        CAFFE_ENFORCE(HasArgument("ends"));
+        if (HasArgument("dim") && HasArgument("start_idx") &&
+            HasArgument("end_idx")) {
+          auto dim = this->template GetSingleArgument<int>("dim", 0);
+          auto start =
+              this->template GetSingleArgument<int64_t>("start_idx", 0);
+          auto end = this->template GetSingleArgument<int64_t>("end_idx", -1);
+          auto& input_tensor = Inputs()[0]->Get<Int8TensorCPU>();
+          auto rank = input_tensor.t.sizes().size();
+          starts_.resize(rank, 0);
+          ends_.resize(rank, -1);
+          starts_[dim] = start;
+          ends_[dim] = end;
+        } else {
+          CAFFE_ENFORCE(HasArgument("starts"));
+          CAFFE_ENFORCE(HasArgument("ends"));
+        }
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(
+            &starts_host_,
+            {static_cast<int64_t>(starts_.size())},
+            at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &ends_host_,
+            {static_cast<int64_t>(ends_.size())},
+            at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),

@@ -12,6 +12,7 @@ OPERATOR_SCHEMA(Int8ResizeNearest)
     .Arg("Y_zero_point", "Output tensor quantization offset")
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension")
+    .Arg("output_size", "Output dimensions (HxW). If specified this takes precedence over scale values.")
     .SetDoc(R"DOC(
 Resizes the spatial dimensions of the input using nearest neighbor
 interpolation. The `width_scale` and `height_scale` arguments

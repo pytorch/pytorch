@@ -1,8 +1,8 @@
 #pragma once
 
-#include <c10/DeviceGuard.h>
+#include <c10/core/DeviceGuard.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/ScalarType.h> // TensorList whyyyyy
+#include <c10/core/ScalarType.h> // TensorList whyyyyy
 
 namespace at {
 
@@ -14,7 +14,7 @@ namespace at {
 //    OptionalDeviceGuard guard(device_of(tensor));
 
 /// Return the Device of a Tensor, if the Tensor is defined.
-inline optional<Device> device_of(Tensor t) {
+inline optional<Device> device_of(const Tensor& t) {
   if (t.defined()) {
     return make_optional(t.device());
   } else {

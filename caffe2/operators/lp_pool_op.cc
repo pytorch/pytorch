@@ -3,13 +3,15 @@
 
 namespace caffe2 {
 
-using std::min;
 using std::max;
+using std::min;
 
-class LpPool {};
+struct LpPoolFunctor {
+  explicit LpPoolFunctor(const OperatorBase& /* op */) {}
+};
 
 template <>
-bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
+bool PoolOp<float, CPUContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
   ConvPoolOpBase::SetOutputSize(X, Y, X.dim32(1));
@@ -55,7 +57,7 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
 }
 
 template <>
-bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
+bool PoolOp<float, CPUContext, LpPoolFunctor>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto* Y = Output(0);
   int height = X.dim32(1);
@@ -104,16 +106,16 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
 }
 
 template <>
-bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
+bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
+    RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
   const auto& Y = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
-  const auto inv_p = 1.0 / p;
 
   // TODO(Yangqing): Add shape checks.
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   math::Set<float, CPUContext>(
       X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
@@ -139,7 +141,6 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
           int wend = min(wstart + kernel_[1], width);
           hstart = max(hstart, 0);
           wstart = max(wstart, 0);
-          float scale = 1. / (hend - hstart) / (wend - wstart);
           for (int h = hstart; h < hend; ++h) {
             for (int w = wstart; w < wend; ++w) {
               // gradient of p-norm is x_j * |x_j|^{p-2} / |x|_p^{p-1}
@@ -162,14 +163,15 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
 }
 
 template <>
-bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
+bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
+    RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
   const auto& Y = Input(1);
   auto& dY = Input(2);
   CAFFE_ENFORCE_EQ(dY.dim(), 4);
-  auto* dX = Output(0);
+
   // TODO(Yangqing): Add shape checks.
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   math::Set<float, CPUContext>(
       X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
@@ -181,7 +183,6 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   int width = X.dim32(2);
   ConvPoolOpBase<CPUContext>::ComputePads({height, width});
   const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
-  const auto inv_p = 1.0 / p;
 
   int pooled_height = dY.dim32(1);
   int pooled_width = dY.dim32(2);
@@ -196,7 +197,6 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
         int wend = min(wstart + kernel_[1], width);
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
-        float scale = 1. / (hend - hstart) / (wend - wstart);
         for (int h = hstart; h < hend; ++h) {
           for (int w = wstart; w < wend; ++w) {
             for (int c = 0; c < channels; ++c) {
@@ -221,10 +221,10 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-REGISTER_CPU_OPERATOR(LpPool, PoolOp<float, CPUContext, LpPool>);
+REGISTER_CPU_OPERATOR(LpPool, PoolOp<float, CPUContext, LpPoolFunctor>);
 REGISTER_CPU_OPERATOR(
     LpPoolGradient,
-    PoolGradientOp<float, CPUContext, LpPool>);
+    PoolGradientOp<float, CPUContext, LpPoolFunctor>);
 
 OPERATOR_SCHEMA(LpPool)
     .NumInputs(1)
@@ -287,12 +287,14 @@ Y:
 </details>
 
 )DOC")
-    .Arg("p","(*float*): type of $L_p$ norm to use (default=2.0)")
-    .Arg("kernel","(*int*): the size of the window to take a max over")
-    .Arg("stride","(*int*): the stride of the window")
-    .Arg("pad","(*int*): implicit zero padding to be added on both sides")
-    .Arg("dilation","(*int*): parameter that controls the stride of elements in the window")
-    .Arg("order","(*string*): order of blob dimensions (default=\"NCHW\")")
+    .Arg("p", "(*float*): type of $L_p$ norm to use (default=2.0)")
+    .Arg("kernel", "(*int*): the size of the window to take a max over")
+    .Arg("stride", "(*int*): the stride of the window")
+    .Arg("pad", "(*int*): implicit zero padding to be added on both sides")
+    .Arg(
+        "dilation",
+        "(*int*): parameter that controls the stride of elements in the window")
+    .Arg("order", "(*string*): order of blob dimensions (default=\"NCHW\")")
     .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Output(0, "Y", "(*Tensor`<float>`*): output tensor");
 
@@ -309,4 +311,4 @@ class GetPoolGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(LpPool, GetPoolGradient);
-}
+} // namespace caffe2

@@ -3,11 +3,11 @@
 
 #include <cuda.h>
 #include <assert.h>
-#include "THCGeneral.h"
-#include "TH/THHalf.h"
-#include "THCTensor.hpp"
-#include "THCTensorInfo.cuh"
-#include "THCTensor.hpp"
+#include <THC/THCGeneral.h>
+#include <TH/THHalf.h>
+#include <THC/THCTensor.hpp>
+#include <THC/THCTensorInfo.cuh>
+#include <THC/THCTensor.hpp>
 
 /// A utility for accessing THCuda*Tensor types in a generic manner
 

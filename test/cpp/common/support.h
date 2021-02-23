@@ -1,7 +1,5 @@
 #pragma once
 
-#include <torch/csrc/utils/tempfile.h>
-
 #include <c10/util/Exception.h>
 
 #include <gtest/gtest.h>
@@ -11,7 +9,6 @@
 
 namespace torch {
 namespace test {
-
 #define ASSERT_THROWS_WITH(statement, substring)                        \
   {                                                                     \
     std::string assert_throws_with_error_message;                       \

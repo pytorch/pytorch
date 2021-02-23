@@ -1,12 +1,29 @@
-#include "caffe2/core/types.h"
 #include "caffe2/perfkernels/cvtsh_ss_bugfix.h"
-#include "caffe2/perfkernels/typed_axpy.h"
-#include "caffe2/utils/math.h"
 
+#include <c10/util/Half.h>
 #include <emmintrin.h>
 #include <immintrin.h>
 
 namespace caffe2 {
+
+void TypedAxpy__avx2_fma(int N, const float a, const float* x, float* y) {
+  int current = 0;
+  const int bound = (N % 8) ? N - 8 : N;
+  __m256 mma = _mm256_set1_ps(a);
+  for (; current < bound; current += 8) {
+    _mm256_storeu_ps(
+        y + current,
+        _mm256_fmadd_ps(
+            mma, _mm256_loadu_ps(x + current), _mm256_loadu_ps(y + current)));
+  }
+
+  if (bound != N) {
+    while (current < N) {
+      y[current] += x[current] * a;
+      ++current;
+    }
+  }
+}
 
 void TypedAxpyHalffloat__avx2_fma(
     int N,
@@ -15,7 +32,7 @@ void TypedAxpyHalffloat__avx2_fma(
     float* y) {
   // if x does not start at the 16 byte boundary, we will process the first few.
   // before we get to a real one.
-  while (((unsigned long)x % 16) && N) {
+  while ((reinterpret_cast<unsigned long>(x) % 16) && N) {
     *(y++) += _cvtsh_ss((*(x++)).x) * a;
     --N;
   }
@@ -50,8 +67,8 @@ void TypedAxpy_uint8_float__avx2_fma(
     float* y) {
   // if x does not start at the 16 byte boundary, we will process the first few.
   // before we get to a real one.
-  while (((unsigned long)x % 16) && N) {
-    *(y++) += (float)(*(x++)) * a;
+  while ((reinterpret_cast<unsigned long>(x) % 16) && N) {
+    *(y++) += static_cast<float>(*(x++)) * a;
     --N;
   }
 

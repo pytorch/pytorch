@@ -2,7 +2,7 @@
 
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <unordered_map>
 
@@ -41,6 +41,6 @@ namespace BlobStat {
  * Return size in bytes of the blob, if available for a blob of given type.
  * If not available, return 0.
  */
-CAFFE2_API size_t sizeBytes(const Blob& blob);
+TORCH_API size_t sizeBytes(const Blob& blob);
 }
 }

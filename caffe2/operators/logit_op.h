@@ -2,8 +2,11 @@
 #define CAFFE2_OPERATORS_LOGIT_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/elementwise_ops.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(Logit)
 
 namespace caffe2 {
 
@@ -25,8 +28,9 @@ template <typename T, class Context>
 class LogitGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LogitGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LogitGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         eps_(this->template GetSingleArgument<float>("eps", 1e-6f)) {}
   ~LogitGradientOp() {}
 

@@ -81,7 +81,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     if (num_entries == 0) {
       if (!output_initialized) {
         // Get both shape and meta
-        output->CopyFrom(input, &context_);
+        output->CopyFrom(input, /* async */ true);
       }
       return true;
     }
@@ -103,9 +103,16 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto output_num =
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
     // output_num is >= output_batch_size
-    output->ExtendTo(output_num, 50, &context_);
+    output->ExtendTo(output_num, 50);
     if (pos_to_object) {
-      pos_to_object->ExtendTo(output_num, 50, &context_);
+      pos_to_object->ExtendTo(output_num, 50);
+      // ExtendTo doesn't zero-initialize tensors any more, explicitly clear
+      // the memory
+      memset(
+          pos_to_object->template mutable_data<int64_t>() +
+              output_batch_size * sizeof(int64_t),
+          0,
+          (output_num - output_batch_size) * sizeof(int64_t));
     }
 
     auto* output_data =
@@ -143,10 +150,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
         // append
         pos = *num_visited;
       } else {
-        auto& gen = context_.RandGenerator();
         // uniform between [0, num_visited]
-        std::uniform_int_distribution<int64_t> uniformDist(0, *num_visited);
-        pos = uniformDist(gen);
+        at::uniform_int_from_to_distribution<int64_t> uniformDist(*num_visited+1, 0);
+        pos = uniformDist(context_.RandGenerator());
         if (pos >= numToCollect_) {
           // discard
           pos = -1;
@@ -254,7 +260,7 @@ This operator is thread-safe.
     .Input(
         5,
         "OBJECT_TO_POS_MAP_IN",
-        "(Optional) Auxillary bookkeeping map. This should be created from "
+        "(Optional) Auxiliary bookkeeping map. This should be created from "
         " `CreateMap` with keys of type int64 and values of type int32")
     .Input(
         6,

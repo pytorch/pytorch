@@ -11,7 +11,8 @@ namespace dnnlowp {
  * for output_index'th output of op.
  */
 void PropagateOutputTensorQuantizationParams(
-    caffe2::OperatorBase* op, int output_index,
+    caffe2::OperatorBase* op,
+    int output_index,
     const TensorQuantizationParams& qparams);
 
 /**
@@ -22,8 +23,10 @@ void PropagateOutputTensorQuantizationParams(
  * chosen by qfactory based on the distribution of the input tensor
  */
 TensorQuantizationParams GetInputTensorQuantizationParamsOf(
-    caffe2::OperatorBase* op, int input_index,
-    const QuantizationFactory* qfactory, bool is_weight = false);
+    caffe2::OperatorBase* op,
+    int input_index,
+    const QuantizationFactory* qfactory,
+    bool is_weight = false);
 
 void SetStaticQuantizationParams(
     caffe2::OperatorBase* op,
@@ -35,15 +38,16 @@ void SetStaticQuantizationParams(
  *              Y_scale and optionally Y_zero_offset argument).
  */
 bool HasStaticQuantization(
-    const caffe2::OperatorBase* op, int output_index = 0);
+    const caffe2::OperatorBase* op,
+    int output_index = 0);
 
 /**
  * Get output_index'th quantization parameter.
  * Should be used only when UseStaticQuantization is true
  */
 TensorQuantizationParams GetStaticQuantizationParamsOf(
-    const caffe2::OperatorBase* op, int output_index);
-
+    const caffe2::OperatorBase* op,
+    int output_index);
 
 /**
  * Quantize input_index'th input if it's not already quantized.
@@ -52,18 +56,18 @@ TensorQuantizationParams GetStaticQuantizationParamsOf(
  * @return array of quantized values
  */
 template <typename T>
-const T *QuantizeInputIfNeeded(
-    caffe2::OperatorBase *op, int input_index,
-    const TensorQuantizationParams& qparams, std::vector<T>& temp,
-    const QuantizationFactory *qfactory);
+const T* QuantizeInputIfNeeded(
+    caffe2::OperatorBase* op,
+    int input_index,
+    const TensorQuantizationParams& qparams,
+    std::vector<T>& temp);
 
 template <typename T>
-const T *RowWiseQuantizeInputIfNeeded(
-    caffe2::OperatorBase *op,
+const T* RowWiseQuantizeInputIfNeeded(
+    caffe2::OperatorBase* op,
     int input_index,
     const std::vector<TensorQuantizationParams>& qparams,
-    std::vector<T>& temp,
-    const QuantizationFactory *qfactory);
+    std::vector<T>& temp);
 
 struct QuantizationErrorStats {
   float sum_sq{0}, sum_err_sq{0};
@@ -74,8 +78,10 @@ struct QuantizationErrorStats {
 };
 
 void MeasureQuantizationError(
-    const float *actual, const float *ref, size_t len,
-    QuantizationErrorStats *stat);
+    const float* actual,
+    const float* ref,
+    size_t len,
+    QuantizationErrorStats* stat);
 
 void ReportQuantizationError(
     const caffe2::OperatorBase* op,
@@ -84,8 +90,8 @@ void ReportQuantizationError(
 /**
  * Get QuantizationFactory based on the arguments of op
  */
-std::unique_ptr<QuantizationFactory>
-    GetQuantizationFactoryOf(const caffe2::OperatorBase* op);
+std::unique_ptr<QuantizationFactory> GetQuantizationFactoryOf(
+    const caffe2::OperatorBase* op);
 
 void AdjustOutputTensorQuantizationParamsWithFollowedBy(
     caffe2::OperatorBase* op,
@@ -98,6 +104,7 @@ void ParseDNNLowPOperatorArguments(
     std::string* followed_by = nullptr);
 
 caffe2::NetDef AddScaleZeroOffsetArgumentsWithHistogram(
-    caffe2::NetDef net_def, const std::string& histogram_file_name);
+    caffe2::NetDef net_def,
+    const std::string& histogram_file_name);
 
 } // namespace dnnlowp

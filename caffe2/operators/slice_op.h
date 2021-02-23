@@ -7,8 +7,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 template <class SIndex, class Context>
 bool SliceImpl(
     Tensor* output,
@@ -35,23 +33,24 @@ bool SliceImpl(
   for (int i = 0; i < data.dim(); ++i) {
     if (i >= starts.numel()) {
       starts_idx[i] = 0;
-      ends_idx[i] = data.sizes()[i];
+      ends_idx[i] = data.size(i);
+      dst_sizes[i] = data.size(i);
       continue;
     }
-    if (data.sizes()[i] > 0) {
+    if (data.size(i) > 0) {
       auto start = starts_data[i];
       auto end = ends_data[i];
       if (start < 0) {
-        start = data.sizes()[i] + 1 + start;
+        start = data.size(i) + 1 + start;
       }
       if (end < 0) {
-        end = data.sizes()[i] + 1 + end;
+        end = data.size(i) + 1 + end;
       }
-      if (start > data.sizes()[i]) {
-        start = data.sizes()[i];
+      if (start > data.size(i)) {
+        start = data.size(i);
       }
-      if (end > data.sizes()[i]) {
-        end = data.sizes()[i];
+      if (end > data.size(i)) {
+        end = data.size(i);
       }
       CAFFE_ENFORCE_GE(start, 0);
       CAFFE_ENFORCE_GE(end, 0);
@@ -71,13 +70,16 @@ bool SliceImpl(
     if (!backward) {
       output->Resize(dst_sizes);
       output->raw_mutable_data(data.dtype());
+    } else {
+      gdata->ResizeLike(data);
+      gdata->raw_mutable_data(go->dtype());
     }
     return true;
   }
   // for now only supports slicing in 1 dimension
   int dim = -1;
   for (int i = 0; i < data.dim(); ++i) {
-    if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
+    if (starts_idx[i] > 0 || ends_idx[i] < data.size(i)) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");
       dim = i;
@@ -85,9 +87,9 @@ bool SliceImpl(
   }
   if (dim == -1) {
     if (!backward) {
-      output->CopyFrom(data, context);
+      output->CopyFrom(data, true /*async*/);
     } else {
-      gdata->CopyFrom(*go, context);
+      gdata->CopyFrom(*go, true /*async*/);
     }
     return true;
   }
@@ -116,7 +118,7 @@ bool SliceImpl(
     size_t src_nbytes = data.nbytes();
     size_t dst_nbytes = output->nbytes();
 
-    size_t src_block_size = unit * data.sizes()[dim];
+    size_t src_block_size = unit * data.size(dim);
     size_t dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
     size_t src_offset = unit * starts_idx[dim];
 
@@ -129,7 +131,7 @@ bool SliceImpl(
 
     char* src_offset_bytes = src_bytes + itemsize * src_offset;
     char* dst_offset_bytes = dst_bytes;
-    for (int i = 0; i < num_blocks; ++i) {
+    for (size_t i = 0; i < num_blocks; ++i) {
       char* local_src_offset_bytes =
           src_offset_bytes + i * src_block_size_bytes;
       char* local_dst_offset_bytes =
@@ -154,7 +156,7 @@ bool SliceImpl(
     size_t dst_nbytes = gdata->nbytes();
 
     size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-    size_t dst_block_size = unit * data.sizes()[dim];
+    size_t dst_block_size = unit * data.size(dim);
     size_t dst_offset = unit * starts_idx[dim];
 
     if (num_blocks == 0 || dst_block_size == 0) {
@@ -175,7 +177,7 @@ bool SliceImpl(
       return true;
     }
 
-    for (int i = 0; i < num_blocks; ++i) {
+    for (size_t i = 0; i < num_blocks; ++i) {
       char* local_src_offset_bytes =
           src_offset_bytes + i * src_block_size_bytes;
       char* local_dst_offset_bytes =
@@ -196,14 +198,13 @@ bool SliceImpl(
   return true;
 }
 
-} // namespace
-
 template <class Context>
 class SliceOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SliceOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SliceOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
@@ -219,16 +220,16 @@ class SliceOp : public Operator<Context> {
   template <typename SIndex>
   bool DoRunWithType() {
     if (InputSize() > 1) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),
@@ -242,7 +243,7 @@ class SliceOp : public Operator<Context> {
       }
     }
 
-    auto data = Input(0);
+    const auto& data = Input(0);
     auto output = Output(0);
 
     return SliceImpl<SIndex, Context>(
@@ -255,16 +256,17 @@ class SliceOp : public Operator<Context> {
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
-  Tensor starts_host_{CPU};
-  Tensor ends_host_{CPU};
+  Tensor starts_host_;
+  Tensor ends_host_;
 };
 
 template <class Context>
 class SliceGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SliceGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
@@ -285,8 +287,8 @@ class SliceGradientOp : public Operator<Context> {
     auto& data = Input(0);
 
     if (InputSize() == 4) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
 
       auto& go = Input(3);
 
@@ -298,8 +300,10 @@ class SliceGradientOp : public Operator<Context> {
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(
+            &starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),
@@ -324,7 +328,7 @@ class SliceGradientOp : public Operator<Context> {
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
-  Tensor starts_host_{CPU};
-  Tensor ends_host_{CPU};
+  Tensor starts_host_;
+  Tensor ends_host_;
 };
 } // namespace caffe2

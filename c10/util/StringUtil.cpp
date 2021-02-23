@@ -1,5 +1,5 @@
-#include "c10/util/StringUtil.h"
-#include "c10/util/Exception.h"
+#include <c10/util/StringUtil.h>
+#include <c10/util/Exception.h>
 
 #include <cstring>
 #include <string>
@@ -18,6 +18,14 @@ std::string StripBasename(const std::string& full_path) {
   }
 }
 
+std::string ExcludeFileExtension(const std::string& file_name) {
+  const char sep = '.';
+  auto end_index = file_name.find_last_of(sep) == std::string::npos
+      ? -1
+      : file_name.find_last_of(sep);
+  return file_name.substr(0, end_index);
+}
+
 } // namespace detail
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
@@ -26,8 +34,8 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
 }
 
 size_t ReplaceAll(std::string& s, const char* from, const char* to) {
-  AT_CHECK(from && *from, "");
-  AT_CHECK(to, "");
+  TORCH_CHECK(from && *from, "");
+  TORCH_CHECK(to, "");
 
   size_t numReplaced = 0;
   std::string::size_type lenFrom = std::strlen(from);

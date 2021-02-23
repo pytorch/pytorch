@@ -1,9 +1,10 @@
-#include "ATen/native/TensorTransformations.h"
+#include <ATen/native/TensorTransformations.h>
 
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/macros/Macros.h>
 
 #include <cstddef>
 #include <vector>
@@ -11,12 +12,12 @@
 namespace at {
 namespace native {
 
-#define AT_APPLY_THREADS_PER_BLOCK 32 * 16
-#define AT_APPLY_BLOCKS_PER_SM 4
+constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
+constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 template <typename scalar_t, typename IndexType>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
@@ -67,7 +68,7 @@ void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int6
 }
 
 // Flip tensor given a list of dims
-Tensor flip_cuda(const Tensor& self, IntList dims) {
+Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
   auto in_tensor = self;
   const int64_t flip_dims_size = dims.size(), total_dims = in_tensor.dim(), N = in_tensor.numel();
   flip_check_errors(total_dims, flip_dims_size, dims);
@@ -76,7 +77,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   dim3 dim_block(block_size);
   dim3 dim_grid((N + block_size - 1) / block_size);
 
-  auto out_tensor = at::empty_like(in_tensor);
+  auto out_tensor = at::empty_like(in_tensor, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (out_tensor.numel() == 0) {
     return out_tensor;
   }
@@ -86,7 +87,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
 
   // use kernel_pointwise_flip_apply2 only when to-flip dim is the 1st or last dim, where collapseDims can reduce the amount of work
   if (flip_dims_size == 1 && in_tensor.is_contiguous() && (flip_dims[0] == 0 || flip_dims[0] == total_dims - 1)) {
-    AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, in_tensor.scalar_type(), "flip_cuda", [&] {
       auto in_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(in_tensor);
       auto out_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(out_tensor);
       int flip_dim = in_tensor_info.collapseDims(flip_dims[0]);
@@ -94,22 +95,26 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
       kernel_pointwise_flip_apply2<scalar_t, int64_t>
         <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           in_tensor_info, out_tensor_info, N, flip_dim, total_dims);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
     return out_tensor;
   }
 
-  auto flip_dims_t = at::CPU(kLong).tensorFromBlob(flip_dims.data(), {static_cast<int64_t>(flip_dims.size())});
+  auto flip_dims_t = at::from_blob(
+      flip_dims.data(), {static_cast<int64_t>(flip_dims.size())}, at::device(kCPU).dtype(kLong));
 
   auto shape = in_tensor.sizes().vec();
-  auto shape_t = at::CPU(kLong).tensorFromBlob(shape.data(), {static_cast<int64_t>(shape.size())});
+  auto shape_t = at::from_blob(
+      shape.data(), {static_cast<int64_t>(shape.size())}, at::device(kCPU).dtype(kLong));
 
   auto strides = in_tensor.strides().vec();
-  auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
+  auto strides_t = at::from_blob(
+      strides.data(), {static_cast<int64_t>(strides.size())}, at::device(kCPU).dtype(kLong));
 
   // stride_contiguous is the stride of non-contiguous tensor after calling contiguous(),
   // it is used to compute indices for each element in non-contiguous tensor
   Tensor stride_contiguous = at::zeros({total_dims}, kLong);
-  int64_t* stride_contiguous_d = stride_contiguous.data<int64_t>();
+  int64_t* stride_contiguous_d = stride_contiguous.data_ptr<int64_t>();
   for (int64_t i = total_dims - 1; i >= 0; i--) {
     if (i == total_dims - 1) {
       stride_contiguous_d[i] = 1;
@@ -118,19 +123,28 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
     }
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, in_tensor.scalar_type(), "flip_cuda", [&] {
     flip_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size,
-      strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
+      in_tensor.data_ptr<scalar_t>(), out_tensor.data_ptr<scalar_t>(), N,
+      flip_dims_t.cuda().data_ptr<int64_t>(),
+      flip_dims_size,
+      strides_t.cuda().data_ptr<int64_t>(),
+      stride_contiguous.cuda().data_ptr<int64_t>(),
+      shape_t.cuda().data_ptr<int64_t>(),
+      total_dims);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   return out_tensor;
 }
 
 template <typename scalar_t>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__
 void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
-                      int64_t roll_dim, int64_t shift, int64_t start,
+                      int64_t roll_dim, int64_t start,
                       int64_t size, int64_t stride, int64_t total_dims) {
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
@@ -141,7 +155,7 @@ void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
   // index into the source data to find appropriate value.
   int64_t source_idx = 0;
   if( roll_dim_idx >= (size - start) ) {
-    source_idx = linear_index - (shift * stride);
+    source_idx = linear_index - ((size - start) * stride);
   } else {
     source_idx = linear_index + (start * stride);
   }
@@ -149,20 +163,16 @@ void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
 }
 
 // Roll a tensor along a dimension
-Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
-  if (dims.size() == 0 && shifts.size() == 1) {
-    auto flattened = self.contiguous().view(self.numel());
-    return roll_cuda(flattened, shifts[0], 0).view(self.sizes());
+Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
+  if (dims.size() != 1 || shifts.size() != 1) {
+    return roll_common(self, shifts, dims);
   }
-  AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
-  // todo: support rolling along multiple dimensions as in numpy.roll.
-  AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
 
   auto in_tensor = self;
   if(!self.is_contiguous()) {
     in_tensor = self.contiguous();
   }
-  auto out_tensor = at::empty_like(in_tensor);
+  auto out_tensor = at::empty_like(in_tensor, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (out_tensor.numel() == 0) {
     return out_tensor;
   }
@@ -176,17 +186,18 @@ Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
 
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid;
-  AT_CHECK(cuda::getApplyGrid(N, dim_grid, in_tensor.get_device()), "unable to get dim grid");
+  TORCH_CHECK(cuda::getApplyGrid(N, dim_grid, in_tensor.get_device()), "unable to get dim grid");
 
   auto total_dims = in_tensor.dim();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "roll_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, in_tensor.scalar_type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
-      dim, shifts[0], start,
+      in_tensor.data_ptr<scalar_t>(), out_tensor.data_ptr<scalar_t>(), N,
+      dim, start,
       size,
       in_tensor.stride(dim),
       total_dims);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   return out_tensor;

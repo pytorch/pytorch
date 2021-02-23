@@ -25,7 +25,6 @@ template <>
 bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   const auto& heatmaps_in = Input(0);
   const auto& bboxes_in = Input(1);
-  auto* keypoints_out = Output(0);
 
   CAFFE_ENFORCE_EQ(heatmaps_in.dim(), 4);
   const int N = heatmaps_in.dim32(0);
@@ -61,7 +60,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   } /* otherwise not initialized */
 
   // Resize and wrap outputs in Eigen
-  keypoints_out->Resize(N, 4, keypoint_count);
+  auto* keypoints_out = Output(0, {N, 4, keypoint_count}, at::dtype<float>());
   Eigen::Map<ERArrXXf> keypoints(
       keypoints_out->mutable_data<float>(), N, 4 * keypoint_count);
 
@@ -141,7 +140,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       }
       assert(std::abs(delta(0)) <= MAX_DELTA);
       assert(std::abs(delta(1)) <= MAX_DELTA);
-      // find maximum of detla scores
+      // find maximum of delta scores
       keypoints(k, 0 * keypoint_count + j) =
           x0 + (0.5 + maxX + delta(0)) * xLen / heatmap_size;
       keypoints(k, 1 * keypoint_count + j) =
@@ -159,3 +158,18 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
 }
 
 } // namespace caffe2
+
+using HeatmapMaxKeypointOpFloatCPU =
+    caffe2::HeatmapMaxKeypointOp<float, caffe2::CPUContext>;
+
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    HeatmapMaxKeypoint,
+    "_caffe2::HeatmapMaxKeypoint("
+      "Tensor heatmaps, "
+      "Tensor bboxes_in, "
+      "bool should_output_softmax = True"
+    ") -> Tensor keypoints",
+    HeatmapMaxKeypointOpFloatCPU);
+
+// clang-format on

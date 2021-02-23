@@ -15,12 +15,10 @@ void adagrad_update__base(
     float* nh,
     float epsilon,
     float decay,
-    const float lr) {
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float hi = nh[i] = decay * h[i] + gi * gi;
-    nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
-  }
+    const float lr,
+    const float weight_decay = 0.f) {
+  internal::adagrad_update_base_inlined(
+      N, w, g, h, nw, nh, decay, epsilon, lr, weight_decay);
 }
 
 void adagrad_update_prefetch__base(
@@ -40,8 +38,9 @@ void adagrad_update_prefetch__base(
     float* /* nh_n */, // prefetch ptr
 
     float epsilon,
-    float lr) {
-  adagrad_update__base(N, w, g, h, nw, nh, epsilon, 1.0f, lr);
+    float lr,
+    float weight_decay = 0.f) {
+  adagrad_update__base(N, w, g, h, nw, nh, epsilon, 1.0f, lr, weight_decay);
 }
 
 void adagrad_fp16_update_prefetch__base(
@@ -56,42 +55,31 @@ void adagrad_fp16_update_prefetch__base(
     at::Half* nh,
     at::Half* /* nh_n */, // prefetch ptr
     float epsilon,
-    float lr) {
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float hi = h[i] + gi * gi;
-    nh[i] = hi;
-    nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
-  }
+    float lr,
+    float weight_decay = 0.f) {
+  internal::adagrad_update_base_inlined(
+      N, w, g, h, nw, nh, 1.0f, epsilon, lr, weight_decay);
 }
 
-void rowwise_adagrad_update__base(
+// version without prefetching
+decltype(adagrad_update__base) adagrad_update__avx2_fma;
+void adagrad_update(
     int N,
-    float* w,
-    float* /* w_n */, // prefetch ptr
-
+    const float* w,
     const float* g,
-
-    float* h,
-    float* /* h_n */, // prefetch ptr
-
+    const float* h,
+    float* nw,
+    float* nh,
     float epsilon,
-    float lr) {
-  float sum = 0.0f;
-  for (auto i = 0; i < N; ++i) {
-    sum += g[i] * g[i];
-  }
-  sum /= N;
-
-  float hi = *h = *h + sum;
-  float float_step = lr / (std::sqrt(hi) + epsilon);
-
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    w[i] = w[i] + gi * float_step;
-  }
+    float decay,
+    float lr,
+    float weight_decay) {
+  AVX2_FMA_DO(
+      adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr, weight_decay);
+  BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr, weight_decay);
 }
 
+decltype(adagrad_update_prefetch__base) adagrad_update_prefetch__avx2_fma;
 void adagrad_update_prefetch(
     int N,
     const float* w,
@@ -109,8 +97,9 @@ void adagrad_update_prefetch(
     float* nh_n, // prefetch ptr
 
     float epsilon,
-    float lr) {
-  AVX_F16C_DO(
+    float lr,
+    float weight_decay) {
+  AVX2_FMA_DO(
       adagrad_update_prefetch,
       N,
       w,
@@ -123,7 +112,8 @@ void adagrad_update_prefetch(
       nh,
       nh_n,
       epsilon,
-      lr);
+      lr,
+      weight_decay);
   BASE_DO(
       adagrad_update_prefetch,
       N,
@@ -137,11 +127,14 @@ void adagrad_update_prefetch(
       nh,
       nh_n,
       epsilon,
-      lr);
+      lr,
+      weight_decay);
 }
 
 // Version with prefetching for embeddings and
 // momentum using fp16
+decltype(
+    adagrad_fp16_update_prefetch__base) adagrad_fp16_update_prefetch__avx2_fma;
 void adagrad_fp16_update_prefetch(
     int N,
     const at::Half* w,
@@ -154,8 +147,9 @@ void adagrad_fp16_update_prefetch(
     at::Half* nh,
     at::Half* nh_n, // prefetch ptr
     float epsilon,
-    float lr) {
-  AVX_F16C_DO(
+    float lr,
+    float weight_decay) {
+  AVX2_FMA_DO(
       adagrad_fp16_update_prefetch,
       N,
       w,
@@ -168,7 +162,8 @@ void adagrad_fp16_update_prefetch(
       nh,
       nh_n,
       epsilon,
-      lr);
+      lr,
+      weight_decay);
   BASE_DO(
       adagrad_fp16_update_prefetch,
       N,
@@ -182,145 +177,8 @@ void adagrad_fp16_update_prefetch(
       nh,
       nh_n,
       epsilon,
-      lr);
-}
-
-void rowwise_adagrad_update(
-    int N,
-    float* w,
-    float* w_n, // prefetch ptr
-
-    const float* g,
-
-    float* h,
-    float* h_n, // prefetch ptr
-
-    float epsilon,
-    float lr) {
-  AVX_F16C_DO(rowwise_adagrad_update, N, w, w_n, g, h, h_n, epsilon, lr);
-  BASE_DO(rowwise_adagrad_update, N, w, w_n, g, h, h_n, epsilon, lr);
-}
-
-// version without prefetching
-void adagrad_update(
-    int N,
-    const float* w,
-    const float* g,
-    const float* h,
-    float* nw,
-    float* nh,
-    float epsilon,
-    float decay,
-    float lr) {
-  AVX_F16C_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
-  BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
-}
-
-template <typename SIndex>
-void sparse_adagrad(
-    int num_rows,
-    int block_size,
-    int param_size,
-    const float* w,
-    const float* g,
-    const float* h,
-    const SIndex* indices,
-    float* nw,
-    float* nh,
-    float epsilon,
-    float lr,
-    const std::string& param_name);
-
-SPARSE_ADAGRAD_SPECIALIZATION(int32_t, base);
-
-template <>
-void sparse_adagrad(
-    int num_rows,
-    int block_size,
-    int param_size,
-    const float* w,
-    const float* g,
-    const float* h,
-    const int32_t* indices,
-    float* nw,
-    float* nh,
-    float epsilon,
-    float lr,
-    const std::string& param_name) {
-  AVX_F16C_DO(
-      sparse_adagrad_int32_t,
-      num_rows,
-      block_size,
-      param_size,
-      w,
-      g,
-      h,
-      indices,
-      nw,
-      nh,
-      epsilon,
       lr,
-      param_name);
-  BASE_DO(
-      sparse_adagrad_int32_t,
-      num_rows,
-      block_size,
-      param_size,
-      w,
-      g,
-      h,
-      indices,
-      nw,
-      nh,
-      epsilon,
-      lr,
-      param_name);
-}
-
-SPARSE_ADAGRAD_SPECIALIZATION(int64_t, base);
-
-template <>
-void sparse_adagrad(
-    int num_rows,
-    int block_size,
-    int param_size,
-    const float* w,
-    const float* g,
-    const float* h,
-    const int64_t* indices,
-    float* nw,
-    float* nh,
-    float epsilon,
-    float lr,
-    const std::string& param_name) {
-  AVX_F16C_DO(
-      sparse_adagrad_int64_t,
-      num_rows,
-      block_size,
-      param_size,
-      w,
-      g,
-      h,
-      indices,
-      nw,
-      nh,
-      epsilon,
-      lr,
-      param_name);
-  BASE_DO(
-      sparse_adagrad_int64_t,
-      num_rows,
-      block_size,
-      param_size,
-      w,
-      g,
-      h,
-      indices,
-      nw,
-      nh,
-      epsilon,
-      lr,
-      param_name);
+      weight_decay);
 }
 
 } // namespace caffe2

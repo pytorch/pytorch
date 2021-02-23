@@ -9,8 +9,9 @@ namespace caffe2 {
 template <typename T, class Context, class Engine = DefaultEngine>
 class ElementwiseLinearOp final : public Operator<Context> {
  public:
-  ElementwiseLinearOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ElementwiseLinearOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axis_(this->template GetSingleArgument<int>("axis", 1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -23,8 +24,9 @@ class ElementwiseLinearOp final : public Operator<Context> {
 template <typename T, class Context, class Engine = DefaultEngine>
 class ElementwiseLinearGradientOp final : public Operator<Context> {
  public:
-  ElementwiseLinearGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ElementwiseLinearGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axis_(this->template GetSingleArgument<int>("axis", 1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -36,4 +38,4 @@ class ElementwiseLinearGradientOp final : public Operator<Context> {
 
 } // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_ELEMENTWISE_LINEAR_OP_H_
+#endif // CAFFE2_OPERATORS_ELEMENTWISE_LINEAR_OP_H_

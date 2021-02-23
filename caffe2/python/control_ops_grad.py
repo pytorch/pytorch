@@ -1,9 +1,9 @@
 ## @package control_ops_grad
 # Module caffe2.python.control_ops_grad
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 
@@ -468,6 +468,11 @@ def _get_net_argument(op, net_name):
     return None
 
 
+def getNetArgument(op, net_name):
+    """A wrapper for external call"""
+    return _get_net_argument(op, net_name)
+
+
 def _gen_subgradient_pass(subnet, init_grad):
     from caffe2.python.core import IR
     subnet_ir = IR(subnet.op)
@@ -683,3 +688,19 @@ def _prepare_gradient_if_op(
     del gradient_if_def.control_input[:]
     gradient_if_def.is_gradient_op = True
     return gradient_if_def
+
+
+def disambiguate_grad_if_op_output(grad_op, idx, new_grad_output):
+    then_net = _get_net_argument(grad_op, "then_net")
+    old_grad_out_match = grad_op.output[idx]
+    for op in then_net.op:
+        for i, out in enumerate(op.output):
+            if out == old_grad_out_match:
+                op.output[i] = new_grad_output
+    else_net = _get_net_argument(grad_op, "else_net")
+    if else_net:
+        for op in else_net.op:
+            for i, out in enumerate(op.output):
+                if out == old_grad_out_match:
+                    op.output[i] = new_grad_output
+    grad_op.output[idx] = new_grad_output

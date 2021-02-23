@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import functools
 
@@ -45,16 +45,19 @@ class TestAdadelta(serial.SerializedTestCase):
             return (param_out.astype(np.float32), mom_out.astype(np.float32),
                     mom_delta_out.astype(np.float32))
 
-    @serial.given(inputs=hu.tensors(n=4),
-           lr=st.floats(min_value=0.01, max_value=0.99,
+    @given(inputs=hu.tensors(n=4),
+           lr=hu.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
-           epsilon=st.floats(min_value=0.01, max_value=0.99,
+           epsilon=hu.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           decay=st.floats(min_value=0.01, max_value=0.99,
-                             allow_nan=False, allow_infinity=False),
+           decay=hu.floats(min_value=0.01, max_value=0.99,
+                           allow_nan=False, allow_infinity=False),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_adadelta(self, inputs, lr, epsilon, decay, gc, dc):
         param, moment, moment_delta, grad = inputs
+        moment = np.abs(moment)
+        moment_delta = np.abs(moment_delta)
         lr = np.array([lr], dtype=np.float32)
 
         op = core.CreateOperator(
@@ -73,24 +76,25 @@ class TestAdadelta(serial.SerializedTestCase):
 
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
-    @settings(suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=10000)
     @given(inputs=hu.tensors(n=4),
-           lr=st.floats(min_value=0.01, max_value=0.99,
+           lr=hu.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
-           epsilon=st.floats(min_value=0.01, max_value=0.99,
+           epsilon=hu.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           decay=st.floats(min_value=0.01, max_value=0.99,
-                             allow_nan=False, allow_infinity=False),
+           decay=hu.floats(min_value=0.01, max_value=0.99,
+                           allow_nan=False, allow_infinity=False),
            **hu.gcs)
     def test_sparse_adadelta(self, inputs, lr, epsilon, decay, gc, dc):
         param, moment, moment_delta, grad = inputs
         moment = np.abs(moment)
+        moment_delta = np.abs(moment_delta)
         lr = np.array([lr], dtype=np.float32)
 
         # Create an indexing array containing values that are lists of indices,
         # which index into grad
         indices = np.random.choice(np.arange(grad.shape[0]),
-            size=np.random.randint(grad.shape[0]), replace=False)
+                                   size=np.random.randint(grad.shape[0]), replace=False)
 
         # Sparsify grad
         grad = grad[indices]
@@ -116,7 +120,7 @@ class TestAdadelta(serial.SerializedTestCase):
             return (param_out, moment_out, moment_delta_out)
 
         ref_using_fp16_values = [False]
-        if dc == hu.gpu_do:
+        if gc == hu.gpu_do:
             ref_using_fp16_values.append(True)
 
         for ref_using_fp16 in ref_using_fp16_values:
@@ -132,22 +136,21 @@ class TestAdadelta(serial.SerializedTestCase):
                 moment_delta_i = moment_delta.astype(np.float32)
                 param_i = param.astype(np.float32)
 
-                self.assertReferenceChecks(gc, op, [
-                    param_i, moment_i, moment_delta_i, indices, grad, lr, decay,
-                    ref_using_fp16
-                ], ref_sparse)
+            self.assertReferenceChecks(gc, op, [
+                param_i, moment_i, moment_delta_i, indices, grad, lr, decay,
+                ref_using_fp16
+            ], ref_sparse)
 
-    @serial.given(inputs=hu.tensors(n=3),
+    @given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            decay=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           data_strategy=st.data(),
            **hu.gcs)
-    def test_sparse_adadelta_empty(self, inputs, lr, epsilon, decay,
-                                  data_strategy, gc, dc):
+    @settings(deadline=1000)
+    def test_sparse_adadelta_empty(self, inputs, lr, epsilon, decay, gc, dc):
         param, moment, moment_delta = inputs
         moment = np.abs(moment)
         lr = np.array([lr], dtype=np.float32)
@@ -172,7 +175,7 @@ class TestAdadelta(serial.SerializedTestCase):
             return (param_out, moment_out, moment_delta_out)
 
         ref_using_fp16_values = [False]
-        if dc == hu.gpu_do:
+        if gc == hu.gpu_do:
             ref_using_fp16_values.append(True)
 
         for ref_using_fp16 in ref_using_fp16_values:
@@ -188,9 +191,9 @@ class TestAdadelta(serial.SerializedTestCase):
                 moment_delta_i = moment_delta.astype(np.float32)
                 param_i = param.astype(np.float32)
 
-        self.assertReferenceChecks(
-            gc,
-            op,
-            [param_i, moment_i, moment_delta_i, indices, grad, lr, decay],
-            ref_sparse_empty
-        )
+            self.assertReferenceChecks(
+                gc,
+                op,
+                [param_i, moment_i, moment_delta_i, indices, grad, lr, decay],
+                ref_sparse_empty
+            )

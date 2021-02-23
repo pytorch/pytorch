@@ -46,7 +46,7 @@ struct Link {
   int32_t window{1};
 };
 
-struct CAFFE2_API ScratchWorkspaces {
+struct TORCH_API ScratchWorkspaces {
   std::vector<std::shared_ptr<Workspace>> stepWorkspaces;
   std::shared_ptr<Workspace> sharedBlobsWs = nullptr;
 };
@@ -59,7 +59,7 @@ inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
       t;
 }
 
-CAFFE2_API std::map<string, string> GetRecurrentMapping(
+TORCH_API std::map<string, string> GetRecurrentMapping(
     const std::vector<detail::Link>& links,
     bool backward);
 
@@ -158,15 +158,15 @@ void initializeRecurrentInput(
   }
 }
 
-CAFFE2_API void PrependOps(std::vector<OperatorDef> ops, NetDef* netdef);
+TORCH_API void PrependOps(std::vector<OperatorDef> ops, NetDef* netdef);
 
-CAFFE2_API void AddApplyLinkOps(
+TORCH_API void AddApplyLinkOps(
     const vector<Link>& links,
     std::string timestep,
     const DeviceOption& device_option,
     NetDef* netdef);
 
-CAFFE2_API void extractLinks(
+TORCH_API void extractLinks(
     OperatorBase* op,
     const std::string& internalArg,
     const std::string& externalArg,
@@ -174,7 +174,7 @@ CAFFE2_API void extractLinks(
     const std::string& windowArg,
     std::vector<detail::Link>* links);
 
-CAFFE2_API NetDef
+TORCH_API NetDef
 extractNetDef(const OperatorDef& op, const std::string& argName);
 } // namespace detail
 
@@ -182,7 +182,7 @@ template <class Context>
 class RecurrentNetworkOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  RecurrentNetworkOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit RecurrentNetworkOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         sharedWs_(ws),
         enable_rnn_executor_(this->template GetSingleArgument<bool>(
@@ -190,7 +190,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
             false)),
         timestep_(this->template GetSingleArgument<std::string>(
             "timestep",
-            "timestep")) {
+            "timestep")),
+        operator_def_(operator_def) {
     CAFFE_ENFORCE(ws);
 
     stepNetDef_ = detail::extractNetDef(operator_def, "step_net");
@@ -204,14 +205,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
         links_, timestep_, operator_def.device_option(), &stepNetDef_);
 
     if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
-      VLOG(1) << "Use RecurrentNetworkExecutor";
-      auto recurrent_map = detail::GetRecurrentMapping(links_, false /* backward */);
-      rnnExecutor_ =
-          createRNNExecutor<Context>(
-              stepNetDef_,
-              recurrent_map,
-              timestep_,
-              ArgumentHelper(operator_def));
+      InitializeExecutor(operator_def);
     }
   }
 
@@ -335,6 +329,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
     // of parallelism over timesteps that the RNNExecutor provides. So with
     // RNN executor we use more workspaces to get better perf.
     int num_workspaces_on_fwd_only = rnnExecutor_ ? 4 : 2;
+    num_workspaces_on_fwd_only = this->template GetSingleArgument<int>(
+        "num_workspaces", num_workspaces_on_fwd_only);
 
     if (!has_backward_pass && stepWorkspaces.size() < num_workspaces_on_fwd_only) {
       // Use alternating stepWorkspaces when forward_only=True.
@@ -372,7 +368,17 @@ class RecurrentNetworkOp final : public Operator<Context> {
     }
 
     if (rnnExecutor_) {
-      rnnExecutor_->Run(seqLen);
+      try {
+        rnnExecutor_->Run(seqLen);
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Encountered exception in RNN executor: " << e.what();
+        InitializeExecutor(operator_def_);
+        return false;
+      } catch (...) {
+        LOG(ERROR) << "Encountered exception in RNN executor: unknown";
+        InitializeExecutor(operator_def_);
+        return false;
+      }
     }
 
     for (const auto& alias : aliases_) {
@@ -396,13 +402,23 @@ class RecurrentNetworkOp final : public Operator<Context> {
   std::vector<detail::OffsetAlias> aliases_;
   std::vector<detail::RecurrentInput> recurrentInputs_;
   std::string timestep_;
+  OperatorDef operator_def_;
+
+ private:
+  void InitializeExecutor(const OperatorDef& operator_def) {
+    VLOG(1) << "Use RecurrentNetworkExecutor";
+    auto recurrent_map =
+        detail::GetRecurrentMapping(links_, false /* backward */);
+    rnnExecutor_ = createRNNExecutor<Context>(
+        stepNetDef_, recurrent_map, timestep_, ArgumentHelper(operator_def));
+  }
 };
 
 template <class Context>
 class RecurrentNetworkGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  RecurrentNetworkGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit RecurrentNetworkGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         sharedWs_(ws),
         enable_rnn_executor_(this->template GetSingleArgument<bool>(
@@ -411,8 +427,8 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         timestep_(this->template GetSingleArgument<std::string>(
             "timestep",
             "timestep")),
-        gradInputs_(this->template GetRepeatedArgument<int32_t>(
-            "outputs_with_grads")) {
+        gradInputs_(
+            this->template GetRepeatedArgument<int32_t>("outputs_with_grads")) {
     CAFFE_ENFORCE(ws);
 
     stepNetDef_ = detail::extractNetDef(operator_def, "backward_step_net");
@@ -835,8 +851,9 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 template <class Context>
 class AccumulateInputGradientOp : public Operator<Context> {
  public:
-  AccumulateInputGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit AccumulateInputGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         offset_(this->template GetSingleArgument<int>("offset", -1)) {
     CAFFE_ENFORCE(offset_ >= 0, "Offset not set");
   }
@@ -879,8 +896,9 @@ class AccumulateInputGradientOp : public Operator<Context> {
 template <class Context>
 class RNNApplyLinkOp : public Operator<Context> {
  public:
-  RNNApplyLinkOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit RNNApplyLinkOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         offset_(this->template GetSingleArgument<int>("offset", -1)),
         window_(this->template GetSingleArgument<int>("window", -1)) {
     CAFFE_ENFORCE(offset_ >= 0, "offset not set");

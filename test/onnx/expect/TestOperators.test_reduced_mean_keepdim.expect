@@ -1,14 +1,16 @@
-ir_version: 3
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "0.4"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "0"
     output: "1"
+    name: "ReduceMean_0"
     op_type: "ReduceMean"
     attribute {
       name: "axes"
       ints: 2
+      ints: 3
       type: INTS
     }
     attribute {
@@ -22,7 +24,7 @@ graph {
     name: "0"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 1
@@ -44,7 +46,7 @@ graph {
     name: "1"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 1
@@ -56,7 +58,7 @@ graph {
             dim_value: 1
           }
           dim {
-            dim_value: 4
+            dim_value: 1
           }
         }
       }

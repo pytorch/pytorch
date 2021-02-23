@@ -8,7 +8,7 @@ namespace caffe2 {
 
 template <typename T>
 struct TemplatePutOp : public Operator<CPUContext> {
-  TemplatePutOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit TemplatePutOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
         given_name_(GetSingleArgument<std::string>(
             "stat_name",
@@ -41,7 +41,7 @@ struct TemplatePutOp : public Operator<CPUContext> {
       input = *Input(0).template data<V>();
     } else if (!has_default_) {
       CAFFE_THROW(
-          "Default value must be provided when recieving empty tensors for ",
+          "Default value must be provided when receiving empty tensors for ",
           given_name_);
     }
 

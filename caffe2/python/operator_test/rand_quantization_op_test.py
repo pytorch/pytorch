@@ -1,12 +1,11 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 import struct
 import unittest
-import os
 
 from hypothesis import given, example
 import hypothesis.strategies as st
@@ -26,6 +25,7 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
             bitwidth_=2,
             random_=False,
             **hu.gcs)
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28550")
     def test_rand_quantization(self, X, bitwidth_, random_, gc, dc):
 
         # python reference of encoder

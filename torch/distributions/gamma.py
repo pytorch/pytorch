@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import _finfo, broadcast_all, lazy_property
+from torch.distributions.utils import broadcast_all
 
 
 def _standard_gamma(concentration):
@@ -59,10 +59,11 @@ class Gamma(ExponentialFamily):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(shape)
-        value.detach().clamp_(min=_finfo(value).tiny)  # do not record in autograd graph
+        value.detach().clamp_(min=torch.finfo(value.dtype).tiny)  # do not record in autograd graph
         return value
 
     def log_prob(self, value):
+        value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         if self._validate_args:
             self._validate_sample(value)
         return (self.concentration * torch.log(self.rate) +

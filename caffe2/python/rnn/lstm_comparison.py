@@ -1,8 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-from caffe2.proto import caffe2_pb2
+
+
+
+
 from caffe2.python import workspace, core, lstm_benchmark, utils
 from copy import copy
 
@@ -11,7 +10,7 @@ def Compare(args):
     results = []
     num_iters = 1000
     args.gpu = True
-    with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+    with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
         for batch_size in [64, 128, 256]:
             for seq_length in [20, 100]:
                 for hidden_dim in [40, 100, 400, 800]:

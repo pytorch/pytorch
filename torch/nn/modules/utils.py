@@ -1,10 +1,12 @@
-from torch._six import container_abcs
+
+import collections
 from itertools import repeat
+from typing import List
 
 
 def _ntuple(n):
     def parse(x):
-        if isinstance(x, container_abcs.Iterable):
+        if isinstance(x, collections.abc.Iterable):
             return x
         return tuple(repeat(x, n))
     return parse
@@ -15,7 +17,16 @@ _triple = _ntuple(3)
 _quadruple = _ntuple(4)
 
 
-def _list_with_default(out_size, defaults):
+def _reverse_repeat_tuple(t, n):
+    r"""Reverse the order of `t` and repeat each element for `n` times.
+
+    This can be used to translate padding arg used by Conv and Pooling modules
+    to the ones used by `F.pad`.
+    """
+    return tuple(x for x in reversed(t) for _ in range(n))
+
+
+def _list_with_default(out_size: List[int], defaults: List[int]) -> List[int]:
     if isinstance(out_size, int):
         return out_size
     if len(defaults) <= len(out_size):

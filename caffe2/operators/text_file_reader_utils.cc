@@ -29,7 +29,7 @@ void Tokenizer::next(char* start, char* end, TokenizedString& tokenized) {
   char* currentStart = start;
   std::string* copied = nullptr;
   if (!leftover_.empty()) {
-    tokenized.modifiedStrings_.emplace_back(new std::string());
+    tokenized.modifiedStrings_.emplace_back(std::make_shared<std::string>());
     copied = tokenized.modifiedStrings_.back().get();
     *copied = std::move(leftover_);
   }
@@ -38,7 +38,7 @@ void Tokenizer::next(char* start, char* end, TokenizedString& tokenized) {
   for (ch = start + toBeSkipped_; ch < end; ++ch) {
     if (*ch == escape_) {
       if (!copied) {
-        tokenized.modifiedStrings_.emplace_back(new std::string());
+        tokenized.modifiedStrings_.emplace_back(std::make_shared<std::string>());
         copied = tokenized.modifiedStrings_.back().get();
       }
       copied->append(currentStart, ch);

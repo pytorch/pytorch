@@ -11,8 +11,9 @@ template <class Context>
 class EnsureCPUOutputOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  EnsureCPUOutputOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit EnsureCPUOutputOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     if (this->InputIsTensorType(0, CPU)) {
@@ -33,7 +34,8 @@ class EnsureCPUOutputOp : public Operator<Context> {
   bool CopyWithContext() {
     // Output is always on CPU
     auto* output = this->template Output<Tensor>(0, CPU);
-    auto& input = this->template Input<Tensor>(0, InputContext::GetDeviceType());
+    auto& input =
+        this->template Input<Tensor>(0, InputContext::GetDeviceType());
     output->ResizeLike(input);
     context_.CopyItemsToCPU(
         input.dtype(),

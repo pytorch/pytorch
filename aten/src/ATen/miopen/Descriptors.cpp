@@ -1,22 +1,21 @@
-#include "Descriptors.h"
+#include <ATen/miopen/Descriptors.h>
 #include <ATen/ATen.h>
 
 namespace at { namespace native {
 
 namespace {
 
-inline miopenDataType_t getDataType(const at::Type& t) {
-  auto scalar_type = t.scalarType();
+inline miopenDataType_t getDataType(const at::Tensor& t) {
+  auto scalar_type = t.scalar_type();
   if (scalar_type == at::kFloat) {
     return miopenFloat;
   } else if (scalar_type == at::kHalf) {
     return miopenHalf;
+  } else if (scalar_type == at::kBFloat16) {
+    return miopenBFloat16;
+  } else {
+  throw std::runtime_error("TensorDescriptor only supports float, half and bfloat16 tensors");
   }
-  throw std::runtime_error("TensorDescriptor only supports float and half tensors");
-}
-
-inline miopenDataType_t getDataType(const at::Tensor& t) {
-  return getDataType(t.type());
 }
 
 } // anonymous namespace
@@ -26,9 +25,9 @@ void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
   set(getDataType(t), t.sizes(), t.strides(), pad);
 }
 
-static int MIOPEN_DIM_MAX = 4;
+static int MIOPEN_DIM_MAX = 5;
 
-void TensorDescriptor::set(miopenDataType_t datatype, IntList t_sizes, IntList t_strides, size_t pad) {
+void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
   size_t dim = t_sizes.size();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
 #define _STR(X) #X
@@ -55,6 +54,8 @@ std::string miopenTypeToString(miopenDataType_t dtype) {
       return "miopenFloat";
     case miopenHalf:
       return "miopenHalf";
+    case miopenBFloat16:
+      return "miopenBFloat16";
     default:
       std::ostringstream oss;
       oss << "(unknown data-type " << static_cast<int>(dtype) << ")";

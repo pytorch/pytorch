@@ -119,15 +119,15 @@ __global__ void ColPassGradientKernel(
 template <>
 bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  CAFFE_ENFORCE(X.ndim() == 4, "Only supports 4D tensors for the momement");
+
+  CAFFE_ENFORCE(X.dim() == 4, "Only supports 4D tensors for the momement");
 
   // Input is (N, C, H, W)
   // Output is (N, C, H + 1, W + 1)
-  vector<int64_t> out_shape(X.dims().vec());
+  vector<int64_t> out_shape(X.sizes().vec());
   out_shape[2] += 1; // H + 1 output size
   out_shape[3] += 1; // W + 1 output size
-  Y->Resize(out_shape);
+  auto* Y = Output(0, out_shape, at::dtype<float>());
 
   const int chans = X.dim32(1);
   const int rows_out = Y->dim32(2);
@@ -145,6 +145,8 @@ bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
       chans,
       X.data<float>(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // Integral image over columns of the integral image over rows
   const int col_pass_size = X.dim32(0) * chans * cols_out;
   ColPassKernel<<<
@@ -157,6 +159,8 @@ bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
       cols_out,
       chans,
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -165,16 +169,17 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Original input to "forward" op
   auto& dY = Input(1); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to
-                        // "forward" op (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
+
   // Row pass reduces shape of dY from (N, C, H + 1, W + 1)
   // to (N, C, H + 1, W)
   // Col pass reduces shape to (N, C, H, W)
-  vector<int64_t> row_pass_shape(dY.dims().vec());
+  vector<int64_t> row_pass_shape(dY.sizes().vec());
   row_pass_shape[3] -= 1;
-  row_pass_buffer_.Resize(row_pass_shape);
+  ReinitializeTensor(&row_pass_buffer_, row_pass_shape, at::dtype<float>().device(CUDA));
   const int chans = row_pass_buffer_.dim32(1);
   const int rows_out = row_pass_buffer_.dim32(2);
   const int cols_out = row_pass_buffer_.dim32(3);
@@ -191,6 +196,8 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
       chans,
       dY.data<float>(),
       row_pass_buffer_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // Integral image over columns of the integral image over rows
   const int col_pass_size = X.dim32(0) * chans * cols_out;
   ColPassGradientKernel<<<
@@ -204,6 +211,8 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
       chans,
       row_pass_buffer_.data<float>(),
       dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

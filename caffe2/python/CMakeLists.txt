@@ -4,6 +4,7 @@ set(Caffe2_CPU_PYTHON_SRCS
     "/pybind_state_dlpack.cc"
     "/pybind_state_nomni.cc"
     "/pybind_state_registry.cc"
+    "/pybind_state_int8.cc"
 )
 
 if(CAFFE2_USE_MKLDNN)

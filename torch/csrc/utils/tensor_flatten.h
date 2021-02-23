@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/utils/functional.h"
-
+#include <ATen/core/functional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/ATen.h>
 #include <utility>
 
@@ -20,8 +20,16 @@ inline std::vector<at::Tensor> unflatten_dense_tensors(const at::Tensor& flat, a
   size_t offset = 0;
   for (const auto & tensor : tensors) {
     auto numel = tensor.numel();
-    outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
-    offset += numel;
+    // If unflatten an empty tensor, create a new empty tensor using
+    // flat tensor Options.
+    // This can avoid the unflattened empty tensor to share the same storage
+    // with other unflatten tensors.
+    if (numel == 0) {
+      outputs.push_back(at::empty({0}, flat.options()));
+    } else {
+      outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
+      offset += numel;
+    }
   }
   return outputs;
 }
@@ -31,7 +39,7 @@ struct TensorGroup {
   std::vector<at::Tensor> tensors;
   size_t size = 0;
 
-  at::Type& type() {
+  at::DeprecatedTypeProperties& type() {
     AT_ASSERT(!tensors.empty());
     return tensors[0].type();
   }
@@ -59,16 +67,16 @@ struct TensorGroup {
 // enough tensors for all data types until the size_limit, and then split
 // the accumulated tensors into different groups by data types, therefore:
 // it will output: {{tensor_a}, {tensor_b}, {tensor_c}}
-std::vector<TensorGroup> take_tensors(
+TORCH_API std::vector<TensorGroup> take_tensors(
     at::TensorList tensors,
     size_t size_limit,
     bool fine_grained = false);
 
-void reorder_tensors_like(std::vector<at::Tensor>& tensors, at::TensorList order);
+TORCH_API void reorder_tensors_like(std::vector<at::Tensor>& tensors, at::TensorList order);
 
-std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(at::TensorList tensors);
+TORCH_API std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(at::TensorList tensors);
 
-std::vector<at::Tensor> unflatten_sparse_tensors(
+TORCH_API std::vector<at::Tensor> unflatten_sparse_tensors(
     const at::Tensor& flat_indices,
     const at::Tensor& flat_values,
     at::TensorList tensors);

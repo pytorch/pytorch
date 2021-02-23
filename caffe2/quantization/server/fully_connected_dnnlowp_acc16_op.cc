@@ -2,8 +2,10 @@
 
 #include <fbgemm/src/RefImplementations.h>
 
-C10_DECLARE_int32(dnnlowp_nbits_in_non_outlier);
-C10_DECLARE_int32(dnnlowp_copy_to_32bit_frequency);
+#include "fbgemm_pack_op.h"
+
+C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
+C10_DECLARE_int32(caffe2_dnnlowp_copy_to_32bit_frequency);
 
 namespace caffe2 {
 
@@ -11,18 +13,18 @@ FullyConnectedDNNLowPAcc16Op::FullyConnectedDNNLowPAcc16Op(
     const OperatorDef& operator_def,
     Workspace* ws)
     : FullyConnectedDNNLowPOp<uint8_t>(operator_def, ws),
-      nbits_in_non_outlier_(OperatorBase::GetSingleArgument<int>(
+      nbits_in_non_outlier_(this->template GetSingleArgument<int>(
           "nbits_in_non_outlier",
-          FLAGS_dnnlowp_nbits_in_non_outlier)),
-      copy_to_32bit_frequency_(OperatorBase::GetSingleArgument<int>(
+          FLAGS_caffe2_dnnlowp_nbits_in_non_outlier)),
+      copy_to_32bit_frequency_(this->template GetSingleArgument<int>(
           "copy_to_32bit_frequency",
-          FLAGS_dnnlowp_copy_to_32bit_frequency)) {}
+          FLAGS_caffe2_dnnlowp_copy_to_32bit_frequency)) {}
 
 bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
   using namespace std;
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   // Get quantization parameters
   if (!GetQuantizationParameters_()) {
@@ -31,7 +33,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
 
   const auto& X = InputTensorCPU_(0);
   const auto& W = InputTensorCPU_(1);
-  auto *Y = OutputTensorCPU_(0);
+  auto* Y = OutputTensorCPU_(0);
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const auto M = X.size_to_dim(canonical_axis);
   const auto K = X.size_from_dim(canonical_axis);
@@ -40,72 +42,62 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
 
   // Quantize X
   vector<uint8_t> X_temp;
-  const uint8_t* Xdata = QuantizeInputIfNeeded<uint8_t>(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+  const uint8_t* Xdata =
+      QuantizeInputIfNeeded<uint8_t>(this, 0, in_qparams_[0], X_temp);
+
+  if (this->quantize_channelwise_) {
+    LOG(WARNING) << "FC with 16-bit accumulation doesn't work with per-channel "
+                    "quantization yet.";
+  }
 
   // Pack W if needed
   if (!Wq_acc16_packed_ || !is_weight_constant_) {
-    if (!Wq_acc16_packed_ && nbits_in_non_outlier_ < 8) {
-      static int log_occurences = 0;
-      if (log_occurences < 32) {
-        ++log_occurences;
+    if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
+      // If the input is already packed
+      const auto& packed_filter =
+          this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
+      Wq_outlier_ = packed_filter.W_outlier;
+      Wq_acc16_packed_ = packed_filter.W_acc16;
+
+      if (nbits_in_non_outlier_ != packed_filter.nbits_in_non_outlier) {
         LOG(WARNING)
-            << "FC DNNLOWP_ACC16 using outlier-aware quantization";
+            << "nbits_in_non_outlier in packed weight "
+            << packed_filter.nbits_in_non_outlier
+            << " doesn't match with nbits_in_non_outlier specified in operator "
+            << nbits_in_non_outlier_;
       }
-
-      // Separate out outliers
-      CAFFE_ENFORCE(!W_quantized_.empty());
-
-      int32_t outlier_cnt = 0;
-      for (int i = 0; i < W_quantized_.size(); ++i) {
-        int8_t w = W_quantized_[i];
-        bool is_outlier = nbits_in_non_outlier_ == 0 ||
-            w < -(1 << (nbits_in_non_outlier_ - 1)) ||
-            w >= (1 << (nbits_in_non_outlier_ - 1));
-        if (is_outlier) {
-          ++outlier_cnt;
+    } else {
+      if (!Wq_acc16_packed_ && nbits_in_non_outlier_ < 8) {
+        static int log_occurences = 0;
+        if (log_occurences < 32) {
+          ++log_occurences;
+          LOG(WARNING) << "FC DNNLOWP_ACC16 using outlier-aware quantization";
         }
+
+        // Separate out outliers
+        CAFFE_ENFORCE(!W_quantized_.empty());
+
+        Wq_outlier_.reset(
+            ExtractOutlierMatrix(1, K, N, nbits_in_non_outlier_, W_quantized_));
+        int outlier_cnt = Wq_outlier_->ColPtr()[N];
+
+        LOG(INFO) << "Proportion of outlier for FC layer with weight blob "
+                  << this->debug_def().input(1) << " is "
+                  << (float)outlier_cnt / W_quantized_.size();
+
+        LOG(INFO) << "copy_to_32bit_frequency " << copy_to_32bit_frequency_;
       }
 
-      Wq_outlier_.reset(new fbgemm::CompressedSparseColumn(K, N));
-      Wq_outlier_->RowIdx().resize(outlier_cnt);
-      Wq_outlier_->Values().resize(outlier_cnt);
+      Wq_acc16_packed_.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
+          fbgemm::matrix_op_t::Transpose,
+          K,
+          N,
+          reinterpret_cast<const int8_t*>(W_quantized_.data()),
+          K));
 
-      outlier_cnt = 0;
-      for (int j = 0; j < N; ++j) {
-        Wq_outlier_->ColPtr()[j] = outlier_cnt;
-        for (int16_t k = 0; k < K; ++k) {
-          int8_t w = W_quantized_[j * K + k];
-          bool is_outlier = nbits_in_non_outlier_ == 0 ||
-              w < -(1 << (nbits_in_non_outlier_ - 1)) ||
-              w >= (1 << (nbits_in_non_outlier_ - 1));
-          if (is_outlier) {
-            CAFFE_ENFORCE_LE(k, numeric_limits<int16_t>::max());
-            Wq_outlier_->RowIdx()[outlier_cnt] = k;
-            Wq_outlier_->Values()[outlier_cnt] = w;
-            ++outlier_cnt;
-            W_quantized_[j * K + k] = 0;
-          }
-        }
+      if (is_weight_constant_) {
+        vector<T_signed>().swap(W_quantized_);
       }
-      Wq_outlier_->ColPtr()[N] = outlier_cnt;
-
-      LOG(INFO) << "Proportion of outlier for FC layer with weight blob "
-                << OperatorBase::debug_def().input(1) << " is "
-                << (float)outlier_cnt / W_quantized_.size();
-
-      LOG(INFO) << "copy_to_32bit_frequency " << copy_to_32bit_frequency_;
-    }
-
-    Wq_acc16_packed_.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
-        fbgemm::matrix_op_t::Transpose,
-        K,
-        N,
-        reinterpret_cast<const int8_t*>(W_quantized_.data()),
-        K));
-
-    if (is_weight_constant_) {
-      vector<T_signed>().swap(W_quantized_);
     }
   }
 
@@ -124,9 +116,10 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         PackAWithRowOffset<uint8_t, int16_t>::rowOffsetBufferSize();
     int x_pack_buf_size_per_thread =
         PackAWithRowOffset<uint8_t, int16_t>::packedBufferSize();
-    BaseType::row_offsets_.resize(row_offset_size_per_thread);
-    BaseType::X_pack_buf_.resize(x_pack_buf_size_per_thread);
+    this->row_offsets_.resize(row_offset_size_per_thread);
+    this->X_pack_buf_.resize(x_pack_buf_size_per_thread);
 
+    // TODO: use PackAMatrix if filter_qparams_[0].zero_point == 0
     PackAWithRowOffset<uint8_t, int16_t> packA(
         matrix_op_t::NoTranspose,
         M,
@@ -135,20 +128,20 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         K,
         X_pack_buf_.data(),
         1, // group
-        in_qparams_[0].zero_point,
         row_offsets_.data());
 
     if (!dequantize_output_) {
       DoNothing<> doNothingObj{};
       ReQuantizeOutput<false /* fuse relu */> reqObj(
           doNothingObj,
-          requantization_params_.real_multiplier,
+          this->requantization_multipliers_.data(),
           out_qparams_.zero_point,
-          in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+          this->filter_zero_points_.data(),
           packA.getRowOffsetBuffer(),
-          column_offsets_.data(),
-          BaseType::b_quantized_data_);
+          column_offsets_->empty() ? nullptr : column_offsets_->data(),
+          this->b_quantized_data_,
+          N); // ncols per quant group
 
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
@@ -182,12 +175,13 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
       ReQuantizeForFloat<false /* FUSE_RELU*/> reqObj(
           doNothingObj,
           in_qparams_[0].scale,
-          in_qparams_[1].scale,
-          in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          this->filter_scales_.data(),
+          column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+          this->filter_zero_points_.data(),
           packA.getRowOffsetBuffer(),
-          column_offsets_.data(),
-          BaseType::b_dequantized_data_);
+          column_offsets_->empty() ? nullptr : column_offsets_->data(),
+          this->b_dequantized_data_,
+          N); // ncols per quant group
 
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
@@ -231,13 +225,17 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         for (int k = 0; k < K; ++k) {
           row_offset += Xdata[i * K + k];
         }
-        row_offset *= in_qparams_[1].zero_point;
 
         for (int j = 0; j < N; ++j) {
+          int quant_group = this->quantize_channelwise_ ? j : 0;
           Y_int32_[i * N + j] -=
-            in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
+              row_offset * this->filter_qparams_[quant_group].zero_point;
+          if (!column_offsets_->empty()) {
+            Y_int32_[i * N + j] -=
+                in_qparams_[0].zero_point * (*column_offsets_)[j];
+          }
           Ydata_float[i * N + j] = Y_int32_[i * N + j] * in_qparams_[0].scale *
-                  in_qparams_[1].scale +
+                  in_qparams_[quant_group].scale +
               b_dequantized_data_[j];
         }
       }
@@ -251,18 +249,19 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         }
 
         requantize_u8acc32_ref(
-          1,
-          N,
-          N,
-          Y_int32_.data() + i * N,
-          Ydata + i * N,
-          requantization_params_.real_multiplier,
-          out_qparams_.zero_point,
-          in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
-          &row_offset,
-          column_offsets_.data(),
-          b_quantized_.data());
+            1,
+            N,
+            N,
+            Y_int32_.data() + i * N,
+            Ydata + i * N,
+            this->requantization_multipliers_.data(),
+            out_qparams_.zero_point,
+            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+            this->filter_zero_points_.data(),
+            &row_offset,
+            column_offsets_->empty() ? nullptr : column_offsets_->data(),
+            b_quantized_->data(),
+            N); // ncols per quant group
       }
     }
   }
@@ -276,9 +275,13 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  FC, DNNLOWP_ACC16, FullyConnectedDNNLowPAcc16Op);
+    FC,
+    DNNLOWP_ACC16,
+    FullyConnectedDNNLowPAcc16Op);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8FC, DNNLOWP_ACC16, FullyConnectedDNNLowPAcc16Op);
+    Int8FC,
+    DNNLOWP_ACC16,
+    FullyConnectedDNNLowPAcc16Op);
 
 } // namespace caffe2

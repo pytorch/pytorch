@@ -2,9 +2,7 @@
 
 #include <TH/THGeneral.h>
 
-#ifdef __cplusplus
-#include <ATen/Allocator.h>
-#endif
+#include <c10/core/Allocator.h>
 
 #define TH_ALLOCATOR_MAPPED_SHARED 1
 #define TH_ALLOCATOR_MAPPED_SHAREDMEM 2
@@ -14,25 +12,16 @@
 #define TH_ALLOCATOR_MAPPED_FROMFD 32
 #define TH_ALLOCATOR_MAPPED_UNLINK 64
 
-#ifdef __cplusplus
-using THAllocator = at::Allocator;
-#else
-// struct at_THAllocator doesn't and will never exist, but we cannot name
-// the actual struct because it's a namespaced C++ thing
-typedef struct at_THAllocator THAllocator;
-#endif
-
 /* default malloc/free allocator. malloc and realloc raise an error (using
  * THError) on allocation failure.
  */
-TH_API THAllocator* getTHDefaultAllocator(void);
+TH_API c10::Allocator* getTHDefaultAllocator(void);
 
-#ifdef __cplusplus
 // Sentinel value/type to help distinguish the file descriptor constructor from
 // the non-file descriptor constructor
 enum WithFd { WITH_FD };
 
-class CAFFE2_API THMapAllocator {
+class TORCH_API THMapAllocator {
  public:
   THMapAllocator(const char *filename, int flags, size_t size);
   THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
@@ -64,7 +53,7 @@ class CAFFE2_API THMapAllocator {
 
   // This is very dangerous.  You have to redefine this destructor for each
   // subclass
-  virtual ~THMapAllocator() { close(); }
+  virtual ~THMapAllocator();
 
 protected:
   bool closed_ = false;
@@ -82,11 +71,11 @@ protected:
 };
 
 // Base-from-member idiom
-struct CAFFE2_API THRefcountedMapAllocatorArgCheck {
+struct TORCH_API THRefcountedMapAllocatorArgCheck {
   THRefcountedMapAllocatorArgCheck(int flags);
 };
 
-class CAFFE2_API THRefcountedMapAllocator
+class TORCH_API THRefcountedMapAllocator
     : private THRefcountedMapAllocatorArgCheck,
       public THMapAllocator {
  public:
@@ -109,5 +98,3 @@ protected:
   void checkFlags();
   void initializeAlloc();
 };
-
-#endif // __cplusplus

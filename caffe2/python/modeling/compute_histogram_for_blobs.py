@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, schema
 from caffe2.python.modeling.net_modifier import NetModifier
@@ -43,9 +43,7 @@ class ComputeHistogramForBlobs(NetModifier):
                    modify_output_record=False):
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            if not net.BlobIsDefined(blob):
-                raise Exception('blob {0} is not defined in net {1}'.format(
-                    blob, net.Name()))
+            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
 
             blob_float = net.Cast(blob, net.NextScopedBlob(prefix=blob +
                 '_float'), to=core.DataType.FLOAT)

@@ -7,8 +7,6 @@
 #include "caffe2/core/context_gpu.h"
 #include <gtest/gtest.h>
 
-C10_DECLARE_bool(caffe2_cuda_full_device_control);
-
 namespace caffe2 {
 
 TEST(CUDATest, HasCudaRuntime) {
@@ -35,20 +33,6 @@ TEST(CUDAContextTest, TestSetGetDeviceWithoutCaffeMode) {
   }
 }
 
-TEST(CUDAContextTest, TestSetGetDeviceWithCaffeMode) {
-  // For a while, set full device control to be true.
-  FLAGS_caffe2_cuda_full_device_control = true;
-  for (int i = 0; i < NumCudaDevices(); ++i) {
-    CaffeCudaSetDevice(i);
-    EXPECT_EQ(CaffeCudaGetDevice(), i);
-  }
-  for (int i = NumCudaDevices() - 1; i >= 0; --i) {
-    CaffeCudaSetDevice(i);
-    EXPECT_EQ(CaffeCudaGetDevice(), i);
-  }
-  FLAGS_caffe2_cuda_full_device_control = false;
-}
-
 TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
   if (!HasCudaGPU())
     return;
@@ -59,7 +43,7 @@ TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
   const int nbytes = 1048576;
   for (int i = 0; i < NumCudaDevices(); ++i) {
     LOG(INFO) << "Device " << i << " of " << NumCudaDevices();
-    DeviceGuard guard(i);
+    CUDAGuard guard(i);
     auto allocated = CUDAContext::New(nbytes);
     EXPECT_NE(allocated, nullptr);
     cudaPointerAttributes attr;
@@ -101,7 +85,7 @@ TEST(CUDAContextTest, TestSameThreadTempObject) {
   if (!HasCudaGPU())
     return;
   CUDAContext context_outer(0); // gpu id
-  context_outer.SwitchToDevice(0); // logical stream id
+  context_outer.SwitchToDevice();
 
   if (NumCudaDevices() >= 2) {
     auto before_stream = context_outer.cuda_stream();
@@ -111,7 +95,7 @@ TEST(CUDAContextTest, TestSameThreadTempObject) {
     context_different_device.SwitchToDevice(10);
 
     // go back
-    context_outer.SwitchToDevice(0); // logical stream id
+    context_outer.SwitchToDevice();
     EXPECT_EQ(context_outer.cuda_stream(), before_stream);
 
     // do nothing - infers the current device and stream
@@ -148,6 +132,7 @@ namespace {
 // after thread exit.
 void TEST_GetStreamAddress(cudaStream_t* ptr) {
   CUDAContext context(0);
+  context.SwitchToDevice();
   *ptr = context.cuda_stream();
   // Sleep for a while so we have concurrent thread executions
   std::this_thread::sleep_for(std::chrono::seconds(1));

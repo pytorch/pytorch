@@ -1,15 +1,11 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "THC/THC.h"
-#include "miopen-wrapper.h"
-#include "ATen/miopen/Handle.h"
+#include <aten/src/THH/THH.h>
+#include <ATen/miopen/miopen-wrapper.h>
+#include <ATen/miopen/Handle.h>
 
 namespace at { namespace native {
-
-inline void setMIOpenStreamToCurrent() {
-  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), THCState_getCurrentStream(globalContext().getTHCState())));
-}
 
 // This function makes tensors which have zero stride contiguous, by
 // setting the strides to 1.

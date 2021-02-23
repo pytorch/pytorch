@@ -1,29 +1,34 @@
 #!/bin/bash
 
 # Common setup for all Jenkins scripts
-
-# NB: define this function before set -x, so that we don't
-# pollute the log with a premature EXITED_USER_LAND ;)
-function cleanup {
-  # Note that if you've exited user land, then CI will conclude that
-  # any failure is the CI's fault.  So we MUST only output this
-  # string
-  retcode=$?
-  set +x
-  if [ $retcode -eq 0 ]; then
-    echo "EXITED_USER_LAND"
-  fi
-}
-
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 set -ex
+
+# Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
+SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
+
+# Figure out which Python to use for ROCm
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+  unset HIP_PLATFORM
+  PYTHON=$(which "python${BASH_REMATCH[1]}")
+  # non-interactive bashs do not expand aliases by default
+  shopt -s expand_aliases
+  export PYTORCH_TEST_WITH_ROCM=1
+  alias python='$PYTHON'
+  # temporary to locate some kernel issues on the CI nodes
+  export HSAKMT_DEBUG_LEVEL=4
+fi
 
 # This token is used by a parser on Jenkins logs for determining
 # if a failure is a legitimate problem, or a problem with the build
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
+
+export IS_PYTORCH_CI=1
 
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
@@ -40,7 +45,7 @@ fatal() { error "$@"; exit 1; }
 # - remaining args:  names of traps to modify
 #
 trap_add() {
-    trap_add_cmd=$1; shift || fatal "${FUNCNAME} usage error"
+    trap_add_cmd=$1; shift || fatal "${FUNCNAME[0]} usage error"
     for trap_add_name in "$@"; do
         trap -- "$(
             # helper fn to get existing trap command from output
@@ -61,32 +66,40 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
-if which sccache > /dev/null; then
-  # Save sccache logs to file
-  sccache --stop-server || true
-  rm ~/sccache_error.log || true
-  SCCACHE_ERROR_LOG=~/sccache_error.log RUST_LOG=sccache::server=error sccache --start-server
-
-  # Report sccache stats for easier debugging
-  sccache --zero-stats
-  function sccache_epilogue() {
-    echo '=================== sccache compilation log ==================='
-    python $(dirname "${BASH_SOURCE[0]}")/print_sccache_log.py ~/sccache_error.log
-    echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
-    sccache --show-stats
+if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
+  if which sccache > /dev/null; then
+    # Save sccache logs to file
     sccache --stop-server || true
-  }
-  trap_add sccache_epilogue EXIT
-fi
+    rm ~/sccache_error.log || true
+    if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
+    else
+      # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+      # https://github.com/pytorch/pytorch/pull/16645
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
+    fi
 
-if which ccache > /dev/null; then
-  # Report ccache stats for easier debugging
-  ccache --zero-stats
-  ccache --show-stats
-  function ccache_epilogue() {
+    # Report sccache stats for easier debugging
+    sccache --zero-stats
+    function sccache_epilogue() {
+      echo '=================== sccache compilation log ==================='
+      python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
+      echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
+      sccache --show-stats
+      sccache --stop-server || true
+    }
+    trap_add sccache_epilogue EXIT
+  fi
+
+  if which ccache > /dev/null; then
+    # Report ccache stats for easier debugging
+    ccache --zero-stats
     ccache --show-stats
-  }
-  trap_add ccache_epilogue EXIT
+    function ccache_epilogue() {
+      ccache --show-stats
+    }
+    trap_add ccache_epilogue EXIT
+  fi
 fi
 
 # It's called a COMPACT_JOB_NAME because it's distinct from the
@@ -98,43 +111,38 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
   exit 1
 fi
 
-if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/disabled-configs.txt"; then
-  echo "Job is explicitly disabled, SKIPPING"
-  exit 0
-else
-  echo "Job is not disabled, proceeding"
-fi
-
-if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/enabled-configs.txt"; then
-  echo "Job is enabled, proceeding"
-else
-  echo "Job is not enabled, FAILING now (revert changes to enabled-configs.txt to fix this)"
-  exit 1
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
+  # shellcheck disable=SC2034
   BUILD_TEST_LIBTORCH=0
 fi
 
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
-# min version 3.5, so we only do it in two builds that we know should use conda.
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn6-py2* ]] || \
-     [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
-    if ! which conda; then
-      echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
-      exit 1
-    else
-      conda install -q -y cmake
-    fi
+# min version (3.5 for xenial and 3.10 for bionic),
+# so we only do it in four builds that we know should use conda.
+# Linux bionic cannot find conda mkl with cmake 3.10, so we need a cmake from conda.
+# Alternatively we could point cmake to the right place
+# export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
+  if ! which conda; then
+    echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
+    exit 1
   else
-    if ! cmake --version | grep 'cmake version 3\.5'; then
-      echo "Expected ${BUILD_ENVIRONMENT} to have cmake version 3.5.* (min support version), but 'cmake --version' returns:"
-      cmake --version
-      exit 1
-    fi
+    conda install -q -y cmake
+  fi
+  if [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]]; then
+    # cmake3 package will conflict with conda cmake
+    sudo yum -y remove cmake3 || true
   fi
 fi
+
+retry () {
+  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+}

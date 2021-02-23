@@ -1,12 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, dyndep, workspace
-from hypothesis import given
+from caffe2.python import core, utils
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 
@@ -20,6 +20,7 @@ class Depthwise3x3ConvOpsTest(hu.HypothesisTestCase):
            engine=st.sampled_from(["DEPTHWISE_3x3"]),
            use_bias=st.booleans(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_convolution_gradients(self, pad, kernel, size,
                                    channels, batch_size,
                                    order, engine, use_bias, gc, dc):
@@ -40,8 +41,8 @@ class Depthwise3x3ConvOpsTest(hu.HypothesisTestCase):
             - 0.5
         b = np.random.rand(channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
         # Error handling path.

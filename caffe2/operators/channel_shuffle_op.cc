@@ -50,12 +50,13 @@ void RunChannelShuffleNHWC(
     const T* X,
     T* Y,
     CPUContext* context) {
-  const std::array<int, 2> dims = {G, K};
-  const std::array<int, 2> axes = {1, 0};
+  const std::array<std::int64_t, 2> dims = {G, K};
+  const std::array<std::int32_t, 2> axes = {1, 0};
   const int M = N * HxW;
   const int C = G * K;
   for (int i = 0; i < M; ++i) {
-    math::Transpose<T, CPUContext>(2, dims.data(), axes.data(), X, Y, context);
+    math::Transpose<std::int64_t, T, CPUContext>(
+        2, dims.data(), axes.data(), X, Y, context);
     X += C;
     Y += C;
   }
@@ -66,14 +67,14 @@ void RunChannelShuffleNHWC(
 template <>
 bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
-  const int HxW = X.numel() / (N * C);
+  const int HxW = X.size_from_dim(2);
   const float* X_data = X.data<float>();
   float* Y_data = Y->mutable_data<float>();
   RunChannelShuffleNCHW<float>(N, G, K, HxW, X_data, Y_data, &context_);
@@ -83,15 +84,15 @@ bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const int ndim = X.dim();
   const int N = X.dim32(0);
   const int C = X.dim32(ndim - 1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
-  const int HxW = X.numel() / (N * C);
+  const int HxW = X.size_between_dim(0, ndim - 1);
   const float* X_data = X.data<float>();
   float* Y_data = Y->mutable_data<float>();
   RunChannelShuffleNHWC<float>(N, G, K, HxW, X_data, Y_data, &context_);
@@ -101,14 +102,14 @@ bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 template <>
 bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->ResizeLike(dY);
+
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   const int N = dY.dim32(0);
   const int C = dY.dim32(1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
-  const int HxW = dY.numel() / (N * C);
+  const int HxW = dY.size_from_dim(2);
   const float* dY_data = dY.data<float>();
   float* dX_data = dX->mutable_data<float>();
   RunChannelShuffleNCHW<float>(N, K, G, HxW, dY_data, dX_data, &context_);
@@ -118,15 +119,15 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->ResizeLike(dY);
+
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   const int ndim = dY.dim();
   const int N = dY.dim32(0);
   const int C = dY.dim32(ndim - 1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
-  const int HxW = dY.numel() / (N * C);
+  const int HxW = dY.size_between_dim(0, ndim - 1);
   const float* dY_data = dY.data<float>();
   float* dX_data = dX->mutable_data<float>();
   RunChannelShuffleNHWC<float>(N, K, G, HxW, dY_data, dX_data, &context_);

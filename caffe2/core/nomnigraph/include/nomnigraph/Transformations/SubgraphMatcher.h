@@ -121,7 +121,7 @@ class MatchGraph : public Graph<MatchPredicate<GraphType>> {
   // is rooted at the given rootNode.
   // The flag invertGraphTraversal specify if we should follow out edges or
   // in edges. The default is true which is useful for a functional
-  // intepretation of a dataflow graph.
+  // interpretation of a dataflow graph.
   SubgraphMatchResultType isSubgraphMatch(
       typename GraphType::NodeRef root,
       const typename MatchGraph::NodeRef& rootCriteriaRef,
@@ -410,11 +410,10 @@ class SubgraphMatchResult {
       : isMatch_(isMatch),
         debugMessage_(debugMessage),
         matchedSubgraph_(
-            ownSubgraph ? std::shared_ptr<typename GraphType::SubgraphType>(
-                              new typename GraphType::SubgraphType())
+            ownSubgraph ? std::make_shared<typename GraphType::SubgraphType>()
                         : nullptr),
         matchNodeMap_(
-            ownSubgraph ? std::shared_ptr<MatchNodeMap>(new MatchNodeMap())
+            ownSubgraph ? std::make_shared<MatchNodeMap>()
                         : nullptr) {}
 
   const bool isMatch_;

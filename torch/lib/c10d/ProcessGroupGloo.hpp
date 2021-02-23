@@ -13,11 +13,11 @@
 #include <gloo/rendezvous/store.h>
 #include <gloo/transport/device.h>
 
-#include <torch/csrc/utils/hash.h>
+#include <c10/util/hash.h>
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <c10d/ProcessGroup.hpp>
@@ -27,120 +27,7 @@
 
 namespace c10d {
 
-// AlgorithmKey is a const identifier for a Gloo algorithm.
-//
-// It captures the set of participating devices, the source device,
-// destination device, source rank, destination rank, reduction type
-// (if applicable), etcetera. This key is used to cache instances of a
-// Gloo algorithm for reuse. The number of cached instances can vary
-// over time and is agreed upon between all processes in the group.
-//
-// When we're dealing with multiple entries per key, it is also used
-// to broadcast the number of entries such that all processes agree.
-//
-struct AlgorithmKey {
-  bool operator==(const AlgorithmKey& other) const {
-    return (collectiveType == other.collectiveType) && (type == other.type) &&
-        (devices == other.devices) && (srcSizes == other.srcSizes) &&
-        (dstSizes == other.dstSizes) && (srcRank == other.srcRank) &&
-        (dstRank == other.dstRank) && (srcTensor == other.srcTensor) &&
-        (dstTensor == other.dstTensor) && (reduceOp == other.reduceOp);
-  }
-
-  CollectiveType collectiveType = CollectiveType::UNUSED;
-  at::Type* type = nullptr;
-  std::vector<int> devices;
-  std::vector<std::vector<int64_t>> srcSizes;
-  std::vector<std::vector<int64_t>> dstSizes;
-  int srcRank = -1;
-  int dstRank = -1;
-  int srcTensor = -1;
-  int dstTensor = -1;
-  ReduceOp reduceOp = ReduceOp::UNUSED;
-
-  // This function is called by torch::hash<AlgorithmKey>
-  static size_t hash(const AlgorithmKey& k) {
-    return torch::get_hash(
-        k.collectiveType,
-        k.type,
-        k.devices,
-        k.srcSizes,
-        k.dstSizes,
-        k.srcRank,
-        k.dstRank,
-        k.srcTensor,
-        k.dstTensor,
-        k.reduceOp);
-  }
-};
-
-// AlgorithmEntry is the state associated with a single algorithm instance.
-//
-// Keeping Gloo algorithms around for reuse is a win, since most of
-// them end up allocating some memory, constructing them takes some
-// time, and they may do some I/O (to setup communication buffers
-// between processes). Also, until it supports executing on arbitrary
-// memory, we need to hold on to memory that we instantiated the
-// algorithm with. The lifecycle of memory in ATen is arbitrary, so to
-// do caching, this entry holds on to memory that we copy to/from.
-//
-// Every unique call (in terms of number of tensors, tensor types,
-// tensor sizes, etc.) gets its own entry. In the future we may extend
-// this to allow multiple entries per unique call, to better exploit
-// parallelism for calls with the same signature.
-//
-struct AlgorithmEntry {
-  AlgorithmKey key;
-  std::unique_ptr<::gloo::Algorithm> algorithm;
-  std::vector<at::Tensor> src;
-  std::vector<at::Tensor> dst;
-  std::function<void()> run;
-
-#ifdef USE_CUDA
-  // For CUDA tensors, the following happens:
-  //
-  // - Input tensor A is copied to persistent tensor B on the stream
-  //   associated with the device that stores A
-  // - This stream is recorded in an event (see events below) so that
-  //   the copy can be synchronized.
-  // - The private stream (see streams below) that is used to execute
-  //   the algorithm on a worker thread waits for this event such that
-  //   we know the copy to tensor B has finished.
-  // - Once the algorithm has finished executing, the work object
-  //   associated with the execution records the private streams in
-  //   its own events. Then, when the wait() function on the work
-  //   object is called, the streams of the caller are synchronized
-  //   with asynchronous completion of the memory copies back to the
-  //   destination tensors.
-  //
-  // This approach means the caller of the process group function can
-  // retain asynchrony (no need for synchronizing its CUDA streams).
-  // Once the wait() function on the associated work object returns
-  // true, the caller can launch new CUDA kernels and they will be
-  // correctly sequenced.
-  //
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
-#endif
-
-  // Used to synchronize between calling thread and worker threads.
-  std::mutex m;
-  std::condition_variable cv;
-  bool busy = false;
-
-  // Default constructor must be specified.
-  AlgorithmEntry() = default;
-
-  // Must not be copyable.
-  // This is implied by the std::unique_ptr member field, but serves
-  // as documentation in case it ever is removed.
-  AlgorithmEntry& operator=(const AlgorithmEntry&) = delete;
-  AlgorithmEntry(const AlgorithmEntry&) = delete;
-};
-
-} // namespace c10d
-
-namespace c10d {
+constexpr const char* GLOO_BACKEND_NAME = "gloo";
 
 // ProcessGroupGloo implements Gloo bindings for c10d.
 //
@@ -183,13 +70,13 @@ class ProcessGroupGloo : public ProcessGroup {
   //
   class AsyncWork : public ProcessGroup::Work {
    public:
-    bool isCompleted() override;
-    bool isSuccess() const override;
-    void synchronize() override;
-    bool wait() override;
-    const std::exception& exception() const override;
+    AsyncWork(
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors) {
+    }
 
-    static void execute(std::shared_ptr<AsyncWork> work) {
+    static void execute(c10::intrusive_ptr<AsyncWork> work) {
       std::exception_ptr eptr;
       try {
         work->run();
@@ -202,62 +89,6 @@ class ProcessGroupGloo : public ProcessGroup {
     virtual void run() = 0;
 
    protected:
-    std::mutex m_;
-    std::condition_variable cv_;
-    bool completed_ = false;
-    std::exception_ptr eptr_;
-
-    void finish(std::exception_ptr ptr);
-
-    friend class ProcessGroupGloo;
-  };
-
-  class WorkGloo : public ProcessGroup::Work {
-   public:
-    explicit WorkGloo();
-    virtual ~WorkGloo();
-
-    bool isCompleted() override;
-    bool isSuccess() const override;
-    void synchronize() override;
-    bool wait() override;
-    const std::exception& exception() const override;
-
-   protected:
-    void finish(const AlgorithmEntry& entry);
-    void finishWithException(const ::gloo::Exception& ex);
-
-    std::mutex m_;
-    std::condition_variable cv_;
-    std::atomic<bool> completed_;
-
-    // Use pointer to ::gloo::Exception because it doesn't have a
-    // default constructor and constructing an empty std::unique_ptr
-    // is probably cheaper (this is highly speculative).
-    std::unique_ptr<::gloo::Exception> ex_;
-
-#ifdef USE_CUDA
-    // List of devices and events so that we can synchronize the
-    // streams of the caller with the kernels that were launched
-    // asynchronously to finish this operation.
-    //
-    // These events are private to a single work instance. An event
-    // captures the progress of a stream at a single point in time. If
-    // we were to use events stored on the algorithm entry, then
-    // multiple work instances might end up using the same events, and
-    // end up interfering with each other (causing unnecessary
-    // synchronization delays). Using events that are private to a
-    // single work instance avoids this. Ad hoc benchmarks showed that
-    // event construction is relatively cheap: creating 8 events takes
-    // 3 microseconds on a fast machine.
-    //
-    // Also see CUDA comment in AlgorithmEntry struct.
-    //
-    bool cuda_;
-    std::vector<int> devices_;
-    std::vector<at::cuda::CUDAEvent> events_;
-#endif
-
     friend class ProcessGroupGloo;
   };
 
@@ -273,17 +104,9 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    virtual ~SendWork() = default;
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
-    bool isCompleted() override;
-
-    bool isSuccess() const override;
-
-    void synchronize() override;
-
-    bool wait() override;
-
-    const std::exception& exception() const override;
+    void abort() override;
 
    protected:
     at::Tensor tensor_;
@@ -295,24 +118,18 @@ class ProcessGroupGloo : public ProcessGroup {
     explicit RecvWork(
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
-        int* srcRank);
+        const char* profilingTitle = nullptr);
 
-    virtual ~RecvWork() = default;
+    int sourceRank() const override;
 
-    bool isCompleted() override;
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
-    bool isSuccess() const override;
-
-    void synchronize() override;
-
-    bool wait() override;
-
-    const std::exception& exception() const override;
+    void abort() override;
 
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
-    int* srcRank_;
+    int srcRank_;
   };
 
   struct Options {
@@ -321,77 +138,115 @@ class ProcessGroupGloo : public ProcessGroup {
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     std::chrono::milliseconds timeout;
     int threads;
-
-    // This controls how many Gloo algorithm instances are created for
-    // a single identifying key. If you have many identical calls with
-    // tensors of identical size and need to parallelize, this should
-    // be greater than 1. More cache entries means more memory usage.
-    // The default value is 1.
-    int cacheNumAlgorithmEntries;
   };
 
+  const std::string getBackendName() const override {
+    return std::string(GLOO_BACKEND_NAME);
+  }
+
+  // Helper functions to create a new device object.
+  // They are static functions on this class to keep them logically
+  // separate from the rest of the code base (e.g. torch/csrc/distributed).
+
+  // Create new device instance for specific interface.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
+      const std::string& interface);
+
+  // Create new device instance for specific hostname or address.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForHostname(
+      const std::string& hostname);
+
+  // Create new device instance.
+  // It tries to resolve this machine's hostname and bind to that address.
+  // If that fails (i.e. the hostname doesn't resolve to an address), it
+  // falls back to binding to the loopback address.
+  static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
+
   explicit ProcessGroupGloo(
-      const std::shared_ptr<Store>& store,
+      const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
       Options options = Options());
 
   virtual ~ProcessGroupGloo();
 
-  std::shared_ptr<Work> broadcast(
-      std::vector<at::Tensor>& data,
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+      std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  std::shared_ptr<Work> allreduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  // Unsupported Ops
-  std::shared_ptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts =
+          AllreduceCoalescedOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors) override;
+  c10::intrusive_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> gather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
+      std::vector<std::vector<at::Tensor>>& output_lists,
+      std::vector<at::Tensor>& input_list,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputs,
+      std::vector<at::Tensor>& inputs,
       const GatherOptions& opts = GatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> scatter(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
+  c10::intrusive_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputs,
+      std::vector<std::vector<at::Tensor>>& inputs,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+      std::vector<at::Tensor>& outputs,
+      std::vector<std::vector<at::Tensor>>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputCounts,
+      std::vector<int64_t>& inputCounts,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier() override;
-
-  std::unordered_map<int, int> getGroupRank() override;
+  c10::intrusive_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
 
  protected:
-  using KeyType = AlgorithmKey;
-  using EntryType = std::unique_ptr<AlgorithmEntry>;
-  using HashType = torch::hash<AlgorithmKey>;
-  using WorkType = std::
-      tuple<AlgorithmEntry*, std::shared_ptr<WorkGloo>, std::function<void()>>;
-
   std::unique_ptr<::gloo::rendezvous::Store> store_;
+
+  // Every Gloo context represents a set of connections to its peers.
+  // In order to use more than one device (or allow for parallelism on
+  // a single device), you need multiple contexts.
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
   std::vector<std::thread> threads_;
   bool stop_;
@@ -405,43 +260,28 @@ class ProcessGroupGloo : public ProcessGroup {
   // Returns next collective tag to use (uses collectiveCounter_).
   uint32_t nextTag();
 
-  void runLoop(void);
+  // Returns the context to use for the specified tag.
+  // With `nextTag` returning an increasing number, this should lead
+  // to contexts being used in a round-robin fashion.
+  std::shared_ptr<::gloo::Context> getContext(uint32_t tag);
 
-  void runSingle(WorkType work);
+  // Entrypoint for worker threads.
+  void runLoop(int workerIndex);
 
-  void createAlgorithm(AlgorithmEntry& entry);
+  // Queue work to run on worker thread.
+  void enqueue(c10::intrusive_ptr<AsyncWork> work);
 
-  template <typename T>
-  void createAllreduce(AlgorithmEntry& entry);
-
-  template <typename T>
-  void createBroadcast(AlgorithmEntry& entry);
-
-  // Construct creates AlgorithmEntry for specified key.
-  EntryType construct(const KeyType& key);
-
-  // Checkout constructs new AlgorithmEntry or returns existing one.
-  AlgorithmEntry* checkout(const KeyType& key);
-
-  // The maximum number of cached algorithms for a single key.
-  const int cacheNumAlgorithmEntries_;
-
-  // Index of the next algorithm to use for a particular key.
-  // Note that this index must be the same for all particating processes.
-  std::unordered_map<KeyType, int, HashType> cacheCurrentEntry_;
-
-  // The list of cached algorithms, by algorithm key.
-  std::unordered_map<KeyType, std::vector<EntryType>, HashType> cache_;
-
-  std::shared_ptr<Work> enqueue(AlgorithmEntry* entry);
-
-  // Queue std::function to run on the background thread pool.
-  void enqueue(std::function<void()> fn);
-
-  std::deque<WorkType> queue_;
-  std::mutex queueMutex_;
-  std::condition_variable queueProduceCV_;
-  std::condition_variable queueConsumeCV_;
+  // Keep both a queue of pending work, and a vector with in progress work.
+  // Both of these can only be mutated when holding the queue lock.
+  // We keep both around instead of just the queue, so we can grab a weak_ptr
+  // to all in progress and pending work when executing a barrier.
+  // When executing a barrier, we need to ensure that all prior work
+  // has completed before completing itself.
+  std::deque<c10::intrusive_ptr<AsyncWork>> workQueue_;
+  std::vector<c10::intrusive_ptr<AsyncWork>> workInProgress_;
+  std::mutex workMutex_;
+  std::condition_variable workProduceCV_;
+  std::condition_variable workConsumeCV_;
 };
 
 } // namespace c10d

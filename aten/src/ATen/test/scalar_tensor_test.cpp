@@ -1,7 +1,9 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "test_seed.h"
+#include <ATen/ATen.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+
 #include <algorithm>
 #include <iostream>
 #include <numeric>
@@ -27,7 +29,7 @@ void require_equal_size_dim(const Tensor &lhs, const Tensor &rhs) {
   ASSERT_TRUE(lhs.sizes().equals(rhs.sizes()));
 }
 
-bool should_expand(const IntList &from_size, const IntList &to_size) {
+bool should_expand(const IntArrayRef &from_size, const IntArrayRef &to_size) {
   if (from_size.size() > to_size.size()) {
     return false;
   }
@@ -43,7 +45,7 @@ bool should_expand(const IntList &from_size, const IntList &to_size) {
   return true;
 }
 
-void test(Type &T) {
+void test(DeprecatedTypeProperties &T) {
   std::vector<std::vector<int64_t>> sizes = {{}, {0}, {1}, {1, 1}, {2}};
 
   // single-tensor/size tests
@@ -54,8 +56,7 @@ void test(Type &T) {
     ASSERT_EQ((size_t)t.ndimension(), s->size());
     ASSERT_TRUE(t.sizes().equals(*s));
     ASSERT_EQ(t.strides().size(), s->size());
-    auto numel =
-        std::accumulate(s->begin(), s->end(), 1, std::multiplies<int64_t>());
+    const auto numel = c10::multiply_integers(s->begin(), s->end());
     ASSERT_EQ(t.numel(), numel);
     // verify we can output
     std::stringstream ss;
@@ -188,8 +189,7 @@ void test(Type &T) {
         // with storage
         auto lhs = ones(*lhs_it, T);
         auto rhs = ones(*rhs_it, T);
-        auto storage = T.storage(rhs.numel(), false);
-        lhs.set_(storage);
+        lhs.set_(rhs.storage());
         // should not be dim 0 because an empty storage is dim 1; all other
         // storages aren't scalars
         ASSERT_NE(lhs.dim(), 0);
@@ -198,8 +198,7 @@ void test(Type &T) {
         // with storage, offset, sizes, strides
         auto lhs = ones(*lhs_it, T);
         auto rhs = ones(*rhs_it, T);
-        auto storage = T.storage(rhs.numel(), false);
-        lhs.set_(storage, rhs.storage_offset(), rhs.sizes(), rhs.strides());
+        lhs.set_(rhs.storage(), rhs.storage_offset(), rhs.sizes(), rhs.strides());
         require_equal_size_dim(lhs, rhs);
       }
     }
@@ -269,12 +268,12 @@ void test(Type &T) {
 }
 
 TEST(TestScalarTensor, TestScalarTensorCPU) {
-  manual_seed(123, at::kCPU);
+  manual_seed(123);
   test(CPU(kFloat));
 }
 
 TEST(TestScalarTensor, TestScalarTensorCUDA) {
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));

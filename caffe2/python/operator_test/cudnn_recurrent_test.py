@@ -1,10 +1,9 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import model_helper, workspace, core, rnn_cell
-from caffe2.proto import caffe2_pb2
 from future.utils import viewitems
 import numpy as np
 
@@ -15,7 +14,7 @@ import unittest
 class TestLSTMs(unittest.TestCase):
 
     def testEqualToCudnn(self):
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA)):
+        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType)):
             T = 8
             batch_size = 4
             input_dim = 8

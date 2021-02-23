@@ -1,7 +1,0 @@
-graph(%x : Dynamic
-      %1 : Dynamic
-      %3 : Dynamic) {
-  %2 : Dynamic = aten::mm(%x, %1)
-  %4 : Double(3, 5) = aten::mm(%2, %3), scope: TracedMod
-  return (%4);
-}

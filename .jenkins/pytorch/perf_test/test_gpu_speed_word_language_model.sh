@@ -28,15 +28,15 @@ test_gpu_speed_word_language_model () {
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
 
-  for (( i=1; i<=$NUM_RUNS; i++ )) do
+  for (( i=1; i<=NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command python main.py --cuda --epochs 1)
     echo $runtime
-    SAMPLE_ARRAY+=(${runtime})
+    SAMPLE_ARRAY+=("${runtime}")
   done
 
   cd ../..
 
-  stats=$(python ../get_stats.py ${SAMPLE_ARRAY[@]})
+  stats=$(python ../get_stats.py "${SAMPLE_ARRAY[@]}")
   echo "Runtime stats in seconds:"
   echo $stats
 

@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
@@ -16,9 +16,9 @@ import unittest
 class TestFcOperator(serial.SerializedTestCase):
     def _run_test(self, n, m, k, transposed, multi_dim, dtype, engine, gc, dc):
         if dtype == np.float16:
-            # fp16 only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            # fp16 only supported with CUDA/HIP
+            assume(core.IsGPUDeviceType(gc.device_type))
+            dc = [d for d in dc if core.IsGPUDeviceType(d.device_type)]
 
         if engine == 'TENSORCORE':
             # TensorCore only makes sense with CUDA
@@ -44,7 +44,7 @@ class TestFcOperator(serial.SerializedTestCase):
         def fc_op(X, W, b):
             return [np.dot(X, W.reshape(n, k).transpose()) + b.reshape(n)]
 
-        def fc_tranposed_op(X, W, b):
+        def fc_transposed_op(X, W, b):
             return [np.dot(X, W.reshape(k, n)) + b.reshape(n)]
 
         op = core.CreateOperator(
@@ -54,18 +54,21 @@ class TestFcOperator(serial.SerializedTestCase):
             engine=engine,
         )
 
-        if dtype == np.float16 and gc.device_type == caffe2_pb2.CUDA:
+        if dtype == np.float16 and core.IsGPUDeviceType(gc.device_type):
             a = caffe2_pb2.Argument()
             a.i = 1
             a.name = "float16_compute"
             op.arg.extend([a])
 
         # Check against numpy reference
+        # ReferenceChecks is flaky on rocm with threshold of 1e-4 for fp16. Relaxing to 1e-3.
+        threshold = 1e-3 if (gc.device_type == caffe2_pb2.HIP and dtype == np.float16) else 1e-4
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[X, W, b],
-            reference=fc_tranposed_op if transposed else fc_op,
+            reference=fc_transposed_op if transposed else fc_op,
+            threshold=threshold
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X, W, b], [0])

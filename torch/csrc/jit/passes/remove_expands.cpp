@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/passes/remove_expands.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include <torch/csrc/jit/passes/remove_expands.h>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 static void RemoveExpands(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
@@ -20,5 +20,5 @@ void RemoveExpands(const std::shared_ptr<Graph>& graph) {
   RemoveExpands(graph->block());
 }
 
-
-}}
+} // namespace jit
+} // namespace torch

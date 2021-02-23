@@ -1,22 +1,36 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
-from caffe2.proto import caffe2_pb2
+
+
+
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 import numpy as np
 
 
 class TestBooleanMaskOp(serial.SerializedTestCase):
+    @given(x=hu.tensor1d(min_len=1,
+                         max_len=100,
+                         elements=hu.floats(min_value=0.5, max_value=1.0)),
+           **hu.gcs_cpu_only)
+    @settings(deadline=1000)
+    def test_boolean_mask_gradient(self, x, gc, dc):
+        op = core.CreateOperator("BooleanMask",
+                                 ["data", "mask"],
+                                 "masked_data")
+        mask = np.random.choice(a=[True, False], size=x.shape[0])
+        expected_gradient = np.copy(mask).astype(int)
+        self.assertDeviceChecks(dc, op, [x, mask], [0])
+        self.assertGradientChecks(gc, op, [x, mask], 0, [0])
 
-    @serial.given(x=hu.tensor(min_dim=1,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+
+    @given(x=hu.tensor1d(min_len=1,
+                         max_len=5,
+                         elements=hu.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_boolean_mask(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
                                  ["data", "mask"],
@@ -25,13 +39,12 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
         def ref(x, mask):
             return (x[mask],)
-
         self.assertReferenceChecks(gc, op, [x, mask], ref)
         self.assertDeviceChecks(dc, op, [x, mask], [0])
 
-    @given(x=hu.tensor(min_dim=1,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+    @given(x=hu.tensor1d(min_len=1,
+                         max_len=5,
+                         elements=hu.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
     def test_boolean_mask_indices(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
@@ -47,16 +60,16 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @staticmethod
     def _dtype_conversion(x, dtype, gc, dc):
-        """SequenceMask only supports fp16 with CUDA."""
+        """SequenceMask only supports fp16 with CUDA/ROCm."""
         if dtype == np.float16:
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            assume(core.IsGPUDeviceType(gc.device_type))
+            dc = [d for d in dc if core.IsGPUDeviceType(d.device_type)]
             x = x.astype(dtype)
         return x, dc
 
-    @serial.given(x=hu.tensor(min_dim=2,
+    @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
     def test_sequence_mask_with_lengths(self, x, dtype, gc, dc):
@@ -89,9 +102,10 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_sequence_mask_with_window(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
@@ -130,10 +144,11 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_sequence_mask_triangle(self, x, mode, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
@@ -182,9 +197,10 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_sequence_mask_batching_lengths(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
@@ -234,9 +250,10 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=4,
                        max_dim=4,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_sequence_mask_batching_window(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
@@ -288,10 +305,11 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=3,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_sequence_mask_batching_triangle(self, x, mode, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
@@ -352,7 +370,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=3,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
     def test_sequence_mask_repeated(self, x, dtype, gc, dc):

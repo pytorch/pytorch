@@ -48,13 +48,14 @@ template <class Context>
 class CreateMapOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CreateMapOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit CreateMapOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~CreateMapOp() {}
 
   bool RunOnDevice() override {
-    TensorProto::DataType key_dtype =
-        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
+    TensorProto::DataType key_dtype = static_cast<TensorProto::DataType>(
+        this->template GetSingleArgument<int>(
             "key_dtype", TensorProto_DataType_INT32));
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -63,8 +64,8 @@ class CreateMapOp final : public Operator<Context> {
 
   template <typename KEY_T>
   bool DoRunWithType() {
-    TensorProto::DataType value_dtype =
-        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
+    TensorProto::DataType value_dtype = static_cast<TensorProto::DataType>(
+        this->template GetSingleArgument<int>(
             "value_dtype", TensorProto_DataType_INT32));
 
     return DispatchHelper<
@@ -82,14 +83,14 @@ class CreateMapOp final : public Operator<Context> {
 
   template <typename KEY_T>
   bool DoRunWithOtherType2() {
-    TensorProto::DataType value_dtype =
-        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
+    TensorProto::DataType value_dtype = static_cast<TensorProto::DataType>(
+        this->template GetSingleArgument<int>(
             "value_dtype", TensorProto_DataType_INT32));
 
     CAFFE_THROW(
         "CreateMap is not implemented on value tensor of type ",
         DataTypeToTypeMeta(value_dtype).name(),
-        "Consider adding it a type in the list DispatchHelper");
+        "consider adding it as a type in the DispatchHelper list");
   }
 
   OUTPUT_TAGS(MAP);
@@ -99,8 +100,9 @@ template <class Context>
 class KeyValueToMapOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  KeyValueToMapOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit KeyValueToMapOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~KeyValueToMapOp() {}
 
   bool RunOnDevice() override {
@@ -140,7 +142,7 @@ class KeyValueToMapOp final : public Operator<Context> {
     CAFFE_THROW(
         "KeyValueToMap is not implemented on value tensor of type ",
         Input(VALUES).dtype().name(),
-        "Consider adding it a type in the list DispatchHelper");
+        "consider adding it as a type in the DispatchHelper list");
   }
 
   INPUT_TAGS(KEYS, VALUES);
@@ -151,8 +153,9 @@ template <class Context>
 class MapToKeyValueOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  MapToKeyValueOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit MapToKeyValueOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~MapToKeyValueOp() {}
 
   bool RunOnDevice() override {
@@ -168,10 +171,13 @@ class MapToKeyValueOp final : public Operator<Context> {
     using key_type = typename MAP_T::key_type;
     using mapped_type = typename MAP_T::mapped_type;
     auto& map_data = this->template Input<MAP_T>(MAP);
-    auto* key_output = Output(KEYS);
-    auto* value_output = Output(VALUES);
-    key_output->Resize(map_data.size());
-    value_output->Resize(map_data.size());
+
+    auto* key_output = Output(
+        KEYS, {static_cast<int64_t>(map_data.size())}, at::dtype<key_type>());
+    auto* value_output = Output(
+        VALUES,
+        {static_cast<int64_t>(map_data.size())},
+        at::dtype<mapped_type>());
     auto* key_data = key_output->template mutable_data<key_type>();
     auto* value_data = value_output->template mutable_data<mapped_type>();
 
@@ -245,9 +251,8 @@ class MapDeserializer : public BlobDeserializerBase {
         tensor_protos.ParseFromString(proto.content()),
         "Fail to parse TensorProtos");
     TensorDeserializer deser;
-    Tensor key_tensor(CPU), value_tensor(CPU);
-    deser.Deserialize(tensor_protos.protos(0), &key_tensor);
-    deser.Deserialize(tensor_protos.protos(1), &value_tensor);
+    Tensor key_tensor = deser.Deserialize(tensor_protos.protos(0));
+    Tensor value_tensor = deser.Deserialize(tensor_protos.protos(1));
     auto* key_data = key_tensor.data<KEY_T>();
     auto* value_data = value_tensor.data<VALUE_T>();
 

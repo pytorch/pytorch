@@ -1,17 +1,9 @@
 #include <caffe2/video/video_decoder.h>
+#include <assert.h>
 #include <caffe2/core/logging.h>
-
-#include <stdio.h>
 #include <mutex>
 #include <random>
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/log.h>
-#include <libswresample/swresample.h>
-#include <libswscale/swscale.h>
-}
+#include <array>
 
 namespace caffe2 {
 
@@ -27,21 +19,103 @@ VideoDecoder::VideoDecoder() {
   }
 }
 
-void VideoDecoder::ResizeAndKeepAspectRatio(
-    const int origHeight,
-    const int origWidth,
-    const int heightMin,
-    const int widthMin,
-    int& outHeight,
-    int& outWidth) {
-  float min_aspect = (float)heightMin / (float)widthMin;
-  float video_aspect = (float)origHeight / (float)origWidth;
-  if (video_aspect >= min_aspect) {
-    outWidth = widthMin;
-    outHeight = (int)ceil(video_aspect * outWidth);
+void VideoDecoder::getAudioSample(
+    AVPacket& packet,
+    AVCodecContext* audioCodecContext_,
+    AVFrame* audioStreamFrame_,
+    SwrContext* convertCtx_,
+    Callback& callback,
+    const Params& params) {
+  int frame_finished = 0;
+  auto result = avcodec_decode_audio4(
+      audioCodecContext_, audioStreamFrame_, &frame_finished, &packet);
+
+  if (frame_finished) {
+    // from
+    // https://www.ffmpeg.org/doxygen/2.3/decoding_encoding_8c-example.html#a57
+    auto c = audioCodecContext_;
+    int data_size = av_samples_get_buffer_size(
+        nullptr, c->channels, audioStreamFrame_->nb_samples, c->sample_fmt, 1);
+    if (data_size < 0) {
+      // This should not occur, checking just for paranoia
+      LOG(ERROR) << "Failed to calculate data size";
+    }
+
+    // from https://www.ffmpeg.org/doxygen/2.1/group__lswr.html#details
+    uint8_t* output;
+    auto swr = convertCtx_;
+    auto inrate = audioCodecContext_->sample_rate;
+    auto in_samples = audioStreamFrame_->nb_samples;
+
+    int out_samples = av_rescale_rnd(
+        swr_get_delay(swr, inrate) + in_samples,
+        params.outrate_,
+        inrate,
+        AV_ROUND_UP);
+
+    if (out_samples > 0) {
+      auto input = (const uint8_t**)&audioStreamFrame_->data[0];
+      av_samples_alloc(
+          &output,
+          nullptr,
+          c->channels,
+          out_samples,
+          (AVSampleFormat)params.outfmt_,
+          0);
+
+      // resample the audio data
+      out_samples = swr_convert(swr, &output, out_samples, input, in_samples);
+      auto sample_size = out_samples * c->channels * sizeof(float);
+      auto buffer = std::make_unique<float[]>(sample_size);
+      memcpy(buffer.get(), output, sample_size);
+      av_freep(&output);
+
+      unique_ptr<DecodedAudio> audio_sample = make_unique<DecodedAudio>();
+      audio_sample->dataSize_ = data_size;
+      audio_sample->outSampleSize_ = out_samples * c->channels;
+      audio_sample->audio_data_ = std::move(buffer);
+      callback.audioDecoded(std::move(audio_sample));
+    }
   } else {
-    outHeight = heightMin;
-    outWidth = (int)ceil(outHeight / video_aspect);
+    result = packet.size;
+  }
+  packet.size -= result;
+  packet.data += result;
+}
+
+void VideoDecoder::ResizeAndKeepAspectRatio(
+    const int origWidth,
+    const int origHeight,
+    const int short_edge,
+    const int long_edge,
+    int& outWidth,
+    int& outHeight) {
+  if (origWidth < origHeight) {
+    // dominant height
+    if (short_edge > 0) {
+      // use short_edge for rescale
+      float ratio = short_edge / float(origWidth);
+      outWidth = short_edge;
+      outHeight = (int)round(ratio * origHeight);
+    } else {
+      // use long_edge for rescale
+      float ratio = long_edge / float(origHeight);
+      outHeight = long_edge;
+      outWidth = (int)round(ratio * origWidth);
+    }
+  } else {
+    // dominant width
+    if (short_edge > 0) {
+      // use short_edge for rescale
+      float ratio = short_edge / float(origHeight);
+      outHeight = short_edge;
+      outWidth = (int)round(ratio * origWidth);
+    } else {
+      // use long_edge for rescale
+      float ratio = long_edge / float(origWidth);
+      outWidth = long_edge;
+      outHeight = (int)round(ratio * origHeight);
+    }
   }
 }
 
@@ -50,12 +124,15 @@ void VideoDecoder::decodeLoop(
     VideoIOContext& ioctx,
     const Params& params,
     const int start_frm,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
+    Callback& callback) {
   AVPixelFormat pixFormat = params.pixelFormat_;
   AVFormatContext* inputContext = avformat_alloc_context();
   AVStream* videoStream_ = nullptr;
   AVCodecContext* videoCodecContext_ = nullptr;
+  AVCodecContext* audioCodecContext_ = nullptr;
   AVFrame* videoStreamFrame_ = nullptr;
+  AVFrame* audioStreamFrame_ = nullptr;
+  SwrContext* convertCtx_ = nullptr;
   AVPacket packet;
   av_init_packet(&packet); // init packet
   SwsContext* scaleContext_ = nullptr;
@@ -68,14 +145,12 @@ void VideoDecoder::decodeLoop(
     // Determining the input format:
     int probeSz = 1 * 1024 + AVPROBE_PADDING_SIZE;
     DecodedFrame::AvDataPtr probe((uint8_t*)av_malloc(probeSz));
-
     memset(probe.get(), 0, probeSz);
     int len = ioctx.read(probe.get(), probeSz - AVPROBE_PADDING_SIZE);
     if (len < probeSz - AVPROBE_PADDING_SIZE) {
       LOG(ERROR) << "Insufficient data to determine video format";
       return;
     }
-
     // seek back to start of stream
     ioctx.seek(0, SEEK_SET);
 
@@ -85,10 +160,15 @@ void VideoDecoder::decodeLoop(
     probeData->filename = "";
     // Determine the input-format:
     inputContext->iformat = av_probe_input_format(probeData.get(), 1);
+    // this is to avoid the double-free error
+    if (inputContext->iformat == nullptr) {
+      LOG(ERROR) << "inputContext iformat is nullptr!";
+      return;
+    }
 
     ret = avformat_open_input(&inputContext, "", nullptr, nullptr);
     if (ret < 0) {
-      LOG(ERROR) << "Unable to open stream " << ffmpegErrorStr(ret);
+      LOG(ERROR) << "Unable to open stream : " << ffmpegErrorStr(ret);
       return;
     }
 
@@ -101,17 +181,24 @@ void VideoDecoder::decodeLoop(
 
     // Decode the first video stream
     int videoStreamIndex_ = params.streamIndex_;
-    if (videoStreamIndex_ == -1) {
+    int audioStreamIndex_ = params.streamIndex_;
+    if (params.streamIndex_ == -1) {
       for (int i = 0; i < inputContext->nb_streams; i++) {
         auto stream = inputContext->streams[i];
-        if (stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+        if (stream->codec->codec_type == AVMEDIA_TYPE_VIDEO &&
+            videoStreamIndex_ == -1) {
           videoStreamIndex_ = i;
           videoStream_ = stream;
+        } else if (
+            stream->codec->codec_type == AVMEDIA_TYPE_AUDIO &&
+            audioStreamIndex_ == -1) {
+          audioStreamIndex_ = i;
+        }
+        if (videoStreamIndex_ != -1 && audioStreamIndex_ != -1) {
           break;
         }
       }
     }
-
     if (videoStream_ == nullptr) {
       LOG(ERROR) << "Unable to find video stream in " << videoName << " "
                  << ffmpegErrorStr(ret);
@@ -137,46 +224,74 @@ void VideoDecoder::decodeLoop(
       return;
     }
 
+    if (params.getAudio_ && audioStreamIndex_ >= 0) {
+      // see e.g. ridge/decoder/StreamDecoder.cpp
+      audioCodecContext_ = inputContext->streams[audioStreamIndex_]->codec;
+      ret = avcodec_open2(
+          audioCodecContext_,
+          avcodec_find_decoder(audioCodecContext_->codec_id),
+          nullptr);
+
+      if (ret < 0) {
+        LOG(ERROR) << "Cannot open audio codec : "
+                   << audioCodecContext_->codec->name;
+        return;
+      }
+
+      convertCtx_ = swr_alloc_set_opts(
+          nullptr,
+          params.outlayout_,
+          (AVSampleFormat)params.outfmt_,
+          params.outrate_,
+          audioCodecContext_->channel_layout,
+          audioCodecContext_->sample_fmt,
+          audioCodecContext_->sample_rate,
+          0,
+          nullptr);
+
+      if (convertCtx_ == nullptr) {
+        LOG(ERROR) << "Cannot setup sample format converter.";
+        return;
+      }
+      if (swr_init(convertCtx_) < 0) {
+        LOG(ERROR) << "Cannot init sample format converter.";
+        return;
+      }
+    }
+
     // Calculate if we need to rescale the frames
-    int origWidth = videoCodecContext_->width;
-    int origHeight = videoCodecContext_->height;
+    const int origWidth = videoCodecContext_->width;
+    const int origHeight = videoCodecContext_->height;
     int outWidth = origWidth;
     int outHeight = origHeight;
 
     if (params.video_res_type_ == VideoResType::ORIGINAL_RES) {
       // if the original resolution is too low,
-      // make its size at least (crop_height, crop_width)
-      if (params.crop_width_ > origWidth || params.crop_height_ > origHeight) {
+      // make it at least the same size as crop_size_
+      if (params.crop_size_ > origWidth || params.crop_size_ > origHeight) {
         ResizeAndKeepAspectRatio(
-            origHeight,
-            origWidth,
-            params.crop_height_,
-            params.crop_width_,
-            outHeight,
-            outWidth);
+            origWidth, origHeight, params.crop_size_, -1, outWidth, outHeight);
       }
-    } else if (
-        params.video_res_type_ == VideoResType::USE_MINIMAL_WIDTH_HEIGHT) {
-      // resize the image to be at least
-      // (height_min, width_min) resolution while keep the aspect ratio
+    } else if (params.video_res_type_ == VideoResType::USE_SHORT_EDGE) {
+      // resize the image to the predefined
+      // short_edge_ resolution while keep the aspect ratio
       ResizeAndKeepAspectRatio(
-          origHeight,
-          origWidth,
-          params.height_min_,
-          params.width_min_,
-          outHeight,
-          outWidth);
+          origWidth, origHeight, params.short_edge_, -1, outWidth, outHeight);
     } else if (params.video_res_type_ == VideoResType::USE_WIDTH_HEIGHT) {
       // resize the image to the predefined
       // resolution and ignore the aspect ratio
-      outWidth = params.scale_w_;
-      outHeight = params.scale_h_;
+      outWidth = params.outputWidth_;
+      outHeight = params.outputHeight_;
     } else {
-      LOG(ERROR) << "Unknown video_res_type: " << params.video_res_type_;
+      LOG(ERROR) << "Unknown VideoResType: " << params.video_res_type_;
+      return;
     }
 
     // Make sure that we have a valid format
-    CAFFE_ENFORCE_NE(videoCodecContext_->pix_fmt, AV_PIX_FMT_NONE);
+    if (videoCodecContext_->pix_fmt == AV_PIX_FMT_NONE) {
+      LOG(ERROR) << "pixel format is not valid.";
+      return;
+    }
 
     // Create a scale context
     scaleContext_ = sws_getContext(
@@ -197,12 +312,17 @@ void VideoDecoder::decodeLoop(
     videoMeta.width = outWidth;
     videoMeta.height = outHeight;
     videoMeta.pixFormat = pixFormat;
-    videoMeta.fps = av_q2d(videoStream_->avg_frame_rate);
 
-    // If sampledFrames is not empty, empty it
-    if (sampledFrames.size() > 0) {
-      sampledFrames.clear();
+    // avoid division by zero, code adapted from
+    // https://www.ffmpeg.org/doxygen/0.6/rational_8h-source.html
+    if (videoStream_->avg_frame_rate.num == 0 ||
+        videoStream_->avg_frame_rate.den == 0) {
+      LOG(ERROR) << "Frame rate is wrong. No data found.";
+      return;
     }
+
+    videoMeta.fps = av_q2d(videoStream_->avg_frame_rate);
+    callback.videoDecodingStarted(videoMeta);
 
     if (params.intervals_.size() == 0) {
       LOG(ERROR) << "Empty sampling intervals.";
@@ -213,6 +333,7 @@ void VideoDecoder::decodeLoop(
         params.intervals_.begin();
     if (itvlIter->timestamp != 0) {
       LOG(ERROR) << "Sampling interval starting timestamp is not zero.";
+      return;
     }
 
     double currFps = itvlIter->fps;
@@ -220,6 +341,7 @@ void VideoDecoder::decodeLoop(
         currFps != SpecialFps::SAMPLE_TIMESTAMP_ONLY) {
       // fps must be 0, -1, -2 or > 0
       LOG(ERROR) << "Invalid sampling fps.";
+      return;
     }
 
     double prevTimestamp = itvlIter->timestamp;
@@ -227,12 +349,16 @@ void VideoDecoder::decodeLoop(
     if (itvlIter != params.intervals_.end() &&
         prevTimestamp >= itvlIter->timestamp) {
       LOG(ERROR) << "Sampling interval timestamps must be strictly ascending.";
+      return;
     }
 
     double lastFrameTimestamp = -1.0;
+    double timestamp = -1.0;
+
     // Initialize frame and packet.
     // These will be reused across calls.
     videoStreamFrame_ = av_frame_alloc();
+    audioStreamFrame_ = av_frame_alloc();
 
     // frame index in video stream
     int frameIndex = -1;
@@ -243,6 +369,7 @@ void VideoDecoder::decodeLoop(
     std::mt19937 meta_randgen(time(nullptr));
     long int start_ts = -1;
     bool mustDecodeAll = false;
+
     if (videoStream_->duration > 0 && videoStream_->nb_frames > 0) {
       /* we have a valid duration and nb_frames. We can safely
        * detect an intermediate timestamp to start decoding from. */
@@ -272,6 +399,10 @@ void VideoDecoder::decodeLoop(
 
         // if we need to decode from the start_frm
       } else if (params.decode_type_ == DecodeType::USE_START_FRM) {
+        if (videoStream_ == nullptr) {
+          LOG(ERROR) << "Nullptr found at videoStream_";
+          return;
+        }
         start_ts = int(floor(
             (videoStream_->duration * start_frm) / (videoStream_->nb_frames)));
         // seek a frame at start_ts
@@ -285,16 +416,12 @@ void VideoDecoder::decodeLoop(
       }
 
       if (ret < 0) {
-        LOG(ERROR) << "Unable to decode from a random start point";
+        LOG(INFO) << "Unable to decode from a random start point";
         /* fall back to default decoding of all frames from start */
         av_seek_frame(inputContext, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD);
         mustDecodeAll = true;
       }
     } else {
-      /* we do not have the necessary metadata to selectively decode frames.
-       * Decode all frames as we do in the default case */
-      LOG(INFO) << " Decoding all frames as we do not have suffiecient"
-                   " metadata for selective decoding.";
       mustDecodeAll = true;
     }
 
@@ -311,10 +438,9 @@ void VideoDecoder::decodeLoop(
     // the decoder is still giving us frames.
     int ipacket = 0;
     while ((!eof || gotPicture) &&
-           /* either you must decode all frames or decode upto maxFrames
+           /* either you must decode all frames or decode up to maxFrames
             * based on status of the mustDecodeAll flag */
-           (mustDecodeAll ||
-            ((!mustDecodeAll) && (selectiveDecodedFrames < maxFrames))) &&
+           (mustDecodeAll || (selectiveDecodedFrames < maxFrames)) &&
            /* If on the last interval and not autodecoding keyframes and a
             * SpecialFps indicates no more frames are needed, stop decoding */
            !((itvlIter == params.intervals_.end() &&
@@ -335,11 +461,28 @@ void VideoDecoder::decodeLoop(
             continue;
           } else if (ret < 0) {
             LOG(ERROR) << "Error reading packet : " << ffmpegErrorStr(ret);
+            return;
           }
           ipacket++;
 
-          // Ignore packets from other streams
-          if (packet.stream_index != videoStreamIndex_) {
+          auto si = packet.stream_index;
+          if (params.getAudio_ && audioStreamIndex_ >= 0 &&
+              si == audioStreamIndex_) {
+            // Audio packets can have multiple audio frames in a single packet
+            while (packet.size > 0) {
+              assert(audioCodecContext_ != nullptr);
+              assert(convertCtx_ != nullptr);
+              getAudioSample(
+                  packet,
+                  audioCodecContext_,
+                  audioStreamFrame_,
+                  convertCtx_,
+                  callback,
+                  params);
+            }
+          }
+
+          if (si != videoStreamIndex_) {
             av_free_packet(&packet);
             continue;
           }
@@ -349,8 +492,8 @@ void VideoDecoder::decodeLoop(
             videoCodecContext_, videoStreamFrame_, &gotPicture, &packet);
         if (ret < 0) {
           LOG(ERROR) << "Error decoding video frame : " << ffmpegErrorStr(ret);
+          return;
         }
-
         try {
           // Nothing to do without a picture
           if (!gotPicture) {
@@ -361,8 +504,7 @@ void VideoDecoder::decodeLoop(
 
           long int frame_ts =
               av_frame_get_best_effort_timestamp(videoStreamFrame_);
-          double timestamp = frame_ts * av_q2d(videoStream_->time_base);
-
+          timestamp = frame_ts * av_q2d(videoStream_->time_base);
           if ((frame_ts >= start_ts && !mustDecodeAll) || mustDecodeAll) {
             /* process current frame if:
              * 1) We are not doing selective decoding and mustDecodeAll
@@ -383,6 +525,7 @@ void VideoDecoder::decodeLoop(
                   prevTimestamp >= itvlIter->timestamp) {
                 LOG(ERROR)
                     << "Sampling interval timestamps must be strictly ascending.";
+                return;
               }
             }
 
@@ -435,6 +578,7 @@ void VideoDecoder::decodeLoop(
             AVFrame* rgbFrame = av_frame_alloc();
             if (!rgbFrame) {
               LOG(ERROR) << "Error allocating AVframe";
+              return;
             }
 
             try {
@@ -469,7 +613,8 @@ void VideoDecoder::decodeLoop(
               frame->timestamp_ = timestamp;
               frame->keyFrame_ = videoStreamFrame_->key_frame;
 
-              sampledFrames.push_back(move(frame));
+              callback.frameDecoded(std::move(frame));
+
               selectiveDecodedFrames++;
               av_frame_free(&rgbFrame);
             } catch (const std::exception&) {
@@ -477,8 +622,10 @@ void VideoDecoder::decodeLoop(
             }
           }
           av_frame_unref(videoStreamFrame_);
+          av_frame_unref(audioStreamFrame_);
         } catch (const std::exception&) {
           av_frame_unref(videoStreamFrame_);
+          av_frame_unref(audioStreamFrame_);
         }
 
         av_free_packet(&packet);
@@ -486,49 +633,170 @@ void VideoDecoder::decodeLoop(
         av_free_packet(&packet);
       }
     } // of while loop
+    callback.videoDecodingEnded(timestamp);
 
     // free all stuffs
     sws_freeContext(scaleContext_);
+    swr_free(&convertCtx_);
     av_packet_unref(&packet);
     av_frame_free(&videoStreamFrame_);
+    av_frame_free(&audioStreamFrame_);
     avcodec_close(videoCodecContext_);
+    if (audioCodecContext_ != nullptr) {
+      avcodec_close(audioCodecContext_);
+    }
     avformat_close_input(&inputContext);
     avformat_free_context(inputContext);
   } catch (const std::exception&) {
     // In case of decoding error
     // free all stuffs
     sws_freeContext(scaleContext_);
+    swr_free(&convertCtx_);
     av_packet_unref(&packet);
     av_frame_free(&videoStreamFrame_);
+    av_frame_free(&audioStreamFrame_);
     avcodec_close(videoCodecContext_);
+    avcodec_close(audioCodecContext_);
     avformat_close_input(&inputContext);
     avformat_free_context(inputContext);
   }
 }
 
 void VideoDecoder::decodeMemory(
+    const string& videoName,
     const char* buffer,
     const int size,
     const Params& params,
     const int start_frm,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
+    Callback& callback) {
   VideoIOContext ioctx(buffer, size);
-  decodeLoop(string("Memory Buffer"), ioctx, params, start_frm, sampledFrames);
+  decodeLoop(videoName, ioctx, params, start_frm, callback);
 }
 
 void VideoDecoder::decodeFile(
     const string& file,
     const Params& params,
     const int start_frm,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
+    Callback& callback) {
   VideoIOContext ioctx(file);
-  decodeLoop(file, ioctx, params, start_frm, sampledFrames);
+  decodeLoop(file, ioctx, params, start_frm, callback);
 }
 
 string VideoDecoder::ffmpegErrorStr(int result) {
   std::array<char, 128> buf;
   av_strerror(result, buf.data(), buf.size());
   return string(buf.data());
+}
+
+void FreeDecodedData(
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
+    std::vector<std::unique_ptr<DecodedAudio>>& sampledAudio) {
+  // free the sampledFrames and sampledAudio
+  for (int i = 0; i < sampledFrames.size(); i++) {
+    DecodedFrame* p = sampledFrames[i].release();
+    delete p;
+  }
+  for (int i = 0; i < sampledAudio.size(); i++) {
+    DecodedAudio* p = sampledAudio[i].release();
+    delete p;
+  }
+  sampledFrames.clear();
+  sampledAudio.clear();
+}
+
+bool DecodeMultipleClipsFromVideo(
+    const char* video_buffer,
+    const std::string& video_filename,
+    const int encoded_size,
+    const Params& params,
+    const int start_frm,
+    const int clip_per_video,
+    const std::vector<int>& clip_start_positions,
+    const bool use_local_file,
+    int& height,
+    int& width,
+    std::vector<unsigned char*>& buffer_rgb) {
+  std::vector<std::unique_ptr<DecodedFrame>> sampledFrames;
+  std::vector<std::unique_ptr<DecodedAudio>> sampledAudio;
+  VideoDecoder decoder;
+
+  CallbackImpl callback;
+  // decoding from buffer or file
+  if (!use_local_file) {
+    decoder.decodeMemory(
+        string("Memory Buffer"),
+        video_buffer,
+        encoded_size,
+        params,
+        start_frm,
+        callback);
+  } else {
+    decoder.decodeFile(video_filename, params, start_frm, callback);
+  }
+
+  for (auto& frame : callback.frames) {
+    sampledFrames.push_back(move(frame));
+  }
+  for (auto& audio_sample : callback.audio_samples) {
+    sampledAudio.push_back(move(audio_sample));
+  }
+
+  for (int i = 0; i < buffer_rgb.size(); i++) {
+    unsigned char* buff = buffer_rgb[i];
+    delete[] buff;
+  }
+  buffer_rgb.clear();
+
+  if (sampledFrames.size() < params.num_of_required_frame_) {
+    LOG(ERROR)
+        << "The video seems faulty and we could not decode enough frames: "
+        << sampledFrames.size() << " VS " << params.num_of_required_frame_;
+    FreeDecodedData(sampledFrames, sampledAudio);
+    return true;
+  }
+  if (sampledFrames.size() == 0) {
+    LOG(ERROR) << "The samples frames have size 0, no frame to process";
+    FreeDecodedData(sampledFrames, sampledAudio);
+    return true;
+  }
+  height = sampledFrames[0]->height_;
+  width = sampledFrames[0]->width_;
+  float sample_stepsz = (clip_per_video <= 1)
+      ? 0
+      : (float(sampledFrames.size() - params.num_of_required_frame_) /
+         (clip_per_video - 1));
+
+  int image_size = 3 * height * width;
+  int clip_size = params.num_of_required_frame_ * image_size;
+  // get the RGB frames for each clip
+  if (clip_start_positions.size() > 0) {
+    for (int i = 0; i < clip_start_positions.size(); i++) {
+      unsigned char* buffer_rgb_ptr = new unsigned char[clip_size];
+      int clip_start = clip_start_positions[i];
+      for (int j = 0; j < params.num_of_required_frame_; j++) {
+        memcpy(
+            buffer_rgb_ptr + j * image_size,
+            (unsigned char*)sampledFrames[j + clip_start]->data_.get(),
+            image_size * sizeof(unsigned char));
+      }
+      buffer_rgb.push_back(buffer_rgb_ptr);
+    }
+  } else {
+    for (int i = 0; i < clip_per_video; i++) {
+      unsigned char* buffer_rgb_ptr = new unsigned char[clip_size];
+      int clip_start = floor(i * sample_stepsz);
+      for (int j = 0; j < params.num_of_required_frame_; j++) {
+        memcpy(
+            buffer_rgb_ptr + j * image_size,
+            (unsigned char*)sampledFrames[j + clip_start]->data_.get(),
+            image_size * sizeof(unsigned char));
+      }
+      buffer_rgb.push_back(buffer_rgb_ptr);
+    }
+  }
+  FreeDecodedData(sampledFrames, sampledAudio);
+
+  return true;
 }
 
 } // namespace caffe2

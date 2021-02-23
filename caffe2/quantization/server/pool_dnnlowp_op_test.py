@@ -1,16 +1,17 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep
-from dnnlowp_test_utils import check_quantized_results_close
+from caffe2.python import core, dyndep, workspace
+from caffe2.quantization.server.dnnlowp_test_utils import check_quantized_results_close
 from hypothesis import assume, given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPOpPoolTest(hu.HypothesisTestCase):
@@ -21,7 +22,7 @@ class DNNLowPOpPoolTest(hu.HypothesisTestCase):
         size=st.integers(1, 20),
         input_channels=st.integers(1, 3),
         batch_size=st.integers(1, 3),
-        order=st.sampled_from({"NCHW", "NHWC"}),
+        order=st.sampled_from(["NCHW", "NHWC"]),
         in_quantized=st.booleans(),
         **hu.gcs_cpu_only
     )
@@ -108,7 +109,7 @@ class DNNLowPOpPoolTest(hu.HypothesisTestCase):
         size=st.integers(2, 2),
         input_channels=st.integers(1, 1),
         batch_size=st.integers(2, 2),
-        order=st.sampled_from({"NCHW", "NHWC"}),
+        order=st.sampled_from(["NCHW", "NHWC"]),
         in_quantized=st.booleans(),
         **hu.gcs_cpu_only
     )
@@ -150,7 +151,7 @@ class DNNLowPOpPoolTest(hu.HypothesisTestCase):
             X = np.round(np.random.rand(*((N,) + sizes + (C,))) * (max_ - min_) + min_)
             X = X.astype(np.float32)
             X[(0,) * (ndim + 2)] = min_
-            X[(0, 1,) + (0,) * ndim] = max_
+            X[(0, 1) + (0,) * ndim] = max_
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
         outputs = []

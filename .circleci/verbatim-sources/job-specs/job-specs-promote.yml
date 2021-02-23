@@ -1,0 +1,18 @@
+
+  promote_s3:
+    <<: *promote_common
+    steps:
+      - checkout
+      - run:
+          name: Running promote script
+          command: |
+            scripts/release/promote/wheel_to_s3.sh
+
+  promote_conda:
+    <<: *promote_common
+    steps:
+      - checkout
+      - run:
+          name: Running promote script
+          command: |
+            scripts/release/promote/conda_to_conda.sh

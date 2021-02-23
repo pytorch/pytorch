@@ -6,9 +6,13 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(PackSegments)
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(UnpackSegments)
 
 namespace caffe2 {
 
@@ -18,8 +22,9 @@ class PackSegmentsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  PackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit PackSegmentsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         max_length_(this->template GetSingleArgument<int>("max_length", -1)),
         pad_minf_(this->template GetSingleArgument<bool>("pad_minf", false)),
         return_presence_mask_(this->template GetSingleArgument<bool>(
@@ -63,8 +68,9 @@ class UnpackSegmentsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  UnpackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit UnpackSegmentsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         max_length_(this->template GetSingleArgument<int>("max_length", -1)) {}
 
   bool RunOnDevice() override {

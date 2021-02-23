@@ -8,33 +8,8 @@ package caffe2;
 // (2) We do not use extension because that used to create quite some conflicts
 //     in Caffe's protobuf design.
 // (3) We have not used any proto3 specific features, such as Any or Map. This
-//     is mainly for backward compability purposes but we may consider using
+//     is mainly for backward compatibility purposes but we may consider using
 //     those in the future.
-
-// ExternalDataProto stores the pointer to the content of TensorProto
-// the content are stored in the raw format as little endian
-message ExternalDataProto {
-  // type of the external storage type, can be the following:
-  enum SourceType {
-    // the container defined in torch/csrc/jit/serialization.h is used,
-    // and record_id is the tag to help the runtime identify the data
-    // this type of storage is set as DEFAULT and recommended for external
-    // data storage
-    INLINE_CONTAINER = 0;
-    // use external file to store the data, and record_id is the POSIX relative path
-    // to the file. this (simple) file is only for the data, and the data is stored
-    // as little endian in the file
-    SIMPLE_FILE = 1;
-  }
-  optional SourceType source_type = 1 [default = INLINE_CONTAINER];
-  // used together with type
-  optional string record_id = 2;
-  // the offset of the starting point, the content may be shared between
-  // multiple tensors
-  optional int64 offset = 3;
-  // the strides of the content
-  repeated int64 strides = 4;
-}
 
 // TensorProto stores serialized Tensor objects.
 message TensorProto {
@@ -60,25 +35,12 @@ message TensorProto {
     INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
+
+    ZERO_COLLISION_HASH = 14;  // zero-collision hash state
+    REBATCHING_BUFFER= 15;     // rebatching buffer
   }
   optional DataType data_type = 2 [default = FLOAT];
 
-  // data storage
-  enum StorageType {
-    // the content is stored in typed field, for example, if the data_type is
-    // FLOAT, float_data is used to store the content.
-    TYPED = 1;
-    // the content is serialized in field raw_data as little-endian
-    RAW = 2;
-    // the pointer to the content is stored in field external_data
-    // the content is serialized as little-endian
-    EXTERNAL = 3;
-    // When StorageType is NO_CONTENT, we use TensorProto to store only type
-    // and shape information. Reuse TensorProto to store type and shape
-    // because we can just have one proto, not having another ValueInfoProto
-    NO_CONTENT = 4;
-  }
-  optional StorageType storage_type = 12 [default = TYPED];
   // For float
   repeated float float_data = 3 [packed = true];
   // For int32, uint8, int8, uint16, int16, bool, and float16
@@ -95,8 +57,6 @@ message TensorProto {
   repeated int64 int64_data = 10 [packed = true];
   // store the raw data, contents are serialized as little-endian
   optional bytes raw_data = 13;
-  // store the pointer to the data
-  optional ExternalDataProto external_data = 14;
 
   // Optionally, a name for the tensor.
   optional string name = 7;
@@ -113,6 +73,9 @@ message TensorProto {
     required int64 end = 2;
   }
   optional Segment segment = 11;
+
+  // Field numbers 12 and 14 were previously used for now-deprecated fields.
+  // reserved 12, 14;
 }
 
 message QTensorProto {
@@ -124,6 +87,17 @@ message QTensorProto {
   repeated int32 data = 6 [packed = true];
   optional string name = 7;
   optional TensorProto.DataType data_type = 8 [default = INT32];
+
+  // Multi-group quantization params
+  repeated double scales = 9;
+  repeated double biases = 10;
+
+  // Multi-group quantization needed, indicates in which dimension
+  // we do the "group wise quantization"
+  optional int32 axis = 11;
+
+  // It should be true if it is a multi-group quantization proto
+  optional bool is_multiparam = 12 [default = false];
 }
 
 // TensorProtos stores multiple TensorProto objects in one single proto. This
@@ -145,6 +119,51 @@ message TensorShapes {
   repeated TensorShape shapes = 1;
 }
 
+// TensorBoundShape is used to save bound shape inference result for a tensor.
+// TensorBoundShape.shape is inferred shape for this tensor.
+// TensorBoundShape.dimType contains dim_type for every dimension.
+// eg: for dimension i, shape.dims[i] is the inferred shape and
+// dim_type[i] is corresponding dim_type.
+message TensorBoundShape {
+  optional TensorShape shape = 1;
+  enum DimType {
+    UNKNOWN = 0;   // unknown
+    CONSTANT  = 1; // constant
+    // batch, corresponding dimension is batch_size
+    BATCH = 2;
+    // batch_of_feature_max,
+    // corresponding shape is inferred_feature_length * batch_size
+    BATCH_OF_FEATURE_MAX = 3;
+    // batch_of_feature_max_default
+    // corresponding shape is default_feature_length * batch_size
+    BATCH_OF_FEATURE_MAX_DEFAULT = 4;
+    // feature_max, corresponding shape is inferred_feature_length
+    FEATURE_MAX = 5;
+    // feature_max_default, corresponding shape is default_feature_length
+    FEATURE_MAX_DEFAULT = 6;
+
+  }
+  repeated DimType dim_type = 2;  // dim_type.size() == shape.dims.size()
+  optional string name = 3;
+  // a flag to indicate whether the shape is final and cannot be changed
+  // eg: input/output of in-place ops
+  optional bool shape_is_final = 4;
+}
+
+message TensorBoundShapes {
+  repeated TensorBoundShape shapes = 1;
+  optional int64 max_batch_size = 2;
+  optional int64 max_feature_len = 3;
+}
+
+message AOTConfig {
+  required int64 max_batch_size = 1;
+  required int64 max_seq_size = 2;
+  required bool in_batch_broadcast = 3;
+  optional string onnxifi_blacklist_ops = 4;
+  optional int32 onnxifi_min_ops = 5;
+}
+
 // A named argument containing either singular float, integer and string
 // values, or repeated float, int and string arrays.
 message Argument {
@@ -161,12 +180,13 @@ message Argument {
   repeated bytes strings = 7;
   repeated TensorProto tensors = 11;
   repeated NetDef nets = 9;
+  repeated QTensorProto qtensors = 12;
 }
 
 // DeviceType that Caffe2 currently supports.
 // Note: if you add a device type, make sure you add the corresponding device
 // line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
-// and update c10/DeviceType.h
+// and update c10/core/DeviceType.h
 enum DeviceTypeProto {
   PROTO_CPU = 0;                    // In default, we will use CPU.
   PROTO_CUDA = 1;                   // CUDA.
@@ -176,9 +196,10 @@ enum DeviceTypeProto {
   PROTO_IDEEP = 5;                  // IDEEP.
   PROTO_HIP = 6;                    // AMD HIP
   PROTO_FPGA = 7;                   // FPGA
+  PROTO_MSNPU = 8;                  // MSNPU
+  PROTO_XLA = 9;                    // XLA / TPU
   // Change the following number if you add more devices in the code.
-  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 8;
-  PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for
@@ -264,6 +285,38 @@ message OperatorDef {
   optional int64 op_version = 12;
 }
 
+// MapFieldEntry follows the pattern for cross-proto-version maps.
+// See https://developers.google.com/protocol-buffers/docs/proto3#maps
+message MapFieldEntry {
+  required string key = 1;
+  required string val = 2;
+};
+
+// Used to hold backend-specific options.
+message BackendOptions {
+  // Name of the backend that the specified options apply to.
+  required string backend_name = 1;
+  // Flexible map for passing in the options.
+  repeated MapFieldEntry option = 2;
+};
+
+// Partition definition.
+message PartitionInfo {
+  // Name of the partition.
+  required string name = 1;
+
+  // A list of logic device ID, indicating which devices this partition
+  // can be executed on. If empty, it means the partition won't run on
+  // device but on host CPU instead.
+  repeated int32 device_id = 2;
+
+  // Extra debug info.
+  optional string extra_info = 3;
+
+  // Flexible map for passing options specific to a backend.
+  repeated BackendOptions backend_options = 4;
+}
+
 // Network definition.
 message NetDef {
   optional string name = 1; // the network's name
@@ -281,7 +334,8 @@ message NetDef {
   // in parallel.
   // Note: This is to be deprecated. Using the arg field with "num_workers" as
   // key.
-  optional int32 num_workers = 4 [deprecated=true];
+  // Note 2: The old uses of this were never actually cleaned up
+  optional int32 num_workers = 4;
 
   // The device option for the network. If a network has a specific device
   // option and one of its operators does not have it set, we will copy over the
@@ -304,7 +358,11 @@ message NetDef {
   // blobs' contents may be overwritten.
   repeated string external_input = 7;
   repeated string external_output = 8;
+
+  // Partitioning info, indexed by partition names.
+  repeated PartitionInfo partition_info = 9;
 }
+
 
 // ExecutionStep is actually a sort-of-hacky way we simulate iteration right
 // now.
@@ -345,7 +403,7 @@ message ExecutionStep {
   optional int64 run_every_ms = 11;
 
   // If false or not set, execute sub-steps serially.
-  // If true, execute all substeps concurrently, each one in a separte thread.
+  // If true, execute all substeps concurrently, each one in a separate thread.
   optional bool concurrent_substeps = 6;
 
   // Name of a scalar boolean tensor.

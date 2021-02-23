@@ -15,7 +15,7 @@
  */
 
 #include "caffe2/core/context_gpu.h"
-#include "select_smooth_l1_loss_op.h"
+#include "modules/detectron/select_smooth_l1_loss_op.h"
 
 namespace caffe2 {
 
@@ -38,11 +38,11 @@ __global__ void SelectSmoothL1Kernel(
       float y_hat = Y_hat[ind];
       float y = Y[i * 4 + j];
       float val = y_hat - y;
-      float abs_val = abs(val);
+      float abs_val = c10::cuda::compat::abs(val);
       if (abs_val < beta) {
-        out[ind] = (0.5 * val * val / beta) / max(S[0], 1.0);
+        out[ind] = (0.5 * val * val / beta) / c10::cuda::compat::max(S[0], static_cast<float>(1.0));
       } else {
-        out[ind] = (abs_val - 0.5 * beta) / max(S[0], 1.0);
+        out[ind] = (abs_val - 0.5 * beta) / c10::cuda::compat::max(S[0], static_cast<float>(1.0));
       }
     }
   }
@@ -75,11 +75,11 @@ __global__ void SelectSmoothL1GradientKernel(
       float y_hat = Y_hat[ind];
       float y = Y[i * 4 + j];
       float val = y_hat - y;
-      float abs_val = abs(val);
+      float abs_val = c10::cuda::compat::abs(val);
       if (abs_val < beta) {
-        out[ind] = norm * d_loss * val / beta / max(S[0], 1.0);
+        out[ind] = norm * d_loss * val / beta / c10::cuda::compat::max(S[0], static_cast<float>(1.0));
       } else {
-        out[ind] = norm * d_loss * ((float(0) < val) - (val < float(0))) / max(S[0], 1.0);
+        out[ind] = norm * d_loss * ((float(0) < val) - (val < float(0))) / c10::cuda::compat::max(S[0], static_cast<float>(1.0));
       }
     }
   }
@@ -97,9 +97,9 @@ bool SelectSmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   auto& L         = Input(2);
   // total number of fg boxes across all FPN levels: scalar
   auto& S         = Input(3);
-  auto* avg_loss  = Output(0);
 
-  avg_loss->Resize(vector<int64_t>());
+
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   if (Y.size() == 0){
     math::Set<float, CUDAContext>(
       1, static_cast<float>(0), avg_loss->mutable_data<float>(), &context_);
@@ -129,6 +129,7 @@ bool SelectSmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
     M, Y_hat.data<float>(), Y.data<float>(),
     L.data<float>(), buff_.mutable_data<float>(),
     S.data<float>(), beta_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Sum of all losses
   // al := sum_i l_i
@@ -150,9 +151,8 @@ bool SelectSmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& S          = Input(3);
   // Below is gradient of net w.r.t. avg_loss ("gradOuput"), should be all 1's
   auto& d_avg_loss = Input(4);
-  auto* d_Y_hat    = Output(0); // gradient of net w.r.t. Y_hat ("gradInput")
 
-  d_Y_hat->ResizeLike(Y_hat);
+  auto* d_Y_hat = Output(0, Y_hat.sizes(), at::dtype<float>()); // gradient of net w.r.t. Y_hat ("gradInput")
   math::Set<float, CUDAContext>(
     d_Y_hat->size(), 0.0, d_Y_hat->mutable_data<float>(), &context_);
   if (Y.size() == 0){
@@ -176,6 +176,7 @@ bool SelectSmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
     D, H, W, M, Y_hat.data<float>(), Y.data<float>(),
     L.data<float>(), d_Y_hat->mutable_data<float>(),
     d_avg_loss.data<float>(), scale_, S.data<float>(), beta_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

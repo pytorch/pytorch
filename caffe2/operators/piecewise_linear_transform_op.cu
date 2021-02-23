@@ -169,9 +169,9 @@ void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
     auto& bounds_input = Input(BOUNDS);
     auto& slopes_input = Input(SLOPES);
     auto& intercepts_input = Input(INTERCEPTS);
-    num_bounds = bounds_input.size();
-    num_slopes = slopes_input.size();
-    num_intercepts = intercepts_input.size();
+    num_bounds = bounds_input.numel();
+    num_slopes = slopes_input.numel();
+    num_intercepts = intercepts_input.numel();
     InferNumFunctionsPerGroup(
         num_bounds,
         num_slopes,
@@ -194,11 +194,11 @@ void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
 template <>
 bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), 2);
+
+  CAFFE_ENFORCE_EQ(X.dim(), 2);
   int64_t N = X.dim32(0);
   int64_t M = X.dim32(1);
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   int64_t num_func_per_group;
   int64_t num_group;
@@ -206,7 +206,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
   setUpTensors(num_func_per_group, num_group, M);
 
   PieceWiseLinearTransformGeneralKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
@@ -219,6 +219,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
       intercepts_device_.data<float>(),
       X.data<float>(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -226,14 +227,14 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
 template <>
 bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  CAFFE_ENFORCE(X.ndim() == 1 || X.ndim() == 2);
+
+  CAFFE_ENFORCE(X.dim() == 1 || X.dim() == 2);
   int64_t N = X.dim32(0);
-  int64_t M = X.ndim() == 2 ? X.dim32(1) : 1;
+  int64_t M = X.dim() == 2 ? X.dim32(1) : 1;
   CAFFE_ENFORCE(
       M == 1 || M == 2,
       "If binary is set to true, the input must be Nx2 or Nx1 tensor");
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   int64_t num_func_per_group;
   int64_t num_group;
@@ -242,7 +243,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
 
   if (M == 1) {
     PieceWiseLinearTransformBinaryKernel1<<<
-        CAFFE_GET_BLOCKS(X.size()),
+        CAFFE_GET_BLOCKS(X.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
@@ -255,10 +256,11 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         intercepts_device_.data<float>(),
         X.data<float>(),
         Y->template mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     // don't want N*M threads, only N*M/2
     PieceWiseLinearTransformBinaryKernel2<<<
-        CAFFE_GET_BLOCKS(X.size() / 2),
+        CAFFE_GET_BLOCKS(X.numel() / 2),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
@@ -271,6 +273,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         intercepts_device_.data<float>(),
         X.data<float>(),
         Y->template mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   return true;
@@ -281,3 +284,10 @@ REGISTER_CUDA_OPERATOR(
     PiecewiseLinearTransformOp<float, CUDAContext>);
 
 } // namespace caffe2
+
+using PiecewiseLinearTransformOpFloatCUDA =
+    caffe2::PiecewiseLinearTransformOp<float, caffe2::CUDAContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
+    PiecewiseLinearTransform,
+    PiecewiseLinearTransformOpFloatCUDA);

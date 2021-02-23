@@ -1,0 +1,107 @@
+ir_version: 6
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    input: "0"
+    output: "1"
+    name: "Pad_0"
+    op_type: "Pad"
+    attribute {
+      name: "mode"
+      s: "constant"
+      type: STRING
+    }
+    attribute {
+      name: "pads"
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "value"
+      f: 0
+      type: FLOAT
+    }
+  }
+  node {
+    input: "1"
+    output: "2"
+    name: "AveragePool_1"
+    op_type: "AveragePool"
+    attribute {
+      name: "kernel_shape"
+      ints: 3
+      ints: 3
+      type: INTS
+    }
+    attribute {
+      name: "pads"
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "strides"
+      ints: 2
+      ints: 2
+      type: INTS
+    }
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 20
+          }
+          dim {
+            dim_value: 16
+          }
+          dim {
+            dim_value: 50
+          }
+          dim {
+            dim_value: 32
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 20
+          }
+          dim {
+            dim_value: 16
+          }
+          dim {
+            dim_value: 24
+          }
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

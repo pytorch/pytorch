@@ -1,8 +1,8 @@
 ## @package data_parallel_model
 # Module caffe2.python.data_parallel_model
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 from collections import OrderedDict
 from future.utils import viewitems, viewkeys, viewvalues
@@ -18,9 +18,14 @@ from caffe2.proto import caffe2_pb2
 import numpy as np
 import warnings
 
-dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
-dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
+
+# We only import nccl operators when the machine has GPUs
+# Otherwise the binary can be compiled with CPU-only mode, and
+# will not be able to find those modules
+if workspace.NumGpuDevices() > 0:
+    dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
+    dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
 
 log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)
@@ -38,6 +43,9 @@ def Parallelize_CPU(*args, **kwargs):
     kwargs['cpu_device'] = True
     Parallelize(*args, **kwargs)
 
+def Parallelize_iDeep(*args, **kwargs):
+    kwargs['ideep'] = True
+    Parallelize(*args, **kwargs)
 
 def Parallelize(
     model_helper_obj,
@@ -58,6 +66,7 @@ def Parallelize(
     use_nccl=False,
     max_concurrent_distributed_ops=16,
     cpu_device=False,
+    ideep=False,
     num_threads_per_device=4,
     shared_model=False,
     combine_spatial_bn=False,
@@ -119,6 +128,7 @@ def Parallelize(
       blobs_to_keep :   A list of blob names to keep and don't free during
                         dynamic memory optimization (for example loss blob).
       cpu_device        Use CPU instead of GPU.
+      ideep             Use ideep.
       combine_spatial_bn:
                         When set to True, applies batch normalization across
                         all devices within the node. If False, batch
@@ -135,22 +145,29 @@ def Parallelize(
         device scope was: {}".format(scope.CurrentDeviceScope())
 
     if devices is None:
-        if not cpu_device:
+        if not (cpu_device or ideep):
             devices = list(range(0, workspace.NumCudaDevices()))
         else:
             devices = list(range(0, cpu_count()))
 
-    if not cpu_device:
+    if not (cpu_device or ideep):
         for gpu in devices:
-            if gpu >= workspace.NumCudaDevices():
+            if gpu >= workspace.NumGpuDevices():
                 log.warning("** Only {} GPUs available, GPUs {} requested".format(
-                    workspace.NumCudaDevices(), devices))
+                    workspace.NumGpuDevices(), devices))
                 break
-        model_helper_obj._device_type = caffe2_pb2.CUDA
+        model_helper_obj._device_type = workspace.GpuDeviceType
         model_helper_obj._device_prefix = "gpu"
         model_helper_obj._shared_model = False
         device_name = "GPU"
         assert shared_model is False, "Shared model only supported on CPU"
+    elif ideep:
+        model_helper_obj._device_type = caffe2_pb2.IDEEP
+        model_helper_obj._device_prefix = "ideep"
+        device_name = "IDEEP"
+        model_helper_obj._shared_model = shared_model
+        if shared_model and rendezvous is not None:
+            assert "Shared model only supported on single-node currently"
     else:
         model_helper_obj._device_type = caffe2_pb2.CPU
         model_helper_obj._device_prefix = "cpu"
@@ -447,17 +464,17 @@ def Parallelize_BMUF(
     assert isinstance(model_helper_obj, model_helper.ModelHelper)
 
     if devices is None:
-        devices = list(range(0, workspace.NumCudaDevices()))
+        devices = list(range(0, workspace.NumGpuDevices()))
     if master_device is None:
         master_device = devices[0]
 
     if not cpu_device:
         for gpu in devices:
-            if gpu >= workspace.NumCudaDevices():
+            if gpu >= workspace.NumGpuDevices():
                 log.warning("** Only {} GPUs available, GPUs {} requested".format(
-                    workspace.NumCudaDevices(), devices))
+                    workspace.NumGpuDevices(), devices))
                 break
-        model_helper_obj._device_type = caffe2_pb2.CUDA
+        model_helper_obj._device_type = workspace.GpuDeviceType
         model_helper_obj._device_prefix = "gpu"
     else:
         model_helper_obj._device_type = caffe2_pb2.CPU
@@ -811,13 +828,17 @@ def ConvertNetForDevice(net, device=None):
 
     if device is None:
         device = scope.CurrentDeviceScope()
-
-    device_prefix = "gpu" if device.device_type == caffe2_pb2.CUDA else "cpu"
+    if core.IsGPUDeviceType(device.device_type):
+        device_prefix = "gpu"
+    elif device.device_type == caffe2_pb2.IDEEP:
+        device_prefix = "ideep"
+    else:
+        device_prefix = "cpu"
 
     namescope = "{}_{}/".format(device_prefix, device.device_id)
     for op in mnet.Proto().op:
         if "RecurrentNetwork" in op.type:
-            raise("RecurrentNetwork conversion not yet supported")
+            raise NotImplementedError("RecurrentNetwork conversion not yet supported")
         for i, inputb in enumerate(op.input):
             op.input[i] = namescope + inputb
         for i, outputb in enumerate(op.output):
@@ -920,7 +941,7 @@ def FinalizeAfterCheckpoint(model, blobs=None, cpu_mode=False):
             uniq_blob_names = [stripBlobName(p) for p in blobs]
 
         # Synchronize to the blob lookup map, as the provided
-        # blobs might have non-parameters, such as momemtum blobs.
+        # blobs might have non-parameters, such as momentum blobs.
         log.info("Creating checkpoint synchronization net")
         devices = model.GetDevices()
         for name in uniq_blob_names:
@@ -969,9 +990,9 @@ def GetLearningRateBlobNames(model):
     Returns a list of learning rates blob names used in the optimizer.
     '''
     if model._optimizer is not None:
-        if model._device_type == caffe2_pb2.CPU:
+        if model._device_type == caffe2_pb2.CPU or model._device_type == caffe2_pb2.IDEEP:
             return [model._optimizer.get_cpu_blob_name('lr')]
-        elif model._device_type == caffe2_pb2.CUDA:
+        elif core.IsGPUDeviceType(model._device_type):
             return [model._optimizer.get_gpu_blob_name('lr', gpu, '')
                     for gpu in model._devices]
         else:
@@ -1006,9 +1027,10 @@ def _Broadcast(devices, model, net, param, use_nccl=False):
 
     for dev_idx in devices[1:]:
         if _IsGPUBlob(model, param):
-            device_opt = core.DeviceOption(caffe2_pb2.CUDA, dev_idx)
+            device_opt = core.DeviceOption(workspace.GpuDeviceType, dev_idx)
         else:
-            device_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
+            device_opt = core.DeviceOption(caffe2_pb2.IDEEP, 0) if _IsIDEEPBlob(model, param) else \
+                core.DeviceOption(caffe2_pb2.CPU, 0)
         with core.DeviceScope(device_opt):
             net.Copy(
                 model._device_grouped_blobs[param][master_dev],
@@ -1025,8 +1047,8 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         )
         return
 
-    if model._device_type == caffe2_pb2.CUDA:
-        p2p_access_pattern = workspace.GetCudaPeerAccessPattern()
+    if model._device_type == workspace.GpuDeviceType:
+        p2p_access_pattern = workspace.GetGpuPeerAccessPattern()
     else:
         p2p_access_pattern = None
 
@@ -1034,7 +1056,7 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         """Create a Sum op for 2 or more blobs on different devices.
         Saves the result on the first device.
 
-        Arguments:
+        Args:
         dev_indices -- a list of device indices, which can be translated into
                        CUDA identifiers with model._devices
         """
@@ -1045,7 +1067,7 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
             for i, peer in enumerate(devices):
                 if i == 0:
                     continue  # Skip the first device
-                if p2p_access_pattern is not None and not p2p_access_pattern[
+                if p2p_access_pattern is not None and p2p_access_pattern.size and not p2p_access_pattern[
                     devices[0], peer
                 ]:
                     # Copy from peer to d0
@@ -1160,6 +1182,7 @@ def _SyncAllParamsDistributed(
 
     gpu_device_opt = core.DeviceOption(model._device_type, devices[0])
     cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
+    ideep_device_opt = core.DeviceOption(caffe2_pb2.IDEEP)
 
     if model._broadcast_context is None:
         model._broadcast_context = CollectivesConcurrencyControl(
@@ -1186,7 +1209,7 @@ def _SyncAllParamsDistributed(
 
         device_opt = gpu_device_opt if _IsGPUBlob(
             model, param_name
-        ) else cpu_device_opt
+        ) else ideep_device_opt if _IsIDEEPBlob(model, param_name) else cpu_device_opt
 
         if rendezvous['engine'] == 'GLOO':
             with core.DeviceScope(device_opt):
@@ -1472,6 +1495,14 @@ def _AllReduceBlobsSingleHost(blob_names, devices, model, net, use_nccl):
                         with core.DeviceScope(device_opt):
                             model.Copy(grad_val_concat, g.values)
 
+        elif _IsIDEEPBlob(model, blob_name):
+            assert not isinstance(blobs_group[0], core.GradientSlice), \
+                "Synchronizing gradient slices not supported"
+            with core.DeviceScope(core.DeviceOption(caffe2_pb2.IDEEP)):
+                net.Sum(blobs_group, [blobs_group[0]])
+                if not model._shared_model:
+                    _Broadcast(devices, model, net, blob_name)
+
         else:
             assert not isinstance(blobs_group[0], core.GradientSlice), \
                 "Synchronizing gradient slices not supported"
@@ -1546,7 +1577,7 @@ def _AnalyzeOperators(model):
         op_gpu = op_dev.device_id
 
         # This avoids failing on operators that are only for CPU
-        if op_dev.device_type != caffe2_pb2.CUDA:
+        if not core.IsGPUDeviceType(op_dev.device_type):
             continue
 
         namescope = "{}_{}/".format(model._device_prefix, op_gpu)
@@ -1587,16 +1618,27 @@ def _InferBlobDevice(model):
     map_ops(model.net.Proto())
     model._blob_to_device = mapping
 
-def _IsGPUBlob(model, blob_name):
+def _IsIDEEPBlob(model, blob_name):
     if blob_name in model._blob_to_device:
-        return model._blob_to_device[blob_name].device_type == caffe2_pb2.CUDA
+        return model._blob_to_device[blob_name].device_type == caffe2_pb2.IDEEP
     else:
         blob_name = "{}_{}/{}".format(
             model._device_prefix, model._devices[0], blob_name
         )
         if blob_name not in model._blob_to_device:
-            return model._device_type == caffe2_pb2.CUDA
-        return model._blob_to_device[blob_name].device_type == caffe2_pb2.CUDA
+            return model._device_type == caffe2_pb2.IDEEP
+        return model._blob_to_device[blob_name].device_type == caffe2_pb2.IDEEP
+
+def _IsGPUBlob(model, blob_name):
+    if blob_name in model._blob_to_device:
+        return core.IsGPUDeviceType(model._blob_to_device[blob_name].device_type)
+    else:
+        blob_name = "{}_{}/{}".format(
+            model._device_prefix, model._devices[0], blob_name
+        )
+        if blob_name not in model._blob_to_device:
+            return core.IsGPUDeviceType(model._device_type)
+        return core.IsGPUDeviceType(model._blob_to_device[blob_name].device_type)
 
 
 def _GroupByDevice(model, devices, params, non_data_params):

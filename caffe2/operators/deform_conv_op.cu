@@ -304,8 +304,8 @@ template <typename DType, typename Context>
 void DeformConvOpBase<DType, Context>::DeformableIm2col(
     const DType* data_im,
     const DType* data_offset,
-    at::IntList im_shape,
-    at::IntList col_shape,
+    at::IntArrayRef im_shape,
+    at::IntArrayRef col_shape,
     DType* data_col) {
   CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
@@ -336,6 +336,7 @@ void DeformConvOpBase<DType, Context>::DeformableIm2col(
           col_shape[1],
           col_shape[2],
           data_col);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 /*!
@@ -431,8 +432,8 @@ template <typename DType, typename Context>
 void DeformConvOpBase<DType, Context>::DeformableCol2im(
     const DType* data_col,
     const DType* data_offset,
-    at::IntList im_shape,
-    at::IntList col_shape,
+    at::IntArrayRef im_shape,
+    at::IntArrayRef col_shape,
     DType* grad_im) {
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
   CAFFE_ENFORCE_EQ(pad_l(), pad_r());
@@ -469,6 +470,7 @@ void DeformConvOpBase<DType, Context>::DeformableCol2im(
           col_shape[1],
           col_shape[2],
           grad_im);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 /*!
@@ -578,8 +580,8 @@ void DeformConvOpBase<DType, Context>::DeformableCol2imCoord(
     const DType* data_col,
     const DType* data_im,
     const DType* data_offset,
-    at::IntList im_shape,
-    at::IntList col_shape,
+    at::IntArrayRef im_shape,
+    at::IntArrayRef col_shape,
     DType* grad_offset) {
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
   CAFFE_ENFORCE_EQ(pad_l(), pad_r());
@@ -617,6 +619,7 @@ void DeformConvOpBase<DType, Context>::DeformableCol2imCoord(
           col_shape[1],
           col_shape[2],
           grad_offset);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(DeformConv, DeformConvOp<float, CUDAContext>);

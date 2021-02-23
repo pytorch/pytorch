@@ -13,8 +13,9 @@ template <class Context, bool Forward>
 class PackRNNSequenceOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  PackRNNSequenceOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit PackRNNSequenceOpBase(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t, float, double>>::call(
@@ -60,8 +61,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
     shape.insert(
         shape.end(), values.sizes().begin() + dim_offset, values.sizes().end());
 
-    auto* output = Output(OUTPUTVALUE);
-    output->Resize(shape);
+    auto* output = Output(OUTPUTVALUE, shape, at::dtype<ValT>());
 
     auto output_data = output->template mutable_data<ValT>();
     // initialize output_data with zero, as it is the default value for padding

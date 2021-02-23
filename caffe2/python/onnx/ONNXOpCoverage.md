@@ -89,7 +89,7 @@ This doc keeps tracking why operators are not covered by the testcases.
 |Sigmoid|Yes|OK|&#x1F49A;OK|
 |Sin|Yes|OK|&#x1F49A;OK|
 |Size|Yes|OK|&#x1F49A;OK|
-|Slice|Yes|OK|&#x1F494;ScatterAssign + Cast, very hacky implementaion, Slice in C2 only supports one dimension|
+|Slice|Yes|OK|&#x1F494;ScatterAssign + Cast, very hacky implementation, Slice in C2 only supports one dimension|
 |Softmax|Yes|OK|&#x1F494;Axis and dim has different semantics|
 |Softplus|Yes|OK|&#x1F49A;OK|
 |Softsign|Yes||&#x1F49A;OK|

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/api/module.h>
+
 #include <iosfwd>
 #include <memory>
 #include <string>
@@ -12,18 +15,16 @@ class Tensor;
 namespace torch {
 using at::Tensor;
 namespace jit {
-namespace script {
 struct Module;
-} // namespace script
 } // namespace jit
 } // namespace torch
 
 namespace torch {
 namespace serialize {
-class OutputArchive final {
+class TORCH_API OutputArchive final {
  public:
-  /// Default-constructs the `OutputArchive`.
-  OutputArchive();
+  explicit OutputArchive(std::shared_ptr<jit::CompilationUnit> cu);
+  explicit OutputArchive() : cu_(std::make_shared<jit::CompilationUnit>()), module_("__torch__.Module", cu_) {}
 
   // Move is allowed.
   OutputArchive(OutputArchive&&) = default;
@@ -32,6 +33,13 @@ class OutputArchive final {
   // Copy is disallowed.
   OutputArchive(OutputArchive&) = delete;
   OutputArchive& operator=(OutputArchive&) = delete;
+
+  std::shared_ptr<jit::CompilationUnit> compilation_unit() const {
+    return cu_;
+  }
+
+  /// Writes an `IValue` to the `OutputArchive`.
+  void write(const std::string& key, const c10::IValue& ivalue);
 
   /// Writes a `(key, tensor)` pair to the `OutputArchive`, and marks it as
   /// being or not being a buffer (non-differentiable tensor).
@@ -52,6 +60,10 @@ class OutputArchive final {
   /// `stream`.
   void save_to(std::ostream& stream);
 
+  /// Saves the `OutputArchive` into a serialized representation using the
+  /// given writer function.
+  void save_to(const std::function<size_t(const void*, size_t)>& func);
+
   /// Forwards all arguments to `write()`.
   /// Useful for generic code that can be re-used for both `OutputArchive` and
   /// `InputArchive` (where `operator()` forwards to `read()`).
@@ -61,7 +73,8 @@ class OutputArchive final {
   }
 
  private:
-  std::shared_ptr<jit::script::Module> module_;
+  std::shared_ptr<jit::CompilationUnit> cu_;
+  jit::Module module_;
 };
 } // namespace serialize
 } // namespace torch

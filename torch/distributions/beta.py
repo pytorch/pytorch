@@ -1,4 +1,4 @@
-from numbers import Number
+from numbers import Real, Number
 
 import torch
 from torch.distributions import constraints
@@ -28,7 +28,7 @@ class Beta(ExponentialFamily):
     has_rsample = True
 
     def __init__(self, concentration1, concentration0, validate_args=None):
-        if isinstance(concentration1, Number) and isinstance(concentration0, Number):
+        if isinstance(concentration1, Real) and isinstance(concentration0, Real):
             concentration1_concentration0 = torch.tensor([float(concentration1), float(concentration0)])
         else:
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
@@ -55,10 +55,7 @@ class Beta(ExponentialFamily):
                 (total.pow(2) * (total + 1)))
 
     def rsample(self, sample_shape=()):
-        value = self._dirichlet.rsample(sample_shape).select(-1, 0)
-        if isinstance(value, Number):
-            value = self._dirichlet.concentration.new_tensor(value)
-        return value
+        return self._dirichlet.rsample(sample_shape).select(-1, 0)
 
     def log_prob(self, value):
         if self._validate_args:

@@ -13,12 +13,11 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
-  CuDNNDropoutOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CuDNNDropoutOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
-        is_test_(
-            OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
+        is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         states_initialized_(false),
         random_seed_(operator_def.device_option().random_seed()) {
     CAFFE_ENFORCE_GE(ratio_, 0);
@@ -36,7 +35,7 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
     }
   }
 
-  ~CuDNNDropoutOp() noexcept {
+  ~CuDNNDropoutOp() noexcept override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyDropoutDescriptor(dropout_desc_));
   }
@@ -75,12 +74,11 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
 class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  CuDNNDropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CuDNNDropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
-        is_test_(
-            OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
+        is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         states_initialized_(false),
         random_seed_(operator_def.device_option().random_seed()) {
     CAFFE_ENFORCE_GE(ratio_, 0);
@@ -98,7 +96,7 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
     CAFFE_ENFORCE(scratch_blob_);
   }
 
-  ~CuDNNDropoutGradientOp() noexcept {
+  ~CuDNNDropoutGradientOp() noexcept override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyDropoutDescriptor(dropout_desc_));
   }
@@ -146,9 +144,8 @@ bool CuDNNDropoutOp::DoRunWithType() {
     }
     return true;
   } else {
-    auto* mask = Output(1);
     // Reshape tensor descriptors if necessary
-    if (X.sizes() != cudnn_input_dims_ && !is_test_) {
+    if (X.sizes() != cudnn_input_dims_) {
       CAFFE_ENFORCE(scratch_blob_);
       Tensor* states = BlobGetMutableTensor(scratch_blob_, CUDA);
       cudnn_input_dims_ = X.sizes().vec();
@@ -165,7 +162,6 @@ bool CuDNNDropoutOp::DoRunWithType() {
       CUDNN_ENFORCE(cudnnDropoutGetReserveSpaceSize(
           data_desc_, &reserve_space_size_in_bytes_));
 
-      mask->Resize(reserve_space_size_in_bytes_);
       states->Resize(states_size_in_bytes_);
 
       if (!states_initialized_) {
@@ -187,6 +183,10 @@ bool CuDNNDropoutOp::DoRunWithType() {
         states_initialized_ = true;
       }
     }
+    auto* mask = Output(
+        1,
+        {static_cast<int64_t>(reserve_space_size_in_bytes_)},
+        at::dtype<uint8_t>());
     CUDNN_ENFORCE(cudnnDropoutForward(
         cudnn_wrapper_.inline_cudnn_handle(),
         dropout_desc_,

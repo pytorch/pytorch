@@ -9,8 +9,9 @@ namespace caffe2 {
 template <class Context>
 class RMACRegionsOp final : public Operator<Context> {
  public:
-  RMACRegionsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit RMACRegionsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         scales_(this->template GetSingleArgument<int>("scales", 3)),
         overlap_(this->template GetSingleArgument<float>("overlap", 0.4f)) {}
 
@@ -21,7 +22,7 @@ class RMACRegionsOp final : public Operator<Context> {
  protected:
   int scales_;
   float overlap_;
-  Tensor num_rois_{Context::GetDeviceType()};
+  Tensor num_rois_;
 };
 
 } // namespace caffe2

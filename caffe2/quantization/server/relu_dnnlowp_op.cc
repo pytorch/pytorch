@@ -1,76 +1,13 @@
-#include "caffe2/operators/relu_op.h"
+#include "caffe2/quantization/server/relu_dnnlowp_op.h"
 
 #include <limits>
 
-#include "caffe2/core/tensor_int8.h"
-#include "caffe2_dnnlowp_utils.h"
-
 namespace caffe2 {
-
-namespace {
-
-template <typename T>
-void ReluAVX2(const int N, const int zero_point, const T* X, T* Y);
-
-template <>
-void ReluAVX2<uint8_t>(
-    const int N,
-    const int zero_point,
-    const uint8_t* X,
-    uint8_t* Y) {
-  constexpr int kVLen = 32;
-  const int n = N / kVLen * kVLen;
-  const int r = N % kVLen;
-  const __m256i zero_v = _mm256_set1_epi8(static_cast<uint8_t>(zero_point));
-  for (int i = 0; i < n; i += kVLen) {
-    __m256i cur_v =
-        _mm256_max_epu8(_mm256_loadu_si256((const __m256i*)(X + i)), zero_v);
-    _mm256_storeu_si256((__m256i*)(Y + i), cur_v);
-  }
-  for (int i = 0; i < r; ++i) {
-    Y[n + i] = std::max(X[n + i], static_cast<uint8_t>(zero_point));
-  }
-}
-
-template <>
-void ReluAVX2<uint16_t>(
-    const int N,
-    const int zero_point,
-    const uint16_t* X,
-    uint16_t* Y) {
-  constexpr int kVLen = 16;
-  const int n = N / kVLen * kVLen;
-  const int r = N % kVLen;
-  const __m256i zero_v = _mm256_set1_epi16(static_cast<uint16_t>(zero_point));
-  for (int i = 0; i < n; i += kVLen) {
-    __m256i cur_v =
-        _mm256_max_epu16(_mm256_loadu_si256((const __m256i*)(X + i)), zero_v);
-    _mm256_storeu_si256((__m256i*)(Y + i), cur_v);
-  }
-  for (int i = 0; i < r; ++i) {
-    Y[n + i] = std::max(X[n + i], static_cast<uint16_t>(zero_point));
-  }
-}
-
-} // namespace
-
-template <typename T>
-class ReluDNNLowPOp final : public Operator<CPUContext> {
- public:
-  ReluDNNLowPOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {}
-
-  bool RunOnDevice() override;
-
- private:
-  std::unique_ptr<dnnlowp::QuantizationFactory> qfactory_;
-};
 
 template <typename T>
 bool ReluDNNLowPOp<T>::RunOnDevice() {
   auto& X = InputIsType<int8::Int8TensorCPU>(0)
-      ? OperatorBase::Input<int8::Int8TensorCPU>(0).t
+      ? (this->template Input<int8::Int8TensorCPU>(0)).t
       : Input(0);
 
   TensorCPU* Y = nullptr;
@@ -90,8 +27,7 @@ bool ReluDNNLowPOp<T>::RunOnDevice() {
 
   // Quantize input if needed
   std::vector<T> X_temp, Y_temp;
-  const T* X_data =
-      QuantizeInputIfNeeded(this, 0, in_qparams, X_temp, qfactory_.get());
+  const T* X_data = QuantizeInputIfNeeded(this, 0, in_qparams, X_temp);
 
   T* Y_data = nullptr;
   if (X.template IsType<T>()) {
@@ -110,7 +46,7 @@ bool ReluDNNLowPOp<T>::RunOnDevice() {
     }
   } else {
     if (GetCpuId().avx2()) {
-      ReluAVX2<T>(N, in_qparams.zero_point, X_data, Y_data);
+      internal::ReluAVX2<T>(N, in_qparams.zero_point, X_data, Y_data);
     } else {
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -129,7 +65,7 @@ bool ReluDNNLowPOp<T>::RunOnDevice() {
   // If input was not quantized, output should be dequantized because ReLU
   // can be inplace.
   if (!X.template IsType<T>()) {
-    Dequantize(
+    fbgemm::Dequantize<T>(
         Y_data, Y->template mutable_data<float>(), Y->numel(), in_qparams);
   }
 

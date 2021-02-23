@@ -1,7 +1,6 @@
 #ifndef THCP_STORAGE_INC
 #define THCP_STORAGE_INC
 
-#define THCPStorage TH_CONCAT_3(THCP,Real,Storage)
 #define THCPStorageStr TH_CONCAT_STRING_3(torch.cuda.,Real,Storage)
 #define THCPStorageClass TH_CONCAT_3(THCP,Real,StorageClass)
 #define THCPStorage_(NAME) TH_CONCAT_4(THCP,Real,Storage_,NAME)
@@ -22,23 +21,42 @@
     PyObject_IsInstance(obj, THCPCharStorageClass)
 #define THCPByteStorage_Check(obj) \
     PyObject_IsInstance(obj, THCPByteStorageClass)
+#define THCPBoolStorage_Check(obj) \
+    PyObject_IsInstance(obj, THCPBoolStorageClass)
+#define THCPBFloat16Storage_Check(obj) \
+    PyObject_IsInstance(obj, THCPBFloat16StorageClass)
+#define THCPComplexDoubleStorage_Check(obj) \
+    PyObject_IsInstance(obj, THCPDoubleStorageClass)
+#define THCPComplexFloatStorage_Check(obj) \
+    PyObject_IsInstance(obj, THCPFloatStorageClass)
 
-#define THCPDoubleStorage_CData(obj)  (obj)->cdata
-#define THCPFloatStorage_CData(obj)   (obj)->cdata
-#define THCPLongStorage_CData(obj)    (obj)->cdata
-#define THCPIntStorage_CData(obj)     (obj)->cdata
-#define THCPShortStorage_CData(obj)   (obj)->cdata
-#define THCPCharStorage_CData(obj)    (obj)->cdata
-#define THCPByteStorage_CData(obj)    (obj)->cdata
+#define THCPDoubleStorage_CData(obj)             (obj)->cdata
+#define THCPFloatStorage_CData(obj)              (obj)->cdata
+#define THCPLongStorage_CData(obj)               (obj)->cdata
+#define THCPIntStorage_CData(obj)                (obj)->cdata
+#define THCPShortStorage_CData(obj)              (obj)->cdata
+#define THCPCharStorage_CData(obj)               (obj)->cdata
+#define THCPByteStorage_CData(obj)               (obj)->cdata
+#define THCPBoolStorage_CData(obj)               (obj)->cdata
+#define THCPBFloat16Storage_CData(obj)           (obj)->cdata
+#define THCPComplexDoubleStorage_CData(obj)      (obj)->cdata
+#define THCPComplexFloatStorage_CData(obj)       (obj)->cdata
 
-#ifdef _THP_CORE
 #define THCPStorageType TH_CONCAT_3(THCP,Real,StorageType)
 #define THCPStorageBaseStr TH_CONCAT_STRING_3(Cuda,Real,StorageBase)
-#endif
 
-#include "override_macros.h"
+#include <torch/csrc/cuda/override_macros.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
 #include <THC/THCGenerateAllTypes.h>
+
+#define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
+#include <THC/THCGenerateComplexTypes.h>
+
+#define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
+#include <THC/THCGenerateBoolType.h>
+
+#define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
+#include <THC/THCGenerateBFloat16Type.h>
 
 #endif

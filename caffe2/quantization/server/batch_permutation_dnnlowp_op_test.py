@@ -1,33 +1,27 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPBatchPermutationOpTest(hu.HypothesisTestCase):
     @given(N=st.integers(min_value=1, max_value=100), **hu.gcs_cpu_only)
+    @settings(max_examples=10, deadline=None)
     def test_batch_permutation(self, N, gc, dc):
         X = np.round(np.random.rand(N, 10, 20, 3) * 255).astype(np.float32)
         indices = np.arange(N).astype(np.int32)
         np.random.shuffle(indices)
 
-        quantize = core.CreateOperator(
-            "Quantize",
-            ["X"],
-            ["X_q"],
-            engine="DNNLOWP",
-        )
+        quantize = core.CreateOperator("Quantize", ["X"], ["X_q"], engine="DNNLOWP")
         batch_perm = core.CreateOperator(
-            "BatchPermutation",
-            ["X_q", "indices"],
-            ["Y_q"],
-            engine="DNNLOWP",
+            "BatchPermutation", ["X_q", "indices"], ["Y_q"], engine="DNNLOWP"
         )
 
         net = core.Net("test_net")

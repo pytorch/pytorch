@@ -30,7 +30,7 @@
   (this is the zlib license)
 */
 
-#include "Intrinsics.h"
+#include <ATen/native/cpu/Intrinsics.h>
 
 /* yes I know, the top of this file is quite ugly */
 #if defined(__GNUC__)
@@ -91,7 +91,7 @@ _PS256_CONST(cephes_log_p8, + 3.3333331174E-1);
 _PS256_CONST(cephes_log_q1, -2.12194440e-4);
 _PS256_CONST(cephes_log_q2, 0.693359375);
 
-#ifndef __AVX2__
+#ifndef CPU_CAPABILITY_AVX2
 
 typedef union imm_xmm_union {
   v8si imm;
@@ -100,7 +100,7 @@ typedef union imm_xmm_union {
 
 #define COPY_IMM_TO_XMM(imm_, xmm0_, xmm1_) {    \
     imm_xmm_union u __attribute__((aligned(32)));  \
-    u.imm = imm_;				   \
+    u.imm = imm_;                                   \
     xmm0_ = u.xmm[0];                            \
     xmm1_ = u.xmm[1];                            \
 }
@@ -150,7 +150,7 @@ AVX2_INTOP_USING_SSE2(cmpeq_epi32)
 AVX2_INTOP_USING_SSE2(sub_epi32)
 AVX2_INTOP_USING_SSE2(add_epi32)
 
-#endif /* __AVX2__ */
+#endif /* CPU_CAPABILITY_AVX2 */
 
 
 /* natural logarithm computed for 8 simultaneous float
@@ -228,8 +228,8 @@ inline v8sf log256_ps(v8sf x) {
   return x;
 }
 
-_PS256_CONST(exp_hi,	88.3762626647949f);
-_PS256_CONST(exp_lo,	-88.3762626647949f);
+_PS256_CONST(exp_hi,        88.3762626647949f);
+_PS256_CONST(exp_lo,        -88.3762626647949f);
 
 _PS256_CONST(cephes_LOG2EF, 1.44269504088896341);
 _PS256_CONST(cephes_exp_C1, 0.693359375);
@@ -260,7 +260,7 @@ inline v8sf exp256_ps(v8sf x) {
 
   tmp = _mm256_floor_ps(fx);
 
-  /* if greater, substract 1 */
+  /* if greater, subtract 1 */
   //v8sf mask = _mm256_cmpgt_ps(tmp, fx);
   v8sf mask = _mm256_cmp_ps(tmp, fx, _CMP_GT_OS);
   mask = _mm256_and_ps(mask, one);
@@ -326,7 +326,7 @@ inline v8sf sin256_ps(v8sf x) { // any x
   v8sf xmm1, xmm2 = _mm256_setzero_ps(), xmm3, sign_bit, y;
   v8si imm0, imm2;
 
-#ifndef __AVX2__
+#ifndef CPU_CAPABILITY_AVX2
   v4si imm0_1, imm0_2;
   v4si imm2_1, imm2_2;
 #endif
@@ -346,7 +346,7 @@ inline v8sf sin256_ps(v8sf x) { // any x
     If we don't have AVX, let's perform them using SSE2 directives
   */
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   /* store the integer part of y in mm0 */
   imm2 = _mm256_cvttps_epi32(y);
   /* j=(j+1) & (~1) (see the cephes sources) */
@@ -453,7 +453,7 @@ inline v8sf cos256_ps(v8sf x) { // any x
   v8sf xmm1, xmm2 = _mm256_setzero_ps(), xmm3, y;
   v8si imm0, imm2;
 
-#ifndef __AVX2__
+#ifndef CPU_CAPABILITY_AVX2
   v4si imm0_1, imm0_2;
   v4si imm2_1, imm2_2;
 #endif
@@ -464,7 +464,7 @@ inline v8sf cos256_ps(v8sf x) { // any x
   /* scale by 4/Pi */
   y = _mm256_mul_ps(x, *(v8sf*)_ps256_cephes_FOPI);
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   /* store the integer part of y in mm0 */
   imm2 = _mm256_cvttps_epi32(y);
   /* j=(j+1) & (~1) (see the cephes sources) */
@@ -571,7 +571,7 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   v8sf xmm1, xmm2, xmm3 = _mm256_setzero_ps(), sign_bit_sin, y;
   v8si imm0, imm2, imm4;
 
-#ifndef __AVX2__
+#ifndef CPU_CAPABILITY_AVX2
   v4si imm0_1, imm0_2;
   v4si imm2_1, imm2_2;
   v4si imm4_1, imm4_2;
@@ -586,7 +586,7 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   /* scale by 4/Pi */
   y = _mm256_mul_ps(x, *(v8sf*)_ps256_cephes_FOPI);
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   /* store the integer part of y in imm2 */
   imm2 = _mm256_cvttps_epi32(y);
 
@@ -653,7 +653,7 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   x = _mm256_add_ps(x, xmm2);
   x = _mm256_add_ps(x, xmm3);
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   imm4 = _mm256_sub_epi32(imm4, *(v8si*)_pi32_256_2);
   imm4 =  _mm256_andnot_si256(imm4, *(v8si*)_pi32_256_4);
   imm4 = _mm256_slli_epi32(imm4, 29);

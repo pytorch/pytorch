@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-#include "softmax_focal_loss_op.h"
-#include "caffe2/operators/softmax_shared.h"
+#include "modules/detectron/softmax_focal_loss_op.h"
+
+#include "caffe2/operators/softmax_utils.h"
 
 namespace caffe2 {
 
@@ -46,12 +47,8 @@ See: https://arxiv.org/abs/1708.02002 for details.
     .Arg(
         "scale",
         "(float) default 1.0; multiply the loss by this scale factor.")
-    .Arg(
-        "alpha",
-        "(float) default 0.25; Focal Loss's alpha hyper-parameter.")
-    .Arg(
-        "gamma",
-        "(float) default 1.0; Focal Loss's gamma hyper-parameter.")
+    .Arg("alpha", "(float) default 0.25; Focal Loss's alpha hyper-parameter.")
+    .Arg("gamma", "(float) default 1.0; Focal Loss's gamma hyper-parameter.")
     .Arg(
         "num_classes",
         "(int) default 81; number of classes in each softmax group.")
@@ -69,12 +66,8 @@ See: https://arxiv.org/abs/1708.02002 for details.
     .Input(
         2,
         "normalizer",
-        "Scalar; the loss is normalized by 1 / max(1, normalizer)."
-    )
-    .Output(
-        0,
-        "loss",
-        "Scalar loss.")
+        "Scalar; the loss is normalized by 1 / max(1, normalizer).")
+    .Output(0, "loss", "Scalar loss.")
     .Output(
         1,
         "probabilities",
@@ -85,30 +78,15 @@ See: https://arxiv.org/abs/1708.02002 for details.
 OPERATOR_SCHEMA(SoftmaxFocalLossGradient)
     .NumInputs(5)
     .NumOutputs(1)
-    .Input(
-        0,
-        "scores",
-        "See SoftmaxFocalLoss.")
-    .Input(
-        1,
-        "labels",
-        "See SoftmaxFocalLoss.")
-    .Input(
-        2,
-        "normalizer",
-        "See SoftmaxFocalLoss.")
+    .Input(0, "scores", "See SoftmaxFocalLoss.")
+    .Input(1, "labels", "See SoftmaxFocalLoss.")
+    .Input(2, "normalizer", "See SoftmaxFocalLoss.")
     .Input(
         3,
         "probabilities",
         "Output 1 from SoftmaxFocalLoss; See SoftmaxFocalLoss.")
-    .Input(
-        4,
-        "d_loss",
-        "Gradient of forward output 0 (loss)")
-    .Output(
-        0,
-        "d_scores",
-        "Gradient of forward input 0 (scores)");
+    .Input(4, "d_loss", "Gradient of forward output 0 (loss)")
+    .Output(0, "d_scores", "Gradient of forward input 0 (scores)");
 
 class GetSoftmaxFocalLossGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -122,4 +100,5 @@ class GetSoftmaxFocalLossGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(SoftmaxFocalLoss, GetSoftmaxFocalLossGradient);
+
 } // namespace caffe2

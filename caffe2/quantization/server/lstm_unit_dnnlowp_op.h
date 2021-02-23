@@ -13,7 +13,7 @@ class LSTMUnitDNNLowPOp final : public LSTMUnitOp<CPUContext> {
   static_assert(std::is_integral<T>::value, "Integral required.");
 
  public:
-  LSTMUnitDNNLowPOp(const OperatorDef& operator_def, Workspace *ws);
+  LSTMUnitDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
   ~LSTMUnitDNNLowPOp();
   bool RunOnDevice() override;
 
@@ -27,17 +27,15 @@ class LSTMUnitDNNLowPOp final : public LSTMUnitOp<CPUContext> {
   dnnlowp::Sigmoid<T> sigmoid_;
   dnnlowp::Tanh<T> tanh_;
 
-  dnnlowp::TensorQuantizationParams
-    H_in_qparams_, C_in_qparams_, G_in_qparams_,
-    H_out_qparams_, C_out_qparams_;
+  dnnlowp::TensorQuantizationParams H_in_qparams_, C_in_qparams_, G_in_qparams_,
+      H_out_qparams_, C_out_qparams_;
 
   std::unique_ptr<OpWrapper<LSTMUnitOp<CPUContext>, T>> fp32_op_;
   bool dequantize_output_{false}, measure_quantization_error_{false};
 
   std::unique_ptr<dnnlowp::QuantizationFactory> qfactory_;
 
-  dnnlowp::QuantizationErrorStats
-      cell_quantization_error_stats_,
+  dnnlowp::QuantizationErrorStats cell_quantization_error_stats_,
       hidden_quantization_error_stats_;
 
   bool arguments_parsed_{false};

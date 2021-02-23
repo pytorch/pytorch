@@ -47,11 +47,11 @@ class Cauchy(Distribution):
 
     @property
     def mean(self):
-        return self.loc.new_tensor(nan).expand(self._extended_shape())
+        return torch.full(self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device)
 
     @property
     def variance(self):
-        return self.loc.new_tensor(inf).expand(self._extended_shape())
+        return torch.full(self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
@@ -69,8 +69,6 @@ class Cauchy(Distribution):
         return torch.atan((value - self.loc) / self.scale) / math.pi + 0.5
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         return torch.tan(math.pi * (value - 0.5)) * self.scale + self.loc
 
     def entropy(self):

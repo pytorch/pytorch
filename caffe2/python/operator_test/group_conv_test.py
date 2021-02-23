@@ -1,18 +1,17 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core
+from caffe2.python import core, utils
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 
 import unittest
-import os
 
 class TestGroupConvolution(hu.HypothesisTestCase):
 
@@ -30,7 +29,7 @@ class TestGroupConvolution(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN", "EIGEN"]),
            use_bias=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2, deadline=None)
     def test_group_convolution(
             self, stride, pad, kernel, size, group,
             input_channels_per_group, output_channels_per_group, batch_size,
@@ -42,7 +41,14 @@ class TestGroupConvolution(hu.HypothesisTestCase):
                 assume(group == 1 and engine != "CUDNN")
         else:
             # TODO: Group conv in NHWC not implemented for GPU yet.
-            assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+            assume(group == 1 or order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
+
+            if group != 1 and order == "NHWC":
+                dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
+
+        # Group conv not implemented with EIGEN engine.
+        assume(group == 1 or engine != "EIGEN")
+
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 
@@ -65,8 +71,8 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
 

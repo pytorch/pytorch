@@ -10,16 +10,20 @@
 #include "caffe2/perfkernels/math.h"
 #include "caffe2/utils/math.h"
 
+#ifdef CAFFE2_USE_MKL
+#include <mkl.h>
+#define FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
+#endif
+
 namespace caffe2 {
 
 template <class Context>
 class FloatToFusedRandRowwiseQuantizedOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  FloatToFusedRandRowwiseQuantizedOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit FloatToFusedRandRowwiseQuantizedOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         bitwidth_(OperatorBase::GetSingleArgument<int32_t>("bitwidth", 8)),
         random_(OperatorBase::GetSingleArgument<bool>("random", true)) {
     CAFFE_ENFORCE(
@@ -61,9 +65,10 @@ class FloatToFusedRandRowwiseQuantizedOp : public Operator<Context> {
  protected:
   size_t bitwidth_{8};
   bool random_{true};
+  std::vector<float> random_buffer_;
+
 #ifdef FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
   VSLStreamStatePtr vslStream_;
-  std::vector<float> random_buffer_;
 #else
   std::unique_ptr<std::uniform_real_distribution<float>> dis_;
   std::minstd_rand gen_;

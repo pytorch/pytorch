@@ -20,7 +20,7 @@ namespace detail {
  * Keeps track of forward and backward gradient workspaces in stack,
  * reuses previously created workspaces, non-thread safe
  */
-class CAFFE2_API WorkspaceStack {
+class TORCH_API WorkspaceStack {
  public:
   explicit WorkspaceStack() : parent_ws_(nullptr), top_(-1) {}
 
@@ -149,13 +149,14 @@ class CAFFE2_API WorkspaceStack {
   int top_;
   std::vector<std::shared_ptr<Workspace>> workspaces_;
 };
-}
+} // namespace detail
 
 template <class Context>
 class CreateScopeOp final : public Operator<Context> {
  public:
-  CreateScopeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit CreateScopeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
@@ -164,8 +165,9 @@ class CreateScopeOp final : public Operator<Context> {
 template <class Context>
 class HasScopeOp final : public Operator<Context> {
  public:
-  HasScopeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit HasScopeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;

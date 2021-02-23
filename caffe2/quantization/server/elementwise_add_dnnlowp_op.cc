@@ -1,7 +1,11 @@
+#include "elementwise_dnnlowp_op.h"
+
 #include "caffe2/operators/elementwise_add_op.h"
 #include "caffe2/quantization/server/sigmoid.h"
-#include "elementwise_dnnlowp_op.h"
+
+#include "dnnlowp_partition.h"
 #include "op_wrapper.h"
+#include "utility_dnnlowp_ops.h"
 
 namespace caffe2 {
 
@@ -36,6 +40,44 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
         "In-place is allowed only with the first tensor when broadcasting");
     C->ResizeLike(A);
 
+    T* C_quantized = GetQuantizedOutputData_();
+
+    if (A.template IsType<T>() && B.template IsType<T>() &&
+        A.numel() == B.numel() && is_same<T, uint8_t>::value &&
+        GetCpuId().avx2() && GetCpuId().fma()) {
+      // fast path
+      // NOTE: this path does addition in floating point unlike slow path that
+      // does everything in fixed-point. So they are numerically different.
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+      {
+        constexpr int VLEN = 8;
+        int j_begin, j_end;
+        tie(j_begin, j_end) = Get1DPartition(
+            A.numel(),
+            dnnlowp_get_num_threads(),
+            dnnlowp_get_thread_num(),
+            VLEN);
+
+        internal::ElementWiseSumAVX2<T, false /*ReluFused*/>(
+            A.template data<T>() + j_begin,
+            B.template data<T>() + j_begin,
+            C_quantized + j_begin,
+            j_end - j_begin,
+            in_qparams_[0].scale,
+            in_qparams_[0].zero_point,
+            in_qparams_[1].scale,
+            in_qparams_[1].zero_point,
+            out_qparams_.scale,
+            out_qparams_.zero_point);
+      } // omp parallel
+
+      RunOnDeviceEpilogue_();
+
+      return true;
+    }
+
     // Quantize inputs if needed
     vector<int32_t> A_quantized(A.numel()), B_quantized(B.numel());
     for (int i = 0; i < 2; ++i) {
@@ -52,7 +94,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #pragma omp parallel for
 #endif
         for (int j = 0; j < InputTensorCPU_(i).numel(); ++j) {
-          quantized_in[j] = Requantize<int32_t>(
+          quantized_in[j] = fbgemm::Requantize<int32_t>(
               input_data[j] - in_qparams_[i].zero_point,
               in_requantization_params);
         }
@@ -63,7 +105,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #pragma omp parallel for
 #endif
         for (int j = 0; j < InputTensorCPU_(i).numel(); ++j) {
-          quantized_in[j] = Quantize<uint32_t>(
+          quantized_in[j] = fbgemm::Quantize<uint32_t>(
               input_data[j],
               intermediate_qparams_.zero_point,
               intermediate_qparams_.scale,
@@ -75,8 +117,6 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
     int32_t intermediate_zero_point =
         intermediate_qparams_.zero_point * InputSize();
 
-    T* C_quantized = GetQuantizedOutputData_();
-
     if (!enable_broadcast_) {
       CAFFE_ENFORCE_EQ(
           A.sizes(),
@@ -87,7 +127,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #endif
       for (int i = 0; i < C->numel(); ++i) {
         int32_t raw = A_quantized[i] + B_quantized[i] - intermediate_zero_point;
-        C_quantized[i] = Requantize<T>(raw, requantization_params_);
+        C_quantized[i] = fbgemm::Requantize<T>(raw, requantization_params_);
       }
     } else if (B.numel() == 1) {
 #ifdef _OPENMP
@@ -95,7 +135,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #endif
       for (int i = 0; i < C->numel(); ++i) {
         int32_t raw = A_quantized[i] + B_quantized[0] - intermediate_zero_point;
-        C_quantized[i] = Requantize<T>(raw, requantization_params_);
+        C_quantized[i] = fbgemm::Requantize<T>(raw, requantization_params_);
       }
     } else {
       size_t pre, n, post;
@@ -110,7 +150,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
             int32_t raw = A_quantized[((i * n) + j) * post + k] +
                 B_quantized[j] - intermediate_zero_point;
             C_quantized[((i * n) + j) * post + k] =
-                Requantize<T>(raw, requantization_params_);
+                fbgemm::Requantize<T>(raw, requantization_params_);
           }
         }
       }

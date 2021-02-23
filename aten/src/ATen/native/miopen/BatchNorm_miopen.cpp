@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 
+// TODO: Remove the condition on AT_ROCM_ENABLED entirely,
+// don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_ROCM_ENABLED()
@@ -60,14 +62,13 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
             running_mean{ running_mean_t, "running_mean", 4 },
             running_var{ running_var_t, "running_var", 5 };
   CheckedFrom c = "miopen_batch_norm";
-  setMIOpenStreamToCurrent();
 
   checkAllDefined(c, {input, weight, bias});
   if (!training) {
     checkAllDefined(c, {running_mean, running_var});
   }
   checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
-  if (input->type().scalarType() != ScalarType::Half) {
+  if (input->scalar_type() != ScalarType::Half) {
     checkAllSameType(c, {input, weight});
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});
@@ -149,11 +150,10 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
             save_mean{ save_mean_t, "save_mean", 4 },
             save_var{ save_var_t, "save_var", 5 };
   CheckedFrom c = "miopen_batch_norm_backward";
-  setMIOpenStreamToCurrent();
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
-  if (input->type().scalarType() == ScalarType::Half) {
+  if (input->scalar_type() == ScalarType::Half) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});

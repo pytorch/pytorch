@@ -23,7 +23,7 @@ namespace c10 {
  * for you, given the underlying type supports it.
  */
 template <class ConcreteType, class UnderlyingType>
-class CAFFE2_API IdWrapper {
+class IdWrapper {
  public:
   using underlying_type = UnderlyingType;
   using concrete_type = ConcreteType;
@@ -48,7 +48,7 @@ class CAFFE2_API IdWrapper {
   //      Fix this once we don't need GCC 4.8 anymore.
   friend constexpr bool operator==(
       const concrete_type& lhs,
-      const concrete_type& rhs) {
+      const concrete_type& rhs) noexcept {
     return lhs.id_ == rhs.id_;
   }
 
@@ -57,7 +57,7 @@ class CAFFE2_API IdWrapper {
   //      Fix this once we don't need GCC 4.8 anymore.
   friend constexpr bool operator!=(
       const concrete_type& lhs,
-      const concrete_type& rhs) {
+      const concrete_type& rhs) noexcept {
     return !(lhs == rhs);
   }
 

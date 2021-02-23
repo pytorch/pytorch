@@ -22,7 +22,7 @@ void MutexSerializer::Serialize(
 
 void MutexDeserializer::Deserialize(const BlobProto& /* unused */, Blob* blob) {
   *blob->GetMutable<std::unique_ptr<std::mutex>>() =
-      caffe2::make_unique<std::mutex>();
+      std::make_unique<std::mutex>();
 }
 
 REGISTER_CPU_OPERATOR(Iter, IterOp<CPUContext>);
@@ -50,6 +50,7 @@ OPERATOR_SCHEMA(AtomicIter)
     .NumInputs(2)
     .NumOutputs(1)
     .EnforceInplace({{1, 0}})
+    .IdenticalTypeAndShapeOfInput(1)
     .SetDoc(R"DOC(
 Similar to Iter, but takes a mutex as the first input to make sure that
 updates are carried out atomically. This can be used in e.g. Hogwild sgd
@@ -60,4 +61,4 @@ algorithms.
 
 NO_GRADIENT(Iter);
 NO_GRADIENT(AtomicIter);
-}  // namespace caffe2
+} // namespace caffe2

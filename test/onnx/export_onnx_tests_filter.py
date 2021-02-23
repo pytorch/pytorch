@@ -1,16 +1,8 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import argparse
 import glob
-import numpy as np
 import onnx.backend.test
-import caffe2.python.onnx.backend as c2
 import os
 import shutil
-from onnx import numpy_helper
 from test_caffe2_common import run_generated_test
 import google.protobuf.text_format
 import test_onnx_common
@@ -36,8 +28,8 @@ def collect_generated_testcases(root_dir=test_onnx_common.pytorch_converted_dir,
                 model_file = os.path.join(dir_name, "model.onnx")
                 data_dir_pattern = os.path.join(dir_name, "test_data_set_*")
                 for data_dir in glob.glob(data_dir_pattern):
-                    for device in ['CPU', 'CUDA']:
-                        run_generated_test(model_file, data_dir)
+                    for device in torch.testing.get_all_device_types():
+                        run_generated_test(model_file, data_dir, device)
                 if expect:
                     expect_file = os.path.join(_expect_dir,
                                                "PyTorch-generated-{}.expect".format(d))

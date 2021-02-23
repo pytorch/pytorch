@@ -1,9 +1,9 @@
 ## @package normalization
 # Module caffe2.python.helpers.normalization
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import scope
 from caffe2.python.modeling.parameter_info import ParameterTags
@@ -243,20 +243,10 @@ def layer_norm(
             - The standard deviation of the input blob acress the given axis.
     '''
 
-    # The LayerNorm operator only performs the layerwise z-shift, without
-    # scaling and shifting by the learned scale and bias parameters. We have
-    # to do that separately below.
-    normalized, mean, stdev = model.net.LayerNorm(
-        [blob_in],
-        [blob_out, blob_out + "_mean", blob_out + "_stdev"],
-        axis=axis,
-        epsilon=epsilon,
-    )
-
     # The learned multiplicative scale or "gain".
     scale = model.create_param(
         param_name='{}_scale'.format(blob_out),
-        shape=[dim_in],
+        shape=[dim_in] if isinstance(dim_in, int) else dim_in,
         initializer=initializers.Initializer(
             'ConstantFill',
             value=initial_scale,
@@ -267,7 +257,7 @@ def layer_norm(
     # The learned additive bias or "shift".
     bias = model.create_param(
         param_name='{}_bias'.format(blob_out),
-        shape=[dim_in],
+        shape=[dim_in] if isinstance(dim_in, int) else dim_in,
         initializer=initializers.Initializer(
             'ConstantFill',
             value=initial_bias,
@@ -275,18 +265,58 @@ def layer_norm(
         tags=ParameterTags.BIAS,
     )
 
-    scaled = model.net.Mul(
-        [normalized, scale],
-        ['{}_scaled'.format(blob_out)],
-        broadcast=1,
+    normalized, mean, std = model.net.LayerNorm(
+        [blob_in, scale, bias],
+        [blob_out, blob_out + "_mean", blob_out + "_std"],
         axis=axis,
+        epsilon=epsilon,
+        elementwise_affine=True,
     )
 
-    biased = model.net.Add(
-        [scaled, bias],
-        ['{}_biased'.format(blob_out)],
-        broadcast=1,
-        axis=axis,
+    return normalized, mean, std
+
+def moments_with_running_stats(model, blob_in, blob_out, dim_in,
+                                     RunningMeanInitializer=None, RunningVarianceInitializer=None,
+                                     order="NCHW", **kwargs):
+
+    if model.init_params:
+        rm_init = ("ConstantFill", {'value': 0.0})
+        riv_init = ("ConstantFill", {'value': 1.0})
+
+        RunningMeanInitializer = initializers.update_initializer(
+            RunningMeanInitializer, rm_init, ("ConstantFill", {})
+        )
+        RunningVarianceInitializer = initializers.update_initializer(
+            RunningVarianceInitializer, riv_init, ("ConstantFill", {})
+        )
+    else:
+        RunningMeanInitializer = initializers.ExternalInitializer()
+        RunningVarianceInitializer = initializers.ExternalInitializer()
+
+    running_mean = model.create_param(
+        param_name=blob_out + '_rm',
+        shape=[dim_in],
+        initializer=RunningMeanInitializer,
+        tags=ParameterTags.COMPUTED_PARAM
     )
 
-    return biased, mean, stdev
+    # this is just running variance
+    running_inv_var = model.create_param(
+        param_name=blob_out + '_riv',
+        shape=[dim_in],
+        initializer=RunningVarianceInitializer,
+        tags=ParameterTags.COMPUTED_PARAM
+    )
+
+    blob_outs = [blob_out + "_sm", blob_out + "_sv"]
+    if order == 'NCHW':
+        blob_outputs = model.net.Moments(
+            [blob_in], blob_outs,
+            axes=[0, 2, 3],
+            order=order, keepdims=False, **kwargs)
+    elif order == 'NHWC':
+        blob_outputs = model.net.Moments(
+            [blob_in], blob_outs,
+            axes=[0, 1, 2],
+            order=order, keepdims=False, **kwargs)
+    return blob_outputs

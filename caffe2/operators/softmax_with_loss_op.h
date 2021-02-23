@@ -11,10 +11,14 @@ namespace caffe2 {
 template <typename T, class Context>
 class SoftmaxWithLossOp final : public Operator<Context> {
  public:
-  SoftmaxWithLossOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SoftmaxWithLossOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         scale_(this->template GetSingleArgument<float>("scale", 1.)),
-        label_prob_mode_(this->template GetSingleArgument<int>("label_prob", 0)),
+        label_prob_mode_(
+            this->template GetSingleArgument<int>("label_prob", 0)),
+        average_by_batch_size_(
+            this->template GetSingleArgument<int>("average_by_batch_size", 0)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         axis_(this->template GetSingleArgument<int>("axis", 1)) {
@@ -29,25 +33,30 @@ class SoftmaxWithLossOp final : public Operator<Context> {
  protected:
   float scale_;
   int label_prob_mode_;
+  int average_by_batch_size_;
   StorageOrder order_;
   int axis_;
 
-  Tensor losses_{Context::GetDeviceType()}; // Per example loss
-  Tensor rowmax_{Context::GetDeviceType()}; // per example row max
-  Tensor weights_{Context::GetDeviceType()}; // unignored weights
-  Tensor sum_multiplier_{
-      Context::GetDeviceType()}; // Vector of ones for summing via dot prod
-  Tensor total_weight_ptr_{Context::GetDeviceType()};
+  Tensor losses_; // Per example loss
+  Tensor rowmax_; // per example row max
+  Tensor weights_; // unignored weights
+  Tensor sum_multiplier_; // Vector of ones for summing via dot prod
+  Tensor total_weight_ptr_;
+  // passed to a function
   Tensor scratch_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
 class SoftmaxWithLossGradientOp final : public Operator<Context> {
  public:
-  SoftmaxWithLossGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit SoftmaxWithLossGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         scale_(this->template GetSingleArgument<float>("scale", 1.)),
-        label_prob_mode_(this->template GetSingleArgument<int>("label_prob", 0)),
+        label_prob_mode_(
+            this->template GetSingleArgument<int>("label_prob", 0)),
+        average_by_batch_size_(
+            this->template GetSingleArgument<int>("average_by_batch_size", 0)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         only_loss_(this->template GetSingleArgument<bool>("only_loss", false)),
@@ -63,9 +72,11 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
  protected:
   float scale_;
   int label_prob_mode_;
+  int average_by_batch_size_;
+  // not used?
   Tensor sum_multiplier_{Context::GetDeviceType()};
-  Tensor weights_{Context::GetDeviceType()}; // unignored weights
-  Tensor total_weight_ptr_{Context::GetDeviceType()};
+  Tensor weights_; // unignored weights
+  Tensor total_weight_ptr_;
   StorageOrder order_;
   bool only_loss_;
   int axis_;

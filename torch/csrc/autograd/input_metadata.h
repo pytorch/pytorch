@@ -1,48 +1,58 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <cstdint>
 
 namespace torch { namespace autograd {
 
-/// A tensor's type and shape. Each Function records the required type and
-/// shape of its inputs. If is_valid() is false, then the corresponding input
-/// is not used and may be an undefined tensor.
+/**
+ * Records type, shape, and device of tensor and, where applicable,
+ * the stream the correspondingoperation took place on.
+ *
+ * If is_valid() is false, then the corresponding input is not used and may be
+ * an undefined tensor.
+ */
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::Type& type, at::IntList shape, const int64_t device)
-  : type_{&type} , shape_{shape}, device_{device} { }
+  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, at::Device device)
+  : options_{options}, shape_{shape}, device_{device} {
+    stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
+  }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.type(), t.sizes(), t.is_cuda() ? t.get_device() : - 1) { }
+  : InputMetadata(t.options(), t.sizes(), t.device()) { }
 
-  bool is_valid() const {
-    return type_ != nullptr;
+  const at::TensorOptions options() const {
+    return options_;
   }
 
-  const at::Type& type() const {
-    AT_ASSERT(type_);
-    return *type_;
-  }
-
-  at::IntList shape() const {
+  at::IntArrayRef shape() const {
     return shape_;
   }
 
-  int64_t device() const {
+  at::Device device() const {
     return device_;
   }
 
+  c10::Stream stream() const {
+    return stream_;
+  }
+
   at::Tensor zeros_like() const {
-    return at::zeros(shape_, type_->options(static_cast<int32_t>(device_)));
+    return at::zeros(shape_, options_);
   }
 
 private:
-  const at::Type* type_ = nullptr;
+  const at::TensorOptions options_;
   at::DimVector shape_;
-  const int64_t device_ = -1;
+  at::Device device_ = at::kCPU;
+  c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device_);
 };
 
-}}
+}} // torch::autograd

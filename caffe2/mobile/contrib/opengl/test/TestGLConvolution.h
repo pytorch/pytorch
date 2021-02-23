@@ -1,4 +1,0 @@
-
-#pragma once
-
-void TestGLConvolution();

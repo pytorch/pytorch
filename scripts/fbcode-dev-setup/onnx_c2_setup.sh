@@ -3,7 +3,7 @@
 # This script helps developers set up the ONNX Caffe2 and PyTorch develop environment on devgpu.
 # It creates an virtualenv instance, and installs all the dependencies in this environment.
 # The script will creates a folder called onnx-dev folder under the $HOME directory.
-# onnx, pytorch and caffe2 are installed seperately.
+# onnx, pytorch and caffe2 are installed separately.
 # Please source $HOME/onnx-dev/.onnx_env_init to initialize the development before starting developing.
 
 
@@ -14,7 +14,7 @@ set -e
 shopt -s expand_aliases
 
 # Proxy setup
-alias with_proxy="HTTPS_PROXY=http://fwdproxy.any:8080 HTTP_PROXY=http://fwdproxy.any:8080 FTP_PROXY=http://fwdproxy.any:8080 https_proxy=http://fwdproxy.any:8080 http_proxy=http://fwdproxy.any:8080 ftp_proxy=http://fwdproxy.any:8080 http_no_proxy='*.facebook.com|*.tfbnw.net|*.fb.com'"
+alias with_proxy="HTTPS_PROXY=http://fwdproxy:8080 HTTP_PROXY=http://fwdproxy:8080 FTP_PROXY=http://fwdproxy:8080 https_proxy=http://fwdproxy:8080 http_proxy=http://fwdproxy:8080 ftp_proxy=http://fwdproxy:8080 http_no_proxy='*.facebook.com|*.tfbnw.net|*.fb.com'"
 
 # Set the variables
 RED='\033[0;31m'
@@ -90,7 +90,7 @@ touch "$onnx_init_file"
   # shellcheck disable=SC2016
   echo 'export PATH='"$ccache_root"'/lib:/usr/local/cuda/bin:$PATH';
   echo "source $venv/bin/activate";
-  echo 'alias with_proxy="HTTPS_PROXY=http://fwdproxy.any:8080 HTTP_PROXY=http://fwdproxy.any:8080 FTP_PROXY=http://fwdproxy.any:8080 https_proxy=http://fwdproxy.any:8080 http_proxy=http://fwdproxy.any:8080 ftp_proxy=http://fwdproxy.any:8080 http_no_proxy='"'"'*.facebook.com|*.tfbnw.net|*.fb.com'"'"'"'
+  echo 'alias with_proxy="HTTPS_PROXY=http://fwdproxy:8080 HTTP_PROXY=http://fwdproxy:8080 FTP_PROXY=http://fwdproxy:8080 https_proxy=http://fwdproxy:8080 http_proxy=http://fwdproxy:8080 ftp_proxy=http://fwdproxy:8080 http_no_proxy='"'"'*.facebook.com|*.tfbnw.net|*.fb.com'"'"'"'
 } >> "$onnx_init_file"
 chmod u+x "$onnx_init_file"
 
@@ -140,7 +140,7 @@ with_proxy python setup.py develop
 # Build PyTorch and Caffe2
 cd "$onnx_root/pytorch"
 with_proxy pip install -r "requirements.txt"
-with_proxy python setup.py build_deps develop
+with_proxy python setup.py develop
 
 # Sanity checks and useful info
 cd "$onnx_root"

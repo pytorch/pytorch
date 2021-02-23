@@ -1,9 +1,9 @@
 ## @package model_helper_api
 # Module caffe2.python.model_helper_api
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import sys
 import copy
@@ -24,6 +24,7 @@ from caffe2.python.helpers.fc import *
 from caffe2.python.helpers.nonlinearity import *
 from caffe2.python.helpers.normalization import *
 from caffe2.python.helpers.pooling import *
+from caffe2.python.helpers.quantization import *
 from caffe2.python.helpers.tools import *
 from caffe2.python.helpers.train import *
 
@@ -45,12 +46,16 @@ class HelperWrapper(object):
         'instance_norm': instance_norm,
         'spatial_bn': spatial_bn,
         'spatial_gn': spatial_gn,
+        'moments_with_running_stats': moments_with_running_stats,
         'relu': relu,
         'prelu': prelu,
         'tanh': tanh,
         'concat': concat,
         'depth_concat': depth_concat,
         'sum': sum,
+        'reduce_sum': reduce_sum,
+        'sub': sub,
+        'arg_min': arg_min,
         'transpose': transpose,
         'iter': iter,
         'accuracy': accuracy,
@@ -64,10 +69,13 @@ class HelperWrapper(object):
         'add_weight_decay': add_weight_decay,
         'elementwise_linear': elementwise_linear,
         'layer_norm': layer_norm,
+        'mat_mul' : mat_mul,
         'batch_mat_mul' : batch_mat_mul,
         'cond' : cond,
         'loop' : loop,
         'db_input' : db_input,
+        'fused_8bit_rowwise_quantized_to_float' : fused_8bit_rowwise_quantized_to_float,
+        'sparse_lengths_sum_4bit_rowwise_sparse': sparse_lengths_sum_4bit_rowwise_sparse,
     }
 
     def __init__(self, wrapped):
@@ -127,4 +135,5 @@ class HelperWrapper(object):
         return helper_name in self._registry
 
 
+# pyre-fixme[6]: incompatible parameter type: expected ModuleType, got HelperWrapper
 sys.modules[__name__] = HelperWrapper(sys.modules[__name__])

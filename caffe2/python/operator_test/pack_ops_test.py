@@ -1,13 +1,13 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 import numpy as np
 import time
@@ -21,13 +21,13 @@ class TestTensorPackOps(serial.SerializedTestCase):
             constant_values = 0
             if data.dtype.char == 'S':
                 constant_values = ''
-            if max_length is not None:
-                assert(max_length > np.max(lengths))
-            else:
+            if max_length is None:
                 max_length = np.max(lengths)
+            start = 0
             for idx in range(np.size(lengths)):
-                chunk = data[np.sum(lengths[:idx]):np.sum(lengths[:idx + 1])]
-                pad_length = max_length - lengths[idx]
+                len = lengths[idx] if max_length >= lengths[idx] else max_length
+                chunk = data[start : start + len]
+                pad_length = max_length - len
 
                 # ((0, pad_length), (0, 0)) says add pad_length rows of padding
                 # below chunk and 0 rows of padding elsewhere
@@ -38,10 +38,12 @@ class TestTensorPackOps(serial.SerializedTestCase):
                         constant_values=constant_values
                     )
                 )
+                start += lengths[idx]
             result = [arr]
             if return_presence_mask:
                 presence_arr = []
                 for length in lengths:
+                    length = length if max_length >= length else max_length
                     pad_length = max_length - length
                     presence_arr.append(
                         np.pad(
@@ -54,12 +56,16 @@ class TestTensorPackOps(serial.SerializedTestCase):
 
         return pack_segments_ref
 
-    @serial.given(
+    @given(
         num_seq=st.integers(10, 100),
         cell_size=st.integers(1, 10),
+        max_length_buffer=st.integers(-5, 5),
         **hu.gcs
     )
-    def test_pack_with_max_length_ops(self, num_seq, cell_size, gc, dc):
+    @settings(deadline=None, max_examples=50)
+    def test_pack_with_max_length_ops(
+        self, num_seq, cell_size, max_length_buffer, gc, dc
+    ):
         # create data
         lengths = np.arange(num_seq, dtype=np.int32) + 1
         num_cell = np.sum(lengths)
@@ -74,7 +80,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
             + "=" * 60
         )
         # run test
-        max_length = num_seq + 1
+        max_length = num_seq + max_length_buffer
         op = core.CreateOperator(
             'PackSegments', ['l', 'd'], ['t'], max_length=max_length)
         workspace.FeedBlob('l', lengths)
@@ -105,13 +111,31 @@ class TestTensorPackOps(serial.SerializedTestCase):
             max_length=max_length,
             device_option=gc))
         assert(workspace.FetchBlob('t').shape[1] == max_length)
-        assert((workspace.FetchBlob('newd') == workspace.FetchBlob('d')).all())
+
+        def _cal_unpacked_data(data):
+            if max_length >= num_seq:
+                return data
+            output = None
+            start = 0
+            for i, length in enumerate(lengths):
+                new_len = max_length if length > max_length else length
+                chunk = data[start: start + new_len]
+                if output is None:
+                    output = chunk
+                else:
+                    output = np.concatenate((output, chunk), axis=0)
+                start += length
+            return output
+
+        true_newd = _cal_unpacked_data(workspace.FetchBlob('d'))
+        assert((workspace.FetchBlob('newd') == true_newd).all())
 
     @given(
         num_seq=st.integers(10, 500),
         cell_size=st.integers(1, 10),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_pack_ops(self, num_seq, cell_size, gc, dc):
         # create data
         lengths = np.arange(num_seq, dtype=np.int32) + 1
@@ -209,7 +233,43 @@ class TestTensorPackOps(serial.SerializedTestCase):
         exponentiated = workspace.FetchBlob('r')
         assert(exponentiated[0, -1, 0] == 0.0)
 
-    @given(**hu.gcs_cpu_only)
+    def test_pad_no_minf(self):
+        workspace.FeedBlob('l', np.array([1, 2, 3], dtype=np.int32))
+        workspace.FeedBlob(
+            'd',
+            np.array([
+                [1.0, 1.1],
+                [2.0, 2.1],
+                [2.2, 2.2],
+                [3.0, 3.1],
+                [3.2, 3.3],
+                [3.4, 3.5]],
+                dtype=np.float32))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                'PackSegments', ['l', 'd'], ['t'], pad_minf=False),
+        )
+        result = workspace.FetchBlob('t')
+        assert(result[0, -1, 0] == 0.0)
+
+        workspace.FeedBlob(
+            'i',
+            np.array([
+                [1, 1],
+                [2, 2],
+                [2, 2],
+                [3, 3],
+                [3, 3],
+                [3, 3]],
+                dtype=np.int32))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                'PackSegments', ['l', 'i'], ['t2'], pad_minf=False),
+        )
+        result = workspace.FetchBlob('t2')
+        assert(result[0, -1, 0] == 0)
+
+    @given(**hu.gcs)
     def test_presence_mask(self, gc, dc):
         lengths = np.array([1, 2, 3], dtype=np.int32)
         data = np.array(
@@ -266,6 +326,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         self.assertEquals(output.shape, expected_output_shape)
 
     @given(**hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_out_of_bounds(self, gc, dc):
         # Copy pasted from test_pack_ops but with 3 changed to 4
         lengths = np.array([1, 2, 4], dtype=np.int32)
@@ -288,6 +349,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         )
 
     @given(**hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_under_bounds(self, gc, dc):
         # Copy pasted from test_pack_ops but with 3 changed to 2
         lengths = np.array([1, 2, 2], dtype=np.int32)

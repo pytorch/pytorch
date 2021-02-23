@@ -1,6 +1,6 @@
-#include "torch/csrc/onnx/init.h"
-#include "torch/csrc/onnx/onnx.h"
-#include "onnx/onnx_pb.h"
+#include <torch/csrc/onnx/init.h>
+#include <torch/csrc/onnx/onnx.h>
+#include <onnx/onnx_pb.h>
 
 namespace torch { namespace onnx {
 void initONNXBindings(PyObject* module) {
@@ -28,7 +28,16 @@ void initONNXBindings(PyObject* module) {
     .value("ONNX", OperatorExportTypes::ONNX)
     .value("ONNX_ATEN", OperatorExportTypes::ONNX_ATEN)
     .value("ONNX_ATEN_FALLBACK", OperatorExportTypes::ONNX_ATEN_FALLBACK)
-    .value("RAW", OperatorExportTypes::RAW);
+    .value("RAW", OperatorExportTypes::RAW)
+    .value("ONNX_FALLTHROUGH", OperatorExportTypes::ONNX_FALLTHROUGH);
+
+  py::enum_<TrainingMode>(onnx, "TrainingMode")
+    .value("EVAL", TrainingMode::EVAL)
+    .value("PRESERVE", TrainingMode::PRESERVE)
+    .value("TRAINING", TrainingMode::TRAINING);
+
+  onnx.attr("IR_VERSION") = IR_VERSION;
+  onnx.attr("PRODUCER_VERSION") = py::str(PRODUCER_VERSION);
 
 #ifdef PYTORCH_ONNX_CAFFE2_BUNDLE
   onnx.attr("PYTORCH_ONNX_CAFFE2_BUNDLE") = true;

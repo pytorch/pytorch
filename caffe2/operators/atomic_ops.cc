@@ -1,4 +1,5 @@
 #include <mutex>
+#include <thread>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
@@ -13,8 +14,9 @@ namespace {
 
 class CreateMutexOp final : public Operator<CPUContext> {
  public:
-  CreateMutexOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit CreateMutexOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<std::mutex>>(0) =
@@ -23,24 +25,26 @@ class CreateMutexOp final : public Operator<CPUContext> {
   }
 };
 
+template <typename IntType>
 class AtomicFetchAddOp final : public Operator<CPUContext> {
  public:
-  AtomicFetchAddOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit AtomicFetchAddOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(0);
+    std::lock_guard<std::mutex> lg(*mutex);
     auto& a = Input(1);
     auto& b = Input(2);
     auto* c = Output(0);
     auto* d = Output(1);
-    std::lock_guard<std::mutex> lg(*mutex);
     c->Resize();
     d->Resize();
-    auto* aPtr = a.data<int32_t>();
-    auto* bPtr = b.data<int32_t>();
-    auto* cPtr = c->template mutable_data<int32_t>();
-    auto* dPtr = d->template mutable_data<int32_t>();
+    auto* aPtr = a.template data<IntType>();
+    auto* bPtr = b.template data<IntType>();
+    auto* cPtr = c->template mutable_data<IntType>();
+    auto* dPtr = d->template mutable_data<IntType>();
     *dPtr = *aPtr;
     *cPtr = *aPtr + *bPtr;
     return true;
@@ -88,10 +92,13 @@ class CheckAtomicBoolOp final : public Operator<CPUContext> {
 };
 
 REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
-REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp);
+REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp<int32_t>);
+REGISTER_CPU_OPERATOR(AtomicFetchAdd64, AtomicFetchAddOp<int64_t>);
 
 #ifdef CAFFE2_USE_MKLDNN
-REGISTER_IDEEP_OPERATOR(CreateMutex, IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
+REGISTER_IDEEP_OPERATOR(
+    CreateMutex,
+    IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
 #endif
 
 REGISTER_CPU_OPERATOR(CreateAtomicBool, CreateAtomicBoolOp);
@@ -110,6 +117,22 @@ OPERATOR_SCHEMA(AtomicFetchAdd)
     .NumOutputs(2)
     .SetDoc(R"DOC(
 Given a mutex and two int32 scalar tensors, performs an atomic fetch add
+by mutating the first argument and adding it to the second input
+argument. Returns the updated integer and the value prior to the update.
+)DOC")
+    .Input(0, "mutex_ptr", "Blob containing to a unique_ptr<mutex>")
+    .Input(1, "mut_value", "Value to be mutated after the sum.")
+    .Input(2, "increment", "Value to add to the first operand.")
+    .Output(0, "mut_value", "Mutated value after sum. Usually same as input 1.")
+    .Output(1, "fetched_value", "Value of the first operand before sum.")
+    .AllowInplace({{1, 0}});
+
+OPERATOR_SCHEMA(AtomicFetchAdd64)
+    .NumInputs(3)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
+Like, AtomicFetchAdd but with int64_t scalar tensors,
+performs an atomic fetch add
 by mutating the first argument and adding it to the second input
 argument. Returns the updated integer and the value prior to the update.
 )DOC")
@@ -147,6 +170,6 @@ SHOULD_NOT_DO_GRADIENT(AtomicFetchAdd);
 SHOULD_NOT_DO_GRADIENT(CreateAtomicBool);
 SHOULD_NOT_DO_GRADIENT(ConditionalSetAtomicBool);
 SHOULD_NOT_DO_GRADIENT(CheckAtomicBool);
-}
-}
-}
+} // namespace
+} // namespace fb
+} // namespace caffe2

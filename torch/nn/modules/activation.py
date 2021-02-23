@@ -1,17 +1,19 @@
 import warnings
-import torch
-from torch.nn.parameter import Parameter
+from typing import Optional, Tuple
 
+import torch
+from torch import Tensor
+from .linear import Linear
+from torch.nn.init import xavier_uniform_
+from torch.nn.init import constant_
+from torch.nn.init import xavier_normal_
+from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
-from ..._jit_internal import weak_module, weak_script_method
 
 
-@torch._jit_internal.weak_module
 class Threshold(Module):
-    __constants__ = ['threshold', 'value', 'inplace']
-
-    r"""Thresholds each element of the input Tensor
+    r"""Thresholds each element of the input Tensor.
 
     Threshold is defined as:
 
@@ -38,30 +40,33 @@ class Threshold(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['threshold', 'value', 'inplace']
 
-    def __init__(self, threshold, value, inplace=False):
+    threshold: float
+    value: float
+    inplace: bool
+
+    def __init__(self, threshold: float, value: float, inplace: bool = False) -> None:
         super(Threshold, self).__init__()
         self.threshold = threshold
         self.value = value
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'threshold={}, value={}{}'.format(
             self.threshold, self.value, inplace_str
         )
 
 
-class ReLU(Threshold):
-    r"""Applies the rectified linear unit function element-wise
-    :math:`\text{ReLU}(x)= \max(0, x)`
+class ReLU(Module):
+    r"""Applies the rectified linear unit function element-wise:
 
-    .. image:: scripts/activation_images/ReLU.png
+    :math:`\text{ReLU}(x) = (x)^+ = \max(0, x)`
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -71,22 +76,36 @@ class ReLU(Threshold):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: ../scripts/activation_images/ReLU.png
+
     Examples::
 
         >>> m = nn.ReLU()
         >>> input = torch.randn(2)
         >>> output = m(input)
+
+
+      An implementation of CReLU - https://arxiv.org/abs/1603.05201
+
+        >>> m = nn.ReLU()
+        >>> input = torch.randn(2).unsqueeze(0)
+        >>> output = torch.cat((m(input),m(-input)))
     """
+    __constants__ = ['inplace']
+    inplace: bool
 
-    def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0, 0, inplace)
+    def __init__(self, inplace: bool = False):
+        super(ReLU, self).__init__()
+        self.inplace = inplace
 
-    def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+    def forward(self, input: Tensor) -> Tensor:
+        return F.relu(input, inplace=self.inplace)
+
+    def extra_repr(self) -> str:
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
-@torch._jit_internal.weak_module
 class RReLU(Module):
     r"""Applies the randomized leaky rectified liner unit function, element-wise,
     as described in the paper:
@@ -126,20 +145,28 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
-    __constants__ = ['lower', 'upper', 'inplace', 'training']
+    __constants__ = ['lower', 'upper', 'inplace']
 
-    def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
+    lower: float
+    upper: float
+    inplace: bool
+
+    def __init__(
+        self,
+        lower: float = 1. / 8,
+        upper: float = 1. / 3,
+        inplace: bool = False
+    ):
         super(RReLU, self).__init__()
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
@@ -158,8 +185,6 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted using
     :attr:`min_val` and :attr:`max_val`.
 
-    .. image:: scripts/activation_images/Hardtanh.png
-
     Args:
         min_val: minimum value of the linear region range. Default: -1
         max_val: maximum value of the linear region range. Default: 1
@@ -173,20 +198,34 @@ class Hardtanh(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: ../scripts/activation_images/Hardtanh.png
+
     Examples::
 
         >>> m = nn.Hardtanh(-2, 2)
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['min_val', 'max_val', 'inplace']
 
-    def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
+    min_val: float
+    max_val: float
+    inplace: bool
+
+    def __init__(
+        self,
+        min_val: float = -1.,
+        max_val: float = 1.,
+        inplace: bool = False,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None
+    ) -> None:
         super(Hardtanh, self).__init__()
         if min_value is not None:
-            warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
+            warnings.warn("keyword argument min_value is deprecated and rename to min_val")
             min_val = min_value
         if max_value is not None:
-            warnings.warn("keyword argument max_value is deprecated and renamed to max_val")
+            warnings.warn("keyword argument max_value is deprecated and rename to max_val")
             max_val = max_value
 
         self.min_val = min_val
@@ -194,11 +233,11 @@ class Hardtanh(Module):
         self.inplace = inplace
         assert self.max_val > self.min_val
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
-    def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+    def extra_repr(self) -> str:
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'min_val={}, max_val={}{}'.format(
             self.min_val, self.max_val, inplace_str
         )
@@ -218,7 +257,7 @@ class ReLU6(Hardtanh):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ReLU6.png
+    .. image:: ../scripts/activation_images/ReLU6.png
 
     Examples::
 
@@ -227,20 +266,19 @@ class ReLU6(Hardtanh):
         >>> output = m(input)
     """
 
-    def __init__(self, inplace=False):
-        super(ReLU6, self).__init__(0, 6, inplace)
+    def __init__(self, inplace: bool = False):
+        super(ReLU6, self).__init__(0., 6., inplace)
 
-    def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+    def extra_repr(self) -> str:
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
-@torch._jit_internal.weak_module
 class Sigmoid(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}
+        \text{Sigmoid}(x) = \sigma(x) = \frac{1}{1 + \exp(-x)}
 
 
     Shape:
@@ -248,7 +286,7 @@ class Sigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Sigmoid.png
+    .. image:: ../scripts/activation_images/Sigmoid.png
 
     Examples::
 
@@ -257,24 +295,58 @@ class Sigmoid(Module):
         >>> output = m(input)
     """
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return torch.sigmoid(input)
 
 
-@torch._jit_internal.weak_module
-class Tanh(Module):
+class Hardsigmoid(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 + 1 / 2 & \text{otherwise}
+        \end{cases}
+
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Tanh.png
+    Examples::
+
+        >>> m = nn.Hardsigmoid()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+    __constants__ = ['inplace']
+
+    inplace: bool
+
+    def __init__(self, inplace : bool = False) -> None:
+        super(Hardsigmoid, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.hardsigmoid(input, self.inplace)
+
+
+class Tanh(Module):
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: ../scripts/activation_images/Tanh.png
 
     Examples::
 
@@ -283,16 +355,97 @@ class Tanh(Module):
         >>> output = m(input)
     """
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return torch.tanh(input)
+
+class SiLU(Module):
+    r"""Applies the silu function, element-wise.
+
+    .. math::
+        \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
+
+    .. note::
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish:
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
+        where the SiLU was experimented with later.
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.SiLU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+    __constants__ = ['inplace']
+    inplace: bool
+
+    def __init__(self, inplace: bool = False):
+        super(SiLU, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.silu(input, inplace=self.inplace)
+
+    def extra_repr(self) -> str:
+        inplace_str = 'inplace=True' if self.inplace else ''
+        return inplace_str
+
+class Hardswish(Module):
+    r"""Applies the hardswish function, element-wise, as described in the paper:
+
+    `Searching for MobileNetV3`_.
+
+    .. math::
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x \cdot (x + 3) /6 & \text{otherwise}
+        \end{cases}
+
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Hardswish()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Searching for MobileNetV3`:
+        https://arxiv.org/abs/1905.02244
+    """
+    __constants__ = ['inplace']
+
+    inplace: bool
+
+    def __init__(self, inplace : bool = False) -> None:
+        super(Hardswish, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.hardswish(input, self.inplace)
 
 
 class ELU(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+        \text{ELU}(x) = \begin{cases}
+        x, & \text{ if } x > 0\\
+        \alpha * (\exp(x) - 1), & \text{ if } x \leq 0
+        \end{cases}
 
     Args:
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
@@ -303,7 +456,7 @@ class ELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ELU.png
+    .. image:: ../scripts/activation_images/ELU.png
 
     Examples::
 
@@ -311,17 +464,20 @@ class ELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['alpha', 'inplace']
+    alpha: float
+    inplace: bool
 
-    def __init__(self, alpha=1., inplace=False):
+    def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
         super(ELU, self).__init__()
         self.alpha = alpha
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.elu(input, self.alpha, self.inplace)
 
-    def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+    def extra_repr(self) -> str:
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -342,7 +498,7 @@ class CELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/CELU.png
+    .. image:: ../scripts/activation_images/CELU.png
 
     Examples::
 
@@ -353,17 +509,20 @@ class CELU(Module):
     .. _`Continuously Differentiable Exponential Linear Units`:
         https://arxiv.org/abs/1704.07483
     """
+    __constants__ = ['alpha', 'inplace']
+    alpha: float
+    inplace: bool
 
-    def __init__(self, alpha=1., inplace=False):
+    def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
         super(CELU, self).__init__()
         self.alpha = alpha
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.celu(input, self.alpha, self.inplace)
 
-    def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+    def extra_repr(self) -> str:
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -376,8 +535,6 @@ class SELU(Module):
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
-    .. image:: scripts/activation_images/SELU.png
-
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
@@ -388,6 +545,8 @@ class SELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: ../scripts/activation_images/SELU.png
+
     Examples::
 
         >>> m = nn.SELU()
@@ -396,31 +555,33 @@ class SELU(Module):
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
+    __constants__ = ['inplace']
+    inplace: bool
 
-    def __init__(self, inplace=False):
+    def __init__(self, inplace: bool = False) -> None:
         super(SELU, self).__init__()
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.selu(input, self.inplace)
 
-    def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+    def extra_repr(self) -> str:
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
-    of the input vector and :math:`b` is the second half.
+    of the input matrices and :math:`b` is the second half.
 
     Args:
         dim (int): the dimension on which to split the input. Default: -1
 
     Shape:
-        - Input: :math:`(*, N, *)` where `*` means, any number of additional
+        - Input: :math:`(\ast_1, N, \ast_2)` where `*` means, any number of additional
           dimensions
-        - Output: :math:`(*, N / 2, *)`
+        - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
     Examples::
 
@@ -428,19 +589,44 @@ class GLU(Module):
         >>> input = torch.randn(4, 2)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
+    dim: int
 
-    def __init__(self, dim=-1):
+    def __init__(self, dim: int = -1) -> None:
         super(GLU, self).__init__()
         self.dim = dim
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.glu(input, self.dim)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'dim={}'.format(self.dim)
 
 
-@torch._jit_internal.weak_module
+class GELU(Module):
+    r"""Applies the Gaussian Error Linear Units function:
+
+    .. math:: \text{GELU}(x) = x * \Phi(x)
+
+    where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: ../scripts/activation_images/GELU.png
+
+    Examples::
+
+        >>> m = nn.GELU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+    def forward(self, input: Tensor) -> Tensor:
+        return F.gelu(input)
+
+
 class Hardshrink(Module):
     r"""Applies the hard shrinkage function element-wise:
 
@@ -460,7 +646,7 @@ class Hardshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Hardshrink.png
+    .. image:: ../scripts/activation_images/Hardshrink.png
 
     Examples::
 
@@ -469,16 +655,16 @@ class Hardshrink(Module):
         >>> output = m(input)
     """
     __constants__ = ['lambd']
+    lambd: float
 
-    def __init__(self, lambd=0.5):
+    def __init__(self, lambd: float = 0.5) -> None:
         super(Hardshrink, self).__init__()
         self.lambd = lambd
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.hardshrink(input, self.lambd)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return '{}'.format(self.lambd)
 
 
@@ -507,7 +693,7 @@ class LeakyReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/LeakyReLU.png
+    .. image:: ../scripts/activation_images/LeakyReLU.png
 
     Examples::
 
@@ -515,31 +701,35 @@ class LeakyReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['inplace', 'negative_slope']
+    inplace: bool
+    negative_slope: float
 
-    def __init__(self, negative_slope=1e-2, inplace=False):
+    def __init__(self, negative_slope: float = 1e-2, inplace: bool = False) -> None:
         super(LeakyReLU, self).__init__()
         self.negative_slope = negative_slope
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
-    def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+    def extra_repr(self) -> str:
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
 class LogSigmoid(Module):
     r"""Applies the element-wise function:
 
-    .. math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
+    .. math::
+        \text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/LogSigmoid.png
+    .. image:: ../scripts/activation_images/LogSigmoid.png
 
     Examples::
 
@@ -548,7 +738,7 @@ class LogSigmoid(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.logsigmoid(input)
 
 
@@ -562,7 +752,7 @@ class Softplus(Module):
     to constrain the output of a machine to always be positive.
 
     For numerical stability the implementation reverts to the linear function
-    for inputs above a certain value.
+    when :math:`input \times \beta > threshold`.
 
     Args:
         beta: the :math:`\beta` value for the Softplus formulation. Default: 1
@@ -573,7 +763,7 @@ class Softplus(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softplus.png
+    .. image:: ../scripts/activation_images/Softplus.png
 
     Examples::
 
@@ -581,20 +771,22 @@ class Softplus(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['beta', 'threshold']
+    beta: int
+    threshold: int
 
-    def __init__(self, beta=1, threshold=20):
+    def __init__(self, beta: int = 1, threshold: int = 20) -> None:
         super(Softplus, self).__init__()
         self.beta = beta
         self.threshold = threshold
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.softplus(input, self.beta, self.threshold)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'beta={}, threshold={}'.format(self.beta, self.threshold)
 
 
-@torch._jit_internal.weak_module
 class Softshrink(Module):
     r"""Applies the soft shrinkage function elementwise:
 
@@ -607,14 +799,14 @@ class Softshrink(Module):
         \end{cases}
 
     Args:
-        lambd: the :math:`\lambda` value for the Softshrink formulation. Default: 0.5
+        lambd: the :math:`\lambda` (must be no less than zero) value for the Softshrink formulation. Default: 0.5
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softshrink.png
+    .. image:: ../scripts/activation_images/Softshrink.png
 
     Examples::
 
@@ -623,20 +815,178 @@ class Softshrink(Module):
         >>> output = m(input)
     """
     __constants__ = ['lambd']
+    lambd: float
 
-    def __init__(self, lambd=0.5):
+    def __init__(self, lambd: float = 0.5) -> None:
         super(Softshrink, self).__init__()
         self.lambd = lambd
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.softshrink(input, self.lambd)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return str(self.lambd)
 
 
-@torch._jit_internal.weak_module
+class MultiheadAttention(Module):
+    r"""Allows the model to jointly attend to information
+    from different representation subspaces.
+    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_
+
+    .. math::
+        \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
+
+    where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
+
+    Args:
+        embed_dim: total dimension of the model.
+        num_heads: parallel attention heads.
+        dropout: a Dropout layer on attn_output_weights. Default: 0.0.
+        bias: add bias as module parameter. Default: True.
+        add_bias_kv: add bias to the key and value sequences at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and
+                       value sequences at dim=1.
+        kdim: total number of features in key. Default: None.
+        vdim: total number of features in value. Default: None.
+
+    Note that if :attr:`kdim` and :attr:`vdim` are None, they will be set
+    to :attr:`embed_dim` such that query, key, and value have the same
+    number of features.
+
+    Examples::
+
+        >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
+        >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+    """
+    bias_k: Optional[torch.Tensor]
+    bias_v: Optional[torch.Tensor]
+
+    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
+        super(MultiheadAttention, self).__init__()
+        self.embed_dim = embed_dim
+        self.kdim = kdim if kdim is not None else embed_dim
+        self.vdim = vdim if vdim is not None else embed_dim
+        self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
+
+        self.num_heads = num_heads
+        self.dropout = dropout
+        self.head_dim = embed_dim // num_heads
+        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
+
+        if self._qkv_same_embed_dim is False:
+            self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
+            self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
+            self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
+            self.register_parameter('in_proj_weight', None)
+        else:
+            self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
+            self.register_parameter('q_proj_weight', None)
+            self.register_parameter('k_proj_weight', None)
+            self.register_parameter('v_proj_weight', None)
+
+        if bias:
+            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
+        else:
+            self.register_parameter('in_proj_bias', None)
+        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+
+        if add_bias_kv:
+            self.bias_k = Parameter(torch.empty(1, 1, embed_dim))
+            self.bias_v = Parameter(torch.empty(1, 1, embed_dim))
+        else:
+            self.bias_k = self.bias_v = None
+
+        self.add_zero_attn = add_zero_attn
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        if self._qkv_same_embed_dim:
+            xavier_uniform_(self.in_proj_weight)
+        else:
+            xavier_uniform_(self.q_proj_weight)
+            xavier_uniform_(self.k_proj_weight)
+            xavier_uniform_(self.v_proj_weight)
+
+        if self.in_proj_bias is not None:
+            constant_(self.in_proj_bias, 0.)
+            constant_(self.out_proj.bias, 0.)
+        if self.bias_k is not None:
+            xavier_normal_(self.bias_k)
+        if self.bias_v is not None:
+            xavier_normal_(self.bias_v)
+
+    def __setstate__(self, state):
+        # Support loading old MultiheadAttention checkpoints generated by v1.1.0
+        if '_qkv_same_embed_dim' not in state:
+            state['_qkv_same_embed_dim'] = True
+
+        super(MultiheadAttention, self).__setstate__(state)
+
+    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
+                need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+        r"""
+    Args:
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        key_padding_mask: if provided, specified padding elements in the key will
+            be ignored by the attention. When given a binary mask and a value is True,
+            the corresponding value on the attention layer will be ignored. When given
+            a byte mask and a value is non-zero, the corresponding value on the attention
+            layer will be ignored
+        need_weights: output attn_output_weights.
+        attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
+            the batches while a 3D mask allows to specify a different mask for the entries of each batch.
+
+    Shapes for inputs:
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
+          If a ByteTensor is provided, the non-zero positions will be ignored while the position
+          with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
+          value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
+        - attn_mask: if a 2D mask: :math:`(L, S)` where L is the target sequence length, S is the
+          source sequence length.
+
+          If a 3D mask: :math:`(N\cdot\text{num\_heads}, L, S)` where N is the batch size, L is the target sequence
+          length, S is the source sequence length. ``attn_mask`` ensure that position i is allowed to attend
+          the unmasked positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
+          while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+          is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
+          is provided, it will be added to the attention weight.
+
+    Shapes for outputs:
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+          E is the embedding dimension.
+        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
+          L is the target sequence length, S is the source sequence length.
+        """
+        if not self._qkv_same_embed_dim:
+            return F.multi_head_attention_forward(
+                query, key, value, self.embed_dim, self.num_heads,
+                self.in_proj_weight, self.in_proj_bias,
+                self.bias_k, self.bias_v, self.add_zero_attn,
+                self.dropout, self.out_proj.weight, self.out_proj.bias,
+                training=self.training,
+                key_padding_mask=key_padding_mask, need_weights=need_weights,
+                attn_mask=attn_mask, use_separate_proj_weight=True,
+                q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
+                v_proj_weight=self.v_proj_weight)
+        else:
+            return F.multi_head_attention_forward(
+                query, key, value, self.embed_dim, self.num_heads,
+                self.in_proj_weight, self.in_proj_bias,
+                self.bias_k, self.bias_v, self.add_zero_attn,
+                self.dropout, self.out_proj.weight, self.out_proj.bias,
+                training=self.training,
+                key_padding_mask=key_padding_mask, need_weights=need_weights,
+                attn_mask=attn_mask)
+
+
 class PReLU(Module):
     r"""Applies the element-wise function:
 
@@ -676,10 +1026,9 @@ class PReLU(Module):
         - Output: :math:`(N, *)`, same shape as the input
 
     Attributes:
-        weight (Tensor): the learnable weights of shape (attr:`num_parameters`).
-            The attr:`dtype` is default to
+        weight (Tensor): the learnable weights of shape (:attr:`num_parameters`).
 
-    .. image:: scripts/activation_images/PReLU.png
+    .. image:: ../scripts/activation_images/PReLU.png
 
     Examples::
 
@@ -687,21 +1036,21 @@ class PReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['num_parameters']
+    num_parameters: int
 
-    def __init__(self, num_parameters=1, init=0.25):
+    def __init__(self, num_parameters: int = 1, init: float = 0.25) -> None:
         self.num_parameters = num_parameters
         super(PReLU, self).__init__()
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'num_parameters={}'.format(self.num_parameters)
 
 
-@torch._jit_internal.weak_module
 class Softsign(Module):
     r"""Applies the element-wise function:
 
@@ -713,7 +1062,7 @@ class Softsign(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softsign.png
+    .. image:: ../scripts/activation_images/Softsign.png
 
     Examples::
 
@@ -722,24 +1071,22 @@ class Softsign(Module):
         >>> output = m(input)
     """
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.softsign(input)
 
 
-@torch._jit_internal.weak_module
 class Tanhshrink(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Tanhshrink}(x) = x - \text{Tanh}(x)
+        \text{Tanhshrink}(x) = x - \tanh(x)
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Tanhshrink.png
+    .. image:: ../scripts/activation_images/Tanhshrink.png
 
     Examples::
 
@@ -748,24 +1095,26 @@ class Tanhshrink(Module):
         >>> output = m(input)
     """
 
-    @torch._jit_internal.weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.tanhshrink(input)
 
 
 class Softmin(Module):
     r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range `(0, 1)` and sum to 1
+    lie in the range `[0, 1]` and sum to 1.
+
+    Softmin is defined as:
 
     .. math::
         \text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmin will be computed (so every slice
             along dim will sum to 1).
 
@@ -779,34 +1128,47 @@ class Softmin(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
+    dim: Optional[int]
 
-    def __init__(self, dim=None):
+    def __init__(self, dim: Optional[int] = None) -> None:
         super(Softmin, self).__init__()
         self.dim = dim
 
-    def forward(self, input):
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
+    def forward(self, input: Tensor) -> Tensor:
         return F.softmin(input, self.dim, _stacklevel=5)
 
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range (0,1) and sum to 1
+    lie in the range [0,1] and sum to 1.
 
     Softmax is defined as:
 
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
+    When the input Tensor is a sparse tensor then the unspecifed
+    values are treated as ``-inf``.
+
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmax will be computed (so every slice
             along dim will sum to 1).
 
@@ -817,12 +1179,15 @@ class Softmax(Module):
 
     Examples::
 
-        >>> m = nn.Softmax()
+        >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
-    """
 
-    def __init__(self, dim=None):
+    """
+    __constants__ = ['dim']
+    dim: Optional[int]
+
+    def __init__(self, dim: Optional[int] = None) -> None:
         super(Softmax, self).__init__()
         self.dim = dim
 
@@ -831,8 +1196,11 @@ class Softmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self) -> str:
+        return 'dim={dim}'.format(dim=self.dim)
 
 
 class Softmax2d(Module):
@@ -857,7 +1225,7 @@ class Softmax2d(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return F.softmax(input, 1, _stacklevel=5)
 
@@ -870,12 +1238,12 @@ class LogSoftmax(Module):
         \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
-        dim (int): A dimension along which Softmax will be computed (so every slice
-            along dim will sum to 1).
+    Args:
+        dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -887,8 +1255,10 @@ class LogSoftmax(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
+    dim: Optional[int]
 
-    def __init__(self, dim=None):
+    def __init__(self, dim: Optional[int] = None) -> None:
         super(LogSoftmax, self).__init__()
         self.dim = dim
 
@@ -897,5 +1267,8 @@ class LogSoftmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.log_softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)

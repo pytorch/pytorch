@@ -25,9 +25,9 @@ class ProfDAGStats {
   }
 
   std::pair<float, float> computeMoments() const {
-    CAFFE_ENFORCE_GT(cnt_, 0);
+    CAFFE_ENFORCE_GT(cnt_, 0U);
     float mean = sum_ / cnt_;
-    float stddev = std::sqrt(sqrsum_ / cnt_ - mean * mean);
+    float stddev = std::sqrt(std::abs(sqrsum_ / cnt_ - mean * mean));
     return {mean, stddev};
   }
 
@@ -49,19 +49,51 @@ class ProfDAGStats {
   size_t cnt_;
 };
 
-/**
- * A simple wrapper around prof_dag's counters
- */
-class ProfDAGCounters {
+class ProfDAGReport {
  public:
-  explicit ProfDAGCounters(const std::shared_ptr<const NetDef>& net_def);
-
+  friend class ProfDAGCounters;
   // Collects the execution time per each operator type
   ProfDAGProtos GetOperatorStats() const;
 
   // Collects the execution time of each operator, the output is
   // formatted as a map: (netName__opIndex__opType, cost)
   ProfDAGProtos GetPerOperatorCost() const;
+
+  ProfDAGReport& operator+=(const ProfDAGReport& rhs);
+
+  void PrintStats();
+
+ private:
+  ProfDAGProto statsProto(
+      const std::string& name,
+      const ProfDAGStats& stats,
+      const std::vector<std::string>& op_extra_info) const;
+
+  bool hasStats() const;
+
+  std::vector<std::string> op_types_;
+  std::vector<std::vector<std::string>> op_extra_info_;
+
+  std::string net_name_;
+
+  int num_runs_;
+  // Cumulative stats per operator instance of the net
+  std::vector<ProfDAGStats> time_per_op_total_;
+
+  // Cumulative stats per unique operator type
+  CaffeMap<std::string, ProfDAGStats> time_per_op_type_total_;
+
+  CaffeMap<std::string, ProfDAGStats> times_per_run_per_type_total_;
+
+  ProfDAGStats runtime_stats_;
+};
+
+/**
+ * A simple wrapper around prof_dag's counters
+ */
+class ProfDAGCounters {
+ public:
+  explicit ProfDAGCounters(const std::shared_ptr<const NetDef>& net_def);
 
   // ReportRunStart/End are called at the beginning and at the end of
   // each net's run
@@ -71,32 +103,15 @@ class ProfDAGCounters {
   void AddPerOpStartTime(size_t op_id);
   void AddPerOpEndTime(size_t op_id);
   void AddPerOpAsyncEndTime(size_t op_id);
-
-  void PrintStats();
+  ProfDAGReport GetReport() const;
 
  private:
-  ProfDAGProto statsProto(const std::string& name, const ProfDAGStats& stats)
-      const;
-
-  std::vector<std::string> op_types_;
-
-  // Cumulative stats per operator instance of the net
-  std::vector<ProfDAGStats> time_per_op_total_;
-
-  // Cumulative stats per unique operator type
-  CaffeMap<std::string, ProfDAGStats> time_per_op_type_total_;
-
-  CaffeMap<std::string, ProfDAGStats> times_per_run_per_type_total_;
-
-  std::string net_name_;
-
-  int num_runs_;
   Timer timer_;
-  ProfDAGStats runtime_stats_;
 
   std::vector<float> op_start_times_run_;
   std::vector<float> op_end_times_run_;
   std::vector<float> op_async_end_times_run_;
+  ProfDAGReport report_;
 };
 
 } // namespace caffe2

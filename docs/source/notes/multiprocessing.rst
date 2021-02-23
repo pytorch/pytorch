@@ -1,3 +1,5 @@
+.. _multiprocessing-best-practices:
+
 Multiprocessing best practices
 ==============================
 
@@ -20,24 +22,28 @@ memory and will only send a handle to another process.
 This allows to implement various training methods, like Hogwild, A3C, or any
 others that require asynchronous operation.
 
-Sharing CUDA tensors
---------------------
+.. _multiprocessing-cuda-note:
 
-Sharing CUDA tensors between processes is supported only in Python 3, using
-a ``spawn`` or ``forkserver`` start methods. :mod:`python:multiprocessing` in
-Python 2 can only create subprocesses using ``fork``, and it's not supported
-by the CUDA runtime.
+CUDA in multiprocessing
+-----------------------
 
-.. warning::
+The CUDA runtime does not support the ``fork`` start method; either the ``spawn`` or ``forkserver`` start method are
+required to use CUDA in subprocesses.
 
-    CUDA API requires that the allocation exported to other processes remains
-    valid as long as it's used by them. You should be careful and ensure that
-    CUDA tensors you shared don't go out of scope as long as it's necessary.
-    This shouldn't be a problem for sharing model parameters, but passing other
-    kinds of data should be done with care. Note that this restriction doesn't
-    apply to shared CPU memory.
+.. note::
+  The start method can be set via either creating a context with
+  ``multiprocessing.get_context(...)`` or directly using
+  ``multiprocessing.set_start_method(...)``.
 
-See also: :ref:`cuda-nn-dataparallel-instead`
+Unlike CPU tensors, the sending process is required to keep the original tensor
+as long as the receiving process retains a copy of the tensor. It is implemented
+under the hood but requires users to follow the best practices for the program
+to run correctly. For example, the sending process must stay alive as long as
+the consumer process has references to the tensor, and the refcounting can not
+save you if the consumer process exits abnormally via a fatal signal. See
+:ref:`this section <multiprocessing-cuda-sharing-details>`.
+
+See also: :ref:`cuda-nn-ddp-instead`
 
 
 Best practices and tips

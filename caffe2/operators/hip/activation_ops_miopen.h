@@ -1,7 +1,7 @@
 #ifndef CAFFE2_OPERATORS_ACTIVATION_OPS_MIOPEN_H_
 #define CAFFE2_OPERATORS_ACTIVATION_OPS_MIOPEN_H_
 
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
@@ -14,8 +14,7 @@ class MIOPENActivationOpBase : public Operator<HIPContext> {
   USE_OPERATOR_FUNCTIONS(HIPContext);
 
   MIOPENActivationOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<HIPContext>(operator_def, ws),
-        miopen_wrapper_(&context_) {
+      : Operator<HIPContext>(operator_def, ws), miopen_wrapper_(&context_) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateActivationDescriptor(&act_desc_));
   }
@@ -30,7 +29,6 @@ class MIOPENActivationOpBase : public Operator<HIPContext> {
   miopenTensorDescriptor_t data_desc_;
   miopenActivationDescriptor_t act_desc_;
   vector<int64_t> mio_dims_;
-
 };
 
 template <miopenActivationMode_t kMIOPENActivationMode>
@@ -45,7 +43,7 @@ class MIOPENActivationOp final : public MIOPENActivationOpBase {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -58,9 +56,9 @@ class MIOPENActivationOp final : public MIOPENActivationOpBase {
       return true;
     }
     // See if we need to reshape.
-    if (X.dims() != mio_dims_) {
+    if (X.sizes() != mio_dims_) {
       VLOG(1) << "Setting descriptors.";
-      mio_dims_ = X.dims().vec();
+      mio_dims_ = X.sizes().vec();
       int C = 1, H = 1, W = 1;
       if (X.ndim() == 4) {
         // Normal 4-dimensional tensors for images.
@@ -96,11 +94,11 @@ class MIOPENActivationGradientOp final : public MIOPENActivationOpBase {
   MIOPENActivationGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : MIOPENActivationOpBase(operator_def, ws) {
     MIOPEN_ENFORCE(miopenSetActivationDescriptor(
-        act_desc_, kMIOPENActivationMode,  1.0, 1.0, 1.0));
+        act_desc_, kMIOPENActivationMode, 1.0, 1.0, 1.0));
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -114,9 +112,9 @@ class MIOPENActivationGradientOp final : public MIOPENActivationOpBase {
       return true;
     }
     // See if we need to reshape.
-    if (Y.dims() != mio_dims_) {
+    if (Y.sizes() != mio_dims_) {
       VLOG(1) << "Setting descriptors.";
-      mio_dims_ = Y.dims().vec();
+      mio_dims_ = Y.sizes().vec();
       int C = 1, H = 1, W = 1;
       if (Y.ndim() == 4) {
         // Normal 4-dimensional tensors for images.

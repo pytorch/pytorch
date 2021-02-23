@@ -8,19 +8,9 @@
 
 namespace torch {
 namespace data {
-namespace detail {
-struct FullDataLoaderOptions;
-} // namespace detail
-} // namespace data
-} // namespace torch
-
-namespace torch {
-namespace data {
 
 /// Options to configure a `DataLoader`.
 struct DataLoaderOptions {
-  friend struct torch::data::detail::FullDataLoaderOptions;
-
   DataLoaderOptions() = default;
   /* implicit */ DataLoaderOptions(size_t batch_size)
       : batch_size_(batch_size) {}
@@ -57,12 +47,12 @@ struct DataLoaderOptions {
 /// instance, which will do any necessary coalescing.
 struct FullDataLoaderOptions {
   explicit FullDataLoaderOptions(DataLoaderOptions options)
-      : batch_size(options.batch_size_),
-        workers(options.workers_),
-        max_jobs(options.max_jobs_.value_or(2 * workers)),
-        timeout(options.timeout_),
-        enforce_ordering(options.enforce_ordering_),
-        drop_last(options.drop_last_) {}
+      : batch_size(options.batch_size()),
+        workers(options.workers()),
+        max_jobs(options.max_jobs().value_or(2 * workers)),
+        timeout(options.timeout()),
+        enforce_ordering(options.enforce_ordering()),
+        drop_last(options.drop_last()) {}
 
   size_t batch_size;
   size_t workers;

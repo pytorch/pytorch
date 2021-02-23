@@ -1,12 +1,12 @@
 #pragma once
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/types.h"
 #include "caffe2/utils/cast.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
-#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
@@ -15,7 +15,7 @@ class CastOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  CastOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CastOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     const ArgumentHelper helper(operator_def);
     TensorProto_DataType to = cast::GetCastDataType(helper, "to");
@@ -52,4 +52,4 @@ class CastOp : public Operator<Context> {
   bool (CastOp::*body_)();
 };
 
-}  // namespace caffe2
+} // namespace caffe2

@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import tempfile
 import unittest
@@ -30,6 +30,24 @@ class MetaNetDefTest(unittest.TestCase):
         meta_net_def = metanet_pb2.MetaNetDef()
         net_def = caffe2_pb2.NetDef()
         meta_net_def.nets.add(key="test_key", value=net_def)
+
+    def test_replace_blobs(self):
+        '''
+        Tests that NetDefs can be added to MetaNetDefs
+        '''
+        meta_net_def = metanet_pb2.MetaNetDef()
+        blob_name = "Test"
+        blob_def = ["AA"]
+        blob_def2 = ["BB"]
+        replaced_blob_def = ["CC"]
+        pred_utils.AddBlobs(meta_net_def, blob_name, blob_def)
+        self.assertEqual(blob_def, pred_utils.GetBlobs(meta_net_def, blob_name))
+        pred_utils.AddBlobs(meta_net_def, blob_name, blob_def2)
+        self.assertEqual(blob_def + blob_def2, pred_utils.GetBlobs(meta_net_def, blob_name))
+
+        pred_utils.ReplaceBlobs(meta_net_def, blob_name, replaced_blob_def)
+        self.assertEqual(replaced_blob_def, pred_utils.GetBlobs(meta_net_def, blob_name))
+
 
 class PredictorExporterTest(unittest.TestCase):
     def _create_model(self):
@@ -100,6 +118,15 @@ class PredictorExporterTest(unittest.TestCase):
 
         extra_init_net = core.Net('extra_init')
         extra_init_net.ConstantFill('data', 'data', value=1.0)
+
+        global_init_net = core.Net('global_init')
+        global_init_net.ConstantFill(
+            [],
+            'global_init_blob',
+            value=1.0,
+            shape=[1, 5],
+            dtype=core.DataType.FLOAT
+        )
         pem = pe.PredictorExportMeta(
             predict_net=self.predictor_export_meta.predict_net,
             parameters=self.predictor_export_meta.parameters,
@@ -107,6 +134,7 @@ class PredictorExporterTest(unittest.TestCase):
             outputs=self.predictor_export_meta.outputs,
             shapes=self.predictor_export_meta.shapes,
             extra_init_net=extra_init_net,
+            global_init_net=global_init_net,
             net_type='dag',
         )
 
@@ -142,10 +170,16 @@ class PredictorExporterTest(unittest.TestCase):
         np.testing.assert_array_equal(
             workspace.FetchBlob("y"), np.zeros(shape=(1, 10)))
 
+        self.assertTrue("global_init_blob" not in workspace.Blobs())
         # Load parameters from DB
         global_init_net = pred_utils.GetNet(meta_net_def,
                                             pc.GLOBAL_INIT_NET_TYPE)
         workspace.RunNetOnce(global_init_net)
+
+        # make sure the extra global_init_net is running
+        self.assertTrue(workspace.HasBlob('global_init_blob'))
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("global_init_blob"), np.ones(shape=(1, 5)))
 
         # Run the net with a reshaped input and verify we are
         # producing good numbers (with our custom implementation)

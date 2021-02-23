@@ -6,8 +6,8 @@
 #include <typeinfo>
 #include <vector>
 
-#include <ATen/core/intrusive_ptr.h>
-#include <ATen/core/typeid.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10/util/typeid.h>
 #include <c10/macros/Macros.h>
 
 namespace caffe2 {
@@ -21,7 +21,7 @@ class Tensor;
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
+class TORCH_API Blob final : public c10::intrusive_ptr_target {
  public:
   /**
    * Initializes an empty Blob.
@@ -51,14 +51,14 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Returns the meta info of the blob.
    */
-  inline const TypeMeta& meta() const noexcept {
+  const TypeMeta meta() const noexcept {
     return meta_;
   }
 
   /**
    * Returns a printable typename of the blob.
    */
-  inline const char* TypeName() const noexcept {
+  c10::string_view TypeName() const noexcept {
     return meta_.name();
   }
 
@@ -69,7 +69,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   // TODO(jerryzh): add a Get(DeviceType) function?
   template <class T>
   const T& Get() const {
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         IsType<T>(),
         "wrong type for the Blob instance. Blob contains ",
         meta_.name(),
@@ -155,10 +155,10 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
         TypeMeta::Make<typename std::remove_const<T>::type>()));
   }
 
-  void* ShareExternal(void* allocated, const TypeMeta& meta) {
+  void* ShareExternal(void* allocated, const TypeMeta meta) {
     free_();
     meta_ = meta;
-    pointer_ = static_cast<void*>(allocated);
+    pointer_ = allocated;
     has_ownership_ = false;
     return allocated;
   }
@@ -166,7 +166,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Resets the Blob to an empty one.
    */
-  inline void Reset() {
+  void Reset() {
     free_();
     pointer_ = nullptr;
     meta_ = TypeMeta();
@@ -185,15 +185,14 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
 
  private:
   void free_() {
-    if (has_ownership_) {
-      AT_ASSERTM(pointer_ != nullptr, "Can't have ownership of nullptr");
+    if (has_ownership_ && pointer_ != nullptr) {
       (*meta_.deleteFn())(pointer_);
     }
   }
 
   TypeMeta meta_;
-  void* pointer_ = nullptr;
-  bool has_ownership_ = false;
+  void* pointer_;
+  bool has_ownership_;
 
   C10_DISABLE_COPY_AND_ASSIGN(Blob);
 };

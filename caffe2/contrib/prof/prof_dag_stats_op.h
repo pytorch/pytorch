@@ -1,7 +1,6 @@
 #ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_
 
-#include "caffe2/contrib/prof/prof_dag_net.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/net_async_base.h"
 #include "caffe2/core/operator.h"
@@ -9,7 +8,7 @@
 
 namespace caffe2 {
 
-// This operator outputs the ProfDAGNet stats
+// This operator outputs the prof_dag stats
 template <typename T, class Context, class Engine = DefaultEngine>
 class GetProfDagStatsOp final : public Operator<Context> {
  public:
@@ -54,17 +53,9 @@ class GetProfDagStatsOp final : public Operator<Context> {
           " as part of its name");
     }
 
-    ProfDAGProtos stats;
     auto async_net = dynamic_cast_if_rtti<AsyncNetBase*>(net);
-    if (async_net) {
-      LOG(INFO) << "Using AsyncNetBase to collect stats";
-      stats = getProtos(async_net);
-    } else {
-      auto prof_dag_net = dynamic_cast_if_rtti<ProfDAGNet*>(net);
-      CAFFE_ENFORCE(prof_dag_net);
-      LOG(INFO) << "Using ProfDAGNet to collect stats";
-      stats = getProtos(prof_dag_net);
-    }
+    CAFFE_ENFORCE(async_net);
+    auto stats = getProtos(async_net);
 
     // Write protobuf message to the output blob
     std::string serialized_data;
@@ -75,8 +66,7 @@ class GetProfDagStatsOp final : public Operator<Context> {
     return true;
   }
 
-  template <typename Net>
-  ProfDAGProtos getProtos(Net* net) {
+  ProfDAGProtos getProtos(AsyncNetBase* net) {
     ProfDAGProtos stats;
     if (per_op_) {
       stats = net->GetPerOperatorCost();

@@ -1,68 +1,108 @@
-Torch Script
-============
+TorchScript
+===========
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Builtin Functions
+   :hidden:
+
+   torch.jit.supported_ops <jit_builtin_functions>
+
+
+.. toctree::
+    :maxdepth: 1
+    :caption: Language Reference
+    :hidden:
+
+    jit_language_reference
 
 .. contents:: :local:
+    :depth: 2
 
 .. automodule:: torch.jit
 .. currentmodule:: torch.jit
 
-Torch Script is a way to create serializable and optimizable models from PyTorch code.
-Any code written in Torch Script can be saved from your Python
+TorchScript is a way to create serializable and optimizable models from PyTorch code.
+Any TorchScript program can be saved from a Python
 process and loaded in a process where there is no Python dependency.
 
-We provide tools to incrementally transition a model from being a pure Python program
-to a Torch Script program that can be run independently from Python, for instance, in a standalone C++ program.
-This makes it possible to train models in PyTorch using familiar tools and then export
-the model to a production environment where it is not a good idea to run models as Python programs
+We provide tools to incrementally transition a model from a pure Python program
+to a TorchScript program that can be run independently from Python, such as in a standalone C++ program.
+This makes it possible to train models in PyTorch using familiar tools in Python and then export
+the model via TorchScript to a production environment where Python programs may be disadvantageous
 for performance and multi-threading reasons.
 
-Creating Torch Script Code
+For a gentle introduction to TorchScript, see the `Introduction to TorchScript <https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html>`_ tutorial.
+
+For an end-to-end example of converting a PyTorch model to TorchScript and running it in C++, see the
+`Loading a PyTorch Model in C++ <https://pytorch.org/tutorials/advanced/cpp_export.html>`_ tutorial.
+
+Creating TorchScript Code
 --------------------------
 
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autoclass:: ScriptModule
-    :members:
-
-    .. method:: save(filename)
-
-       Save an offline version of this module for use in a separate process. The saved
-       module serializes all of the methods and parameters of this module. It can be
-       loaded into the C++ API using ``torch::jit::load(filename)`` or into the Python
-       API with ``torch.jit.load(filename)``.
-
-       To be able to save a module, it must not make any calls to native python functions.
-       This means that all submodules must be subclasses of ScriptModules as well.
-
-       .. DANGER::
-          All modules, no matter their device, are always loaded onto the CPU during loading.
-          This is different from :func:`torch.load`'s semantics and may change in the future.
-
-
-.. autofunction:: load
-
-.. autofunction:: trace
-
+    script
+    trace
+    script_if_tracing
+    trace_module
+    fork
+    wait
+    ScriptModule
+    ScriptFunction
+    freeze
+    save
+    load
+    ignore
+    unused
+    isinstance
 
 Mixing Tracing and Scripting
 ----------------------------
 
-In many cases either tracing or script is an easier approach for converting a model.
-We allow you to compose tracing and scripting to suit the particular requirements
+In many cases either tracing or scripting is an easier approach for converting a model to TorchScript.
+Tracing and scripting can be composed to suit the particular requirements
 of a part of a model.
 
-Scripted functions can call traced ones. This is particularly useful when you need
+Scripted functions can call traced functions. This is particularly useful when you need
 to use control-flow around a simple feed-forward model. For instance the beam search
 of a sequence to sequence model will typically be written in script but can call an
 encoder module generated using tracing.
 
-Example:
 
-::
+.. testsetup::
+
+    # These are hidden from the docs, but these are necessary for `doctest`
+    # since the `inspect` module doesn't play nicely with the execution
+    # environment for `doctest`
+    import torch
+
+    original_script = torch.jit.script
+    def script_wrapper(obj, *args, **kwargs):
+        obj.__module__ = 'FakeMod'
+        return original_script(obj, *args, **kwargs)
+
+    torch.jit.script = script_wrapper
+
+    original_trace = torch.jit.trace
+    def trace_wrapper(obj, *args, **kwargs):
+        obj.__module__ = 'FakeMod'
+        return original_trace(obj, *args, **kwargs)
+
+    torch.jit.trace = trace_wrapper
+
+
+Example (calling a traced function in script):
+
+.. testcode::
 
     import torch
 
     def foo(x, y):
         return 2 * x + y
+
     traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
     @torch.jit.script
@@ -72,11 +112,11 @@ Example:
 Traced functions can call script functions. This is useful when a small part of
 a model requires some control-flow even though most of the model is just a feed-forward
 network. Control-flow inside of a script function called by a traced function is
-preserved correctly:
+preserved correctly.
 
-Example:
+Example (calling a script function in a traced function):
 
-::
+.. testcode::
 
     import torch
 
@@ -92,19 +132,20 @@ Example:
     def bar(x, y, z):
         return foo(x, y) + z
 
-    traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3))
+    traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3)))
 
-This composition also works for modules as well, where it can be used to generate
-a submodule using tracing that can be called from the methods of a script module:
+This composition also works for ``nn.Module``\s as well, where it can be used to generate
+a submodule using tracing that can be called from the methods of a script module.
 
-Example:
+Example (using a traced module):
 
-::
+.. testcode::
+    :skipif: torchvision is None
 
     import torch
     import torchvision
 
-    class MyScriptModule(torch.jit.ScriptModule):
+    class MyScriptModule(torch.nn.Module):
         def __init__(self):
             super(MyScriptModule, self).__init__()
             self.means = torch.nn.Parameter(torch.tensor([103.939, 116.779, 123.68])
@@ -112,691 +153,708 @@ Example:
             self.resnet = torch.jit.trace(torchvision.models.resnet18(),
                                           torch.rand(1, 3, 224, 224))
 
-        @torch.jit.script_method
         def forward(self, input):
             return self.resnet(input - self.means)
 
+    my_script_module = torch.jit.script(MyScriptModule())
 
-Torch Script Language Reference
--------------------------------
 
-Torch Script is a subset of Python that can either be written directly (using
-the @script annotations) or generated automatically from Python code via
-tracing. When using tracing, code is automatically converted into this subset of
-Python by recording only the actual operators on tensors and simply executing and
-discarding the other surrounding Python code.
+TorchScript Language
+--------------------
 
-When writing Torch Script directly using @script annotations, the programmer must
-only use the subset of Python supported in Torch Script. This section documents
-what is supported in Torch Script as if it were a language reference for a stand
-alone language. Any features of Python not mentioned in this reference are not
-part of Torch Script.
+TorchScript is a statically typed subset of Python, so many Python features apply
+directly to TorchScript. See the full :ref:`language-reference` for details.
 
-As a subset of Python any valid Torch Script function is also a valid Python
-function. This makes it possible to remove the @script annotations and debug the
-function using standard Python tools like pdb. The reverse is not true: there
-are many valid python programs that are not valid Torch Script programs.
-Instead, Torch Script focuses specifically on the features of Python that are
-needed to represent neural network models in Torch.
 
-.. envvar:: PYTORCH_JIT=1
+.. _builtin functions:
 
-    Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
-    and tracing annotations. If there is hard-to-debug error in one of your
-    ScriptModules, you can use this flag to force everything to run using native
-    Python. This allows the use of tools like ``pdb`` to debug code.
+Built-in Functions and Modules
+------------------------------
 
+TorchScript supports the use of most PyTorch functions and many Python built-ins.
+See :ref:`builtin-functions` for a full reference of supported functions.
 
-Types
-~~~~~
+PyTorch Functions and Modules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The largest difference between Torch Script and the full Python language is that
-Torch Script only support a small set of types that are needed to express neural
-net models. In particular Torch Script supports:
+TorchScript supports a subset of the tensor and neural network
+functions that PyTorch provides. Most methods on Tensor as well as functions in
+the ``torch`` namespace, all functions in ``torch.nn.functional`` and
+most modules from ``torch.nn`` are supported in TorchScript.
 
-``Tensor``
-    A PyTorch tensor of any dtype, dimension, or backend.
+See :ref:`jit_unsupported` for a list of unsupported PyTorch functions and modules.
 
-``Tuple[T0, T1, ...]``
-    A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)
 
-``int``
-    A scalar integer
+Python Functions and Modules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Many of Python's `built-in functions <https://docs.python.org/3/library/functions.html>`_ are supported in TorchScript.
+The :any:`math` module is also supported (see :ref:`math-module` for details), but no other Python modules
+(built-in or third party) are supported.
 
-``float``
-    A scalar floating point number
 
-``List[T]``
-    A list of which all members are type ``T``
+Python Language Reference Comparison
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Unlike Python, each variable in Torch Script function must have a single static type.
-This makes it easier to optimize Torch Script functions.
-
-Example::
-
-    @torch.jit.script
-    def an_error(x):
-        if x:
-            r = torch.rand(1)
-        else:
-            r = 4
-        return r # Type mismatch: r is set to type Tensor in the true branch
-                 # and type int in the false branch
-
-By default, all parameters to a Torch Script function are assumed to be Tensor
-because this is the most common type used in modules. To specify that an
-argument to a Torch Script function is another type, it is possible to use
-MyPy-style type annotations using the types listed above:
-
-Example::
-
-    @torch.jit.script
-    def foo(x, tup):
-        # type: (int, Tuple[Tensor, Tensor]) -> Tensor
-        t0, t1 = tup
-        return t0 + t1 + x
-
-    print(foo(3, (torch.rand(3), torch.rand(3))))
-
-.. note::
-  It is also possible to annotate types with Python 3 type annotations.
-  In our examples, we use comment-based annotations to ensure Python 2
-  compatibility as well.
-
-Expressions
-~~~~~~~~~~~
-
-The following Python Expressions are supported
-
-Literals
-    ``True``, ``False``, ``None``, ``'string literals'``, ``"string literals"``,
-    number literals ``3`` (interpreted as int) ``3.4`` (interpreter as a float)
-
-Variables
-  ``a``
-
-  .. note::
-      See `Variable Resolution`_ for how variables are resolved.
-
-Tuple Construction
-    ``(3, 4)``, ``(3,)``
-
-List Construction
-    ``[3, 4]``, ``[]``, ``[torch.rand(3), torch.rand(4)]``
-
-    .. note::
-        an empty list is assumed have type ``List[Tensor]``.
-        The types of other list literals are derived from the type of the members.
-
-Arithmetic Operators
-  ``a + b``
-  ``a - b``
-  ``a * b``
-  ``a / b``
-  ``a ^ b``
-  ``a @ b``
-
-Comparison Operators
-  ``a == b``
-  ``a != b``
-  ``a < b``
-  ``a > b``
-  ``a <= b``
-  ``a >= b``
-
-Logical Operators
-  ``a and b``
-  ``a or b``
-  ``not b``
-
-Subscripts
-  ``t[0]``
-  ``t[-1]``
-  ``t[0:2]``
-  ``t[1:]``
-  ``t[:1]``
-  ``t[:]``
-  ``t[0, 1]``
-  ``t[0, 1:2]``
-  ``t[0, :1]``
-  ``t[-1, 1:, 0]``
-  ``t[1:, -1, 0]``
-  ``t[i:j, i]``
-
-  .. note::
-    Torch Script currently does not support mutating tensors in place, so any
-    tensor indexing can only appear on the right-hand size of an expression.
-
-Function calls
-   Calls to built-in functions: ``torch.rand(3, dtype=torch.int)``
-
-   Calls to other script functions:
-
-   ::
-
-        import torch
-
-        @torch.jit.script
-        def foo(x):
-          return x + 1
-
-        @torch.jit.script
-        def bar(x):
-          return foo(x)
-
-Method calls
-    Calls to methods of builtin types like tensor: ``x.mm(y)``
-
-
-    When defining a Script method inside of a ScriptModule, the ``@script_method``
-    annotation is used. Inside of these methods it is possible to call other methods
-    of this class or access methods on the submodules.
-
-    Calling a submodule directly (e.g. ``self.resnet(input)``) is equivalent to
-    calling its ``forward`` method (e.g. ``self.resnet.forward(input)``)
-
-    ::
-
-        import torch
-
-        class MyScriptModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(MyScriptModule, self).__init__()
-                self.means = torch.nn.Parameter(torch.tensor([103.939, 116.779, 123.68])
-                                                .resize_(1, 3, 1, 1))
-                self.resnet = torch.jit.trace(torchvision.models.resnet18(),
-                                              torch.rand(1, 3, 224, 224))
-
-            @torch.jit.script_method
-            def helper(self, input):
-              return self.resnet(input - self.means)
-
-            @torch.jit.script_method
-            def forward(self, input):
-                return self.helper(input)
-
-If expressions
-    ``x if x > y else y``
-
-Casts
-    ``float(ten)``, ``int(3.5)``, ``bool(ten)``
-
-Accessing Module Parameters
-    ``self.my_parameter`` ``self.my_submodule.my_parameter``
-
-
-Statements
-~~~~~~~~~~
-
-Torch Script supports the following types of statements:
-
-Simple Assignments
-
-    ::
-
-        a = b
-        a += b # short-hand for a = a + b, does not operate in-place on a
-        a -= b
-
-Pattern Matching Assignments
-
-    ::
-
-        a, b = tuple_or_list
-        a, b, *c = a_tuple
-
-Print Statements
-
-  ``print("the result of an add:", a + b)``
-
-If Statements
-
-    ::
-
-        if a < 4:
-            r = -a
-        elif a < 3:
-            r = a + a
-        else:
-            r = 3 * a
-
-While Loops
-
-  ::
-
-      a = 0
-      while a < 4:
-          print(a)
-          a += 1
-
-
-For loops with ``range``
-
-    ::
-
-        x = 0
-        for i in range(10):
-            x *= i
-
-    .. note::
-      Script currently does not support iterating over generic iterable
-      objects like lists or tensors. Script currently does not support start or
-      increment parameters to range. These will be added in a future version.
-
-For loops over tuples:
-
-    ::
-
-        tup = (3, torch.rand(4))
-        for x in tup:
-            print(x)
-
-    .. note::
-      for loops over tuples will unroll the loop, generating a body for
-      each member of the tuple. The body must type-check correctly for each member.
-
-For loops over constant ``torch.nn.ModuleList``
-
-      ::
-
-          class SubModule(torch.jit.ScriptModule):
-              def __init__(self):
-                  super(Sub, self).__init__()
-                  self.weight = nn.Parameter(torch.randn(2))
-
-              @torch.jit.script_method
-              def forward(self, input):
-                  return self.weight + input
-
-          class MyModule(torch.jit.ScriptModule):
-              __constants__ = ['mods']
-
-              def __init__(self):
-                  super(MyModule, self).__init__()
-                  self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
-
-              @torch.jit.script_method
-              def forward(self, v):
-                  for module in self.mods:
-                      v = m(v)
-                  return v
-
-      .. note::
-          To use a module list inside a ``@script_method`` it must be marked
-          constant by adding the name of the attribute to the ``__constants__``
-          list for the type. For loops over a ModuleList will unroll the body of the
-          loop at compile time, with each member of the constant module list.
-
-Return
-    ``return a, b``
-
-    .. note::
-        there must be a return statement as the last member of the function
-        and return statements cannot appear anywhere else in the function. This
-        restriction will be removed in the future.
-
-Variable Resolution
-~~~~~~~~~~~~~~~~~~~
-
-Torch Script supports a subset of Python's variable resolution (i.e. scoping)
-rules. Local variables behave the same as in Python, except for the restriction
-that a variable must have the same type along all paths through a function.
-If a variable has a different type on different sides of an if statement, it
-is an error to use it after the end of the if statement.
-
-Similarly, a variable is not allowed to be used if it is only *defined* along some
-paths through the function.
-
-Example::
-
-    @torch.jit.script
-    def foo(x):
-        if x < 0:
-            y = 4
-        print(y) # Error: undefined value y
-
-Non-local variables are resolved to Python values at compile time when the
-function is defined. These values are then converted into Torch Script values using
-the rules described in `Use of Python Values`_.
-
-Use of Python Values
-~~~~~~~~~~~~~~~~~~~~
-
-To make writing Torch Script more convenient, we allow script code to refer
-to Python values in the surrounding scope. For instance, any time there is a
-reference to ``torch``, the Torch Script compiler is actually resolving it to the
-``torch`` Python module when the function is declared.  These Python values are
-not a first class part of Torch Script. Instead they are desugared at compile-time
-into the primitive types that Torch Script supports. This section describes the
-rules that are used when accessing Python values in Torch Script. They depend
-on the dynamic type of the python valued referenced.
-
-Functions
-  Torch Script can call python functions. This functionality is very useful when
-  incrementally converting a model into script. The model can be moved function-by-function
-  to script, leaving calls to Python functions in place. This way you can incrementally
-  check the correctness of the model as you go.
-
-  Example::
-
-      def foo(x):
-        print("I am called with {}".format(x))
-        import pdb; pdb.set_trace()
-        return x
-
-      @torch.jit.script
-      def bar(x)
-        return foo(x + 1)
-
-  .. note::
-    Attempting to call ``save`` on a ScriptModule that contains calls to Python
-    functions will fail. The intention is that this pathway is used for debugging
-    and the calls removed or turned into script functions before saving.
-
-
-Attribute Lookup On Python Modules
-    Torch Script can lookup attributes on modules. Builtin functions like ``torch.add``
-    are accessed this way. This allows Torch Script to call functions defined in
-    other modules.
-
-Python-defined Constants
-    Torch Script also provides a way to use constants that are defined in Python.
-    These can be used to hard-code hyper-parameters into the function, or to
-    define universal constants. There are two ways of specifying that a Python
-    value should be treated as a constant.
-
-    1. Values looked up as attributes of a module are assumed to be constant.
-       Example: ``math.pi``
-    2. Attributes of a ScriptModule can be marked constant by listing them
-       as a member of the ``__constants__`` property of the class:
-
-       Example::
-
-           class Foo(torch.jit.ScriptModule):
-               __constants__ = ['a']
-
-               def __init__(self):
-                   super(Foo, self).__init__(False)
-                   self.a = 1 + 4
-
-              @torch.jit.ScriptModule
-              def forward(self, input):
-                  return self.a + input
-
-    Supported constant Python Values are
-
-    * ``int``
-    * ``bool``
-    * ``torch.device``
-    * ``torch.layout``
-    * ``torch.dtype``
-    * tuples containing supported types
-    * ``torch.nn.ModuleList`` which can be used in a TorchScript for loop
-
+For a full listing of supported Python features, see :ref:`python-language-reference`.
 
 Debugging
-~~~~~~~~~
+---------
+
+.. _`disable TorchScript`:
 
 Disable JIT for Debugging
-    If you want to disable all JIT modes (tracing and scripting) so you can
-    debug your program in raw Python, you can use the ``PYTORCH_JIT`` environment
-    variable. ``PYTORCH_JIT`` can be used to globally disable the
-    JIT by setting its value to ``0``. Given an example script::
+~~~~~~~~~~~~~~~~~~~~~~~~~
+.. envvar:: PYTORCH_JIT
 
-        @torch.jit.script
-        def scripted_fn(x : torch.Tensor):
-            for i in range(12):
-                x = x + x
-            return x
+Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
+and tracing annotations. If there is hard-to-debug error in one of your
+TorchScript models, you can use this flag to force everything to run using native
+Python. Since TorchScript (scripting and tracing) is disabled with this flag,
+you can use tools like ``pdb`` to debug the model code.  For example::
 
+    @torch.jit.script
+    def scripted_fn(x : torch.Tensor):
+        for i in range(12):
+            x = x + x
+        return x
 
-        def fn(x):
-            x = torch.neg(x)
-            import pdb; pdb.set_trace()
-            return scripted_fn(x)
+    def fn(x):
+        x = torch.neg(x)
+        import pdb; pdb.set_trace()
+        return scripted_fn(x)
 
-        traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
+    traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
+    traced_fn(torch.rand(3, 4))
 
-        traced_fn(torch.rand(3, 4))
+Debugging this script with ``pdb`` works except for when we invoke the
+:func:`@torch.jit.script <torch.jit.script>` function. We can globally disable
+JIT, so that we can call the :func:`@torch.jit.script <torch.jit.script>`
+function as a normal Python function and not compile it. If the above script
+is called ``disable_jit_example.py``, we can invoke it like so::
 
-    Debugging this script with PDB works except for when we invoke the @script
-    function. We can globally disable JIT, so that we can call the @script
-    function as a normal python function and not compile it. If the above script
-    is called ``disable_jit_example.py``, we can invoke it like so::
+    $ PYTORCH_JIT=0 python disable_jit_example.py
 
-        $ PYTORCH_JIT=0 python disable_jit_example.py
+and we will be able to step into the :func:`@torch.jit.script
+<torch.jit.script>` function as a normal Python function. To disable the
+TorchScript compiler for a specific function, see
+:func:`@torch.jit.ignore <torch.jit.ignore>`.
 
-    and we will be able to step into the @script function as a normal Python
-    function.
+.. _inspecting-code:
 
+Inspecting Code
+~~~~~~~~~~~~~~~
 
-Interpreting Graphs
-    TorchScript uses a static single assignment (SSA) intermediate representation
-    (IR) to represent computation. The instructions in this format consist of
-    ATen (the C++ backend of PyTorch) operators and other primitive operators,
-    including control flow operators for loops and conditionals. As an example::
+TorchScript provides a code pretty-printer for all :class:`ScriptModule` instances. This
+pretty-printer gives an interpretation of the script method's code as valid
+Python syntax. For example:
 
-        @torch.jit.script
-        def foo(len):
-          # type: (int) -> torch.Tensor
-          rv = torch.zeros(3, 4)
-          for i in range(len):
+.. testcode::
+
+    @torch.jit.script
+    def foo(len):
+        # type: (int) -> torch.Tensor
+        rv = torch.zeros(3, 4)
+        for i in range(len):
             if i < 10:
                 rv = rv - 1.0
             else:
                 rv = rv + 1.0
-          return rv
+        return rv
 
-        print(foo.graph)
+    print(foo.code)
 
-    A ``ScriptModule`` with a single ``forward`` method will have an attribute
-    ``graph``, which you can use to inspect the IR representing the computation.
-    If the ScriptModule has more than one method, you will need to access
-    ``.graph`` on the method itself and not the module. We can inspect the
-    graph of a method named ``bar`` on a ScriptModule by accessing ``.bar.graph``.
+.. testoutput::
+    :hide:
 
-    The example script above produces the graph::
+    ...
 
-        graph(%len : int) {
-          %13 : float = prim::Constant[value=1]()
-          %10 : int = prim::Constant[value=10]()
-          %2 : int = prim::Constant[value=4]()
-          %1 : int = prim::Constant[value=3]()
-          %3 : int[] = prim::ListConstruct(%1, %2)
-          %4 : int = prim::Constant[value=6]()
-          %5 : int = prim::Constant[value=0]()
-          %6 : int[] = prim::Constant[value=[0, -1]]()
-          %rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)
-          %8 : int = prim::Constant[value=1]()
-          %rv : Dynamic = prim::Loop(%len, %8, %rv.1)
-            block0(%i : int, %12 : Dynamic) {
-              %11 : int = aten::lt(%i, %10)
-              %rv.4 : Dynamic = prim::If(%11)
-                block0() {
-                  %14 : int = prim::Constant[value=1]()
-                  %rv.2 : Dynamic = aten::sub(%12, %13, %14)
-                  -> (%rv.2)
-                }
-                block1() {
-                  %16 : int = prim::Constant[value=1]()
-                  %rv.3 : Dynamic = aten::add(%12, %13, %16)
-                  -> (%rv.3)
-                }
-              %19 : int = prim::Constant[value=1]()
-              -> (%19, %rv.4)
-            }
-          return (%rv);
-        }
+A :class:`ScriptModule` with a single ``forward`` method will have an attribute
+``code``, which you can use to inspect the :class:`ScriptModule`'s code.
+If the :class:`ScriptModule` has more than one method, you will need to access
+``.code`` on the method itself and not the module. We can inspect the
+code of a method named ``foo`` on a :class:`ScriptModule` by accessing ``.foo.code``.
+The example above produces this output: ::
 
-    Take the instruction ``%rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)`` for
-    example. ``%rv.1 : Dynamic`` means we assign the output to a (unique)
-    value named ``rv.1``, and that value is of ``Dynamic`` type, i.e. we do
-    not know its concrete shape. ``aten::zeros`` is the operator (equivalent
-    to ``torch.zeros``) and the input list ``(%3, %4, %5, %6)`` specifies which
-    values in scope should be passed as inputs. The schema for built-in functions
-    like ``aten::zeros`` can be found at `Builtin Functions`_.
+    def foo(len: int) -> Tensor:
+        rv = torch.zeros([3, 4], dtype=None, layout=None, device=None, pin_memory=None)
+        rv0 = rv
+        for i in range(len):
+            if torch.lt(i, 10):
+                rv1 = torch.sub(rv0, 1., 1)
+            else:
+                rv1 = torch.add(rv0, 1., 1)
+            rv0 = rv1
+        return rv0
 
-    Notice that operators can also have associated ``blocks``, namely the
-    ``prim::Loop`` and ``prim::If`` operators. In the graph print-out, these
-    operators are formatted to reflect their equivalent source code forms
-    to facilitate easy debugging.
+This is TorchScript's compilation of the code for the ``forward`` method.
+You can use this to ensure TorchScript (tracing or scripting) has captured
+your model code correctly.
 
-    Graphs can be inspected as shown to confirm that the computation described
-    by a ``ScriptModule`` is correct, in both automated and manual fashion, as
-    described below.
+
+.. _interpreting-graphs:
+
+Interpreting Graphs
+~~~~~~~~~~~~~~~~~~~
+TorchScript also has a representation at a lower level than the code pretty-
+printer, in the form of IR graphs.
+
+TorchScript uses a static single assignment (SSA) intermediate representation
+(IR) to represent computation. The instructions in this format consist of
+ATen (the C++ backend of PyTorch) operators and other primitive operators,
+including control flow operators for loops and conditionals. As an example:
+
+.. testcode::
+
+    @torch.jit.script
+    def foo(len):
+        # type: (int) -> torch.Tensor
+        rv = torch.zeros(3, 4)
+        for i in range(len):
+            if i < 10:
+                rv = rv - 1.0
+            else:
+                rv = rv + 1.0
+        return rv
+
+    print(foo.graph)
+
+.. testoutput::
+    :hide:
+
+    ...
+
+``graph`` follows the same rules described in the :ref:`inspecting-code` section
+with regard to ``forward`` method lookup.
+
+The example script above produces the graph::
+
+    graph(%len.1 : int):
+      %24 : int = prim::Constant[value=1]()
+      %17 : bool = prim::Constant[value=1]() # test.py:10:5
+      %12 : bool? = prim::Constant()
+      %10 : Device? = prim::Constant()
+      %6 : int? = prim::Constant()
+      %1 : int = prim::Constant[value=3]() # test.py:9:22
+      %2 : int = prim::Constant[value=4]() # test.py:9:25
+      %20 : int = prim::Constant[value=10]() # test.py:11:16
+      %23 : float = prim::Constant[value=1]() # test.py:12:23
+      %4 : int[] = prim::ListConstruct(%1, %2)
+      %rv.1 : Tensor = aten::zeros(%4, %6, %6, %10, %12) # test.py:9:10
+      %rv : Tensor = prim::Loop(%len.1, %17, %rv.1) # test.py:10:5
+        block0(%i.1 : int, %rv.14 : Tensor):
+          %21 : bool = aten::lt(%i.1, %20) # test.py:11:12
+          %rv.13 : Tensor = prim::If(%21) # test.py:11:9
+            block0():
+              %rv.3 : Tensor = aten::sub(%rv.14, %23, %24) # test.py:12:18
+              -> (%rv.3)
+            block1():
+              %rv.6 : Tensor = aten::add(%rv.14, %23, %24) # test.py:14:18
+              -> (%rv.6)
+          -> (%17, %rv.13)
+      return (%rv)
+
+
+Take the instruction ``%rv.1 : Tensor = aten::zeros(%4, %6, %6, %10, %12) # test.py:9:10`` for
+example.
+
+* ``%rv.1 : Tensor`` means we assign the output to a (unique) value named ``rv.1``, that value is of ``Tensor`` type and that we do not know its concrete shape.
+* ``aten::zeros`` is the operator (equivalent to ``torch.zeros``) and the input list ``(%4, %6, %6, %10, %12)`` specifies which values in scope should be passed as inputs. The schema for built-in functions like ``aten::zeros`` can be found at `Builtin Functions`_.
+* ``# test.py:9:10`` is the location in the original source file that generated this instruction. In this case, it is a file named `test.py`, on line 9, and at character 10.
+
+Notice that operators can also have associated ``blocks``, namely the
+``prim::Loop`` and ``prim::If`` operators. In the graph print-out, these
+operators are formatted to reflect their equivalent source code forms
+to facilitate easy debugging.
+
+Graphs can be inspected as shown to confirm that the computation described
+by a :class:`ScriptModule` is correct, in both automated and manual fashion, as
+described below.
+
+Tracer
+~~~~~~
 
 
 Tracing Edge Cases
-    There are some edge cases that exist where the trace of a given Python
-    function/module will not be representative of the underlying code. These
-    cases can include:
+^^^^^^^^^^^^^^^^^^
+There are some edge cases that exist where the trace of a given Python
+function/module will not be representative of the underlying code. These
+cases can include:
 
-    * Tracing of control flow that is dependent on inputs (e.g. tensor shapes)
-    * Tracing of in-place operations of tensor views (e.g. indexing on the
-      left-hand side of an assignment)
+* Tracing of control flow that is dependent on inputs (e.g. tensor shapes)
+* Tracing of in-place operations of tensor views (e.g. indexing on the left-hand side of an assignment)
 
-    Note that these cases may in fact be traceable in the future.
+Note that these cases may in fact be traceable in the future.
 
 
 Automatic Trace Checking
-    One way to automatically catch many errors in traces is by using ``check_inputs``
-    on the ``torch.jit.trace()`` API. ``check_inputs`` takes a list of tuples
-    of inputs that will be used to re-trace the computation and verify the
-    results. For example::
+^^^^^^^^^^^^^^^^^^^^^^^^
+One way to automatically catch many errors in traces is by using ``check_inputs``
+on the ``torch.jit.trace()`` API. ``check_inputs`` takes a list of tuples
+of inputs that will be used to re-trace the computation and verify the
+results. For example::
 
-        def loop_in_traced_fn(x):
-            result = x[0]
-            for i in range(x.size(0)):
-                result = result * x[i]
-            return result
+    def loop_in_traced_fn(x):
+        result = x[0]
+        for i in range(x.size(0)):
+            result = result * x[i]
+        return result
 
-        inputs = (torch.rand(3, 4, 5),)
-        check_inputs = [(torch.rand(4, 5, 6),), (torch.rand(2, 3, 4),)]
+    inputs = (torch.rand(3, 4, 5),)
+    check_inputs = [(torch.rand(4, 5, 6),), (torch.rand(2, 3, 4),)]
 
-        traced = torch.jit.trace(loop_in_traced_fn, inputs, check_inputs=check_inputs)
+    traced = torch.jit.trace(loop_in_traced_fn, inputs, check_inputs=check_inputs)
 
-    Gives us the following diagnostic information::
+Gives us the following diagnostic information::
 
-        ERROR: Graphs differed across invocations!
-        Graph diff:
-            graph(%0 : Dynamic) {
-                  %1 : int = prim::Constant[value=0]()
-                  %2 : int = prim::Constant[value=0]()
-                  %3 : Dynamic = aten::select(%0, %1, %2)
-                  %4 : int = prim::Constant[value=0]()
-                  %5 : int = prim::Constant[value=0]()
-                  %6 : Dynamic = aten::select(%0, %4, %5)
-                  %7 : Dynamic = aten::mul(%3, %6)
-                  %8 : int = prim::Constant[value=0]()
-                  %9 : int = prim::Constant[value=1]()
-                  %10 : Dynamic = aten::select(%0, %8, %9)
-                  %11 : Dynamic = aten::mul(%7, %10)
-                  %12 : int = prim::Constant[value=0]()
-                  %13 : int = prim::Constant[value=2]()
-                  %14 : Dynamic = aten::select(%0, %12, %13)
-                  %15 : Dynamic = aten::mul(%11, %14)
-              +   %16 : int = prim::Constant[value=0]()
-              +   %17 : int = prim::Constant[value=3]()
-              +   %18 : Dynamic = aten::select(%0, %16, %17)
-              +   %19 : Dynamic = aten::mul(%15, %18)
-              -   return (%15);
-              ?             ^
-              +   return (%19);
-              ?             ^
-            }
+    ERROR: Graphs differed across invocations!
+    Graph diff:
 
-
-    This message indicates to us that the computation differed between when
-    we first traced it and when we traced it with the ``check_inputs``. Indeed,
-    the loop within the body of ``loop_in_traced_fn`` depends on the shape
-    of the input ``x``, and thus when we try another ``x`` with a different
-    shape, the trace differs.
-
-    In this case, data-dependent control flow like this can be captured using
-    script instead::
-
-        def fn(x):
-            result = x[0]
-            for i in range(x.size(0)):
-                result = result * x[i]
-            return result
-
-        inputs = (torch.rand(3, 4, 5),)
-        check_inputs = [(torch.rand(4, 5, 6),), (torch.rand(2, 3, 4),)]
-
-        scripted_fn = torch.jit.script(fn)
-        print(scripted_fn.graph)
-
-        for input_tuple in [inputs] + check_inputs:
-            torch.testing.assert_allclose(fn(*input_tuple), scripted_fn(*input_tuple))
+                graph(%x : Tensor) {
+                %1 : int = prim::Constant[value=0]()
+                %2 : int = prim::Constant[value=0]()
+                %result.1 : Tensor = aten::select(%x, %1, %2)
+                %4 : int = prim::Constant[value=0]()
+                %5 : int = prim::Constant[value=0]()
+                %6 : Tensor = aten::select(%x, %4, %5)
+                %result.2 : Tensor = aten::mul(%result.1, %6)
+                %8 : int = prim::Constant[value=0]()
+                %9 : int = prim::Constant[value=1]()
+                %10 : Tensor = aten::select(%x, %8, %9)
+            -   %result : Tensor = aten::mul(%result.2, %10)
+            +   %result.3 : Tensor = aten::mul(%result.2, %10)
+            ?          ++
+                %12 : int = prim::Constant[value=0]()
+                %13 : int = prim::Constant[value=2]()
+                %14 : Tensor = aten::select(%x, %12, %13)
+            +   %result : Tensor = aten::mul(%result.3, %14)
+            +   %16 : int = prim::Constant[value=0]()
+            +   %17 : int = prim::Constant[value=3]()
+            +   %18 : Tensor = aten::select(%x, %16, %17)
+            -   %15 : Tensor = aten::mul(%result, %14)
+            ?     ^                                 ^
+            +   %19 : Tensor = aten::mul(%result, %18)
+            ?     ^                                 ^
+            -   return (%15);
+            ?             ^
+            +   return (%19);
+            ?             ^
+                }
 
 
-    Which produces::
+This message indicates to us that the computation differed between when
+we first traced it and when we traced it with the ``check_inputs``. Indeed,
+the loop within the body of ``loop_in_traced_fn`` depends on the shape
+of the input ``x``, and thus when we try another ``x`` with a different
+shape, the trace differs.
 
-        graph(%x : Dynamic) {
-          %1 : int = prim::Constant[value=0]()
-          %2 : int = prim::Constant[value=0]()
-          %result.1 : Dynamic = aten::select(%x, %2, %1)
-          %4 : int = aten::size(%x, %1)
-          %5 : int = prim::Constant[value=1]()
-          %result : Dynamic = prim::Loop(%4, %5, %result.1)
-            block0(%i : int, %7 : Dynamic) {
-              %9 : int = prim::Constant[value=0]()
-              %10 : Dynamic = aten::select(%x, %9, %i)
-              %result.2 : Dynamic = aten::mul(%7, %10)
-              %12 : int = prim::Constant[value=1]()
-              -> (%12, %result.2)
-            }
-          return (%result);
+In this case, data-dependent control flow like this can be captured using
+:func:`torch.jit.script` instead:
+
+.. testcode::
+
+    def fn(x):
+        result = x[0]
+        for i in range(x.size(0)):
+            result = result * x[i]
+        return result
+
+    inputs = (torch.rand(3, 4, 5),)
+    check_inputs = [(torch.rand(4, 5, 6),), (torch.rand(2, 3, 4),)]
+
+    scripted_fn = torch.jit.script(fn)
+    print(scripted_fn.graph)
+    #print(str(scripted_fn.graph).strip())
+
+    for input_tuple in [inputs] + check_inputs:
+        torch.testing.assert_allclose(fn(*input_tuple), scripted_fn(*input_tuple))
+
+.. testoutput::
+    :hide:
+
+    ...
+
+
+Which produces::
+
+    graph(%x : Tensor) {
+        %5 : bool = prim::Constant[value=1]()
+        %1 : int = prim::Constant[value=0]()
+        %result.1 : Tensor = aten::select(%x, %1, %1)
+        %4 : int = aten::size(%x, %1)
+        %result : Tensor = prim::Loop(%4, %5, %result.1)
+        block0(%i : int, %7 : Tensor) {
+            %10 : Tensor = aten::select(%x, %1, %i)
+            %result.2 : Tensor = aten::mul(%7, %10)
+            -> (%5, %result.2)
         }
-
+        return (%result);
+    }
 
 Tracer Warnings
-    The tracer produces warnings for several problematic patterns in traced
-    computation. As an example, take a trace of a function that contains an
-    in-place assignment on a slice (a view) of a Tensor::
+^^^^^^^^^^^^^^^
+The tracer produces warnings for several problematic patterns in traced
+computation. As an example, take a trace of a function that contains an
+in-place assignment on a slice (a view) of a Tensor:
 
-        def fill_row_zero(x):
-            x[0] = torch.rand(*x.shape[1:2])
-            return x
+.. testcode::
 
+    def fill_row_zero(x):
+        x[0] = torch.rand(*x.shape[1:2])
+        return x
+
+    traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
+    print(traced.graph)
+
+.. testoutput::
+    :hide:
+
+    ...
+
+Produces several warnings and a graph which simply returns the input::
+
+    fill_row_zero.py:4: TracerWarning: There are 2 live references to the data region being modified when tracing in-place operator copy_ (possibly due to an assignment). This might cause the trace to be incorrect, because all other views that also reference this data will not reflect this change in the trace! On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. are outputs of torch.split), this might still be safe.
+        x[0] = torch.rand(*x.shape[1:2])
+    fill_row_zero.py:6: TracerWarning: Output nr 1. of the traced function does not match the corresponding output of the Python function. Detailed error:
+    Not within tolerance rtol=1e-05 atol=1e-05 at input[0, 1] (0.09115803241729736 vs. 0.6782537698745728) and 3 other locations (33.00%)
         traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
-        print(traced.graph)
+    graph(%0 : Float(3, 4)) {
+        return (%0);
+    }
+
+We can fix this by modifying the code to not use the in-place update, but
+rather build up the result tensor out-of-place with ``torch.cat``:
+
+.. testcode::
+
+    def fill_row_zero(x):
+        x = torch.cat((torch.rand(1, *x.shape[1:2]), x[1:2]), dim=0)
+        return x
+
+    traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
+    print(traced.graph)
+
+.. testoutput::
+    :hide:
+
+    ...
+
+Frequently Asked Questions
+--------------------------
+
+Q: I would like to train a model on GPU and do inference on CPU. What are the
+best practices?
+
+   First convert your model from GPU to CPU and then save it, like so: ::
+
+      cpu_model = gpu_model.cpu()
+      sample_input_cpu = sample_input_gpu.cpu()
+      traced_cpu = torch.jit.trace(cpu_model, sample_input_cpu)
+      torch.jit.save(traced_cpu, "cpu.pt")
+
+      traced_gpu = torch.jit.trace(gpu_model, sample_input_gpu)
+      torch.jit.save(traced_gpu, "gpu.pt")
+
+      # ... later, when using the model:
+
+      if use_gpu:
+        model = torch.jit.load("gpu.pt")
+      else:
+        model = torch.jit.load("cpu.pt")
+
+      model(input)
+
+   This is recommended because the tracer may witness tensor creation on a
+   specific device, so casting an already-loaded model may have unexpected
+   effects. Casting the model *before* saving it ensures that the tracer has
+   the correct device information.
 
 
-    Produces several warnings and a graph which simply returns the input::
+Q: How do I store attributes on a :class:`ScriptModule`?
 
-        fill_row_zero.py:4: TracerWarning: There are 2 live references to the data region being modified when tracing in-place operator copy_ (possibly due to an assignment). This might cause the trace to be incorrect, because all other views that also reference this data will not not reflect this change in the trace! On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. are outputs of torch.split), this might still be safe.
-          x[0] = torch.rand(*x.shape[1:2])
-        fill_row_zero.py:6: TracerWarning: Output nr 1. of the traced function does not match the corresponding output of the Python function. Detailed error:
-        Not within tolerance rtol=1e-05 atol=1e-05 at input[0, 1] (0.09115803241729736 vs. 0.6782537698745728) and 3 other locations (33.00%)
-          traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
-        graph(%0 : Float(3, 4)) {
-          return (%0);
-        }
+    Say we have a model like:
 
-    We can fix this by modifying the code to not use the in-place update, but
-    rather build up the result tensor out-of-place with `torch.cat`::
+    .. testcode::
 
-        def fill_row_zero(x):
-            x = torch.cat((torch.rand(1, *x.shape[1:2]), x[1:2]), dim=0)
-            return x
+        import torch
 
-        traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
-        print(traced.graph)
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.x = 2
+
+            def forward(self):
+                return self.x
+
+        m = torch.jit.script(Model())
 
 
-Builtin Functions
-~~~~~~~~~~~~~~~~~
 
-Torch Script supports a subset of the builtin tensor and neural network functions that
-PyTorch provides. Most methods on Tensor as well as functions in the ``torch``
-namespace are available. Many functions in ``torch.nn.functional`` are also availiable.
+    If ``Model`` is instantiated it will result in a compilation error
+    since the compiler doesn't know about ``x``. There are 4 ways to inform the
+    compiler of attributes on :class:`ScriptModule`:
+
+    1. ``nn.Parameter`` - Values wrapped in ``nn.Parameter`` will work as they
+    do on ``nn.Module``\s
+
+    2. ``register_buffer`` - Values wrapped in ``register_buffer`` will work as
+    they do on ``nn.Module``\s. This is equivalent to an attribute (see 4) of type
+    ``Tensor``.
+
+    3. Constants - Annotating a class member as ``Final`` (or adding it to a list called
+    ``__constants__`` at the class definition level) will mark the contained names
+    as constants. Constants are saved directly in the code of the model. See
+    `builtin-constants` for details.
+
+    4. Attributes - Values that are a `supported type` can be added as mutable
+    attributes. Most types can be inferred but some may need to be specified, see
+    `module attributes` for details.
+
+Q: I would like to trace module's method but I keep getting this error:
+
+``RuntimeError: Cannot insert a Tensor that requires grad as a constant. Consider making it a parameter or input, or detaching the gradient``
+
+    This error usually means that the method you are tracing uses a module's parameters and
+    you are passing the module's method instead of the module instance (e.g. ``my_module_instance.forward`` vs ``my_module_instance``).
+
+      - Invoking ``trace`` with a module's method captures module parameters (which may require gradients) as **constants**.
+      - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
+
+    To trace a specific method on a module, see :func:`torch.jit.trace_module <torch.jit.trace_module>`
+
+Appendix
+--------
+
+Migrating to PyTorch 1.2 Recursive Scripting API
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This section details the changes to TorchScript in PyTorch 1.2. If you are new to TorchScript you can
+skip this section. There are two main changes to the TorchScript API with PyTorch 1.2.
+
+1. :func:`torch.jit.script <torch.jit.script>` will now attempt to recursively compile functions,
+methods, and classes that it encounters. Once you call ``torch.jit.script``,
+compilation is "opt-out", rather than "opt-in".
+
+2. ``torch.jit.script(nn_module_instance)`` is now the preferred way to create
+:class:`ScriptModule`\s, instead of inheriting from ``torch.jit.ScriptModule``.
+These changes combine to provide a simpler, easier-to-use API for converting
+your ``nn.Module``\s into :class:`ScriptModule`\s, ready to be optimized and executed in a
+non-Python environment.
+
+The new usage looks like this:
+
+.. testcode::
+
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    class Model(nn.Module):
+        def __init__(self):
+            super(Model, self).__init__()
+            self.conv1 = nn.Conv2d(1, 20, 5)
+            self.conv2 = nn.Conv2d(20, 20, 5)
+
+        def forward(self, x):
+            x = F.relu(self.conv1(x))
+            return F.relu(self.conv2(x))
+
+    my_model = Model()
+    my_scripted_model = torch.jit.script(my_model)
 
 
-We currently do not provide any builtin ScriptModules e.g. a ``Linear`` or
-``Conv`` module. This functionality is something that will be developed in the future.
-For now we suggest using ``torch.jit.trace`` to transform standard ``torch.nn``
-modules into ScriptModules on construction.
+* The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``.
+* To compile a method other than ``forward`` that is not called from ``forward``, add ``@torch.jit.export``.
+* To stop the compiler from compiling a method, add :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`@torch.jit.unused <torch.jit.unused>`. ``@ignore`` leaves the
+* method as a call to python, and ``@unused`` replaces it with an exception. ``@ignored`` cannot be exported; ``@unused`` can.
+* Most attribute types can be inferred, so ``torch.jit.Attribute`` is not necessary. For empty container types, annotate their types using `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
+* Constants can be marked with a ``Final`` class annotation instead of adding the name of the member to ``__constants__``.
+* Python 3 type hints can be used in place of ``torch.jit.annotate``
 
-.. automodule:: torch.jit.supported_ops
+As a result of these changes, the following items are considered deprecated and should not appear in new code:
+  * The ``@torch.jit.script_method`` decorator
+  * Classes that inherit from ``torch.jit.ScriptModule``
+  * The ``torch.jit.Attribute`` wrapper class
+  * The ``__constants__`` array
+  * The ``torch.jit.annotate`` function
+
+Modules
+^^^^^^^
+.. warning::
+
+    The :func:`@torch.jit.ignore <torch.jit.ignore>` annotation's behavior changes in
+    PyTorch 1.2. Before PyTorch 1.2 the @ignore decorator was used to make a function
+    or method callable from code that is exported. To get this functionality back,
+    use ``@torch.jit.unused()``. ``@torch.jit.ignore`` is now equivalent
+    to ``@torch.jit.ignore(drop=False)``. See :func:`@torch.jit.ignore <torch.jit.ignore>`
+    and :func:`@torch.jit.unused<torch.jit.unused>` for details.
+
+When passed to the :func:`torch.jit.script <torch.jit.script>` function, a ``torch.nn.Module``\'s data is
+copied to a :class:`ScriptModule` and the TorchScript compiler compiles the module.
+The module's ``forward`` is compiled by default. Methods called from ``forward`` are
+lazily compiled in the order they are used in ``forward``, as well as any
+``@torch.jit.export`` methods.
+
+.. autofunction:: export
+
+Functions
+^^^^^^^^^
+Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`torch.jit.unused <torch.jit.unused>` if needed.
+
+.. testcode::
+
+    # Same behavior as pre-PyTorch 1.2
+    @torch.jit.script
+    def some_fn():
+        return 2
+
+    # Marks a function as ignored, if nothing
+    # ever calls it then this has no effect
+    @torch.jit.ignore
+    def some_fn2():
+        return 2
+
+    # As with ignore, if nothing calls it then it has no effect.
+    # If it is called in script it is replaced with an exception.
+    @torch.jit.unused
+    def some_fn3():
+      import pdb; pdb.set_trace()
+      return 4
+
+    # Doesn't do anything, this function is already
+    # the main entry point
+    @torch.jit.export
+    def some_fn4():
+        return 2
+
+TorchScript Classes
+^^^^^^^^^^^^^^^^^^^
+
+.. warning::
+
+    TorchScript class support is experimental. Currently it is best suited
+    for simple record-like types (think a ``NamedTuple`` with methods
+    attached).
+
+Everything in a user defined `TorchScript Class <torchscript-class>`_ is
+exported by default, functions can be decorated with :func:`@torch.jit.ignore
+<torch.jit.ignore>` if needed.
+
+Attributes
+^^^^^^^^^^
+The TorchScript compiler needs to know the types of `module attributes`. Most types
+can be inferred from the value of the member. Empty lists and dicts cannot have their
+types inferred and must have their types annotated with `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
+If a type cannot be inferred and is not explicitly annotated, it will not be added as an attribute
+to the resulting :class:`ScriptModule`
+
+
+Old API:
+
+.. testcode::
+
+    from typing import Dict
+    import torch
+
+    class MyModule(torch.jit.ScriptModule):
+        def __init__(self):
+            super(MyModule, self).__init__()
+            self.my_dict = torch.jit.Attribute({}, Dict[str, int])
+            self.my_int = torch.jit.Attribute(20, int)
+
+    m = MyModule()
+
+New API:
+
+.. testcode::
+
+    from typing import Dict
+
+    class MyModule(torch.nn.Module):
+        my_dict: Dict[str, int]
+
+        def __init__(self):
+            super(MyModule, self).__init__()
+            # This type cannot be inferred and must be specified
+            self.my_dict = {}
+
+            # The attribute type here is inferred to be `int`
+            self.my_int = 20
+
+        def forward(self):
+            pass
+
+    m = torch.jit.script(MyModule())
+
+
+Constants
+^^^^^^^^^
+The ``Final`` type constructor can be used to mark members as `constant`. If members are not marked constant, they will be copied to the resulting :class:`ScriptModule` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
+
+Old API:
+
+.. testcode::
+
+    class MyModule(torch.jit.ScriptModule):
+        __constants__ = ['my_constant']
+
+        def __init__(self):
+            super(MyModule, self).__init__()
+            self.my_constant = 2
+
+        def forward(self):
+            pass
+    m = MyModule()
+
+New API:
+
+::
+
+    try:
+        from typing_extensions import Final
+    except:
+        # If you don't have `typing_extensions` installed, you can use a
+        # polyfill from `torch.jit`.
+        from torch.jit import Final
+
+    class MyModule(torch.nn.Module):
+
+        my_constant: Final[int]
+
+        def __init__(self):
+            super(MyModule, self).__init__()
+            self.my_constant = 2
+
+        def forward(self):
+            pass
+
+    m = torch.jit.script(MyModule())
+
+.. _Python 3 type hints:
+
+Variables
+^^^^^^^^^
+Containers are assumed to have type ``Tensor`` and be non-optional (see
+`Default Types` for more information). Previously, ``torch.jit.annotate`` was used to
+tell the TorchScript compiler what the type should be. Python 3 style type hints are
+now supported.
+
+.. testcode::
+
+    import torch
+    from typing import Dict, Optional
+
+    @torch.jit.script
+    def make_dict(flag: bool):
+        x: Dict[str, int] = {}
+        x['hi'] = 2
+        b: Optional[int] = None
+        if flag:
+            b = 2
+        return x, b
+
+References
+~~~~~~~~~~
+.. toctree::
+    :maxdepth: 1
+
+    jit_python_reference
+    jit_unsupported

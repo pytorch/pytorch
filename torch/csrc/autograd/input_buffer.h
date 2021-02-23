@@ -10,7 +10,9 @@
 #include <memory>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/variable.h>
+#include <c10/util/Optional.h>
+#include <c10/core/Stream.h>
 
 namespace torch { namespace autograd {
 
@@ -19,12 +21,18 @@ struct InputBuffer {
     : buffer(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
+  explicit InputBuffer(variable_list&& inputs): buffer(std::move(inputs)) {};
   InputBuffer& operator=(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
-  void add(size_t pos, Variable var);
+  // The optional CUDA streams determine which stream the accumulation
+  // is run on and how the addition is synchronized.
+  void add(size_t pos,
+           Variable&& var,
+           const c10::optional<c10::Stream>& opt_producer_stream,
+           const c10::optional<c10::Stream>& opt_consumer_stream);
 
-  int device() const;
+  at::Device device() const;
 
   Variable operator[](size_t pos) { return buffer[pos]; }
 

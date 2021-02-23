@@ -1,17 +1,9 @@
 #pragma once
 
+#include <c10/macros/Export.h>
+
 #ifdef _WIN32
-#if defined(torch_EXPORTS)
-#define TORCH_API __declspec(dllexport)
+#define TORCH_PYTHON_API
 #else
-#define TORCH_API __declspec(dllimport)
-#endif
-#elif defined(__GNUC__)
-#if defined(torch_EXPORTS)
-#define TORCH_API __attribute__((__visibility__("default")))
-#else
-#define TORCH_API
-#endif
-#else
-#define TORCH_API
+#define TORCH_PYTHON_API TORCH_API
 #endif

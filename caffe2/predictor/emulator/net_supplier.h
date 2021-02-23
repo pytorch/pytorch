@@ -10,9 +10,13 @@ namespace emulator {
 struct RunnableNet {
   const caffe2::NetDef& netdef;
   const Filler* filler;
+  std::string debug_info;
 
-  RunnableNet(const caffe2::NetDef& netdef_, const Filler* filler_)
-      : netdef(netdef_), filler(filler_) {}
+  RunnableNet(
+      const caffe2::NetDef& netdef_,
+      const Filler* filler_,
+      const std::string& info_ = "")
+      : netdef(netdef_), filler(filler_), debug_info(info_) {}
 };
 
 /*
@@ -40,9 +44,30 @@ class SingleNetSupplier : public NetSupplier {
     return RunnableNet(netdef_, filler_.get());
   }
 
- private:
+ protected:
   const unique_ptr<Filler> filler_;
   const caffe2::NetDef netdef_;
+};
+
+/*
+ * A simple net supplier that always return the same net and filler pair.
+ * The SingleLoadedNetSupplier contains a shared ptr to a workspace with
+ * parameters already loaded by net loader.
+ */
+class SingleLoadedNetSupplier : public SingleNetSupplier {
+ public:
+  SingleLoadedNetSupplier(
+      std::unique_ptr<Filler> filler,
+      caffe2::NetDef netdef,
+      std::shared_ptr<Workspace> ws)
+      : SingleNetSupplier(std::move(filler), netdef), ws_(ws) {}
+
+  std::shared_ptr<Workspace> get_loaded_workspace() {
+    return ws_;
+  }
+
+ private:
+  const std::shared_ptr<Workspace> ws_;
 };
 
 class MutatingNetSupplier : public NetSupplier {
@@ -61,7 +86,7 @@ class MutatingNetSupplier : public NetSupplier {
       new_net = &nets_.back();
     }
     mutator_(new_net);
-    return RunnableNet(*new_net, orig.filler);
+    return RunnableNet(*new_net, orig.filler, orig.debug_info);
   }
 
  private:

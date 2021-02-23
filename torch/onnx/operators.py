@@ -1,6 +1,6 @@
 r"""This file provides a location for operators that help exporting
 models via onnx. E.g. shape_as_tensor and reshape_from_tensor_shape
-are to make all dynamic sizes operations traceble.
+are to make all dynamic sizes operations traceable.
 
 NOTE: at one point these functions were implemented differently.
 Since then we have implemented these directly in ATen, so this

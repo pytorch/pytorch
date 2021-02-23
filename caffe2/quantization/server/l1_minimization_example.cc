@@ -1,18 +1,17 @@
-#include "l2_minimization.h"
 #include "caffe2/core/logging.h"
+#include "l2_minimization.h"
 
-#include <iostream>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 
 using namespace std;
 using namespace dnnlowp;
 
-int main(int argc, const char *argv[])
-{
+int main(int argc, const char* argv[]) {
   if (argc < 3) {
-    cerr << "Usage: " <<
-      argv[0] << " in_file out_file [preserve_sparsity] [precision]" << endl;
+    cerr << "Usage: " << argv[0]
+         << " in_file out_file [preserve_sparsity] [precision]" << endl;
     return -1;
   }
 
@@ -33,10 +32,9 @@ int main(int argc, const char *argv[])
     float min, max;
     int nbins;
 
-    ist >>
-      op_index >> op_type >> output_index >> tensor_name >> min >> max >> nbins;
-    infos.push_back(
-      tuple<int, string, int, string>(
+    ist >> op_index >> op_type >> output_index >> tensor_name >> min >> max >>
+        nbins;
+    infos.push_back(tuple<int, string, int, string>(
         op_index, op_type, output_index, tensor_name));
 
     vector<uint64_t> bins;
@@ -60,12 +58,9 @@ int main(int argc, const char *argv[])
   }
 
   for (int i = 0; i < qparams.size(); ++i) {
-    out <<
-      std::get<0>(infos[i]) << " " <<
-      std::get<1>(infos[i]) << " " <<
-      std::get<2>(infos[i]) << " " <<
-      std::get<3>(infos[i]) << " " <<
-      qparams[i].Min() << " " << qparams[i].Max() << endl;
+    out << std::get<0>(infos[i]) << " " << std::get<1>(infos[i]) << " "
+        << std::get<2>(infos[i]) << " " << std::get<3>(infos[i]) << " "
+        << qparams[i].Min() << " " << qparams[i].Max() << endl;
   }
 
   return 0;

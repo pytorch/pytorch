@@ -12,10 +12,13 @@ namespace int8 {
 
 class Int8ResizeNearestOp final : public Operator<CPUContext> {
  public:
-  Int8ResizeNearestOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {
+  template <class... Args>
+  explicit Int8ResizeNearestOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {
     width_scale_ = this->template GetSingleArgument<float>("width_scale", 1);
     height_scale_ = this->template GetSingleArgument<float>("height_scale", 1);
+    output_dims =
+        this->template GetRepeatedArgument<int>("output_size", vector<int>{});
     CAFFE_ENFORCE_GT(width_scale_, 0);
     CAFFE_ENFORCE_GT(height_scale_, 0);
   }
@@ -26,14 +29,20 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
 
     CAFFE_ENFORCE_EQ(4, X.t.dim());
+
     const int N = X.t.dim32(0);
     const int IH = X.t.dim32(1);
     const int IW = X.t.dim32(2);
     const int C = X.t.dim32(3);
+    if (!output_dims.empty()) {
+      CAFFE_ENFORCE_EQ(
+          2, output_dims.size(), "Int8ResizeNearest expects 2 dim output size");
+      height_scale_ = output_dims[0] / IH;
+      width_scale_ = output_dims[1] / IW;
+    }
     const int OW = IW * width_scale_;
     const int OH = IH * height_scale_;
-
-    Y->t.Resize(N, OH, OW, C);
+    ReinitializeTensor(&Y->t, {N, OH, OW, C}, at::dtype<uint8_t>().device(CPU));
     Y->scale = X.scale;
     Y->zero_point = X.zero_point;
 
@@ -63,6 +72,7 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
  private:
   float width_scale_;
   float height_scale_;
+  vector<int> output_dims;
 };
 
 } // namespace int8

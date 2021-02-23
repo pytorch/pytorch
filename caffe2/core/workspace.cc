@@ -280,8 +280,15 @@ bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
     LOG(ERROR) << "Error when running operator " << op_def.type();
     return false;
   }
-  return true;
+  // workaround for async cpu ops
+  if (op->HasAsyncPart() && op->device_option().device_type() == PROTO_CPU) {
+    op->Finish();
+    return op->event().Query() == EventStatus::EVENT_SUCCESS;
+  } else {
+    return true;
+  }
 }
+
 bool Workspace::RunNetOnce(const NetDef& net_def) {
   std::unique_ptr<NetBase> net(caffe2::CreateNet(net_def, this));
   if (net == nullptr) {

@@ -1,10 +1,14 @@
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/memonger.h"
+#include "caffe2/core/tensor_impl.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/map_utils.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/string_utils.h"
 
+#include <numeric>
 #include <unordered_set>
 
 namespace caffe2 {
@@ -100,6 +104,159 @@ NodeProto AddShapeNode(const std::string& input, const std::string& output) {
   return shape_node;
 }
 
+void collectExternalsFromIfOpSubnet(
+    const NetDef* net,
+    std::vector<std::string>* input,
+    std::vector<std::string>* output) {
+  std::set<std::string> in_input, in_output;
+  for (const auto& op : net->op()) {
+    for (const auto& blob : op.input()) {
+      in_input.emplace(blob);
+    }
+    for (const auto& blob : op.output()) {
+      in_output.emplace(blob);
+    }
+  }
+
+  for (const auto& blob : in_input) {
+    if (!in_output.count(blob)) {
+      input->push_back(blob);
+    }
+  }
+  for (const auto& blob : in_output) {
+    if (!in_input.count(blob)) {
+      output->push_back(blob);
+    }
+  }
+}
+
+void ssaRewriteForIfOp(
+    OperatorDef* op,
+    std::unordered_map<std::string, int>* blob_versions,
+    std::set<std::string>* is_initialized_tensor) {
+  // Get all the "external" inputs and outputs of the subnet
+  // Since then_net and else_net has same external input/output, we only collect
+  // external input/output from one of its subnet And perform the rewrite to
+  // both then_net and else_net
+  std::vector<std::string> if_external_input;
+  std::vector<std::string> if_external_output;
+
+  std::unordered_set<std::string> if_inputs, if_outputs;
+  for (const auto& input : op->input()) {
+    if_inputs.insert(input);
+  }
+  for (const auto& output : op->output()) {
+    if_outputs.insert(output);
+  }
+
+  ArgumentHelper helper(*op);
+  Argument *then_arg = nullptr, *else_arg = nullptr;
+  NetDef* target_net = nullptr;
+  bool has_then = false, has_else = false;
+
+  if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
+    then_arg = GetMutableArgument("then_net", false, op);
+    target_net = then_arg->mutable_n();
+    has_then = true;
+  }
+  if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
+    else_arg = GetMutableArgument("else_net", false, op);
+    if (!has_then) {
+      target_net = else_arg->mutable_n();
+    }
+    has_else = true;
+  }
+
+  if (has_then || has_else) {
+    collectExternalsFromIfOpSubnet(
+        target_net, &if_external_input, &if_external_output);
+
+    // Add inputs/outputs of the sub_net to the inputs/outputs of the op
+    for (const auto& input : if_external_input) {
+      if (if_inputs.count(input) == 0) {
+        op->add_input(input);
+      }
+    }
+    for (const auto& output : if_external_output) {
+      if (if_outputs.count(output) == 0) {
+        op->add_output(output);
+      }
+    }
+    std::map<string, string> oldname_to_newname;
+
+    // Build oldname_to_newname map
+    for (auto& input : if_external_input) {
+      const auto it = blob_versions->find(input);
+      if (it != blob_versions->end()) {
+        oldname_to_newname[input] = SsaName(input, it->second);
+      }
+    }
+    for (auto& output : if_external_output) {
+      auto it = blob_versions->find(output);
+      if (it != blob_versions->end()) {
+        if (is_initialized_tensor->count(output) == 0) {
+          it->second += 1;
+        } else {
+          is_initialized_tensor->erase(output);
+        }
+        oldname_to_newname[output] = SsaName(output, it->second);
+      } else {
+        blob_versions->emplace(output, 0);
+        oldname_to_newname[output] = SsaName(output, 0);
+      }
+    }
+
+    if (has_then) {
+      rewriteSubnet(then_arg, oldname_to_newname);
+    }
+    if (has_else) {
+      rewriteSubnet(else_arg, oldname_to_newname);
+    }
+  }
+}
+
+void revertRenamedExternalOutput(
+    OperatorDef* op,
+    const std::unordered_map<std::string, std::string>&
+        renamed_external_outputs) {
+  for (auto& input : *(op->mutable_input())) {
+    const auto it = renamed_external_outputs.find(input);
+    if (it != renamed_external_outputs.end()) {
+      input = it->second;
+    }
+  }
+  for (auto& output : *(op->mutable_output())) {
+    const auto it = renamed_external_outputs.find(output);
+    if (it != renamed_external_outputs.end()) {
+      output = it->second;
+    }
+  }
+}
+
+void revertRenamedExternalOutputForIfOp(
+    OperatorDef* if_op,
+    const std::unordered_map<std::string, std::string>&
+        renamed_external_outputs) {
+  ArgumentHelper helper(*if_op);
+  Argument *then_arg = nullptr, *else_arg = nullptr;
+
+  revertRenamedExternalOutput(if_op, renamed_external_outputs);
+
+  if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
+    then_arg = GetMutableArgument("then_net", false, if_op);
+    NetDef* net = then_arg->mutable_n();
+    for (auto& op : *(net->mutable_op())) {
+      revertRenamedExternalOutput(&op, renamed_external_outputs);
+    }
+  }
+  if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
+    else_arg = GetMutableArgument("else_net", false, if_op);
+    NetDef* net = else_arg->mutable_n();
+    for (auto& op : *(net->mutable_op())) {
+      revertRenamedExternalOutput(&op, renamed_external_outputs);
+    }
+  }
+}
 } // namespace
 
 ::ONNX_NAMESPACE::TensorProto::DataType Caffe2TypeToOnnxType(
@@ -125,87 +282,156 @@ NodeProto AddShapeNode(const std::string& input, const std::string& output) {
 #undef CAFFE2_TO_ONNX_TYPE
 }
 
+void rewriteSubnet(
+    Argument* arg,
+    std::map<std::string, std::string> oldname_to_newname) {
+  NetDef* net = arg->mutable_n();
+  // clear external inputs and outputs since they're no longer valid
+  net->mutable_external_input()->Clear();
+  net->mutable_external_output()->Clear();
+  for (auto& op : *(net->mutable_op())) {
+    for (auto& input : *(op.mutable_input())) {
+      if (oldname_to_newname.find(input) != oldname_to_newname.end()) {
+        input = oldname_to_newname[input];
+      }
+    }
+    for (auto& output : *(op.mutable_output())) {
+      if (oldname_to_newname.find(output) != oldname_to_newname.end()) {
+        output = oldname_to_newname[output];
+      }
+    }
+  }
+}
+
 std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
-    caffe2::NetDef* pred_net) {
+    caffe2::NetDef* pred_net,
+    bool PreserveInPlaceOps) {
   std::unordered_map<std::string, std::string> input_mapping;
   std::unordered_map<std::string, int> blob_versions;
 
-#define REWRITE_EXTERNAL_IO(net, name)                 \
-  for (auto& name : *net->mutable_external_##name()) { \
-    auto version = blob_versions.at(name);             \
-    auto new_##name = SsaName(name, version);          \
-    name##_mapping.emplace(new_##name, name);          \
-    name = new_##name;                                 \
-  }
-
   if (init_net) {
-    for (auto& op : *init_net->mutable_op()) {
-      CAFFE_ENFORCE_EQ(op.type().find("GivenTensor"), 0);
-      CAFFE_ENFORCE_EQ(op.type().rfind("Fill"), op.type().size() - 4);
-      CAFFE_ENFORCE_EQ(op.output_size(), 1);
-      const auto& output = op.output(0);
-      op.set_output(0, SsaName(output, 0));
+    // No ssa rewrite is done for init net. The reason being that the output
+    // blobs of init net are what becomes the input blobs of pred_net. Since
+    // inputs of pred_net are not renamed we are not renaming the output of
+    // init_net. Furthermore, the assumption made is that init_net is simple net
+    // with each operator producing the one output and thus not renaming
+    // translates to not renaming the outputs of the init_net. Create identical
+    // mapping for now. This shall be removed eventually.
+    for (const auto& name : init_net->external_input()) {
+      input_mapping.emplace(name, name);
     }
-    for (const auto& input : init_net->external_input()) {
-      blob_versions.emplace(input, 0);
-    }
-    for (const auto& output : init_net->external_output()) {
-      blob_versions.emplace(output, 0);
-    }
-    REWRITE_EXTERNAL_IO(init_net, input);
     blob_versions.clear();
   }
 
+  std::set<std::string> is_initialized_tensor;
   if (pred_net) {
+    // Ssa rewriting modifies the net, check if the net passes schema check
+    run_schema_check(*pred_net);
+
+    std::unordered_set<std::string> external_outputs;
     for (const auto& input : pred_net->external_input()) {
-      blob_versions.emplace(input, 0);
+      // Create identical mapping for now. This shall be removed eventually.
+      input_mapping.emplace(input, input);
     }
-    REWRITE_EXTERNAL_IO(pred_net, input);
+    for (const auto& output : pred_net->external_output()) {
+      external_outputs.emplace(output);
+    }
     for (auto& op : *pred_net->mutable_op()) {
+      // Special SSA Rewrite for subnet of If Operator
+      // This needs to happen first because the inputs/outputs of If/AsyncIf
+      // may get modified inside ssaRewriteForIfOp
+      if (op.type() == "If" || op.type() == "AsyncIf") {
+        ssaRewriteForIfOp(&op, &blob_versions, &is_initialized_tensor);
+      }
+
       for (auto& input : *op.mutable_input()) {
         const auto it = blob_versions.find(input);
         if (it != blob_versions.end()) {
           input = SsaName(input, it->second);
         } else {
-          blob_versions.emplace(input, 0);
-          input = SsaName(input, 0);
+          // Input blob is not versioned yet.
+          // If it is not versioned yet, it is assumed to be primary input,
+          // Thus skip renaming it.
+          continue;
         }
       }
-      for (auto& output : *op.mutable_output()) {
+
+      for (int out_idx = 0; out_idx < op.output_size(); out_idx++) {
+        auto& output = *op.mutable_output(out_idx);
+
+        // restore in-place settings
+        bool is_inplace = false;
+        if (PreserveInPlaceOps) {
+          for (int in_idx = 0; in_idx < op.input_size(); in_idx++) {
+            auto* schema = OpSchemaRegistry::Schema(op.type());
+            if (schema && schema->inplace_enforced(in_idx, out_idx)) {
+              output = op.input(in_idx);
+              is_inplace = true;
+              break;
+            }
+          }
+        }
+        if (is_inplace) {
+          continue;
+        }
+
         auto it = blob_versions.find(output);
         if (it != blob_versions.end()) {
-          it->second += 1;
+          if (op.type() != "If" && op.type() != "AsyncIf") {
+            if (is_initialized_tensor.count(output) == 0) {
+              it->second += 1;
+            } else {
+              is_initialized_tensor.erase(output);
+            }
+          }
           output = SsaName(output, it->second);
+
         } else {
           blob_versions.emplace(output, 0);
+          // These filling ops are designed for a by-default value for the
+          // tensors generated by ops like If. For example, if an If op's
+          // condition is not satisfied, and it does not have else_net, then it
+          // will not generate any output blob, which may cause some error in
+          // the future. Here we would like to ensure these tensors only been
+          // ssa re-write once but not twice. (One in the filling operator, one
+          // in If op)
+          if ((caffe2::StartsWith(op.type(), "GivenTensor") &&
+               caffe2::EndsWith(op.type(), "Fill")) ||
+              op.type() == "ConstantFill" ||
+              op.type() == "Int8GivenTensorFill" ||
+              op.type() == "Int8GivenIntTensorFill") {
+            is_initialized_tensor.insert(output);
+          }
           output = SsaName(output, 0);
         }
       }
     }
 
-    // Fix the external output name back to original
-    std::unordered_set<std::string> external_outputs;
-    for (const auto& output : pred_net->external_output()) {
-      external_outputs.emplace(output);
+    // For all the renamed blobs find if the blob is one of the external
+    // output. If so add a mapping from it's latest renamed version to its
+    // original name.
+    std::unordered_map<std::string, std::string> renamed_external_outputs;
+    for (const auto it : blob_versions) {
+      if (external_outputs.count(it.first)) {
+        renamed_external_outputs.emplace(
+            SsaName(it.first, it.second), it.first);
+      }
     }
+
+    // Use the mapping to find if the input or output of an op was a renamed
+    // external output. If so replace it with its original name.
     for (auto& op : *pred_net->mutable_op()) {
-      for (auto& output : *op.mutable_output()) {
-        auto pos = output.find_last_of('_');
-        CAFFE_ENFORCE_NE(pos, 0);
-        auto basename = output.substr(0, pos);
-        if (!external_outputs.count(basename)) {
-          continue;
-        }
-        auto it = blob_versions.find(basename);
-        if (it != blob_versions.end() &&
-            SsaName(basename, it->second) == output) {
-          output = basename;
-        }
+      // If/AsyncIf needs special handling
+      if (op.type() == "If" || op.type() == "AsyncIf") {
+        revertRenamedExternalOutputForIfOp(&op, renamed_external_outputs);
+      } else {
+        revertRenamedExternalOutput(&op, renamed_external_outputs);
       }
     }
   }
-#undef REWRITE_EXTERNAL_IO
+  // run schema check again
+  run_schema_check(*pred_net);
 
   return input_mapping;
 }
@@ -225,7 +451,8 @@ OnnxExporter::get_renamed_operators() const {
       {"MaxPool3D", "MaxPool"},
       {"AveragePool1D", "AveragePool"},
       {"AveragePool2D", "AveragePool"},
-      {"AveragePool3D", "AveragePool"}};
+      {"AveragePool3D", "AveragePool"},
+      {"Copy", "Identity"}};
   return kRenamedOperators;
 }
 
@@ -268,16 +495,21 @@ OnnxExporter::get_special_operators() const {
           {"Greater", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Less", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Cast", &OnnxExporter::CreateCastNodes},
+          {"ElementwiseLinear", &OnnxExporter::CreateElementwiseLinearNodes},
           {"Conv", &OnnxExporter::CreateConvPoolNodes},
           {"ConvTranspose", &OnnxExporter::CreateConvPoolNodes},
           {"MaxPool", &OnnxExporter::CreateConvPoolNodes},
           {"AveragePool", &OnnxExporter::CreateConvPoolNodes},
           {"FC", &OnnxExporter::CreateGemmNodes},
           {"Concat", &OnnxExporter::CreateConcatNodes},
+          {"MergeDim", &OnnxExporter::CreateMergeDimNodes},
           {"LRN", &OnnxExporter::CreateLrnNodes},
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
           {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes},
+          {"ReduceMean", &OnnxExporter::CreateReduceMeanNodes},
+          {"ReduceFrontMean", &OnnxExporter::CreateReduceMeanNodes},
+          {"ReduceBackMean", &OnnxExporter::CreateReduceMeanNodes},
           {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes}};
   return kSpecialOperators;
 }
@@ -286,13 +518,13 @@ void OnnxExporter::CopyCaffe2ArgToOnnxAttr(
     AttributeProto* attr,
     const std::string& op_type,
     const caffe2::Argument& arg) {
-  std::string name;
+  std::string name =
+      caffe2::get_default(get_renamed_attrs(), arg.name(), arg.name());
   const auto& per_op_renamed_attr_lut = get_per_op_renamed_attrs();
   const auto it = per_op_renamed_attr_lut.find(op_type);
   if (it != per_op_renamed_attr_lut.end()) {
-    name = caffe2::get_default(it->second, arg.name(), arg.name());
-  } else {
-    name = caffe2::get_default(get_renamed_attrs(), arg.name(), arg.name());
+    // Per-op attribute renames override the global attribute renames
+    name = caffe2::get_default(it->second, arg.name(), name);
   }
   attr->set_name(name);
 
@@ -319,24 +551,24 @@ void OnnxExporter::CopyCaffe2ArgToOnnxAttr(
   }
 }
 
-bool OnnxExporter::IsBlackListed(const caffe2::Argument& arg) {
+bool OnnxExporter::IsBlockListed(const caffe2::Argument& arg) {
   const static std::unordered_map<std::string, std::unordered_set<std::string>>
-      kBlackListString = {{"order", {"NCHW"}}};
+      kBlockListString = {{"order", {"NCHW"}}};
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
-      kBlackListInt = {{"cudnn_exhaustive_search", {0, 1}},
+      kBlockListInt = {{"cudnn_exhaustive_search", {0, 1}},
                        {"use_cudnn", {0, 1}},
                        {"exhaustive_search", {0, 1}},
                        {"is_test", {0, 1}},
                        {"broadcast", {0, 1}}};
 
   if (arg.has_i()) {
-    const auto it = kBlackListInt.find(arg.name());
-    if (it != kBlackListInt.end()) {
+    const auto it = kBlockListInt.find(arg.name());
+    if (it != kBlockListInt.end()) {
       return it->second.count(arg.i());
     }
   } else if (arg.has_s()) {
-    const auto it = kBlackListString.find(arg.name());
-    if (it != kBlackListString.end()) {
+    const auto it = kBlockListString.find(arg.name());
+    if (it != kBlockListString.end()) {
       return it->second.count(arg.s());
     }
   }
@@ -378,7 +610,7 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
     node.add_output(o);
   }
   for (const auto& a : def.arg()) {
-    if (!IsBlackListed(a)) {
+    if (!IsBlockListed(a)) {
       auto* attr = node.add_attribute();
       CopyCaffe2ArgToOnnxAttr(attr, def.type(), a);
     }
@@ -541,6 +773,61 @@ ConvertedResult OnnxExporter::CreateCastNodes(
   return result;
 }
 
+ConvertedResult OnnxExporter::CreateElementwiseLinearNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  CAFFE_ENFORCE_EQ(def.input_size(), 3);
+  CAFFE_ENFORCE_GE(def.output_size(), 1);
+  const auto& x = def.input(0);
+  const auto& w = def.input(1);
+  const auto& b = def.input(2);
+  const auto& y = def.output(0);
+  CAFFE_ENFORCE_EQ(shapes.at(w).dims().size(), 1);
+  CAFFE_ENFORCE_EQ(shapes.at(b).dims().size(), 1);
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  auto& const_tensors = result.second;
+  std::unordered_map<std::string, const caffe2::Argument*> args;
+  for (const auto& a : def.arg()) {
+    args.emplace(a.name(), &a);
+  }
+
+  const auto& x_shape = shapes.at(x);
+  const auto it = args.find("axis");
+  const int64_t axis = it == args.end() ? 1 : it->second->i();
+  const bool need_reshape = axis + 1 != x_shape.dims().size();
+
+  auto fma_x_input = x;
+  if (need_reshape) {
+    const auto inner = DimProd(x_shape, axis, x_shape.dims().size());
+    CAFFE_ENFORCE_EQ(shapes.at(w).dims(0), inner);
+    CAFFE_ENFORCE_EQ(shapes.at(b).dims(0), inner);
+
+    fma_x_input = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(
+        dummy_, std::vector<int64_t>{-1, shapes.at(w).dims(0)}));
+    nodes.emplace_back(
+        MakeNode("Reshape", {x, const_tensors.back().name()}, {fma_x_input}));
+  }
+
+  const auto& mul_output = dummy_->NewDummyName();
+  nodes.emplace_back(
+      MakeNode("Mul", {fma_x_input, w}, {mul_output}, def.name()));
+
+  const auto& fma_y_output = need_reshape ? dummy_->NewDummyName() : y;
+  nodes.emplace_back(
+      MakeNode("Add", {mul_output, b}, {fma_y_output}, def.name()));
+
+  if (need_reshape) {
+    const auto shape = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Shape", {x}, {shape}));
+    nodes.emplace_back(MakeNode("Reshape", {fma_y_output, shape}, {y}));
+  }
+
+  return result;
+}
+
 ConvertedResult OnnxExporter::CreateConvPoolNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
@@ -581,25 +868,28 @@ ConvertedResult OnnxExporter::CreateConvPoolNodes(
     const auto& input_size = shapes.at(node.input(0));
     const auto& output_size = shapes.at(node.output(0));
     CAFFE_ENFORCE_EQ(output_size.dims().size(), 4);
-    if (!global &&  // global pool does not care about legacy pad
-        legacy_pad_attr.i() != static_cast<int64_t>(caffe2::LegacyPadding::NOTSET)) {
+    if (!global && // global pool does not care about legacy pad
+        legacy_pad_attr.i() !=
+            static_cast<int64_t>(caffe2::LegacyPadding::NOTSET)) {
       if (legacy_pad_attr.i() ==
           static_cast<int64_t>(caffe2::LegacyPadding::VALID)) {
         CAFFE_ENFORCE(!attrs.count("pads"));
         attrs.emplace("auto_pad", MakeAttribute("auto_pad", "VALID"));
-      } else if (legacy_pad_attr.i() ==
+      } else if (
+          legacy_pad_attr.i() ==
           static_cast<int64_t>(caffe2::LegacyPadding::SAME)) {
         CAFFE_ENFORCE(!attrs.count("pads"));
         // default behavior in Caffe2 is SAME_UPPER
         // https://github.com/caffe2/caffe2/blob/master/caffe2/operators/conv_pool_op_base.h#L39
         attrs.emplace("auto_pad", MakeAttribute("auto_pad", "SAME_UPPER"));
-      } else if (legacy_pad_attr.i() ==
+      } else if (
+          legacy_pad_attr.i() ==
           static_cast<int64_t>(caffe2::LegacyPadding::CAFFE_LEGACY_POOLING)) {
-        // The problem here is that, Pool op in Caffe may add an additional pixel,
-        // if the last part is smaller than stride. So we use the explicit padding
-        // to replace legacy_pad. pad[end] = output_size[start + 2] *
-        // stride[start] - pad[start] - 1 + kernel[start] - input[start + 2] end =
-        // start + len(pad) / 2
+        // The problem here is that, Pool op in Caffe may add an additional
+        // pixel, if the last part is smaller than stride. So we use the
+        // explicit padding to replace legacy_pad. pad[end] = output_size[start
+        // + 2] * stride[start] - pad[start] - 1 + kernel[start] - input[start +
+        // 2]; end = start + len(pad) / 2
         LOG(WARNING) << "Converting legacy padding to explicit padding.";
         auto* pads_attr = attrs.at("pads").mutable_ints();
         auto& strides_attr = attrs.at("strides").ints();
@@ -611,7 +901,8 @@ ConvertedResult OnnxExporter::CreateConvPoolNodes(
           pads_attr->Set(i + 2, tmp_pad);
         }
       } else {
-        LOG(ERROR) << "Don't know how to handle the legacy_pad:" << legacy_pad_attr.i();
+        LOG(ERROR) << "Don't know how to handle the legacy_pad:"
+                   << legacy_pad_attr.i();
         CAFFE_THROW("Failed to handle legacy padding in pool operator!");
       }
     }
@@ -644,28 +935,112 @@ ConvertedResult OnnxExporter::CreateLrnNodes(
 ConvertedResult OnnxExporter::CreateConcatNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
-  auto result = CommonCaffe2OpToOnnxNodes(def);
+  caffe2::OperatorDef mdef(def); // The modified def without add_axis
+  // In caffe2, we can optionally add an axis specified by `add_axis`
+  int add_axis = 0;
+  for (int i = 0; i < mdef.arg_size(); ++i) {
+    const auto& arg = mdef.arg(i);
+    if (arg.name() == "add_axis") {
+      add_axis = arg.i();
+      ArgumentHelper::RemoveArgument(mdef, i);
+      break;
+    }
+  }
+
+  auto result = CommonCaffe2OpToOnnxNodes(mdef);
   auto& nodes = result.first;
+  nodes.reserve(nodes.size() + 3);
+  auto& const_tensors = result.second;
 
   CAFFE_ENFORCE_EQ(nodes.size(), 1);
   auto& node = nodes.back();
   bool explicit_axis = false;
-  for (const auto& a : def.arg()) {
-    if (a.name() == "axis") {
-      explicit_axis = true;
-      break;
-    }
+  int axis = -1;
+  if (ArgumentHelper::HasArgument(mdef, "axis")) {
+    axis = ArgumentHelper::GetSingleArgument(mdef, "axis", -1);
+    explicit_axis = true;
   }
   if (!explicit_axis) {
-    node.add_attribute()->CopyFrom(MakeAttribute("axis", 1L));
+    node.add_attribute()->CopyFrom(MakeAttribute("axis", 1));
   }
 
-  if (node.output_size() == 2) {
-    std::string shape_input = node.output(0);
-    std::string shape_output = node.output(1);
-    node.mutable_output()->RemoveLast();
-    nodes.emplace_back(AddShapeNode(shape_input, shape_output));
+  // If we have add_axis, we need to add a reshape node
+  auto final_output = node.output(0);
+  if (add_axis > 0) {
+    CAFFE_ENFORCE_GE(axis, 0);
+    std::vector<int64_t> dims;
+    const auto& shape0 = shapes.at(mdef.input(0));
+    for (int i = 1; i < mdef.input_size(); ++i) {
+      const auto& shape = shapes.at(mdef.input(i));
+      CAFFE_ENFORCE_EQ(shape.dims(axis), shape0.dims(axis));
+    }
+    for (const auto d : shape0.dims()) {
+      dims.push_back(d);
+    }
+    dims.insert(dims.begin() + axis, mdef.input_size());
+
+    auto concat_output = dummy_->NewDummyName();
+    *node.mutable_output(0) = concat_output;
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
+    nodes.emplace_back(MakeNode(
+        "Reshape",
+        {concat_output, const_tensors.back().name()},
+        {final_output}));
   }
+
+  // If we have two output, we need to output the split_info, which can be
+  // statically inferred from the input shapes
+  if (node.output_size() == 2) {
+    std::string second_output = node.output(1);
+    node.mutable_output()->RemoveLast();
+    std::vector<int32_t> split_info;
+    int adj_size = shapes.at(mdef.input(0)).dims_size() + (add_axis ? 1 : 0);
+    int canonical_axis = canonical_axis_index_(axis, adj_size);
+    CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
+    for (int i = 0; i < mdef.input_size(); ++i) {
+      split_info.push_back(
+          add_axis ? 1 : shapes.at(mdef.input(i)).dims(canonical_axis));
+    }
+    auto split_info_tensor =
+        MakeTensor("split_info", split_info, TensorProto::INT32);
+    auto cnode = MakeNode("Constant", {}, {second_output});
+    cnode.add_attribute()->CopyFrom(MakeAttribute("value", split_info_tensor));
+    nodes.emplace_back(std::move(cnode));
+  }
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateMergeDimNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  const auto& x = def.input(0);
+  const auto& y = def.output(0);
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  auto& const_tensors = result.second;
+
+  {
+    const auto ndim = shapes.at(x).dims().size();
+    CAFFE_ENFORCE_GE(ndim, 2, "No enough dims to merge.");
+    std::vector<int64_t> dims(ndim);
+    dims[0] = 1;
+    dims[1] = -1;
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
+  }
+
+  const auto reshaped = dummy_->NewDummyName();
+  nodes.emplace_back(
+      MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped}));
+
+  nodes.emplace_back(MakeNode(
+      "Squeeze",
+      {reshaped},
+      {y},
+      std::vector<AttributeProto>{
+          MakeAttribute("axes", std::vector<int64_t>{0}),
+      }));
+
   return result;
 }
 
@@ -717,6 +1092,73 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
   return result;
 }
 
+ConvertedResult OnnxExporter::CreateReduceMeanNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  CAFFE_ENFORCE_GE(def.input_size(), 1);
+  CAFFE_ENFORCE_LE(def.input_size(), 2);
+  CAFFE_ENFORCE_EQ(def.input_size(), 1, "Input \"lengths\" is not supported.");
+  CAFFE_ENFORCE_GE(def.output_size(), 1);
+  const auto& x = def.input(0);
+  const auto& y = def.output(0);
+  const auto& dims = shapes.at(x).dims();
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  std::unordered_map<std::string, const caffe2::Argument*> args;
+  for (const auto& a : def.arg()) {
+    args.emplace(a.name(), &a);
+  }
+
+  std::vector<int64_t> axes;
+  int64_t keepdims = 1;
+
+  if (def.type() == "ReduceMean") {
+    // axes
+    auto it = args.find("axes");
+    if (it == args.end()) {
+      axes.resize(dims.size());
+      std::iota(axes.begin(), axes.end(), 0);
+    } else {
+      axes.assign(it->second->ints().begin(), it->second->ints().end());
+    }
+
+    // keepdims
+    it = args.find("keepdims");
+    if (it != args.end()) {
+      keepdims = it->second->i();
+    }
+  } else {
+    // num_reduce_dim
+    auto it = args.find("num_reduce_dim");
+    const int64_t num_reduce_dim = it == args.end() ? 1 : it->second->i();
+    CAFFE_ENFORCE_LE(num_reduce_dim, dims.size());
+    axes.resize(num_reduce_dim);
+
+    int64_t start_dim = 0;
+    if (def.type() == "ReduceFrontMean") {
+      start_dim = 0;
+    } else if (def.type() == "ReduceBackMean") {
+      start_dim = dims.size() - axes.size();
+    }
+    std::iota(axes.begin(), axes.end(), start_dim);
+
+    keepdims = 0;
+  }
+
+  nodes.emplace_back(MakeNode(
+      "ReduceMean",
+      {x},
+      {y},
+      {
+          MakeAttribute("axes", axes),
+          MakeAttribute("keepdims", keepdims),
+      },
+      def.name()));
+
+  return result;
+}
+
 ConvertedResult OnnxExporter::CreateUpsampleNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
@@ -741,7 +1183,6 @@ ConvertedResult OnnxExporter::CreateUpsampleNodes(
         MakeTensor("resolved scale tensor", tmp_vector, TensorProto::FLOAT);
 
     auto node = MakeNode("Constant", {}, {resolved_scale});
-    MakeAttribute("value", resolved_scale_tensor);
     node.add_attribute()->CopyFrom(
         MakeAttribute("value", resolved_scale_tensor));
     nodes.emplace_back(node);
@@ -881,16 +1322,17 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   if (has_axis) {
     axis = it->second->i();
   }
+
+  auto gemm_x_input = x;
   if (x_shape.dims().size() > 2) {
     // we need to reshape only when dimension is higher than 2
-    auto outer = DimProd(x_shape, 0, axis);
-    auto inner = DimProd(x_shape, axis, x_shape.dims().size());
-    std::vector<int64_t> dims = {outer, inner};
-    auto reshaped_x = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
+    const auto inner = DimProd(x_shape, axis, x_shape.dims().size());
+
+    gemm_x_input = dummy_->NewDummyName();
+    const_tensors.emplace_back(
+        CreateOnnxShapeTensor(dummy_, std::vector<int64_t>{-1, inner}));
     nodes.emplace_back(
-        MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped_x}));
-    x = reshaped_x;
+        MakeNode("Reshape", {x, const_tensors.back().name()}, {gemm_x_input}));
   }
 
   it = args.find("axis_w");
@@ -902,32 +1344,48 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(w_shape, 0, axis_w);
     auto inner = DimProd(w_shape, axis_w, w_shape.dims().size());
-    std::vector<int64_t> dims = {outer, inner};
     auto reshaped_w = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
+    const_tensors.emplace_back(
+        CreateOnnxShapeTensor(dummy_, std::vector<int64_t>{outer, inner}));
     nodes.emplace_back(
         MakeNode("Reshape", {w, const_tensors.back().name()}, {reshaped_w}));
     w = reshaped_w;
   }
 
-  auto gemm_y_output = (has_axis) ? dummy_->NewDummyName() : y;
-  std::vector<AttributeProto> attrs = {MakeAttribute("transB", 1L)};
+  auto gemm_y_output = axis > 1 ? dummy_->NewDummyName() : y;
   nodes.emplace_back(MakeNode(
       "Gemm",
-      {x, w, b},
+      {gemm_x_input, w, b},
       {gemm_y_output},
-      attrs,
+      {MakeAttribute("transB", 1L)},
       def.name()));
 
-  if (has_axis) {
-    std::vector<int64_t> dims;
-    for (int i = 0; i < axis; ++i) {
-      dims.push_back(x_shape.dims(i));
-    }
-    dims.push_back(-1);
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
-    nodes.emplace_back(
-        MakeNode("Reshape", {gemm_y_output, const_tensors.back().name()}, {y}));
+  // capture the outer shape if needed.
+  if (axis > 1) {
+    const auto x_shape = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Shape", {x}, {x_shape}));
+
+    const auto x_shape_outer = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode(
+        "Slice",
+        {x_shape},
+        {x_shape_outer},
+        std::vector<AttributeProto>{
+            MakeAttribute("starts", std::vector<int64_t>{0}),
+            MakeAttribute("ends", std::vector<int64_t>{axis}),
+        }));
+
+    const auto y_shape = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, {-1}));
+    nodes.emplace_back(MakeNode(
+        "Concat",
+        {x_shape_outer, const_tensors.back().name()},
+        {y_shape},
+        std::vector<AttributeProto>{
+            MakeAttribute("axis", static_cast<int64_t>(0)),
+        }));
+
+    nodes.emplace_back(MakeNode("Reshape", {gemm_y_output, y_shape}, {y}));
   }
 
   return result;
@@ -944,7 +1402,7 @@ void OnnxExporter::InitOpToTensorProto(
 
   const Argument* values = nullptr;
   const Argument* shape = nullptr;
-  for (const auto& arg: op.arg()) {
+  for (const auto& arg : op.arg()) {
     if (arg.name() == "values") {
       values = &arg;
     } else if (arg.name() == "shape") {
@@ -956,7 +1414,7 @@ void OnnxExporter::InitOpToTensorProto(
   CAFFE_ENFORCE(shape);
 
   // Set dims
-  for (const auto i: shape->ints()) {
+  for (const auto i : shape->ints()) {
     tensor->add_dims(i);
   }
 
@@ -995,4 +1453,3 @@ void OnnxExporter::InitOpToTensorProto(
 
 } // namespace onnx
 } // namespace caffe2
-

@@ -1,0 +1,93 @@
+pytorch_params: &pytorch_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    docker_image:
+      type: string
+      default: ""
+    resource_class:
+      type: string
+      default: "large"
+    use_cuda_docker_runtime:
+      type: string
+      default: ""
+    build_only:
+      type: string
+      default: ""
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    DOCKER_IMAGE: << parameters.docker_image >>
+    USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
+    BUILD_ONLY: << parameters.build_only >>
+  resource_class: << parameters.resource_class >>
+
+pytorch_ios_params: &pytorch_ios_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    ios_arch:
+      type: string
+      default: ""
+    ios_platform:
+      type: string
+      default: ""
+    op_list:
+      type: string
+      default: ""
+    use_metal:
+      type: string
+      default: "0"
+    lite_interpreter:
+      type: string
+      default: "0"
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    IOS_ARCH: << parameters.ios_arch >>
+    IOS_PLATFORM: << parameters.ios_platform >>
+    SELECTED_OP_LIST: << parameters.op_list >>
+    USE_PYTORCH_METAL: << parameters.use_metal >>
+    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
+
+pytorch_windows_params: &pytorch_windows_params
+  parameters:
+    executor:
+      type: string
+      default: "windows-xlarge-cpu-with-nvidia-cuda"
+    build_environment:
+      type: string
+      default: ""
+    test_name:
+      type: string
+      default: ""
+    cuda_version:
+      type: string
+      default: "10.1"
+    python_version:
+      type: string
+      default: "3.6"
+    vc_version:
+      type: string
+      default: "14.16"
+    vc_year:
+      type: string
+      default: "2019"
+    vc_product:
+      type: string
+      default: "BuildTools"
+    use_cuda:
+      type: string
+      default: ""
+  environment:
+    BUILD_ENVIRONMENT: <<parameters.build_environment>>
+    SCCACHE_BUCKET: "ossci-compiler-cache"
+    CUDA_VERSION: <<parameters.cuda_version>>
+    PYTHON_VERSION: <<parameters.python_version>>
+    VC_VERSION: <<parameters.vc_version>>
+    VC_YEAR: <<parameters.vc_year>>
+    VC_PRODUCT: <<parameters.vc_product>>
+    USE_CUDA: <<parameters.use_cuda>>
+    TORCH_CUDA_ARCH_LIST: "7.5"
+    JOB_BASE_NAME: <<parameters.test_name>>
+    JOB_EXECUTOR: <<parameters.executor>>

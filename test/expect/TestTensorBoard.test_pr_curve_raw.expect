@@ -1,0 +1,50 @@
+value {
+  tag: "prcurve with raw data"
+  tensor {
+    dtype: DT_FLOAT
+    tensor_shape {
+      dim {
+        size: 6
+      }
+      dim {
+        size: 5
+      }
+    }
+    float_val: 75.0
+    float_val: 64.0
+    float_val: 21.0
+    float_val: 5.0
+    float_val: 0.0
+    float_val: 150.0
+    float_val: 105.0
+    float_val: 18.0
+    float_val: 0.0
+    float_val: 0.0
+    float_val: 0.0
+    float_val: 45.0
+    float_val: 132.0
+    float_val: 150.0
+    float_val: 150.0
+    float_val: 0.0
+    float_val: 11.0
+    float_val: 54.0
+    float_val: 70.0
+    float_val: 75.0
+    float_val: 0.3333333
+    float_val: 0.3786982
+    float_val: 0.5384616
+    float_val: 1.0
+    float_val: 0.0
+    float_val: 1.0
+    float_val: 0.8533334
+    float_val: 0.28
+    float_val: 0.0666667
+    float_val: 0.0
+  }
+  metadata {
+    plugin_data {
+      plugin_name: "pr_curves"
+      content: "\020\001"
+    }
+  }
+}

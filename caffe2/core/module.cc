@@ -1,7 +1,7 @@
-#include "caffe2/core/logging.h"
 #include "caffe2/core/module.h"
+#include "caffe2/core/logging.h"
 
-#ifndef _MSC_VER
+#ifndef _WIN32
 #include <dlfcn.h>
 #endif
 
@@ -28,58 +28,54 @@ const CaffeMap<string, const ModuleSchema*>& CurrentModules() {
   return MutableCurrentModules();
 }
 
-ModuleSchema::ModuleSchema(const char* name, const char* description)
-    : name_(name), description_(description) {
+ModuleSchema::ModuleSchema(const char* name, const char* description) {
   std::lock_guard<std::mutex> guard(gModuleChangeMutex());
   MutableCurrentModules().emplace(name, this);
 }
 
 bool HasModule(const string& name) {
- auto& modules = CurrentModules();
- return (modules.find(name) != modules.end());
+  auto& modules = CurrentModules();
+  return (modules.find(name) != modules.end());
 }
-
-#ifdef _MSC_VER
-
-void LoadModule(const string& name, const string& filename) {
-  CAFFE_ENFORCE(!HasModule(name),
-    "On Windows, LoadModule is currently not supported yet and you should "
-    "use static linking for any module that you intend to use.");
-}
-
-#else
 
 void LoadModule(const string& name, const string& filename) {
   CAFFE_ENFORCE(
       name.size() > 0 || filename.size() > 0,
       "You must provide at least one of name and filename.");
   if (name.size() && HasModule(name)) {
-    VLOG(1) << "Module " << name << " already present. Skip loading."; 
+    VLOG(1) << "Module " << name << " already present. Skip loading.";
     return;
   }
+
+#ifdef _WIN32
+  CAFFE_ENFORCE(
+      !HasModule(name),
+      "On Windows, LoadModule is currently not supported yet and you should "
+      "use static linking for any module that you intend to use.");
+#else
   void* handle = nullptr;
   if (filename.size()) {
-    handle = dlopen(
-        filename.c_str(), RTLD_NOW | RTLD_GLOBAL);
-    CAFFE_ENFORCE(handle != nullptr,
-      "Cannot load module ",
-      name,
-      " (with given filename ",
-      filename,
-      "), are you sure it is correct?");
+    handle = dlopen(filename.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    CAFFE_ENFORCE(
+        handle != nullptr,
+        "Cannot load module ",
+        name,
+        " (with given filename ",
+        filename,
+        "), are you sure it is correct?");
   } else {
     string inferred_name = string("lib") + name + ".so";
-    handle = dlopen(
-        inferred_name.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    handle = dlopen(inferred_name.c_str(), RTLD_NOW | RTLD_GLOBAL);
 #ifdef __APPLE__
     // For apple, we will also try the dylib extension.
     if (!handle) {
       string inferred_name = string("lib") + name + ".dylib";
-      handle = dlopen(
-          inferred_name.c_str(), RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE);
+      handle =
+          dlopen(inferred_name.c_str(), RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE);
     }
 #endif
-    CAFFE_ENFORCE(handle != nullptr,
+    CAFFE_ENFORCE(
+        handle != nullptr,
         "Cannot load module ",
         name,
         " (with inferred filename ",
@@ -91,7 +87,8 @@ void LoadModule(const string& name, const string& filename) {
   // and the module name are inconsistent.
   if (name.size()) {
     string module_name_check = "gCaffe2ModuleSanityCheck" + name;
-    CAFFE_ENFORCE(dlsym(handle, module_name_check.c_str()),
+    CAFFE_ENFORCE(
+        dlsym(handle, module_name_check.c_str()),
         "The loaded module ",
         name,
         " did not pass the module name sanity check. Is it built with the "
@@ -114,9 +111,7 @@ void LoadModule(const string& name, const string& filename) {
     std::lock_guard<std::mutex> guard(gModuleChangeMutex());
     CurrentModuleHandles()[filename] = handle;
   }
+#endif // _WIN32
 }
 
-#endif // _MSC_VER
-
-}  // namespace caffe2
-
+} // namespace caffe2

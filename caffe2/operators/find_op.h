@@ -12,8 +12,9 @@ namespace caffe2 {
 template <class Context>
 class FindOp final : public Operator<Context> {
  public:
-  FindOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit FindOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         missing_value_(
             this->template GetSingleArgument<int>("missing_value", -1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -28,8 +29,8 @@ class FindOp final : public Operator<Context> {
   bool DoRunWithType() {
     auto& idx = Input(0);
     auto& needles = Input(1);
-    auto* res_indices = Output(0);
-    res_indices->ResizeLike(needles);
+
+    auto* res_indices = Output(0, needles.sizes(), at::dtype<T>());
 
     const T* idx_data = idx.template data<T>();
     const T* needles_data = needles.template data<T>();

@@ -117,7 +117,7 @@ typedef struct {
 
 /*!
  * \brief C Tensor object, manage memory of DLTensor. This data structure is
- *  intended to faciliate the borrowing of DLTensor by another framework. It is
+ *  intended to facilitate the borrowing of DLTensor by another framework. It is
  *  not meant to transfer the tensor. When the borrowing framework doesn't need
  *  the tensor, it should call the deleter to notify the host that the resource
  *  is no longer needed.

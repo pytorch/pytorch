@@ -1,40 +1,11 @@
-from collections import namedtuple
 from functools import update_wrapper
 from numbers import Number
-import math
 import torch
 import torch.nn.functional as F
+from typing import Dict, Any
+from torch.overrides import has_torch_function
 
-# This follows semantics of numpy.finfo.
-_Finfo = namedtuple('_Finfo', ['eps', 'tiny'])
-_FINFO = {
-    torch.HalfStorage: _Finfo(eps=0.00097656, tiny=6.1035e-05),
-    torch.FloatStorage: _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
-    torch.DoubleStorage: _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
-    torch.cuda.HalfStorage: _Finfo(eps=0.00097656, tiny=6.1035e-05),
-    torch.cuda.FloatStorage: _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
-    torch.cuda.DoubleStorage: _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
-}
-
-
-def _finfo(tensor):
-    r"""
-    Return floating point info about a `Tensor`:
-    - `.eps` is the smallest number that can be added to 1 without being lost.
-    - `.tiny` is the smallest positive number greater than zero
-      (much smaller than `.eps`).
-
-    Args:
-        tensor (Tensor): tensor of floating point data.
-    Returns:
-        _Finfo: a `namedtuple` with fields `.eps` and `.tiny`.
-    """
-    return _FINFO[tensor.storage_type()]
-
-
-# promote numbers to tensors of dtype torch.get_default_dtype()
-def _default_promotion(v):
-    return torch.tensor(v, dtype=torch.get_default_dtype())
+euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
 
 def broadcast_all(*values):
@@ -47,21 +18,25 @@ def broadcast_all(*values):
         values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
-        values (list of `numbers.Number` or `torch.*Tensor`)
+        values (list of `numbers.Number`, `torch.*Tensor` or objects implementing __torch_function__)
 
     Raises:
-        ValueError: if any of the values is not a `numbers.Number` or
-            `torch.*Tensor` instance
+        ValueError: if any of the values is not a `numbers.Number` instance,
+            a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(torch.is_tensor(v) or isinstance(v, Number) for v in values):
-        raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
-    if not all(map(torch.is_tensor, values)):
-        new_tensor = _default_promotion
+    if not all(isinstance(v, torch.Tensor) or has_torch_function((v,)) or isinstance(v, Number)
+               for v in values):
+        raise ValueError('Input arguments must all be instances of numbers.Number, '
+                         'torch.Tensor or objects implementing __torch_function__.')
+    if not all([isinstance(v, torch.Tensor) or has_torch_function((v,)) for v in values]):
+        options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
-            if torch.is_tensor(value):
-                new_tensor = value.new_tensor
+            if isinstance(value, torch.Tensor):
+                options = dict(dtype=value.dtype, device=value.device)
                 break
-        values = [v if torch.is_tensor(v) else new_tensor(v) for v in values]
+        new_values = [v if isinstance(v, torch.Tensor) or has_torch_function((v,)) else torch.tensor(v, **options)
+                      for v in values]
+        return torch.broadcast_tensors(*new_values)
     return torch.broadcast_tensors(*values)
 
 
@@ -100,7 +75,7 @@ def logits_to_probs(logits, is_binary=False):
 
 
 def clamp_probs(probs):
-    eps = _finfo(probs).eps
+    eps = torch.finfo(probs.dtype).eps
     return probs.clamp(min=eps, max=1 - eps)
 
 
@@ -117,18 +92,6 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-def batch_tril(bmat, diagonal=0):
-    """
-    Given a batch of matrices, returns the lower triangular part of each matrix, with
-    the other entries set to 0. The argument `diagonal` has the same meaning as in
-    `torch.tril`.
-    """
-    if bmat.dim() == 2:
-        return bmat.tril(diagonal=diagonal)
-    else:
-        return bmat * torch.tril(bmat.new(*bmat.shape[-2:]).fill_(1.0), diagonal=diagonal)
-
-
 class lazy_property(object):
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a
@@ -138,7 +101,7 @@ class lazy_property(object):
     """
     def __init__(self, wrapped):
         self.wrapped = wrapped
-        update_wrapper(self, wrapped)
+        update_wrapper(self, wrapped)  # type: ignore[arg-type]
 
     def __get__(self, instance, obj_type=None):
         if instance is None:
@@ -147,3 +110,36 @@ class lazy_property(object):
             value = self.wrapped(instance)
         setattr(instance, self.wrapped.__name__, value)
         return value
+
+
+def tril_matrix_to_vec(mat, diag=0):
+    r"""
+    Convert a `D x D` matrix or a batch of matrices into a (batched) vector
+    which comprises of lower triangular elements from the matrix in row order.
+    """
+    n = mat.shape[-1]
+    if not torch._C._get_tracing_state() and (diag < -n or diag >= n):
+        raise ValueError(f'diag ({diag}) provided is outside [{-n}, {n-1}].')
+    arange = torch.arange(n, device=mat.device)
+    tril_mask = arange < arange.view(-1, 1) + (diag + 1)
+    vec = mat[..., tril_mask]
+    return vec
+
+
+def vec_to_tril_matrix(vec, diag=0):
+    r"""
+    Convert a vector or a batch of vectors into a batched `D x D`
+    lower triangular matrix containing elements from the vector in row order.
+    """
+    # +ve root of D**2 + (1+2*diag)*D - |diag| * (diag+1) - 2*vec.shape[-1] = 0
+    n = (-(1 + 2 * diag) + ((1 + 2 * diag)**2 + 8 * vec.shape[-1] + 4 * abs(diag) * (diag + 1))**0.5) / 2
+    eps = torch.finfo(vec.dtype).eps
+    if not torch._C._get_tracing_state() and (round(n) - n > eps):
+        raise ValueError(f'The size of last dimension is {vec.shape[-1]} which cannot be expressed as ' +
+                         'the lower triangular part of a square D x D matrix.')
+    n = torch.round(n).long() if isinstance(n, torch.Tensor) else round(n)
+    mat = vec.new_zeros(vec.shape[:-1] + torch.Size((n, n)))
+    arange = torch.arange(n, device=vec.device)
+    tril_mask = arange < arange.view(-1, 1) + (diag + 1)
+    mat[..., tril_mask] = vec
+    return mat

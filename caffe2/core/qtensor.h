@@ -1,15 +1,16 @@
 #ifndef CAFFE2_CORE_QTENSOR_H_
 #define CAFFE2_CORE_QTENSOR_H_
 
+#include "caffe2/core/common.h"
+#include "caffe2/core/context.h"
+#include "caffe2/core/tensor.h"
+#include <c10/util/accumulate.h>
+#include <c10/util/typeid.h>
+
 #include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <vector>
-
-#include "caffe2/core/common.h"
-#include "caffe2/core/context.h"
-#include "caffe2/core/tensor.h"
-#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 
@@ -46,6 +47,7 @@ class C10_EXPORT QTensor {
    * many low precision integers as a sum of popcnt(A & B) * 1 << bit.
    * Explained here: https://arxiv.org/abs/1606.06160
    */
+  // TODO: changing at::ArrayRef<int> to at::ArrayRef<int64_t>?
   explicit QTensor(
       at::ArrayRef<int> dims,
       const unsigned char precision,
@@ -56,8 +58,7 @@ class C10_EXPORT QTensor {
 
   void Resize(at::ArrayRef<int> dim_source) {
     if (dims_ != dim_source) {
-      size_t source_size = std::accumulate(
-          dim_source.begin(), dim_source.end(), 1, std::multiplies<int>());
+      const auto source_size = c10::multiply_integers(dim_source);
       if ((source_size * (precision_ + signed_)) > capacity_) {
         data_ptr_.clear();
         capacity_ = 0;
@@ -145,6 +146,11 @@ class C10_EXPORT QTensor {
     return precision_;
   }
 
+  inline at::ArrayRef<int> sizes() const {
+    return dims_;
+  }
+
+  // TODO: deprecate?
   inline at::ArrayRef<int> dims() const {
     return dims_;
   }

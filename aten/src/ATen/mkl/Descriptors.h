@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Exceptions.h"
+#include <ATen/mkl/Exceptions.h>
 #include <mkl_dfti.h>
 #include <ATen/Tensor.h>
 

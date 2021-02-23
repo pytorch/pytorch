@@ -15,7 +15,7 @@
  */
 
 #include "caffe2/core/context_gpu.h"
-#include "smooth_l1_loss_op.h"
+#include "modules/detectron/smooth_l1_loss_op.h"
 
 namespace caffe2 {
 
@@ -27,7 +27,7 @@ __global__ void SmoothL1Kernel(
   //        |x| - 0.5 * beta      otherwise
   CUDA_1D_KERNEL_LOOP(index, n) {
     T val = in[index];
-    T abs_val = abs(val);
+    T abs_val = c10::cuda::compat::abs(val);
     if (abs_val < beta) {
       out[index] = 0.5 * val * val / beta;
     } else {
@@ -49,7 +49,7 @@ __global__ void SmoothL1GradientKernel(
   // We also scale by norm * d_loss in this kernel for convenience
   CUDA_1D_KERNEL_LOOP(index, n) {
     T val = in[index];
-    T abs_val = abs(val);
+    T abs_val = c10::cuda::compat::abs(val);
     T d_loss = *d_loss_data;
     if (abs_val < beta) {
       out[index] = norm * d_loss * val / beta;
@@ -66,7 +66,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   auto& Y         = Input(1);
   auto& alpha_in  = Input(2);
   auto& alpha_out = Input(3);
-  auto* avg_loss  = Output(0);
+
 
   int N = Y.dim32(0);
   // Require the same number of elements along axis 0 (batch size), but
@@ -78,7 +78,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_in.size());
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_out.size());
 
-  avg_loss->Resize(vector<int64_t>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   buff_.ResizeLike(Y);
 
   // Difference
@@ -102,6 +102,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
      context_.cuda_stream()>>>(
           buff_.size(), buff_.data<float>(), buff_.mutable_data<float>(),
           beta_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Element-wise weighted smooth l1 loss (can be used to specify a per-element
   // loss weight)
@@ -128,7 +129,6 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& alpha_in   = Input(2);
   auto& alpha_out  = Input(3);
   auto& d_avg_loss = Input(4);  // gradient of net w.r.t. avg_loss ("gradOuput")
-  auto* d_Y_hat    = Output(0); // gradient of net w.r.t. Y_hat ("gradInput")
   // We intentially don't compute gradients for Y, alpha_{in,out} since they
   // are not needed (can change in the future if desired)
 
@@ -143,7 +143,7 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_out.size());
   CAFFE_ENFORCE_EQ(d_avg_loss.size(), 1);
 
-  d_Y_hat->ResizeLike(Y_hat);
+  auto* d_Y_hat = Output(0, Y_hat.sizes(), at::dtype<float>()); // gradient of net w.r.t. Y_hat ("gradInput")
   buff_.ResizeLike(Y);
 
   // Difference
@@ -165,6 +165,8 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
      context_.cuda_stream()>>>(
          buff_.size(), buff_.data<float>(), d_Y_hat->mutable_data<float>(),
          d_avg_loss.data<float>(), scale_ / N, beta_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // Element-wise scale by alpha_in and alpha_out
   math::Mul<float, CUDAContext>(
       d_Y_hat->size(), d_Y_hat->data<float>(), alpha_in.data<float>(),

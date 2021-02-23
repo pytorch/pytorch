@@ -1,19 +1,22 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep
-from dnnlowp_test_utils import (
+from caffe2.python import core, dyndep, workspace
+from caffe2.quantization.server import utils as dnnlowp_utils
+from caffe2.quantization.server.dnnlowp_test_utils import (
     avoid_vpmaddubsw_overflow_fc,
     check_quantized_results_close,
+    run_conv_or_fc,
 )
 from hypothesis import given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
@@ -21,9 +24,10 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
     @given(
         input_channels=st.sampled_from([3, 4, 5, 8, 16, 32]),
         output_channels=st.integers(2, 16),
-        batch_size=st.integers(1, 16),
+        batch_size=st.integers(0, 16),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
+        prepack_weight=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_rowwise_dnnlowp_fully_connected_int(
@@ -33,12 +37,10 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         batch_size,
         in_quantized,
         out_quantized,
+        prepack_weight,
         gc,
         dc,
     ):
-        print("@given M ", batch_size, " K ", input_channels, " N ", output_channels)
-        print("@given in_quantized ", in_quantized, " out_quantized ", out_quantized)
-
         # X has scale 1, so exactly represented after quantization
         X_min = -77
         X_max = X_min + 255
@@ -49,7 +51,8 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         # input channels 0 and 1 are all X_min to avoid overflow from vpmaddubsw
         # when multiplied with W_min and W_max
         X[:, 0:2] = X_min
-        X[0, 2] = X_max
+        if batch_size != 0:
+            X[0, 2] = X_max
 
         # Each row of W has scale 1 but with different offset, so row-wise
         # quantization shouldn't have any input quantization error.
@@ -76,6 +79,9 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 W_max,
             )
 
+            if i % 2 == 0:
+                W[i, :] = (W[i, :] - W_min) * 2 + W_min
+
         b = np.random.randn(output_channels).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
@@ -86,14 +92,15 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
             ("FC", "DNNLOWP_ROWWISE"),
             ("FC", "DNNLOWP_ROWWISE_16"),
             ("Int8FC", "DNNLOWP_ROWWISE"),
-            ("Int8FCRowWise", "DNNLOWP"),
         ]
 
         for op_type, engine in op_engine_list:
+            init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
             do_quantize = "DNNLOWP" in engine and in_quantized
             do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_prepack_weight = engine == "DNNLOWP_ROWWISE" and prepack_weight
 
             if do_quantize:
                 quantize = core.CreateOperator(
@@ -101,14 +108,41 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
+            X_min = 0 if X.size == 0 else X.min()
+            X_max = 0 if X.size == 0 else X.max()
+            x_q_param = dnnlowp_utils.choose_quantization_params(X_min, X_max)
+
+            if do_prepack_weight:
+                inputs = ["W"]
+                if do_dequantize:
+                    inputs += ["b"]
+                pack = core.CreateOperator(
+                    "Int8FCPackWeight",
+                    inputs,
+                    ["W_packed"],
+                    in_scale=x_q_param.scale,
+                    engine=engine,
+                )
+                init_net.Proto().op.extend([pack])
+
             fc = core.CreateOperator(
                 op_type,
-                ["X_q" if do_quantize else "X", "W", "b"],
+                [
+                    "X_q" if do_quantize else "X",
+                    "W_packed" if do_prepack_weight else "W",
+                    "b",
+                ],
                 ["Y_q" if do_dequantize else "Y"],
                 dequantize_output=not do_dequantize,
                 engine=engine,
                 device_option=gc,
             )
+            if do_prepack_weight:
+                # When pre-packed quantized weight is provided, we can't rescale
+                # the output dynamically by looking at the range of output of
+                # each batch, so here we provide the range of output observed
+                # from fp32 reference implementation
+                dnnlowp_utils.add_quantization_param_args(fc, outputs[0][0])
             net.Proto().op.extend([fc])
 
             if do_dequantize:
@@ -117,12 +151,8 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(net)
-            outputs.append(
-                Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, None, gc, outputs
             )
 
         check_quantized_results_close(outputs)

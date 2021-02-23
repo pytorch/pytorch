@@ -4,6 +4,8 @@
 #include <torch/data/example.h>
 #include <torch/types.h>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <cstddef>
 #include <string>
 
@@ -11,7 +13,7 @@ namespace torch {
 namespace data {
 namespace datasets {
 /// The MNIST dataset.
-class MNIST : public Dataset<MNIST> {
+class TORCH_API MNIST : public Dataset<MNIST> {
  public:
   /// The mode in which the dataset is loaded.
   enum class Mode { kTrain, kTest };

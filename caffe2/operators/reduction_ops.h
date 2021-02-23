@@ -14,17 +14,24 @@ class SumElementsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SumElementsOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit SumElementsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         average_(this->template GetSingleArgument<bool>("average", false)) {}
-  SumElementsOp(const OperatorDef& operator_def, Workspace* ws, bool average)
+  explicit SumElementsOp(const OperatorDef& operator_def, Workspace* ws, bool average)
       : Operator<Context>(operator_def, ws), average_(average) {}
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  explicit SumElementsOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs)
+      : Operator<Context>(schema, std::move(inputs), std::move(outputs)),
+        average_(this->template GetSingleArgument<bool>("average", false)) {}
+  explicit SumElementsOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs, bool average)
+      : Operator<Context>(schema, std::move(inputs), std::move(outputs)), average_(average) {}
+#endif
   ~SumElementsOp() {}
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* sum = Output(0);
-    sum->Resize(vector<int64_t>());
+
+    auto* sum = Output(0, vector<int64_t>(), at::dtype<T>());
 
     T* data = sum->template mutable_data<T>();
 
@@ -51,14 +58,15 @@ class SumElementsIntOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SumElementsIntOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit SumElementsIntOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~SumElementsIntOp() {}
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* sum = Output(0);
-    sum->Resize(vector<int64_t>());
+
+    auto* sum = Output(0, vector<int64_t>(), at::dtype<T>());
     T* data = sum->template mutable_data<T>();
     math::Sum<T, Context>(
         X.numel(), X.template data<T>(), data, &context_, &scratch_);
@@ -74,14 +82,18 @@ class SumElementsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SumElementsGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit SumElementsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         average_(this->template GetSingleArgument<bool>("average", false)) {}
-  SumElementsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws,
-      bool average)
+  explicit SumElementsGradientOp(const OperatorDef& operator_def, Workspace* ws, bool average)
       : Operator<Context>(operator_def, ws), average_(average) {}
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  explicit SumElementsGradientOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs)
+      : Operator<Context>(schema, std::move(inputs), std::move(outputs)),
+        average_(this->template GetSingleArgument<bool>("average", false)) {}
+  explicit SumElementsGradientOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs, bool average)
+      : Operator<Context>(schema, std::move(inputs), std::move(outputs)), average_(average) {}
+#endif
   ~SumElementsGradientOp() {}
 
   bool RunOnDevice() override;
@@ -97,15 +109,15 @@ class SumSqrElementsOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, double>>::call(this, Input(0));
   }
 
   template <typename T>
   bool DoRunWithType() {
     bool average = this->template GetSingleArgument<bool>("average", false);
     auto& X = Input(0);
-    auto* sum = Output(0);
-    sum->Resize(vector<int64_t>());
+
+    auto* sum = Output(0, vector<int64_t>(), at::dtype<T>());
     math::SumSqr<T, Context>(
         X.numel(),
         X.template data<T>(),
@@ -141,8 +153,7 @@ class MaxReductionOp : public Operator<Context> {
     const int M = X.dim32(1);
     const int N = X.dim32(2);
 
-    auto* Y = Output(0);
-    ROWWISE ? Y->Resize(batch_size, M) : Y->Resize(batch_size, N);
+    auto* Y = Output(0, {batch_size, ROWWISE ? M : N}, at::dtype<T>());
 
     if (ROWWISE) {
       math::RowwiseMax<T, Context>(

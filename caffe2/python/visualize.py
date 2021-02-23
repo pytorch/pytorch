@@ -115,7 +115,7 @@ class PatchVisualizer(object):
     def get_patch_shape(self, patch):
         """Gets the shape of a single patch.
 
-    Basically it tries to interprete the patch as a square, and also check if it
+    Basically it tries to interpret the patch as a square, and also check if it
     is in color (3 channels)
     """
         edgeLen = np.sqrt(patch.size)

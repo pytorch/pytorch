@@ -1,5 +1,7 @@
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES // For M_PI
+#endif
 #endif // _MSC_VER
 #include <cmath>
 
@@ -140,7 +142,8 @@ void ROIAlignRotatedForward(
     const T* bottom_rois,
     int roi_cols,
     T* top_data,
-    StorageOrder order) {
+    StorageOrder order,
+    bool continuous_coordinate) {
   DCHECK(roi_cols == 5 || roi_cols == 6);
 
   int n_rois = nthreads / channels / pooled_width / pooled_height;
@@ -159,15 +162,22 @@ void ROIAlignRotatedForward(
     }
 
     // Do not round
-    T roi_center_w = offset_bottom_rois[0] * spatial_scale;
-    T roi_center_h = offset_bottom_rois[1] * spatial_scale;
+    T roi_offset = continuous_coordinate ? T(0.5) : 0;
+    T roi_center_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
+    T roi_center_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
     T roi_width = offset_bottom_rois[2] * spatial_scale;
     T roi_height = offset_bottom_rois[3] * spatial_scale;
     T theta = offset_bottom_rois[4] * M_PI / 180.0;
 
-    // Force malformed ROIs to be 1x1
-    roi_width = std::max(roi_width, (T)1.);
-    roi_height = std::max(roi_height, (T)1.);
+    if (continuous_coordinate) {
+      CAFFE_ENFORCE(
+          roi_width >= 0 && roi_height >= 0,
+          "ROIs in ROIAlign do not have non-negative size!");
+    } else { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_width = std::max(roi_width, (T)1.);
+      roi_height = std::max(roi_height, (T)1.);
+    }
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
@@ -281,20 +291,20 @@ void ROIAlignRotatedForward(
 } // namespace
 
 template <>
-bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
-  auto* Y = Output(0); // RoI pooled data
 
   if (R.numel() == 0) {
+    std::vector<int64_t> sizes;
     // Handle empty rois
     if (order_ == StorageOrder::NCHW) {
-      Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
+      sizes = {0, X.dim32(1), pooled_height_, pooled_width_};
     } else if (order_ == StorageOrder::NHWC) {
-      Y->Resize(0, pooled_height_, pooled_width_, X.dim32(3));
+      sizes = {0, pooled_height_, pooled_width_, X.dim32(3)};
     }
-    // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    // Output tensor is inititalized with proper sizes and data type
+    Output(0, sizes, at::dtype<float>());
     return true;
   }
 
@@ -306,8 +316,12 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   assert(sampling_ratio_ >= 0);
 
   if (order_ == StorageOrder::NCHW) {
-    Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
-    int output_size = Y->numel();
+    auto* Y = Output(
+        0,
+        {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
+        at::dtype<float>()); // RoI pooled data
+
+    size_t output_size = Y->numel();
     ROIAlignRotatedForward<float>(
         output_size,
         X.data<float>(),
@@ -321,10 +335,14 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
         R.data<float>(),
         R.dim32(1),
         Y->mutable_data<float>(),
-        order_);
+        order_,
+        aligned_);
   } else if (order_ == StorageOrder::NHWC) {
-    Y->Resize(R.dim32(0), pooled_height_, pooled_width_, X.dim32(3));
-    int output_size = Y->numel();
+    auto* Y = Output(
+        0,
+        {R.dim32(0), pooled_height_, pooled_width_, X.dim32(3)},
+        at::dtype<float>()); // RoI pooled data
+    size_t output_size = Y->numel();
     ROIAlignRotatedForward<float>(
         output_size,
         X.data<float>(),
@@ -338,7 +356,8 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
         R.data<float>(),
         R.dim32(1),
         Y->mutable_data<float>(),
-        order_);
+        order_,
+        aligned_);
   }
 
   return true;
@@ -386,3 +405,23 @@ Based on https://arxiv.org/abs/1703.01086.
         "is a pooled feature map cooresponding to the r-th RoI.");
 
 } // namespace caffe2
+
+using RoIAlignRotatedOpFloatCPU =
+    caffe2::RoIAlignRotatedOp<float, caffe2::CPUContext>;
+
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    RoIAlignRotated,
+    "_caffe2::RoIAlignRotated("
+      "Tensor features, "
+      "Tensor rois, "
+      "str order, "
+      "float spatial_scale, "
+      "int pooled_h, "
+      "int pooled_w, "
+      "int sampling_ratio, "
+      "bool aligned"
+    ") -> Tensor",
+    RoIAlignRotatedOpFloatCPU);
+
+// clang-format on

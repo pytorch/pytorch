@@ -32,6 +32,14 @@ namespace {
 }
 
 template <>
+struct numeric_limits<bool> {
+  static inline __host__ __device__ bool lowest() { return false; }
+  static inline __host__ __device__ bool max() { return true; }
+  static inline __host__ __device__ bool lower_bound() { return false; }
+  static inline __host__ __device__ bool upper_bound() { return true; }
+};
+
+template <>
 struct numeric_limits<uint8_t> {
   static inline __host__ __device__ uint8_t lowest() { return 0; }
   static inline __host__ __device__ uint8_t max() { return UINT8_MAX; }
@@ -80,10 +88,18 @@ struct numeric_limits<int64_t> {
 
 template <>
 struct numeric_limits<at::Half> {
-  static inline __host__ __device__ at::Half lowest() { return at::Half(0xFBFF, at::Half::from_bits); }
-  static inline __host__ __device__ at::Half max() { return at::Half(0x7BFF, at::Half::from_bits); }
-  static inline __host__ __device__ at::Half lower_bound() { return at::Half(0xFC00, at::Half::from_bits); }
-  static inline __host__ __device__ at::Half upper_bound() { return at::Half(0x7C00, at::Half::from_bits); }
+  static inline __host__ __device__ at::Half lowest() { return at::Half(0xFBFF, at::Half::from_bits()); }
+  static inline __host__ __device__ at::Half max() { return at::Half(0x7BFF, at::Half::from_bits()); }
+  static inline __host__ __device__ at::Half lower_bound() { return at::Half(0xFC00, at::Half::from_bits()); }
+  static inline __host__ __device__ at::Half upper_bound() { return at::Half(0x7C00, at::Half::from_bits()); }
+};
+
+template <>
+struct numeric_limits<at::BFloat16> {
+  static inline __host__ __device__ at::BFloat16 lowest() { return at::BFloat16(0xFF7F, at::BFloat16::from_bits()); }
+  static inline __host__ __device__ at::BFloat16 max() { return at::BFloat16(0x7F7F, at::BFloat16::from_bits()); }
+  static inline __host__ __device__ at::BFloat16 lower_bound() { return at::BFloat16(0xFF80, at::BFloat16::from_bits()); }
+  static inline __host__ __device__ at::BFloat16 upper_bound() { return at::BFloat16(0x7F80, at::BFloat16::from_bits()); }
 };
 
 template <>

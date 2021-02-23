@@ -1,9 +1,9 @@
 ## @package scope
 # Module caffe2.python.scope
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import contextlib
 import threading
@@ -84,6 +84,23 @@ def DeviceScope(scope, node_name=None):
         assert _threadlocal_scope.devicescope == new_scope, \
             "The device scope is changed from outside DeviceScope() calls."
         _threadlocal_scope.devicescope = old_scope
+
+
+@contextlib.contextmanager
+def EmptyNameScope():
+    """
+    Allow users to 'disable' the name scope behaviour.
+
+    This sets the CurrentNameScope() to None, so that the field is
+    not set in CreateOperator(...), etc.
+    """
+    old_scope = CurrentNameScope()
+    try:
+        _threadlocal_scope.namescope = ''
+        yield
+    finally:
+        _threadlocal_scope.namescope = old_scope
+        return
 
 
 @contextlib.contextmanager

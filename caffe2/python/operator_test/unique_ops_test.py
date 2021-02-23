@@ -13,11 +13,12 @@
 # limitations under the License.
 ##############################################################################
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
+
+
+
+
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 from functools import partial
@@ -35,7 +36,7 @@ def _unique_ref(x, return_inverse):
 
 
 class TestUniqueOps(serial.SerializedTestCase):
-    @serial.given(
+    @given(
         X=hu.tensor1d(
             # allow empty
             min_len=0,
@@ -43,8 +44,9 @@ class TestUniqueOps(serial.SerializedTestCase):
             # allow negatives
             elements=st.integers(min_value=-10, max_value=10)),
         return_remapping=st.booleans(),
-        **hu.gcs
+        **hu.gcs_no_hip
     )
+    @settings(deadline=10000)
     def test_unique_op(self, X, return_remapping, gc, dc):
         # impl of unique op does not guarantees return order, sort the input
         # so different impl return same outputs
@@ -67,3 +69,7 @@ class TestUniqueOps(serial.SerializedTestCase):
             inputs=[X],
             reference=partial(_unique_ref, return_inverse=return_remapping),
         )
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

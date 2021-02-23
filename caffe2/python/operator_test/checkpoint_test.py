@@ -1,19 +1,20 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from caffe2.python import core, workspace
+
+
+
+
+from caffe2.python import core, workspace, test_util
 import os
 import shutil
 import tempfile
 import unittest
 
 
-class CheckpointTest(unittest.TestCase):
+class CheckpointTest(test_util.TestCase):
     """A simple test case to make sure that the checkpoint behavior is correct.
     """
 
+    @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
     def testCheckpoint(self):
         temp_root = tempfile.mkdtemp()
         net = core.Net("test_checkpoint")
@@ -23,8 +24,8 @@ class CheckpointTest(unittest.TestCase):
         net.Iter([], "iter")
         net.ConstantFill([], "value", shape=[1, 2, 3])
         net.Checkpoint(["iter", "value"], [],
-                     db=os.path.join(temp_root, "test_checkpoint_at_%05d"),
-                     db_type="leveldb", every=10, absolute_path=True)
+                       db=os.path.join(temp_root, "test_checkpoint_at_%05d"),
+                       db_type="leveldb", every=10, absolute_path=True)
         self.assertTrue(workspace.CreateNet(net))
         for i in range(100):
             self.assertTrue(workspace.RunNet("test_checkpoint"))
@@ -40,5 +41,4 @@ class CheckpointTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()

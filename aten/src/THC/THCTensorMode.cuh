@@ -1,9 +1,9 @@
 #ifndef THC_TENSOR_MODE_CUH
 #define THC_TENSOR_MODE_CUH
 
-#include "THCNumerics.cuh"
-#include "THCSortUtils.cuh"
-#include "THCScanUtils.cuh"
+#include <THC/THCNumerics.cuh>
+#include <THC/THCSortUtils.cuh>
+#include <THC/THCScanUtils.cuh>
 
 struct ThrustHalfLess
 {
@@ -271,7 +271,7 @@ __global__ void computeMode(
   // Finally, we have the mode, and an index where it occurs. We use a single thread
   // to place this in the appropriate output position
   if (tidx == 0) {
-    int64_t index = TH_INDEX_BASE + match.val;
+    int64_t index = match.val;
 
     unsigned int outputOffset = IndexToOffset<T, unsigned int, -1>::get(blockId, values);
     values.data[outputOffset] = mode;

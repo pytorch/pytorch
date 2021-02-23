@@ -38,38 +38,7 @@ std::string ShowNode(NodeRef node) {
   }
 }
 
-void DumpGraph(NNGraph* g) {
-  auto nnprinter = [](typename NNGraph::NodeRef node) {
-    std::map<std::string, std::string> labelMap;
-    assert(node->data() && "Node doesn't have data, can't render it");
-    if (isa<NeuralNetOperator>(node->data())) {
-      auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
-      labelMap["label"] = op->getName() + " (" +
-          caffe2::to_string((unsigned long long)node) + ")";
-      auto* annotation = op->getAnnotation();
-      if (annotation && isa<Caffe2Annotation>(annotation)) {
-        auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
-        labelMap["label"] += "\\n[" + device_annotation->getDevice() + "]";
-        auto hash = std::hash<std::string>{}(device_annotation->getDevice());
-        std::stringstream hex_stream;
-        hex_stream << std::hex << hash;
-        labelMap["color"] = "#" + hex_stream.str().substr(0, 6);
-        labelMap["fontcolor"] = labelMap["color"];
-      }
-      labelMap["shape"] = "box";
-    } else if (isa<Data>(node->data())) {
-      auto tensor = dyn_cast<NeuralNetData>(node->data().get());
-      labelMap["label"] = tensor->getName();
-      labelMap["label"] += "_" + caffe2::to_string(tensor->getVersion()) + " " +
-          caffe2::to_string((unsigned long long)node);
-    }
-    return labelMap;
-  };
 
-  std::ofstream out("dump.dot");
-  out << nom::converters::convertToDotString(g, nnprinter);
-  out.close();
-}
 
 struct VisitorContext {
   VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
@@ -295,7 +264,7 @@ void ReplaceSubgraph(
     for (const auto& input : op.input()) {
       if (!tensor_map.count(input)) {
         tensor_map[input] =
-            g->createNode(caffe2::make_unique<nom::repr::Tensor>(input));
+            g->createNode(std::make_unique<nom::repr::Tensor>(input));
       }
 
       auto tensor_node = tensor_map[input];
@@ -305,7 +274,7 @@ void ReplaceSubgraph(
     for (const auto& output : op.output()) {
       if (!tensor_map.count(output)) {
         tensor_map[output] =
-            g->createNode(caffe2::make_unique<nom::repr::Tensor>(output));
+            g->createNode(std::make_unique<nom::repr::Tensor>(output));
       }
       auto tensor_node = tensor_map[output];
       g->createEdge(op_node, tensor_node);
@@ -342,11 +311,59 @@ void PruneUnrefereredNodes(NNModule* nn) {
 }
 
 } // namespace
+void DumpGraph(NNGraph* g, const std::string& fname) {
+  auto nnprinter = [](typename NNGraph::NodeRef node) {
+    std::map<std::string, std::string> labelMap;
+    assert(node->data() && "Node doesn't have data, can't render it");
+    if (isa<NeuralNetOperator>(node->data())) {
+      auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
+      const auto& op_def =
+          dyn_cast<Caffe2Annotation>(op->getAnnotation())->getOperatorDef();
+      int pos = -1;
+      for (const auto& arg : op_def.arg()) {
+        if (arg.name() == "net_pos") {
+          if (arg.has_i()) {
+            pos = arg.i();
+          }
+          break;
+        }
+      }
+      labelMap["label"] =
+          op->getName() + " (" + c10::to_string((unsigned long long)node) + ")";
+      auto* annotation = op->getAnnotation();
+      if (annotation && isa<Caffe2Annotation>(annotation)) {
+        auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
+        labelMap["label"] += "\\n[" + device_annotation->getDevice() +
+            ", pos=" + c10::to_string(pos) + "]";
+        auto hash = std::hash<std::string>{}(device_annotation->getDevice());
+        std::stringstream hex_stream;
+        hex_stream << std::hex << hash;
+        labelMap["color"] = "#" + hex_stream.str().substr(0, 6);
+        labelMap["fontcolor"] = labelMap["color"];
+      }
+      labelMap["shape"] = "box";
+    } else if (isa<Data>(node->data())) {
+      auto tensor = dyn_cast<NeuralNetData>(node->data().get());
+      labelMap["label"] = tensor->getName();
+      labelMap["label"] += "_" + c10::to_string(tensor->getVersion()) + " " +
+          c10::to_string((unsigned long long)node);
+    }
+    return labelMap;
+  };
+
+  std::ofstream out(fname.c_str());
+  if (out) {
+    out << nom::converters::convertToDotString(g, nnprinter);
+  } else {
+    LOG(ERROR) << "Cannot create nomnigraph dump file: " << fname;
+  }
+}
 
 caffe2::NetDef OptimizeForBackend(
     caffe2::NetDef& net,
     std::function<bool(const caffe2::OperatorDef&)> supports,
-    std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func) {
+    std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func,
+    bool debug) {
   auto nn = convertToNNModule(net);
   auto& dfg = nn.dataFlow;
 
@@ -367,10 +384,16 @@ caffe2::NetDef OptimizeForBackend(
       if (!nn::hasConsumer(node)) {
         external_outputs.emplace(nn::get<const NeuralNetData>(node)->getName());
       }
+      for (auto i = 0; i < net.external_output_size(); ++i) {
+        const auto& n = net.external_output(i);
+        if (n == nn::get<const NeuralNetData>(node)->getName()) {
+          external_outputs.emplace(n);
+        }
+      }
     }
   }
 
-  // Find unsupported and supported groups of nodes alernatively
+  // Find unsupported and supported groups of nodes alternatively
   context.frontier.clear();
   context.current_group.clear();
   context.find_supported = false;
@@ -412,6 +435,10 @@ caffe2::NetDef OptimizeForBackend(
   // Prune dangling nodes, because after transformation, some weights might be
   // absorbed
   PruneUnrefereredNodes(&nn);
+
+  if (debug) {
+    DumpGraph(&dfg, "dump.dot");
+  }
 
   auto new_net = convertToCaffe2Proto(nn);
   new_net.set_name(net.name() + "_opt");

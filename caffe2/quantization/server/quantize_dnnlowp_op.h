@@ -9,7 +9,7 @@ template <typename T>
 class QuantizeDNNLowPOp final : public Operator<CPUContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  QuantizeDNNLowPOp(const OperatorDef& operator_def, Workspace *ws);
+  QuantizeDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
 
   bool RunOnDevice() override;
 

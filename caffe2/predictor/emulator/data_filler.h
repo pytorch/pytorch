@@ -31,12 +31,14 @@ class Filler {
     for (const auto& item : *input_data) {
       bytes += item.nbytes();
     }
-    CAFFE_ENFORCE(bytes > 0, "input bytes should be positive");
+    if (bytes == 0) {
+      LOG(WARNING) << "0 input bytes filled";
+    }
 
     return bytes;
   }
 
-  std::vector<std::string> get_input_names() const {
+  const std::vector<std::string>& get_input_names() const {
     CAFFE_ENFORCE(!input_names_.empty(), "input names is not initialized");
     return input_names_;
   }
@@ -77,9 +79,14 @@ class DataNetFiller : public Filler {
   const NetDef data_net_;
 };
 
+void fill_with_type(
+    const TensorFiller& filler,
+    const std::string& type,
+    TensorCPU* output);
+
 /*
  * @run_net: the predict net with parameter and input names
- * @input_dims: the input dimentions of all operator inputs of run_net
+ * @input_dims: the input dimensions of all operator inputs of run_net
  * @input_types: the input types of all operator inputs of run_net
  */
 class DataRandomFiller : public Filler {
@@ -93,13 +100,12 @@ class DataRandomFiller : public Filler {
 
   void fill_parameter(Workspace* ws) const override;
 
- private:
-  TensorFiller get_tensor_filler(
+  static TensorFiller get_tensor_filler(
       const OperatorDef& op_def,
       int input_index,
       const std::vector<std::vector<int64_t>>& input_dims) {
     Workspace ws;
-    for (size_t i = 0; i < op_def.input_size(); ++i) {
+    for (int i = 0; i < op_def.input_size(); ++i) {
       // CreateOperator requires all input blobs present
       ws.CreateBlob(op_def.input(i));
     }
@@ -113,10 +119,36 @@ class DataRandomFiller : public Filler {
     return filler;
   }
 
+ protected:
+  DataRandomFiller() {}
+
   using filler_type_pair_t = std::pair<TensorFiller, std::string>;
   std::unordered_map<std::string, filler_type_pair_t> parameters_;
   std::unordered_map<std::string, filler_type_pair_t> inputs_;
 };
+
+// A DataRandomFiller that is more convenient to use in unit tests.
+// Callers just need to supply input dimensions and types for non-intermediate
+// blobs.
+// It also treats parameters the same way as non-intermediate inputs (no
+// handling of parameters separately).
+class TestDataRandomFiller : public DataRandomFiller {
+ public:
+  TestDataRandomFiller(
+      const NetDef& net,
+      const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+      const std::vector<std::vector<std::string>>& inputTypes);
+
+  // Fill input directly to the workspace.
+  void fillInputToWorkspace(Workspace* workspace) const;
+};
+
+// Convenient helpers to fill data to workspace.
+TORCH_API void fillRandomNetworkInputs(
+    const NetDef& net,
+    const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+    const std::vector<std::vector<std::string>>& inputTypes,
+    Workspace* workspace);
 
 } // namespace emulator
 } // namespace caffe2

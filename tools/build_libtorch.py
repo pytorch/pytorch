@@ -1,35 +1,20 @@
 import argparse
-import os
-import shlex
-import subprocess
+from os.path import dirname, abspath
 import sys
 
-from setup_helpers.cuda import USE_CUDA
-from setup_helpers.env import check_env_flag
+# By appending pytorch_root to sys.path, this module can import other torch
+# modules even when run as a standalone script. i.e., it's okay either you
+# do `python build_libtorch.py` or `python -m tools.build_libtorch`.
+pytorch_root = dirname(dirname(abspath(__file__)))
+sys.path.append(pytorch_root)
+
+from tools.build_pytorch_libs import build_caffe2
+from tools.setup_helpers.cmake import CMake
 
 if __name__ == '__main__':
     # Placeholder for future interface. For now just gives a nice -h.
     parser = argparse.ArgumentParser(description='Build libtorch')
     options = parser.parse_args()
 
-    os.environ['BUILD_TORCH'] = 'ON'
-    os.environ['BUILD_TEST'] = 'ON'
-    os.environ['ONNX_NAMESPACE'] = 'onnx_torch'
-    os.environ['PYTORCH_PYTHON'] = sys.executable
-
-    tools_path = os.path.dirname(os.path.abspath(__file__))
-    build_pytorch_libs = os.path.join(tools_path, 'build_pytorch_libs.sh')
-
-    command = [build_pytorch_libs, '--use-nnpack']
-    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
-    if USE_MKLDNN:
-        command.append('--use-mkldnn')
-    if USE_CUDA:
-        command.append('--use-cuda')
-        if os.environ.get('USE_CUDA_STATIC_LINK', False):
-            command.append('--cuda-static-link')
-    command.append('caffe2')
-
-    sys.stdout.flush()
-    sys.stderr.flush()
-    subprocess.check_call(command, universal_newlines=True)
+    build_caffe2(version=None, cmake_python_library=None, build_python=False,
+                 rerun_cmake=True, cmake_only=False, cmake=CMake())

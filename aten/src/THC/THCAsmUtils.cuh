@@ -84,25 +84,26 @@ struct Bitfield<uint64_t> {
 
 __device__ __forceinline__ int getLaneId() {
 #if defined(__HIP_PLATFORM_HCC__)
-  return hc::__lane_id();
+  return __lane_id();
 #else
   int laneId;
-  asm("mov.s32 %0, %laneid;" : "=r"(laneId) );
+  asm("mov.s32 %0, %%laneid;" : "=r"(laneId) );
   return laneId;
 #endif
 }
 
 #if defined(__HIP_PLATFORM_HCC__)
 __device__ __forceinline__ unsigned long long int getLaneMaskLt() {
-  std::uint64_t m = (1ull << getLaneId()) - 1ull;
+  const std::uint64_t m = (1ull << getLaneId()) - 1ull;
   return m;
+}
 #else
 __device__ __forceinline__ unsigned getLaneMaskLt() {
   unsigned mask;
   asm("mov.u32 %0, %%lanemask_lt;" : "=r"(mask));
   return mask;
-#endif
 }
+#endif
 
 #if defined (__HIP_PLATFORM_HCC__)
 __device__ __forceinline__ unsigned long long int getLaneMaskLe() {
@@ -119,27 +120,28 @@ __device__ __forceinline__ unsigned getLaneMaskLe() {
 
 #if defined(__HIP_PLATFORM_HCC__)
 __device__ __forceinline__ unsigned long long int getLaneMaskGt() {
-  std::uint64_t m = getLaneMaskLe();
+  const std::uint64_t m = getLaneMaskLe();
   return m ? ~m : m;
+}
 #else
 __device__ __forceinline__ unsigned getLaneMaskGt() {
   unsigned mask;
   asm("mov.u32 %0, %%lanemask_gt;" : "=r"(mask));
   return mask;
-#endif
 }
+#endif
 
 #if defined(__HIP_PLATFORM_HCC__)
 __device__ __forceinline__ unsigned long long int getLaneMaskGe() {
-  std::uint64_t m = getLaneMaskLt();
+  const std::uint64_t m = getLaneMaskLt();
   return ~m;
+}
 #else
 __device__ __forceinline__ unsigned getLaneMaskGe() {
   unsigned mask;
   asm("mov.u32 %0, %%lanemask_ge;" : "=r"(mask));
   return mask;
-#endif
 }
-
+#endif
 
 #endif // THC_ASM_UTILS_INC

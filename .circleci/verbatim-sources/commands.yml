@@ -1,0 +1,174 @@
+commands:
+
+  calculate_docker_image_tag:
+    description: "Calculates the docker image tag"
+    steps:
+      - run:
+          name: "Calculate docker image hash"
+          command: |
+            DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+            echo "DOCKER_TAG=${DOCKER_TAG}" >> "${BASH_ENV}"
+
+  designate_upload_channel:
+    description: "inserts the correct upload channel into ${BASH_ENV}"
+    steps:
+      - run:
+          name: adding UPLOAD_CHANNEL to BASH_ENV
+          command: |
+            our_upload_channel=nightly
+            # On tags upload to test instead
+            if [[ -n "${CIRCLE_TAG}" ]]; then
+              our_upload_channel=test
+            fi
+            echo "export UPLOAD_CHANNEL=${our_upload_channel}" >> ${BASH_ENV}
+
+  # This system setup script is meant to run before the CI-related scripts, e.g.,
+  # installing Git client, checking out code, setting up CI env, and
+  # building/testing.
+  setup_linux_system_environment:
+    steps:
+      - run:
+          name: Set Up System Environment
+          no_output_timeout: "1h"
+          command: .circleci/scripts/setup_linux_system_environment.sh
+
+  setup_ci_environment:
+    steps:
+      - run:
+          name: Set Up CI Environment After attach_workspace
+          no_output_timeout: "1h"
+          command: .circleci/scripts/setup_ci_environment.sh
+
+  brew_update:
+    description: "Update Homebrew and install base formulae"
+    steps:
+      - run:
+          name: Update Homebrew
+          no_output_timeout: "10m"
+          command: |
+            set -ex
+
+            # Update repositories manually.
+            # Running `brew update` produces a comparison between the
+            # current checkout and the updated checkout, which takes a
+            # very long time because the existing checkout is 2y old.
+            for path in $(find /usr/local/Homebrew -type d -name .git)
+            do
+            cd $path/..
+            git fetch --depth=1 origin
+            git reset --hard origin/master
+            done
+
+            export HOMEBREW_NO_AUTO_UPDATE=1
+
+            # Install expect and moreutils so that we can call `unbuffer` and `ts`.
+            # moreutils installs a `parallel` executable by default, which conflicts
+            # with the executable from the GNU `parallel`, so we must unlink GNU
+            # `parallel` first, and relink it afterwards.
+            brew unlink parallel
+            brew install moreutils
+            brew link parallel --overwrite
+            brew install expect
+
+  brew_install:
+    description: "Install Homebrew formulae"
+    parameters:
+      formulae:
+        type: string
+        default: ""
+    steps:
+      - run:
+          name: Install << parameters.formulae >>
+          no_output_timeout: "10m"
+          command: |
+            set -ex
+            export HOMEBREW_NO_AUTO_UPDATE=1
+            brew install << parameters.formulae >>
+
+  run_brew_for_macos_build:
+    steps:
+      - brew_update
+      - brew_install:
+          formulae: libomp
+
+  run_brew_for_ios_build:
+    steps:
+      - brew_update
+      - brew_install:
+          formulae: libtool
+
+  optional_merge_target_branch:
+    steps:
+      - run:
+          name: (Optional) Merge target branch
+          no_output_timeout: "10m"
+          command: |
+            if [[ -n "$CIRCLE_PULL_REQUEST" && "$CIRCLE_BRANCH" != "nightly" ]]; then
+              PR_NUM=$(basename $CIRCLE_PULL_REQUEST)
+              CIRCLE_PR_BASE_BRANCH=$(curl -s https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls/$PR_NUM | jq -r '.base.ref')
+              if [[ "${BUILD_ENVIRONMENT}" == *"xla"* || "${BUILD_ENVIRONMENT}" == *"gcc5"* ]] ; then
+                set -x
+                git config --global user.email "circleci.ossci@gmail.com"
+                git config --global user.name "CircleCI"
+                git config remote.origin.url https://github.com/pytorch/pytorch.git
+                git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+                # PRs generated from ghstack has format CIRCLE_PR_BASE_BRANCH=gh/xxx/1234/base
+                if [[ "${CIRCLE_PR_BASE_BRANCH}" == "gh/"* ]]; then
+                  CIRCLE_PR_BASE_BRANCH=master
+                fi
+                export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/$CIRCLE_PR_BASE_BRANCH`
+                echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+                export GIT_COMMIT=${CIRCLE_SHA1}
+                echo "GIT_COMMIT: " ${GIT_COMMIT}
+                git checkout -f ${GIT_COMMIT}
+                git reset --hard ${GIT_COMMIT}
+                git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
+                echo "Merged $CIRCLE_PR_BASE_BRANCH branch before building in environment $BUILD_ENVIRONMENT"
+                set +x
+              else
+                echo "No need to merge with $CIRCLE_PR_BASE_BRANCH, skipping..."
+              fi
+            else
+              echo "This is not a pull request, skipping..."
+            fi
+
+  upload_binary_size_for_android_build:
+    description: "Upload binary size data for Android build"
+    parameters:
+      build_type:
+        type: string
+        default: ""
+      artifacts:
+        type: string
+        default: ""
+    steps:
+      - run:
+          name: "Binary Size - Install Dependencies"
+          no_output_timeout: "5m"
+          command: |
+            retry () {
+              $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+            retry pip3 install requests
+      - run:
+          name: "Binary Size - Untar Artifacts"
+          no_output_timeout: "5m"
+          command: |
+            # The artifact file is created inside docker container, which contains the result binaries.
+            # Now unpackage it into the project folder. The subsequent script will scan project folder
+            # to locate result binaries and report their sizes.
+            # If artifact file is not provided it assumes that the project folder has been mounted in
+            # the docker during build and already contains the result binaries, so this step can be skipped.
+            export ARTIFACTS="<< parameters.artifacts >>"
+            if [ -n "${ARTIFACTS}" ]; then
+              tar xf "${ARTIFACTS}" -C ~/project
+            fi
+      - run:
+          name: "Binary Size - Upload << parameters.build_type >>"
+          no_output_timeout: "5m"
+          command: |
+            cd ~/project
+            export ANDROID_BUILD_TYPE="<< parameters.build_type >>"
+            export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            python3 .circleci/scripts/upload_binary_size_to_scuba.py android

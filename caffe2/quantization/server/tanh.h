@@ -1,5 +1,4 @@
-#ifndef DNNLOWP_TANH_H
-#define DNNLOWP_TANH_H
+#pragma once
 
 #include "dnnlowp.h"
 
@@ -37,12 +36,14 @@ class Tanh {
   }
 
   float GetPassRegionEndDequantized() const {
-    return Dequantize<T>(
-      (uint8_t)(x_pq_index_ + in_qparams_.zero_point), in_qparams_);
+    return fbgemm::Dequantize<T>(
+        static_cast<uint8_t>(x_pq_index_ + in_qparams_.zero_point),
+        in_qparams_);
   }
 
   float GetSaturationRegionBegin() const {
-    return Dequantize<T>((T)((1 << num_in_bits_) - 1), in_qparams_);
+    return fbgemm::Dequantize<T>(
+        static_cast<T>((1 << num_in_bits_) - 1), in_qparams_);
   }
 
   static constexpr double DEFAULT_MAX_ABS_ERR = 0.02;
@@ -60,5 +61,3 @@ class Tanh {
 }; // class TanhApproximation
 
 } // namespace dnnlowp
-
-#endif

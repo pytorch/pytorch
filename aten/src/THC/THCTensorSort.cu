@@ -1,4 +1,6 @@
-#include "THCTensorSort.cuh"
+#include <THC/THCTensorSort.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAException.h>
 
 void THCudaLongTensor_fillSliceWithIndex(THCState* state,
                                          THCudaLongTensor* t,
@@ -17,7 +19,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
     }
 
     int64_t maxThreads =
-      THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
     int64_t numThreads = sliceSize;
     if (numThreads > maxThreads) {
       numThreads = maxThreads;
@@ -27,8 +29,10 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
 
 #define FILL_INDEX(T, DIM)                                         \
     fillSliceWithIndex<T, DIM>                                     \
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(      \
-        info, numSlices, sliceSize, info.strides[collapseDim])
+      <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(     \
+        info, numSlices, sliceSize, info.strides[collapseDim]);    \
+    C10_CUDA_KERNEL_LAUNCH_CHECK()
+
 
     if (THCTensor_canUse32BitIndexMath(state, t)) {
       TensorInfo<int64_t, uint32_t> info =
@@ -58,6 +62,5 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
     }
 
 #undef FILL_INDEX
-    THCudaCheck(cudaGetLastError());
   }
 }

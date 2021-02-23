@@ -1,357 +1,411 @@
-#include "c10/util/Optional.h"
-#include "torch/csrc/autograd/VariableTypeUtils.h"
-#include "torch/csrc/utils/memory.h"
-
+#include <c10/util/Optional.h>
+#include <c10/core/ScalarType.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
+#include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/autograd/utils/error_messages.h>
+#include <torch/csrc/autograd/autograd.h>
+#include <ATen/TracerMode.h>
+#include <ATen/RedispatchFunctions.h>
+#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
 
-namespace torch { namespace autograd {
+namespace torch { namespace autograd { namespace VariableType {
 
-VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
-  : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
-  , baseType(baseType)
-  , id_(context->freshTypeID()) {
-  str = std::string("Variable[") + baseType->toString() + "]";
-}
-
-ScalarType VariableType::scalarType() const {
-  return baseType->scalarType();
-}
-caffe2::TypeMeta VariableType::typeMeta() const {
-  return baseType->typeMeta();
-}
-Backend VariableType::backend() const {
-  return baseType->backend();
-}
-Allocator* VariableType::allocator() const {
-  return baseType->allocator();
-}
-Device VariableType::getDeviceFromPtr(void * data) const {
-  return baseType->getDeviceFromPtr(data);
-}
-Storage VariableType::storage(bool resizable) const {
-  return baseType->storage();
-}
-Storage VariableType::storage(size_t size, bool resizable) const {
-  return baseType->storage(size);
-}
-Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  return baseType->storageFromBlob(data, size, deleter);
-}
-Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
-  return baseType->unsafeStorageFromTH(th_pointer, retain);
-}
-Storage VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  return baseType->storageWithAllocator(size, allocator);
-}
-Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
-}
-std::unique_ptr<Generator> VariableType::generator() const {
-  return baseType->generator();
-}
-
-const char * VariableType::toString() const {
-  return str.c_str();
-}
-size_t VariableType::elementSizeInBytes() const {
-  return baseType->elementSizeInBytes();
-}
-Type & VariableType::toBackend(Backend b) const {
-  return *getVariableTypeFromBaseType(baseType->toBackend(b));
-}
-Type & VariableType::toScalarType(ScalarType s) const {
-  return *getVariableTypeFromBaseType(baseType->toScalarType(s));
-}
-TypeID VariableType::ID() const {
-  return static_cast<TypeID>(id_);
-}
-
-std::vector<std::unique_ptr<Type>> type_to_variable_type;
-
-// XXX - this is not threadsafe with uses of Variables
-void register_variable_type_for(TypeExtendedInterface* baseType) {
-  AT_ASSERT(baseType);
-  const auto base_id = static_cast<size_t>(baseType->ID());
-  if(type_to_variable_type.size() <= base_id) {
-    type_to_variable_type.resize(base_id + 1);
-  }
-  type_to_variable_type[base_id] =
-      make_unique<VariableType>(&at::globalContext(), baseType);
-}
-
-struct VariableTypeRegistry {
-  VariableTypeRegistry() {
-    auto& context = at::globalContext();
-    for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
-      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-        auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
-        if (baseType && baseType->backend() != Backend::Undefined) {
-          register_variable_type_for(baseType);
-        }
-      }
-    }
-  }
-};
-
-struct VariableHooks : public at::VariableHooksInterface {
-  VariableHooks(at::VariableHooksArgs) {}
-  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend, at::ScalarType) const override;
-  at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
-};
-
-// Sigh, the registry doesn't support namespaces :(
-using at::RegistererVariableHooksRegistry;
-using at::VariableHooksRegistry;
-
-// WARNING: YOU MUST DO THE NEXT TWO STATIC INITIALIZERS IN THIS ORDER.
-//
-// If you do it in the other order, this is what can happen if
-// these static initializers are called before Context is
-// initialized:
-//
-//    - VariableHooks::registerVariableTypeFor will be activated
-//      to register a variable type
-//
-//    - We run the constructor of VariableTypeRegistry, which
-//      calls at::globalContext()
-//
-//    - Context is not initialized yet, so we call the constructor
-//      of Context
-//
-//    - We register CPU types, calling VariableHooks::registerVariableTypeFor
-//
-//    - We register the CPU type as a variable type
-//
-//    - In VariableTypeRegistry, we try to register the Variable type AGAIN!!
-//      Disaster.
-//
-static VariableTypeRegistry registry;
-REGISTER_VARIABLE_HOOKS(VariableHooks)
-
-// Pre-condition: backend/scalar_type is a valid type in the type_registry
-void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
-  auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
-  register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
-}
-
-at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
-  return *VariableType::getVariableTypeFromBaseType(baseType);
-}
-
-bool VariableType::isVariableType(const at::Type& type) {
-  return type.is_variable();
-}
-
-at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
-  auto id = static_cast<size_t>(baseType.ID());
-  if(id >= type_to_variable_type.size())
-    return nullptr;
-  return static_cast<at::TypeExtendedInterface*>(type_to_variable_type[id].get());
-}
-
-namespace {
-std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
-  auto& context = at::globalContext();
-  std::vector<Type*> res;
-  res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
+std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
+  std::vector<DeprecatedTypeProperties*> res;
+  res.reserve(backends.size());
   for (auto p : backends) {
-    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
-      if (baseType) {
-        res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
-      }
+    for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
+      auto& type = getDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      res.emplace_back(&type);
     }
   }
   return res;
 }
-}
 
-std::vector<at::Type*> VariableType::allCPUTypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
   return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
 }
 
-std::vector<at::Type*> VariableType::allCUDATypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
-const Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
+namespace {
+const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
-  }
-  return as_variable_ref(t);
+  return t;
 }
 
-Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, int pos) {
+Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
-  }
-  return as_variable_ref(t);
+  return t;
+}
 }
 
-const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+const Tensor & unpack(const Tensor & t, const char * name, int pos) {
+  return checked_cast_variable(t, name, pos);
 }
 
-Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+Tensor & unpack(Tensor & t, const char * name, int pos) {
+  return checked_cast_variable(t, name, pos);
 }
 
-SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
-}
-
-Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
+Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     return Tensor();
   }
   return unpack(t, name, pos);
 }
 
-std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) {
+std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
-      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #", i, " "
-                    "for iterable argument #", pos, " '", name, "'");
+      continue;
     }
-    if (!isVariableType(t.type())) {
-      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
-                    "for iterable argument #", pos, " '", name, "'");
-    }
-    ret[i] = static_cast<const Variable&>(t).data();
+    ret[i] = static_cast<const Variable&>(t);
   }
   return ret;
 }
 
-void VariableType::backward(
-    Tensor& self,
-    c10::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) const {
-  as_variable_ref(self).backward(gradient, keep_graph, create_graph);
+namespace {
+
+void _backward(
+    const Tensor& self,
+    TensorList inputs,
+    const c10::optional<Tensor>& gradient,
+    c10::optional<bool> keep_graph,
+    bool create_graph) {
+  // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
+  // instead of us having to unwrap it to Tensor _gradient here.
+  Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
+  std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
+  torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
 }
 
-void VariableType::set_data(Tensor & self, Tensor new_data) const {
-  as_variable_ref(self).set_data(new_data);
-}
-Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  jit::Node* node = nullptr;
-  if(torch::jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    // if you have no views of self, then an in place copy is equivalent to
-    // making sure we expand src to the same size as self
-    node = graph->create(jit::aten::expand_as, /*num_outputs=*/0);
-    jit::tracer::addInputs(node, "src", src);
-    jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
-    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
+void set_data(Tensor & self, const Tensor & new_data) {
+  // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
+  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
+  // tensor type.
+  TORCH_CHECK(
+    _has_compatible_shallow_copy_type(self, new_data),
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
+
+  // Resets gradient accumulator if metadata is out of date
+  AutogradMeta* autograd_meta = impl::get_autograd_meta(self);
+  if (autograd_meta) {
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+    auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
+    if (prior_accumulator) {
+      const auto prior_device = prior_accumulator->input_metadata(0).device();
+      const auto new_device = new_data.device();
+
+      if (!new_data.options().type_equal(self.options()) || prior_device != new_device) {
+        autograd_meta->grad_accumulator_.reset();
+      }
+    }
   }
-  // TODO: once copy is exposed in Declarations.yaml we may be able to bind
-  // it automatically
+
+  // Version counter is not shared when we replace a `Variable`'s tensor data
+  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
+  // See NOTE [ Version Counter Sharing ] for details.
+  //
+  // `var.set_data(new_data)` always ignores `var`'s `allow_tensor_metadata_change_`, because
+  // users need this API as an escape hatch for changing a tensor's metadata regardless of its
+  // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
+  // the behavior they want.
+  self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
+}
+
+Tensor data(const Tensor & self) {
+  return self.variable_data();
+}
+
+bool is_leaf(const Tensor & self) {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
+  } else {
+    return true;
+  }
+}
+
+int64_t output_nr(const Tensor & self) {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->output_nr_;
+  } else {
+    return 0;
+  }
+}
+
+int64_t _version(const Tensor & self) {
+  return self.unsafeGetTensorImpl()->version_counter().current_version();
+}
+
+Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
+  if (!self.is_leaf() && !_requires_grad) {
+    throw std::runtime_error(
+      autograd::utils::requires_grad_leaf_error(_requires_grad)
+    );
+  }
+  return self.set_requires_grad(_requires_grad);
+}
+
+void retain_grad(Tensor & self) {
+  TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
+  if (self.is_leaf()) {  // no-op for leaves
+    return;
+  }
+  if (impl::get_autograd_meta(self)->retains_grad_) {
+    return;
+  }
+  c10::weak_intrusive_ptr<TensorImpl> weak_self(self.getIntrusivePtr());
+
+  std::function<void(Tensor)> retain_grad_hook([weak_self](const Tensor& grad) {
+    if (weak_self.expired()) {
+      return;
+    } else {
+      auto var = weak_self.lock();
+      if (!var->grad().defined()) {
+        if (grad.is_sparse()) {
+          var->mutable_grad() = grad.clone();
+        } else {
+          var->mutable_grad() = grad.clone(at::MemoryFormat::Contiguous);
+        }
+      } else {
+        var->mutable_grad() = var->grad() + grad;
+      }
+    }
+  });
+
+  self.register_hook(retain_grad_hook);
+  impl::get_autograd_meta(self)->retains_grad_ = true;
+}
+
+// Taken from codegened version
+Tensor _fw_primal(const Tensor & self, int64_t level) {
   auto& self_ = unpack(self, "self", 0);
-  auto& src_ = unpack(src, "src", 1);
-  check_inplace(self);
-  std::shared_ptr<CopyBackwards> grad_fn;
-  auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.type().scalarType());
-  if (requires_grad) {
-    grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->src_type = &src.type();
-    grad_fn->src_device = src.device();
+  std::shared_ptr<Identity> grad_fn;
+  if (compute_requires_grad( self )) {
+    grad_fn = std::make_shared<Identity>();
+    grad_fn->set_next_edges(collect_next_edges( self ));
   }
-  if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
-  else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
-  else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
-  increment_version(self);
-  rebase_history(as_variable_ref( self ), std::move(grad_fn));
-  if(torch::jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, self);
+  auto tmp = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return self_.alias();
+  })();
+  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
+  if (!self.unsafeGetTensorImpl()->support_as_strided()) {
+    auto size_vec = self.sizes().vec();
+    func = [=](const at::Tensor& input_base) {
+      return input_base.view(size_vec);
+    };
   }
-  return self;
-}
-
-Tensor & VariableType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
-  AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
-}
-
-Tensor & VariableType::resize_(Tensor & self, IntList size) const {
-  auto& self_ = unpack(self, "self", 0);
-  if (as_variable_ref(self).requires_grad()) {
-    AT_ERROR("cannot resize variables that require grad");
+  auto result = as_view(/* base */ self, /* output */ tmp, /* is_bw_differentiable */ true,
+                        /* is_fw_differentiable */ false, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT);
+  if (grad_fn) {
+      set_history(flatten_tensor_args( result ), grad_fn);
   }
-  if (torch::jit::tracer::isTracing()) {
-    jit::tracer::ArgumentStash::popIntList("size");
-    jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
-    jit::tracer::delValueTrace(self);
-  }
-  baseType->resize_(self_, size);
-  return self;
-}
-
-Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
-  auto& self_ = unpack(self, "self", 0);
-  auto& the_template_ = unpack(the_template, "the_template", 1);
-  if (as_variable_ref(self).requires_grad()) {
-    AT_ERROR("cannot resize variables that require grad");
-  }
-  if (torch::jit::tracer::isTracing()) {
-    jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
-    jit::tracer::delValueTrace(self);
-  }
-  baseType->resize_as_(self_, the_template_);
-  return self;
-}
-
-Tensor VariableType::detach(const Tensor & self) const {
-  profiler::RecordFunction profiler("detach");
-  torch::jit::Node* node = nullptr;
-  if (jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    node = graph->create(jit::aten::detach, /*num_outputs=*/0);
-    jit::tracer::recordSourceLocation(node);
-    jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
-
-  }
-  // <NON_GENERATED_CODE>
-  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach(); // NOLINT(cppcoreguidelines-pro-type-const-cast)
-  // </NON_GENERATED_CODE>
-  if (jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, result);
+  if (generated::details::isFwGradDefined(self)) {
+    // Modified from original codegen
+    // We explicitly want to ignore the forward grad at the given level
+    TORCH_CHECK(level == 0, "Invalid level given to _fw_primal");
+    // End modified from original codegen
   }
   return result;
 }
 
-Tensor & VariableType::detach_(Tensor & self) const {
-  profiler::RecordFunction profiler("detach_");
-  torch::jit::Node* node = nullptr;
-  if (jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    node = graph->create(jit::aten::detach, /*num_outputs=*/0);
-    jit::tracer::recordSourceLocation(node);
-    jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
-    jit::tracer::ensureUnique("detach_", self);
+// We don't have an outplace copy, so this can't be generated automatically
+Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
+  // TODO: once copy is exposed in Declarations.yaml we may be able to bind
+  // it automatically
+  auto& self_ = unpack(self, "self", 0);
+  auto& src_ = unpack(src, "src", 1);
+  std::shared_ptr<CopyBackwards> grad_fn;
+  auto requires_grad = compute_requires_grad(self, src);
+  requires_grad &= isDifferentiableType(self.scalar_type());
+  check_inplace(self, requires_grad);
+  if (requires_grad) {
+    grad_fn = std::make_shared<CopyBackwards>();
+    grad_fn->set_next_edges(collect_next_edges(self, src));
+    grad_fn->src_options = src.options();
+    grad_fn->src_device = src.device();
   }
-  // <NON_GENERATED_CODE>
-  as_variable_ref(self).detach_();
-  // </NON_GENERATED_CODE>
-  if (jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, self);
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
+  }
+  increment_version(self);
+  rebase_history(self , std::move(grad_fn));
+
+  if (isDifferentiableType(self.scalar_type()) &&
+      (generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(src))) {
+    auto self_fw_grad = generated::details::toLegacyFwGrad(self);
+    auto src_fw_grad = generated::details::toLegacyFwGrad(src);
+    Tensor new_fw_grad;
+    if (self_fw_grad.defined()) {
+      if (src_fw_grad.defined()) {
+        new_fw_grad = self_fw_grad.copy_(src_fw_grad);
+      } else {
+        new_fw_grad = self_fw_grad.fill_(0);
+      }
+    } else {
+      new_fw_grad = src_fw_grad;
+    }
+    self.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
+  }
+
+  return self;
+}
+
+Tensor& resize_(
+    c10::DispatchKeySet ks,
+    Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  auto& self_ = unpack(self, "self", 0);
+  if (self.requires_grad()) {
+    AT_ERROR("cannot resize variables that require grad");
+  }
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
+  }
+
+  if (self.fw_grad(/* level */ 0).defined()) {
+    AT_ERROR("cannot resize variables that has a forward grad");
+  }
+
+  return self;
+}
+
+Tensor& resize_as_(
+    c10::DispatchKeySet ks,
+    Tensor& self,
+    const Tensor& the_template,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  auto& self_ = unpack(self, "self", 0);
+  auto& the_template_ = unpack(the_template, "the_template", 1);
+  if (self.requires_grad()) {
+    AT_ERROR("cannot resize variables that require grad");
+  }
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
+  }
+
+  // Handle fw grad
+  if (self.fw_grad(/* level */ 0).defined()) {
+    AT_ERROR("cannot resize variables that has a forward grad");
   }
   return self;
 }
 
-}} // namespace torch::autograd
+Tensor detach(const Tensor & self) {
+  RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
+  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
+  auto result = as_view(/* base */ self, /* output */ self, /* is_bw_differentiable */ false,
+                        /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
+                        /*allow_tensor_metadata_change=*/false);
+  namedinference::propagate_names(result, self);
+
+  // detach only backward gradients for both primal and tangent
+  if (self.fw_grad(/* level */ 0).defined()) {
+    auto new_fw_grad = self.fw_grad(/* level */ 0).detach();
+    result.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+  }
+
+  return result;
+}
+
+Tensor & detach_(Tensor & self) {
+  RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
+  if (self.is_view()) {
+    // NB: is_view() ==> get_autograd_meta()
+    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+    // See NOTE [ View + Inplace detection ]
+    if (diff_view_meta->get_creation_meta() == CreationMeta::MULTI_OUTPUT_SAFE) {
+        TORCH_WARN("This view is an output of a function that "
+                   "returns multiple views. Detaching such views inplace "
+                   "is being deprecated and will be forbidden "
+                   "starting from version 1.8. Consider using detach() instead "
+                   "of detach_(). Alternatively, create this view with an "
+                   "`unsafe_` version of the function that produced it.");
+    } else {
+      AT_ERROR("Can't detach views in-place. Use detach() instead. "
+               "If you are using DistributedDataParallel (DDP) for training, "
+               "and gradient_as_bucket_view is set as True, gradients are "
+               "views of DDP buckets, and hence detach_() cannot be called "
+               "on these gradients. To fix this error, please refer to the "
+               "Optimizer.zero_grad() function in torch/optim/optimizer.py "
+               "as the solution.");
+    }
+  }
+  // I think the choice here is conservative.  In principle, doing
+  // an in-place detach should give us the ability to just clear
+  // the autograd meta.  But this function ONLY resets requires_grad,
+  // grad_fn and output_nr; there's other metadata like debug name
+  // and hooks which aren't cleared.  Is this function supposed to
+  // clear those too? I'm not too sure, so I'm leaving it be for now.
+  auto autograd_meta = impl::materialize_autograd_meta(self);
+  autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
+  autograd_meta->grad_fn_.reset();
+  autograd_meta->output_nr_ = 0;
+
+  // detach only backward gradients for both primal and tangent
+  if (self.fw_grad(/* level */ 0).defined()) {
+    self.fw_grad(/* level */ 0).detach_();
+  }
+
+  return self;
+}
+
+// Ops in the following registration list are registered as
+//   (1) Math kernels
+//   (2) Autograd kernels
+//   (3) DefaultBackend kernels and additionally Autograd kernels
+// The reason for (3) is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
+// kernels) will skip picking up Math kernels for Autograd, so we register them to both
+// DefaultBackend and Autograd instead. See
+// https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword
+// for more details.
+// Invariant:
+// - Ops registered to Math or DefaultBackend below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.
+//   and they have manual_kernel_registration=True in native_functions.yaml.
+// - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
+
+TORCH_LIBRARY_IMPL(aten, Autograd, m) {
+  m.impl("resize_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_)));
+  m.impl("resize_as_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_as_)));
+  m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
+  m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
+  m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
+  m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
+}
+
+TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
+  m.impl("_backward", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::_backward)));
+  m.impl("requires_grad_", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::requires_grad_)));
+}
+
+TORCH_LIBRARY_IMPL(aten, Math, m) {
+  m.impl("set_data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::set_data)));
+  m.impl("data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::data)));
+  m.impl("is_leaf", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::is_leaf)));
+  m.impl("output_nr", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::output_nr)));
+  m.impl("_version", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::_version)));
+  m.impl("retain_grad", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::retain_grad)));
+}
+
+}  // namespace
+}}} // namespace torch::autograd::VariableType

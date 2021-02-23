@@ -6,69 +6,68 @@
 
 #include "caffe2/serialize/inline_container.h"
 
-namespace at {
+namespace caffe2 {
+namespace serialize {
 namespace {
 
-TEST(PyTorchFileWriterAndReader, SaveAndLoad) {
+TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   int64_t kFieldAlignment = 64L;
-  // create a name for temporary file
-  // TODO to have different implementation for Windows and POXIS
-  std::string tmp_name = std::tmpnam(nullptr);
 
+  std::ostringstream oss;
   // write records through writers
-  torch::jit::PyTorchFileWriter writer{tmp_name};
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
   std::array<char, 127> data1;
 
   for (int i = 0; i < data1.size(); ++i) {
     data1[i] = data1.size() - i;
   }
-  uint64_t next_key = writer.getCurrentSize();
-  ASSERT_EQ(writer.writeRecord(data1.data(), data1.size()), next_key);
+  writer.writeRecord("key1", data1.data(), data1.size());
+
   std::array<char, 64> data2;
   for (int i = 0; i < data2.size(); ++i) {
     data2[i] = data2.size() - i;
   }
-  next_key = writer.getCurrentSize();
-  ASSERT_EQ(writer.writeRecord(data2.data(), data2.size()), next_key);
+  writer.writeRecord("key2", data2.data(), data2.size());
+
+  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records[0], "key1");
+  ASSERT_EQ(written_records[1], "key2");
+
   writer.writeEndOfFile();
-  ASSERT_TRUE(writer.closed());
+
+  std::string the_file = oss.str();
+  std::ofstream foo("output.zip");
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  std::istringstream iss(the_file);
 
   // read records through readers
-  torch::jit::PyTorchFileReader reader{tmp_name};
-  ASSERT_TRUE(reader.hasNextRecord());
+  PyTorchStreamReader reader(&iss);
+  ASSERT_TRUE(reader.hasRecord("key1"));
+  ASSERT_TRUE(reader.hasRecord("key2"));
+  ASSERT_FALSE(reader.hasRecord("key2000"));
   at::DataPtr data_ptr;
-  int64_t key;
   int64_t size;
-  std::tie(data_ptr, key, size) = reader.getNextRecord();
-  ASSERT_EQ(key, kFieldAlignment);
+  std::tie(data_ptr, size) = reader.getRecord("key1");
+  size_t off1 = reader.getRecordOffset("key1");
   ASSERT_EQ(size, data1.size());
   ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), data1.size()), 0);
+  ASSERT_EQ(memcmp(the_file.c_str() + off1, data1.data(), data1.size()), 0);
+  ASSERT_EQ(off1 % kFieldAlignment, 0);
 
-  ASSERT_TRUE(reader.hasNextRecord());
-  std::tie(data_ptr, key, size) = reader.getNextRecord();
-  ASSERT_EQ(
-      key,
-      kFieldAlignment * 2 +
-          (data1.size() + kFieldAlignment - 1) / kFieldAlignment *
-              kFieldAlignment);
+  std::tie(data_ptr, size) = reader.getRecord("key2");
+  size_t off2 = reader.getRecordOffset("key2");
+  ASSERT_EQ(off2 % kFieldAlignment, 0);
+
   ASSERT_EQ(size, data2.size());
   ASSERT_EQ(memcmp(data_ptr.get(), data2.data(), data2.size()), 0);
-
-  ASSERT_FALSE(reader.hasNextRecord());
-
-  std::tie(data_ptr, size) = reader.getLastRecord();
-  ASSERT_EQ(size, data2.size());
-  ASSERT_EQ(memcmp(data_ptr.get(), data2.data(), data2.size()), 0);
-  ASSERT_FALSE(reader.hasNextRecord());
-
-  std::tie(data_ptr, size) = reader.getRecordWithKey(kFieldAlignment);
-  ASSERT_EQ(size, data1.size());
-  ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), data1.size()), 0);
-  ASSERT_TRUE(reader.hasNextRecord());
-
-  // clean up
-  std::remove(tmp_name.c_str());
+  ASSERT_EQ(memcmp(the_file.c_str() + off2, data2.data(), data2.size()), 0);
 }
 
 } // namespace
-} // namespace at
+} // namespace serialize
+} // namespace caffe2

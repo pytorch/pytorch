@@ -1,12 +1,16 @@
-#include "THCUNN.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
-#include "common.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
+#include <limits>
+
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCAtomics.cuh>
+#include <THCUNN/common.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
 #include <THC/THCApply.cuh>
+#include <c10/macros/Macros.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 #include <thrust/functional.h>
 
@@ -27,7 +31,7 @@ __global__ void SpatialClassNLLCriterion_updateOutput_no_reduce_kernel(
     const int64_t h = (index / batch_size) % H;
     const int64_t w = (index / (batch_size * H)) % W;
 
-    int64_t cur_target = target[b][h][w] - TH_INDEX_BASE;
+    int64_t cur_target = target[b][h][w];
     if (cur_target == ignore_index) {
       output[b][h][w] = ScalarConvert<int, Dtype>::to(0);
       continue;
@@ -56,7 +60,7 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
     const int64_t h = (index / batch_size) % H;
     const int64_t w = (index / (batch_size * H)) % W;
 
-    int64_t cur_target = target[b][h][w] - TH_INDEX_BASE;
+    int64_t cur_target = target[b][h][w];
     if (cur_target == ignore_index) {
       continue;
     }
@@ -67,6 +71,9 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
 }
 
 template <typename T, typename AccumT>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           T *output,
           T *total_weight,
@@ -94,9 +101,9 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   for (i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    t = target[toffset + i] - TH_INDEX_BASE;
+    t = target[toffset + i];
     if (t != ignore_index) {
-      assert(t >= 0 && t < n_classes);
+      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       cur_weight = weights ? weights[t] : ScalarConvert<int, T>::to(1);
       input_sum -= input[ioffset + i + map_nelem * t] * cur_weight;
       acc_weight += cur_weight;
@@ -108,18 +115,24 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   acc_weight = reduceBlock(partial_sums, blockDim.x, acc_weight, thrust::plus<AccumT>(), AccumT(0));
 
   if (threadIdx.x == 0) {
-    atomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
-    atomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
+    gpuAtomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
+    gpuAtomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
   }
 }
 
 template<typename T>
 __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
           T *output,
-          T *total_weight)
+          T *total_weight,
+          int nElement)
 {
-  if (*total_weight > 0)
+  if (nElement == 0) {
+    // Mean reduction on empty tensors produces NaN
+    *output = std::numeric_limits<double>::quiet_NaN();
+  }
+  if (*total_weight != 0) {
     *output = THCNumerics<T>::div(*output, *total_weight);
+  }
 }
 
 template<typename T>
@@ -149,13 +162,16 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
   for (i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    t = (int)target[toffset + i] - TH_INDEX_BASE;
+    t = (int)target[toffset + i];
     if (t != ignore_index) {
-      assert(t >= 0 && t < n_classes);
+      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput[0];
     }
   }
 }
 
-#include "generic/SpatialClassNLLCriterion.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialClassNLLCriterion.cu>
+#include <THC/THCGenerateFloatTypes.h>
+
+#include <THCUNN/generic/SpatialClassNLLCriterion.cu>
+#include <THC/THCGenerateBFloat16Type.h>

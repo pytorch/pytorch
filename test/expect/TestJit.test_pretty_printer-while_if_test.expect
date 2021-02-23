@@ -1,14 +1,15 @@
-def script(
-    a_1: Tensor,
-    b_1: Tensor) -> Tensor:
-  a, b, c = a_1, b_1, 0
-  t = bool(aten.lt(a_1, 10))
-  while t:
-    a_2 = aten.add(a, 1, 1)
-    b_2 = aten.add(b, 1, 1)
-    if bool(aten.gt(a_2, b_2)):
-      c_4 = 2
+def while_if_test(a: Tensor,
+    b: Tensor) -> Tensor:
+  a0 = a
+  c = 0
+  b0 = b
+  _0 = bool(torch.lt(a, 10))
+  while _0:
+    a1 = torch.add(a0, 1, 1)
+    b1 = torch.add(b0, 1, 1)
+    if bool(torch.gt(a1, b1)):
+      c0 = 2
     else:
-      c_4 = 3
-    t, a, b, c = bool(aten.lt(a_2, 10)), a_2, b_2, c_4
-  return aten.add(aten.add(a, 1, 1), c, 1)
+      c0 = 3
+    _0, a0, c, b0 = bool(torch.lt(a1, 10)), a1, c0, b1
+  return torch.add(torch.add(a0, 1, 1), c, 1)

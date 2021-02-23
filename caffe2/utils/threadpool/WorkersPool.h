@@ -3,9 +3,9 @@
 #include <atomic>
 #include <condition_variable>
 #include <thread>
+#include "c10/util/thread_name.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/utils/thread_name.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -53,7 +53,11 @@ struct AllocAligned {
   static void release(T* p) {
     if (p) {
       p->~T();
+#if defined(_MSC_VER)
+      _aligned_free((void*)p);
+#else
       free((void*)p);
+#endif
     }
   }
 };
@@ -227,7 +231,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
       : task_(nullptr),
         state_(State::ThreadStartup),
         counter_to_decrement_when_ready_(counter_to_decrement_when_ready) {
-    thread_ = caffe2::make_unique<std::thread>([this]() { this->ThreadFunc(); });
+    thread_ = std::make_unique<std::thread>([this]() { this->ThreadFunc(); });
   }
 
   ~Worker() {
@@ -263,7 +267,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
 
   // Thread entry point.
   void ThreadFunc() {
-    setThreadName("CaffeWorkersPool");
+    c10::setThreadName("CaffeWorkersPool");
     ChangeState(State::Ready);
 
     // Thread main loop
@@ -296,7 +300,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
     return nullptr;
   }
 
-  // Called by the master thead to give this worker work to do.
+  // Called by the master thread to give this worker work to do.
   // It is only legal to call this if the worker
   void StartWork(Task* task) {
     DCHECK(!task_.load());

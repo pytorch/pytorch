@@ -56,7 +56,7 @@ bool NNApi::run(const TensorVector& inputs, TensorVector* outputs) {
   try {
     init(inputs, outputs);
   } catch (const std::exception& e) {
-    LOG(ERROR) << "Error duing model initialization: " << e.what();
+    LOG(ERROR) << "Error during model initialization: " << e.what();
     return false;
   }
 
@@ -270,7 +270,7 @@ void NNApi::addConv(const OperatorDef& op, bool fuse_relu) {
   const std::string& weight_name = op.input(1);
   const auto& weight = ws_.GetBlob(weight_name)->Get<TensorCPU>();
   std::vector<uint32_t> weight_dims;
-  for (auto dim : weight.dims()) {
+  for (auto dim : weight.sizes()) {
     weight_dims.push_back(dim);
   }
   CAFFE_ENFORCE_EQ(weight_dims.size(), 4);
@@ -560,7 +560,7 @@ void NNApi::init(const TensorVector& inputs, TensorVector* outputs) {
       }
       const std::string& input_blob = run_net_.external_input(i);
       std::vector<uint32_t> dims;
-      for (auto dim : inputs[i]->dims()) {
+      for (auto dim : inputs[i]->sizes()) {
         dims.push_back(dim);
       }
       addTensorOperand(input_blob, tensor_type_, dims, scale, zero_point);

@@ -2,13 +2,15 @@
 
 set -ex
 
+[ -n "${ANDROID_NDK}" ] || ANDROID_NDK=r19c
+
 apt-get update
 apt-get install -y --no-install-recommends autotools-dev autoconf unzip
 apt-get autoclean && apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 pushd /tmp
-curl -Os https://dl.google.com/android/repository/android-ndk-r13b-linux-x86_64.zip
+curl -Os https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK}-linux-x86_64.zip
 popd
 _ndk_dir=/opt/ndk
 mkdir -p "$_ndk_dir"

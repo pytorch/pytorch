@@ -1,18 +1,20 @@
-#include "Types.h"
+#include <ATen/miopen/Types.h>
 
 #include <ATen/ATen.h>
-#include "miopen/version.h"
+#include <miopen/version.h>
 
 namespace at { namespace native {
 
 miopenDataType_t getMiopenDataType(const at::Tensor& tensor) {
-  if (tensor.type().scalarType() == at::kFloat) {
+  if (tensor.scalar_type() == at::kFloat) {
     return miopenFloat;
-  } else if (tensor.type().scalarType() == at::kHalf) {
+  } else if (tensor.scalar_type() == at::kHalf) {
     return miopenHalf;
+  }  else if (tensor.scalar_type() == at::kBFloat16) {
+    return miopenBFloat16;
   }
   std::string msg("getMiopenDataType() not supported for ");
-  msg += at::toString(tensor.type().scalarType());
+  msg += toString(tensor.scalar_type());
   throw std::runtime_error(msg);
 }
 

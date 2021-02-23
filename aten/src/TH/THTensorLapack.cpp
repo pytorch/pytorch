@@ -1,5 +1,5 @@
-#include "THTensor.hpp"
-#include "THLapack.h"
+#include <TH/THTensor.hpp>
+#include <TH/THLapack.h>
 
-#include "generic/THTensorLapack.cpp"
-#include "THGenerateFloatTypes.h"
+#include <TH/generic/THTensorLapack.cpp>
+#include <TH/THGenerateFloatTypes.h>

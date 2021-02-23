@@ -23,27 +23,27 @@ using ::google::protobuf::MessageLite;
 // Note that we can't use DeviceType_Name, because that is only available in
 // protobuf-full, and some platforms (like mobile) may want to use
 // protobuf-lite instead.
-CAFFE2_API std::string DeviceTypeName(const int32_t& d);
+TORCH_API std::string DeviceTypeName(const int32_t& d);
 
-CAFFE2_API int DeviceId(const DeviceOption& option);
+TORCH_API int DeviceId(const DeviceOption& option);
 
 // Returns if the two DeviceOptions are pointing to the same device.
-CAFFE2_API bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
+TORCH_API bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
 
-CAFFE2_API bool IsCPUDeviceType(int device_type);
-CAFFE2_API bool IsGPUDeviceType(int device_type);
+TORCH_API bool IsCPUDeviceType(int device_type);
+TORCH_API bool IsGPUDeviceType(int device_type);
 
 // Common interfaces that reads file contents into a string.
-CAFFE2_API bool ReadStringFromFile(const char* filename, string* str);
-CAFFE2_API bool WriteStringToFile(const string& str, const char* filename);
+TORCH_API bool ReadStringFromFile(const char* filename, string* str);
+TORCH_API bool WriteStringToFile(const string& str, const char* filename);
 
 // Common interfaces that are supported by both lite and full protobuf.
-CAFFE2_API bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto);
+TORCH_API bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto);
 inline bool ReadProtoFromBinaryFile(const string filename, MessageLite* proto) {
   return ReadProtoFromBinaryFile(filename.c_str(), proto);
 }
 
-CAFFE2_API void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename);
+TORCH_API void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename);
 inline void WriteProtoToBinaryFile(const MessageLite& proto,
                                    const string& filename) {
   return WriteProtoToBinaryFile(proto, filename.c_str());
@@ -55,13 +55,14 @@ namespace TextFormat {
 inline bool ParseFromString(const string& spec, MessageLite* proto) {
   LOG(FATAL) << "If you are running lite version, you should not be "
              << "calling any text-format protobuffers.";
+  return false;
 }
 } // namespace TextFormat
 
 
-CAFFE2_API string ProtoDebugString(const MessageLite& proto);
+TORCH_API string ProtoDebugString(const MessageLite& proto);
 
-CAFFE2_API bool ParseProtoFromLargeString(const string& str, MessageLite* proto);
+TORCH_API bool ParseProtoFromLargeString(const string& str, MessageLite* proto);
 
 // Text format MessageLite wrappers: these functions do nothing but just
 // allowing things to compile. It will produce a runtime error if you are using
@@ -79,13 +80,15 @@ inline bool ReadProtoFromTextFile(const string filename, MessageLite* proto) {
 
 inline void WriteProtoToTextFile(
     const MessageLite& /*proto*/,
-    const char* /*filename*/) {
+    const char* /*filename*/,
+    bool throwIfError = true) {
   LOG(FATAL) << "If you are running lite version, you should not be "
                   << "calling any text-format protobuffers.";
 }
 inline void WriteProtoToTextFile(const MessageLite& proto,
-                                 const string& filename) {
-  return WriteProtoToTextFile(proto, filename.c_str());
+                                 const string& filename,
+                                 bool throwIfError = true) {
+  return WriteProtoToTextFile(proto, filename.c_str(), throwIfError);
 }
 
 inline bool ReadProtoFromFile(const char* filename, MessageLite* proto) {
@@ -102,21 +105,21 @@ inline bool ReadProtoFromFile(const string& filename, MessageLite* proto) {
 using ::google::protobuf::Message;
 
 namespace TextFormat {
-CAFFE2_API bool ParseFromString(const string& spec, Message* proto);
+TORCH_API bool ParseFromString(const string& spec, Message* proto);
 } // namespace TextFormat
 
-CAFFE2_API string ProtoDebugString(const Message& proto);
+TORCH_API string ProtoDebugString(const Message& proto);
 
-CAFFE2_API bool ParseProtoFromLargeString(const string& str, Message* proto);
+TORCH_API bool ParseProtoFromLargeString(const string& str, Message* proto);
 
-CAFFE2_API bool ReadProtoFromTextFile(const char* filename, Message* proto);
+TORCH_API bool ReadProtoFromTextFile(const char* filename, Message* proto);
 inline bool ReadProtoFromTextFile(const string filename, Message* proto) {
   return ReadProtoFromTextFile(filename.c_str(), proto);
 }
 
-CAFFE2_API void WriteProtoToTextFile(const Message& proto, const char* filename);
-inline void WriteProtoToTextFile(const Message& proto, const string& filename) {
-  return WriteProtoToTextFile(proto, filename.c_str());
+TORCH_API void WriteProtoToTextFile(const Message& proto, const char* filename, bool throwIfError = true);
+inline void WriteProtoToTextFile(const Message& proto, const string& filename, bool throwIfError = true) {
+  return WriteProtoToTextFile(proto, filename.c_str(), throwIfError);
 }
 
 // Read Proto from a file, letting the code figure out if it is text or binary.
@@ -186,8 +189,8 @@ inline OperatorDef CreateOperatorDef(
       engine);
 }
 
-CAFFE2_API bool HasOutput(const OperatorDef& op, const std::string& output);
-CAFFE2_API bool HasInput(const OperatorDef& op, const std::string& input);
+TORCH_API bool HasOutput(const OperatorDef& op, const std::string& output);
+TORCH_API bool HasInput(const OperatorDef& op, const std::string& input);
 
 /**
  * @brief A helper class to index into arguments.
@@ -269,7 +272,7 @@ class C10_EXPORT ArgumentHelper {
     if (arg_map_.at(name).has_s()) {
       CAFFE_ENFORCE(
           message.ParseFromString(arg_map_.at(name).s()),
-          "Faild to parse content from the string");
+          "Failed to parse content from the string");
     } else {
       VLOG(1) << "Return empty message for parameter " << name;
     }
@@ -283,7 +286,7 @@ class C10_EXPORT ArgumentHelper {
     for (int i = 0; i < messages.size(); ++i) {
       CAFFE_ENFORCE(
           messages[i].ParseFromString(arg_map_.at(name).strings(i)),
-          "Faild to parse content from the string");
+          "Failed to parse content from the string");
     }
     return messages;
   }
@@ -296,31 +299,39 @@ class C10_EXPORT ArgumentHelper {
 
 // Helper methods to get an argument from OperatorDef or NetDef given argument
 // name. Throws if argument does not exist.
-CAFFE2_API const Argument& GetArgument(const OperatorDef& def, const string& name);
-CAFFE2_API const Argument& GetArgument(const NetDef& def, const string& name);
+TORCH_API const Argument& GetArgument(const OperatorDef& def, const string& name);
+TORCH_API const Argument& GetArgument(const NetDef& def, const string& name);
+// Helper methods to get an argument from OperatorDef or NetDef given argument
+// name. Returns nullptr if argument does not exist.
+TORCH_API const Argument* GetArgumentPtr(const OperatorDef& def, const string& name);
+TORCH_API const Argument* GetArgumentPtr(const NetDef& def, const string& name);
 
 // Helper methods to query a boolean argument flag from OperatorDef or NetDef
 // given argument name. If argument does not exist, return default value.
 // Throws if argument exists but the type is not boolean.
-CAFFE2_API bool GetFlagArgument(
+TORCH_API bool GetFlagArgument(
     const OperatorDef& def,
     const string& name,
     bool default_value = false);
-CAFFE2_API bool GetFlagArgument(
+TORCH_API bool GetFlagArgument(
     const NetDef& def,
     const string& name,
     bool default_value = false);
 
-CAFFE2_API Argument* GetMutableArgument(
+TORCH_API Argument* GetMutableArgument(
     const string& name,
     const bool create_if_missing,
     OperatorDef* def);
+TORCH_API Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    NetDef* def);
 
 template <typename T>
-CAFFE2_API Argument MakeArgument(const string& name, const T& value);
+TORCH_API Argument MakeArgument(const string& name, const T& value);
 
-template <typename T>
-inline void AddArgument(const string& name, const T& value, OperatorDef* def) {
+template <typename T, typename Def>
+inline void AddArgument(const string& name, const T& value, Def* def) {
   GetMutableArgument(name, true, def)->CopyFrom(MakeArgument(name, value));
 }
 // **** End Arguments Utils *****
@@ -329,6 +340,14 @@ bool inline operator==(const DeviceOption& dl, const DeviceOption& dr) {
   return IsSameDevice(dl, dr);
 }
 
+// Given a net, modify the external inputs/outputs if necessary so that
+// the following conditions are met
+// - No duplicate external inputs
+// - No duplicate external outputs
+// - Going through list of ops in order, all op inputs must be outputs
+// from other ops, or registered as external inputs.
+// - All external outputs must be outputs of some operators.
+TORCH_API void cleanupExternalInputsAndOutputs(NetDef* net);
 
 } // namespace caffe2
 

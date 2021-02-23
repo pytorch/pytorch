@@ -1,16 +1,18 @@
-ir_version: 3
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "0.4"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "0"
     input: "1"
     output: "2"
+    name: "Greater_0"
     op_type: "Greater"
   }
   node {
     input: "2"
     output: "3"
+    name: "Not_1"
     op_type: "Not"
   }
   name: "torch-jit-export"
@@ -18,7 +20,7 @@ graph {
     name: "0"
     type {
       tensor_type {
-        elem_type: INT32
+        elem_type: 6
         shape {
           dim {
             dim_value: 3
@@ -34,7 +36,7 @@ graph {
     name: "1"
     type {
       tensor_type {
-        elem_type: INT32
+        elem_type: 6
         shape {
           dim {
             dim_value: 3
@@ -50,7 +52,7 @@ graph {
     name: "3"
     type {
       tensor_type {
-        elem_type: UINT8
+        elem_type: 9
         shape {
           dim {
             dim_value: 3

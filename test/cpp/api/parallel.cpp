@@ -2,10 +2,13 @@
 
 #include <torch/csrc/autograd/functions/comm.h>
 #include <torch/nn/module.h>
+#include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/parallel/data_parallel.h>
 #include <torch/nn/pimpl.h>
+#include <torch/optim/sgd.h>
 #include <torch/types.h>
+#include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
 
@@ -34,7 +37,7 @@ TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
                   .allclose(input));
 
   torch::Tensor sum = output[0].to({torch::kCUDA, 1}) + output[1];
-  sum.backward();
+  sum.backward(torch::ones_like(sum));
 
   ASSERT_TRUE(input.grad().defined());
   ASSERT_TRUE(input.grad().device().is_cpu());
@@ -58,7 +61,7 @@ TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
   ASSERT_TRUE(chunks[0].to({torch::kCUDA, 0}).allclose(a));
   ASSERT_TRUE(chunks[1].allclose(b));
 
-  output.backward();
+  output.backward(torch::ones_like(output));
 
   ASSERT_TRUE(a.grad().defined());
   ASSERT_EQ(a.grad().device(), torch::Device(torch::kCUDA, 0));
@@ -86,8 +89,8 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   for (size_t i = 0; i < original_parameters.size(); ++i) {
     ASSERT_TRUE(replica1_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica1_parameters[i].data<float>() !=
-        original_parameters[i].data<float>());
+        replica1_parameters[i].data_ptr<float>() !=
+        original_parameters[i].data_ptr<float>());
   }
 
   auto replica2_parameters = replicas[1]->parameters();
@@ -99,8 +102,8 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   for (size_t i = 0; i < original_parameters.size(); ++i) {
     ASSERT_TRUE(replica2_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica2_parameters[i].data<float>() !=
-        original_parameters[i].data<float>());
+        replica2_parameters[i].data_ptr<float>() !=
+        original_parameters[i].data_ptr<float>());
   }
 }
 
@@ -134,7 +137,7 @@ TEST_F(ParallelTest, ParallelApply_MultiCUDA) {
 TEST_F(ParallelTest, ParallelApplyWithDifferentOutputDevice_MultiCUDA) {
   struct M : torch::nn::Module {
     torch::Tensor forward(torch::Tensor input) {
-      return torch::ones({5}, torch::dtype(torch::kInt32));
+      return torch::ones(5, torch::kInt32);
     }
   };
 
@@ -176,12 +179,9 @@ TEST_F(
   struct M : torch::nn::Cloneable<M> {
     void reset() override {}
     torch::Tensor forward(torch::Tensor input) {
-      // Intermediate tensors should be on the replica's current device.
-      intermediate_tensor = torch::rand(5);
       // The returned tensor should be on the output device.
       return torch::ones(3);
     }
-    torch::Tensor intermediate_tensor;
   };
   auto m = std::make_shared<M>();
   auto input = torch::ones({10, 3});
@@ -202,9 +202,6 @@ TEST_F(
         input,
         /*devices=*/std::vector<torch::Device>{torch::Device(torch::kCUDA, 0)},
         /*output_device=*/torch::Device(torch::kCUDA, 1));
-    ASSERT_TRUE(m->intermediate_tensor.defined());
-    ASSERT_TRUE(m->intermediate_tensor.device().is_cuda());
-    ASSERT_EQ(m->intermediate_tensor.device().index(), 0);
     ASSERT_TRUE(output.defined());
     ASSERT_TRUE(output.device().is_cuda());
     ASSERT_EQ(output.device().index(), 1);
@@ -215,17 +212,82 @@ TEST_F(ParallelTest, DataParallelUsesAllAvailableCUDADevices_CUDA) {
   struct M : torch::nn::Cloneable<M> {
     void reset() override {}
     torch::Tensor forward(torch::Tensor input) {
-      return torch::tensor(torch::getDefaultTensorOptions().device().index());
+      return torch::tensor({input.device().index()});
     }
   };
 
   auto m = std::make_shared<M>();
-  auto input = torch::ones({10, 3});
+  const auto device_count = torch::cuda::device_count();
+  auto input = torch::ones({std::max(10, int(2 * device_count)), 3});
   auto output = parallel::data_parallel(m, input);
 
-  const auto device_count = torch::cuda::device_count();
   ASSERT_EQ(output.numel(), device_count);
   for (size_t i = 0; i < device_count; ++i) {
     ASSERT_EQ(output[i].item<int32_t>(), i);
   }
+}
+
+TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
+  struct M : torch::nn::Cloneable<M> {
+      M() {
+        reset();
+      }
+
+      void reset() override {
+        conv = register_module("conv",
+            torch::nn::Conv2d(torch::nn::Conv2dOptions(2, 2, /*kernel_size=*/2)));
+        fc = register_module("fc", torch::nn::Linear(8, 2));
+      }
+
+      torch::Tensor forward(torch::Tensor x) {
+        x = conv->forward(x);
+        x = torch::relu(x);
+        x = x.view({-1, 8});
+        x = fc->forward(x);
+        return torch::log_softmax(x, /*dim=*/1);
+      }
+
+      torch::nn::Conv2d conv{nullptr};
+      torch::nn::Linear fc{nullptr};
+    };
+
+    // prepare modules and inputs
+    auto input = torch::ones({16, 2, 3, 3});
+    auto input_dp = torch::ones({16, 2, 3, 3});
+    auto model = std::make_shared<M>();
+    auto model_dp = std::dynamic_pointer_cast<M>(model->clone());
+
+    // run 3 training iterations
+    for (int i = 0; i < 3; ++i) {
+      input += i;
+      input_dp += i;
+
+      // non-prallel training
+      torch::optim::SGD optim(
+          model->parameters(), torch::optim::SGDOptions(0.1));
+      auto output = model->forward(input);
+      auto loss = torch::mse_loss(output, torch::zeros_like(output));
+      loss.backward();
+      optim.step();
+
+      // data-parallel training
+      torch::optim::SGD optim_dp(
+          model_dp->parameters(), torch::optim::SGDOptions(0.1));
+      auto output_dp = parallel::data_parallel(model_dp, input_dp);
+      auto loss_dp = torch::mse_loss(output_dp, torch::zeros_like(output_dp));
+      loss_dp.backward();
+      optim_dp.step();
+
+      // make sure that weights are the same
+      model->to(torch::kCPU);
+      model_dp->to(torch::kCPU);
+      auto params = model->parameters();
+      auto params_dp = model_dp->parameters();
+      ASSERT_EQ(params.size(), params_dp.size());
+      for (auto it = params.begin(), it_dp = params_dp.begin();
+          it != params.end() && it_dp != params.end();
+          ++it, ++it_dp) {
+        ASSERT_TRUE(torch::allclose(*it, *it_dp));
+      }
+    }
 }

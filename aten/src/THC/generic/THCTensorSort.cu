@@ -1,6 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorSort.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorSort.cu"
 #else
+
+#include <c10/cuda/CUDAException.h>
 
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
@@ -53,25 +55,29 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
     dim3 block(blockSize);                                              \
                                                                         \
     if (dir) {                                                          \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, GTComp<scalar_t>, TYPE, SIZE> \
-        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
+      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
+          GTComp<scalar_t, true>, TYPE, SIZE>                           \
+        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
           keyInfo,                                                      \
           keySlices,                                                    \
           (TYPE) keySliceSize,                                          \
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          GTComp<scalar_t>());                                              \
+          GTComp<scalar_t, true>());                                    \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     } else {                                                            \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, LTComp<scalar_t>, TYPE, SIZE> \
-        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
+      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
+      LTComp<scalar_t, true>, TYPE, SIZE>                               \
+        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
           keyInfo,                                                      \
           keySlices,                                                    \
           (TYPE) keySliceSize,                                          \
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          LTComp<scalar_t>());                                              \
+          LTComp<scalar_t, true>());                                    \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     }                                                                   \
   } while (0)
 
@@ -101,7 +107,7 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
       /* Nothing to do, data already sorted */          \
       break;                                            \
       default:                                          \
-      assert(false);                                    \
+      TORCH_INTERNAL_ASSERT(false);                                    \
     }                                                   \
   }
 
@@ -147,8 +153,6 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
 #undef HANDLE_CASE
 #undef HANDLE_SORT_CASE
 #undef HANDLE_A_CASE
-
-  THCudaCheck(cudaGetLastError());
 }
 
 void THCTensor_(sortViaThrust)(THCState* state,
@@ -220,45 +224,44 @@ void THCTensor_(sortViaThrust)(THCState* state,
 
   // Fill the indices with a global index across all slices
   thrust::counting_iterator<int64_t> countIter(0);
-
   thrust::copy(
-#if CUDA_VERSION >= 7000
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     countIter, countIter + totalElements, indexIter);
-
-  // First, we sort globally (across all slices) according to key
-  // (the values we're sorting)
-  if (dir) {
-    thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    auto begin = thrust::make_zip_iterator(thrust::make_tuple(indexIter, keyIter));
+  if (dir){
+    if (totalElements < INT_MAX)
+       thrust::sort(
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
-      keyIter, keyIter + totalElements, indexIter, ThrustGTOp<scalar_t>());
+       begin, begin + totalElements, ThrustSliceGTOp<scalar_t, int, true>(sliceSize));
+    else
+       thrust::sort(
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
+#endif
+       begin, begin + totalElements, ThrustSliceGTOp<scalar_t, int64_t, true>(sliceSize));
   } else {
-    thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    if (totalElements < INT_MAX)
+       thrust::sort(
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
-      keyIter, keyIter + totalElements, indexIter, ThrustLTOp<scalar_t>());
+       begin, begin + totalElements, ThrustSliceLTOp<scalar_t, int, true>(sliceSize));
+    else
+       thrust::sort(
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
+#endif
+       begin, begin + totalElements, ThrustSliceLTOp<scalar_t, int64_t, true>(sliceSize));
   }
-
-  // Then, re-sort according to slice that each index is
-  // in. This completes the segment sort in Thrust, since we're
-  // stably sorting here, preserving the relative order of values
-  // per each slice
-  thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-    indexIter, indexIter + totalElements, keyIter,
-    SliceComp(sliceSize));
-
   // Translate the global integer 0-based index to a per-slice real
   // Lua index
   thrust::for_each(
-#if CUDA_VERSION >= 7000
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     indexIter, indexIter + totalElements,
     GlobalIndexToPerSliceIndex(sliceSize));
@@ -268,7 +271,6 @@ void THCTensor_(sortViaThrust)(THCState* state,
     THCTensor_(transpose)(state, trContigKey, NULL, dim, nDims - 1);
     THCudaLongTensor_transpose(state, trContigIndices, NULL, dim, nDims - 1);
   }
-
   // Then copy back to the expected output
   THCTensor_(freeCopyTo)(state, trContigKey, sorted);
   THCudaLongTensor_freeCopyTo(state, trContigIndices, indices);
@@ -281,6 +283,7 @@ void THCTensor_(sort)(THCState* state,
                       int dim, int order) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, sorted, input));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
+  dim = at::maybe_wrap_dim(dim, input);
   int64_t dims = THCTensor_(nDimensionLegacyNoScalars)(state, sorted);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
@@ -309,12 +312,7 @@ void THCTensor_(sort)(THCState* state,
   int maxSliceSize = 2048;
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-  // TODO bitonicSortKVInPlace hangs on ROCm currently.
-  if (0) {
-#else
   if (sliceSize <= maxSliceSize) {
-#endif
     // Fill `indices` (the values) with the
     // slice-relative index.
     THCudaLongTensor_fillSliceWithIndex(state, indices, dim);

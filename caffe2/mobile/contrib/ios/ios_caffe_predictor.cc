@@ -2,7 +2,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/tensor.h"
 
-#if defined(CAFFE2_USE_MPSCNN) && CAFFE2_MOBILE
+#if defined(CAFFE2_USE_MPSCNN) && defined(C10_MOBILE)
 #include "caffe2/mobile/contrib/ios/mpscnn/mpscnn.h"
 #endif
 
@@ -14,7 +14,7 @@ Caffe2IOSPredictor* Caffe2IOSPredictor::NewCaffe2IOSPredictor(const caffe2::NetD
                                                               bool allowMetalOperators) {
   caffe2::NetDef metal_predict_net;
   bool usingMetalOperators = false;
-#if defined(CAFFE2_USE_MPSCNN) && CAFFE2_MOBILE
+#if defined(CAFFE2_USE_MPSCNN) && defined(C10_MOBILE)
   if (allowMetalOperators) {
     caffe2::dumpDef(predict_net);
     if (caffe2::tryConvertToMPSCNN(init_net, predict_net, &metal_predict_net)) {
@@ -38,7 +38,7 @@ Caffe2IOSPredictor::Caffe2IOSPredictor(const caffe2::NetDef& init_net,
                                        bool disableMultithreadProcessing,
                                        bool usingMetalOperators)
     : usingMetalOperators(usingMetalOperators), predictor_(init_net, predict_net) {
-#if CAFFE2_MOBILE
+#ifdef C10_MOBILE
   if (disableMultithreadProcessing) {
     caffe2::ThreadPool* threadpool = predictor_.ws()->GetThreadPool();
     if (threadpool != nullptr) {
@@ -50,24 +50,19 @@ Caffe2IOSPredictor::Caffe2IOSPredictor(const caffe2::NetDef& init_net,
 
 void Caffe2IOSPredictor::run(const Tensor& inData, Tensor& outData, std::string& errorMessage) {
   FLAGS_caffe2_force_shared_col_buffer = true;
-  caffe2::Tensor input(caffe2::CPU);
-  input.Resize(inData.dims);
+  caffe2::Tensor input = caffe2::empty(inData.dims, at::dtype<uint8_t>().device(caffe2::CPU));
   input.ShareExternalPointer(inData.data);
   caffe2::Predictor::TensorList input_vec;
   input_vec.emplace_back(std::move(input));
   caffe2::Predictor::TensorList output_vec;
   try {
     predictor_(input_vec, &output_vec);
-  } catch (const caffe2::EnforceNotMet& e) {
-    std::string error = e.msg();
-    errorMessage.swap(error);
-    return;
   } catch (const std::exception& e) {
     std::string error = e.what();
     errorMessage.swap(error);
     return;
   }
-  caffe2::TensorCPU* output = &output_vec.front();
+  caffe2::Tensor* output = &output_vec.front();
   outData.data = output->mutable_data<uint8_t>();
-  outData.dims = output->dims().vec();
+  outData.dims = output->sizes().vec();
 }

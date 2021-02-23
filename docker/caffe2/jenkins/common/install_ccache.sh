@@ -2,66 +2,58 @@
 
 set -ex
 
-# Install ccache from source.
-# Needs specific branch to work with nvcc (ccache/ccache#145)
-# Also pulls in a commit that disables documentation generation,
-# as this requires asciidoc to be installed (which pulls in a LOT of deps).
-pushd /tmp
-git clone https://github.com/pietern/ccache -b ccbin
-pushd ccache
-./autogen.sh
-./configure --prefix=/usr/local
-make "-j$(nproc)" install
-popd
-popd
-
 # Install sccache from pre-compiled binary.
 curl https://s3.amazonaws.com/ossci-linux/sccache -o /usr/local/bin/sccache
 chmod a+x /usr/local/bin/sccache
 
 # Setup SCCACHE
 ###############################################################################
-mkdir -p ./sccache
-
 SCCACHE="$(which sccache)"
 if [ -z "${SCCACHE}" ]; then
   echo "Unable to find sccache..."
   exit 1
 fi
 
-# List of compilers to use sccache on.
-declare -a compilers=("cc" "c++" "gcc" "g++" "x86_64-linux-gnu-gcc")
-
-# If cuda build, add nvcc to sccache.
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-  compilers+=("nvcc")
-fi
-
-# If rocm build, add hcc to sccache.
 if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
-  # HCC's symlink path: /opt/rocm/hcc/bin/hcc -> /opt/rocm/hcc/bin/clang -> /opt/rocm/hcc/bin/clang-7.0
-  HCC_DEST_PATH="$(readlink -f $(which hcc))"
-  HCC_REAL_BINARY="$(dirname $HCC_DEST_PATH)/clang-7.0_original"
-  mv $HCC_DEST_PATH $HCC_REAL_BINARY
+  # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
+  # hipcc will call either hcc or clang using an absolute path starting with /opt/rocm,
+  # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
+  # directly under /opt/rocm while also preserving the original compiler names.
+  # Note symlinks will chain as follows: [hcc or clang++] -> clang -> clang-??
+  # Final link in symlink chain must point back to original directory.
 
-  # Create sccache wrapper.
-  (
-    echo "#!/bin/sh"
-    echo "exec $SCCACHE "$HCC_REAL_BINARY" \"\$@\""
-  ) > $HCC_DEST_PATH
-  chmod +x "$HCC_DEST_PATH"
+  # Original compiler is moved one directory deeper. Wrapper replaces it.
+  function write_sccache_stub_rocm() {
+    OLDCOMP=$1
+    COMPNAME=$(basename $OLDCOMP)
+    TOPDIR=$(dirname $OLDCOMP)
+    WRAPPED="$TOPDIR/original/$COMPNAME"
+    mv "$OLDCOMP" "$WRAPPED"
+    printf "#!/bin/sh\nexec sccache $WRAPPED \$*" > "$OLDCOMP"
+    chmod a+x "$1"
+  }
+
+  if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then
+    # ROCm 3.3 or earlier.
+    mkdir /opt/rocm/hcc/bin/original
+    write_sccache_stub_rocm /opt/rocm/hcc/bin/hcc
+    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang
+    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang++
+    # Fix last link in symlink chain, clang points to versioned clang in prior dir
+    pushd /opt/rocm/hcc/bin/original
+    ln -s ../$(readlink clang)
+    popd
+  elif [[ -e "/opt/rocm/llvm/bin/clang" ]]; then
+    # ROCm 3.5 and beyond.
+    mkdir /opt/rocm/llvm/bin/original
+    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang
+    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang++
+    # Fix last link in symlink chain, clang points to versioned clang in prior dir
+    pushd /opt/rocm/llvm/bin/original
+    ln -s ../$(readlink clang)
+    popd
+  else
+    echo "Cannot find ROCm compiler."
+    exit 1
+  fi
 fi
-
-# Setup wrapper scripts
-for compiler in "${compilers[@]}"; do
-  (
-    echo "#!/bin/sh"
-    echo "exec $SCCACHE $(which $compiler) \"\$@\""
-  ) > "./sccache/$compiler"
-  chmod +x "./sccache/$compiler"
-done
-
-export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-# CMake must find these wrapper scripts
-export PATH="$CACHE_WRAPPER_DIR:$PATH"

@@ -12,8 +12,9 @@ class NGramFromCategoricalOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  NGramFromCategoricalOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit NGramFromCategoricalOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         col_ids_(this->template GetRepeatedArgument<int>("col_ids")),
         categorical_limits_(
             this->template GetRepeatedArgument<int>("categorical_limits")),
@@ -49,8 +50,8 @@ class NGramFromCategoricalOp : public Operator<Context> {
     auto N = floats.size(0);
     auto D = floats.size_from_dim(1);
     const F* floats_data = floats.template data<F>();
-    auto* output = Output(0);
-    output->Resize(N);
+
+    auto* output = Output(0, {N}, at::dtype<T>());
     auto* output_data = output->template mutable_data<T>();
     math::Set<T, Context>(output->numel(), 0, output_data, &context_);
 

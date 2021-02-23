@@ -53,20 +53,18 @@ void ReversePackedSegsOp<CUDAContext>::DoRunWithLengthType() {
   const auto& lengths = Input(LENGTHS);
 
   CAFFE_ENFORCE(
-      data.ndim() == 3,
+      data.dim() == 3,
       "DATA should be 3-D tensor <lengths, "
       "segments, embeddings>");
-  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE(lengths.dim() == 1, "LENGTH should be 1-D");
 
-  auto* output = Output(0);
-  const auto shape = data.dims();
-  output->Resize(shape);
+  auto* output = Output(0, data.sizes(), at::dtype<T>());
 
-  const auto max_length = data.dims()[0];
-  const auto batch_size = data.dims()[1];
-  const auto block_size = data.dims()[2];
+  const auto max_length = data.size(0);
+  const auto batch_size = data.size(1);
+  const auto block_size = data.size(2);
   CAFFE_ENFORCE(
-      lengths.dims()[0] == batch_size,
+      lengths.sizes()[0] == batch_size,
       "lenths size should be"
       " equal to batch size");
 
@@ -85,6 +83,7 @@ void ReversePackedSegsOp<CUDAContext>::DoRunWithLengthType() {
         lengths_ptr,
         data_ptr,
         rev_data_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(ReversePackedSegs, ReversePackedSegsOp<CUDAContext>);

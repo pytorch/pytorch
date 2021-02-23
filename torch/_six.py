@@ -18,109 +18,26 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import itertools
+import math
 import sys
 
+inf = math.inf
+nan = math.nan
+string_classes = (str, bytes)
+PY37 = sys.version_info[0] == 3 and sys.version_info[1] >= 7
 
-PY2 = sys.version_info[0] == 2
-PY3 = sys.version_info[0] == 3
-
-if PY2:
-    inf = float('inf')
-    nan = float('nan')
-else:
-    import math
-    inf = math.inf
-    nan = math.nan
-
-if PY2:
-    string_classes = basestring
-else:
-    string_classes = (str, bytes)
-
-
-if PY2:
-    int_classes = (int, long)
-else:
-    int_classes = int
-
-
-if PY2:
-    FileNotFoundError = IOError
-else:
-    FileNotFoundError = FileNotFoundError
-
-
-def with_metaclass(meta, *bases):
+def with_metaclass(meta: type, *bases) -> type:
     """Create a base class with a metaclass."""
     # This requires a bit of explanation: the basic idea is to make a dummy
     # metaclass for one level of class instantiation that replaces itself with
     # the actual metaclass.
-    class metaclass(meta):
+    class metaclass(meta):  # type: ignore[misc, valid-type]
 
         def __new__(cls, name, this_bases, d):
             return meta(name, bases, d)
+
+        @classmethod
+        def __prepare__(cls, name, this_bases):
+            return meta.__prepare__(name, bases)
+
     return type.__new__(metaclass, 'temporary_class', (), {})
-
-
-# A portable way of referring to the generator version of map
-# in both Python 2 and Python 3.
-# TODO: Move this into an appropriate utility library.
-if hasattr(itertools, 'imap'):
-    imap = itertools.imap
-else:
-    imap = map
-
-
-if PY3:
-    import builtins
-    exec_ = getattr(builtins, "exec")
-else:
-    def exec_(_code_, _globs_=None, _locs_=None):
-        """Execute code in a namespace."""
-        if _globs_ is None:
-            frame = sys._getframe(1)
-            _globs_ = frame.f_globals
-            if _locs_ is None:
-                _locs_ = frame.f_locals
-            del frame
-        elif _locs_ is None:
-            _locs_ = _globs_
-        exec("""exec _code_ in _globs_, _locs_""")
-
-
-if sys.version_info[:2] == (3, 2):
-    exec_("""def raise_from(value, from_value):
-    try:
-        if from_value is None:
-            raise value
-        raise value from from_value
-    finally:
-        value = None
-""")
-elif sys.version_info[:2] > (3, 2):
-    exec_("""def raise_from(value, from_value):
-    try:
-        raise value from from_value
-    finally:
-        value = None
-""")
-else:
-    def raise_from(value, from_value):
-        raise value
-
-if PY2:
-    import collections
-    container_abcs = collections
-elif PY3:
-    import collections.abc
-    container_abcs = collections.abc
-
-# Gets a function from the name of a method on a type
-if PY2:
-    def get_function_from_type(cls, name):
-        method = getattr(cls, name, None)
-        return getattr(method, "__func__", None)
-elif PY3:
-    def get_function_from_type(cls, name):
-        return getattr(cls, name, None)

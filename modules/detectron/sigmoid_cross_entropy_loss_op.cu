@@ -15,7 +15,7 @@
  */
 
 #include "caffe2/core/context_gpu.h"
-#include "sigmoid_cross_entropy_loss_op.h"
+#include "modules/detectron/sigmoid_cross_entropy_loss_op.h"
 
 namespace caffe2 {
 
@@ -69,7 +69,7 @@ template <>
 bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& T = Input(1);
-  auto* avg_loss = Output(0);
+
 
   CAFFE_ENFORCE(
       X.size() == T.size(),
@@ -79,10 +79,10 @@ bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
       " vs. ",
       T.size(),
       ")");
-  avg_loss->Resize(vector<int64_t>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   counts_.ResizeLike(X);
   losses_.ResizeLike(X);
-  normalizer_.Resize(vector<int64_t>());
+  ReinitializeTensor(&normalizer_, vector<int64_t>(), at::dtype<float>().device(CUDA));
   SigmoidCrossEntropyLossKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -93,6 +93,8 @@ bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
       T.data<int>(),
       losses_.mutable_data<float>(),
       counts_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   float* avg_loss_data = avg_loss->mutable_data<float>();
   math::Sum<float, CUDAContext>(
       losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
@@ -106,6 +108,7 @@ bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(normalizer_.size(), normalizer_data, 1e-5);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     math::Div<float, CUDAContext>(
         1, avg_loss_data, normalizer_data, avg_loss_data, &context_);
   }
@@ -120,11 +123,11 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& T = Input(1);
   auto& d_avg_loss = Input(2);
-  auto* dX = Output(0);
 
-  dX->ResizeLike(X);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   counts_.ResizeLike(X);
-  normalizer_.Resize(vector<int64_t>());
+  ReinitializeTensor(&normalizer_, vector<int64_t>(), at::dtype<float>().device(CUDA));
   SigmoidCrossEntropyLossGradientKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -135,6 +138,7 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
       T.data<int>(),
       dX->mutable_data<float>(),
       counts_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   if (normalize_) {
     float* normalizer_data = normalizer_.mutable_data<float>();
     math::Sum<float, CUDAContext>(
@@ -145,6 +149,7 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(normalizer_.size(), normalizer_data, 1e-5);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     math::Div<float, CUDAContext>(
         1,
         d_avg_loss.data<float>(),

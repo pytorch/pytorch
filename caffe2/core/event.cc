@@ -2,19 +2,19 @@
 
 namespace caffe2 {
 
-CAFFE2_API EventCreateFunction Event::event_creator_[MaxDeviceTypes];
-CAFFE2_API EventRecordFunction Event::event_recorder_[MaxDeviceTypes];
-CAFFE2_API EventWaitFunction
+TORCH_API EventCreateFunction Event::event_creator_[MaxDeviceTypes];
+TORCH_API EventRecordFunction Event::event_recorder_[MaxDeviceTypes];
+TORCH_API EventWaitFunction
     Event::event_waiter_[MaxDeviceTypes][MaxDeviceTypes];
-CAFFE2_API EventFinishFunction Event::event_finisher_[MaxDeviceTypes];
+TORCH_API EventFinishFunction Event::event_finisher_[MaxDeviceTypes];
 
-CAFFE2_API EventQueryFunction Event::event_querier_[MaxDeviceTypes];
-CAFFE2_API EventErrorMessageFunction
+TORCH_API EventQueryFunction Event::event_querier_[MaxDeviceTypes];
+TORCH_API EventErrorMessageFunction
     Event::event_err_msg_getter_[MaxDeviceTypes];
-CAFFE2_API EventSetFinishedFunction
+TORCH_API EventSetFinishedFunction
     Event::event_finished_setter_[MaxDeviceTypes];
-CAFFE2_API EventResetFunction Event::event_resetter_[MaxDeviceTypes];
-CAFFE2_API EventSetCallbackFunction
+TORCH_API EventResetFunction Event::event_resetter_[MaxDeviceTypes];
+TORCH_API EventSetCallbackFunction
     Event::event_callback_setter_[MaxDeviceTypes];
 
 namespace {
@@ -86,6 +86,14 @@ const std::string& EventErrorMessageCPU(const Event* event) {
 void EventSetFinishedCPU(const Event* event, const char* err_msg) {
   auto* wrapper = static_cast<CPUEventWrapper*>(event->event_.get());
   std::unique_lock<std::mutex> lock(wrapper->mutex_);
+
+  if (wrapper->status_ == EventStatus::EVENT_FAILED) {
+    LOG(WARNING) << "SetFinished called on a finished event. "
+                 << "Most likely caused by an external cancellation. "
+                 << "old message: " << wrapper->err_msg_ << ", "
+                 << "new message: " << err_msg;
+    return;
+  }
 
   CAFFE_ENFORCE(
       wrapper->status_ == EventStatus::EVENT_INITIALIZED ||

@@ -24,7 +24,7 @@ namespace caffe2 {
 
 class NetBase;
 
-struct CAFFE2_API StopOnSignal {
+struct TORCH_API StopOnSignal {
   StopOnSignal()
       : handler_(std::make_shared<SignalHandler>(
             SignalHandler::Action::STOP,
@@ -44,7 +44,7 @@ struct CAFFE2_API StopOnSignal {
  * runtime: (1) all blobs, and (2) all instantiated networks. It is the owner of
  * all these objects and deals with the scaffolding logistics.
  */
-class CAFFE2_API Workspace {
+class TORCH_API Workspace {
  public:
   typedef std::function<bool(int)> ShouldContinue;
   typedef CaffeMap<string, unique_ptr<Blob> > BlobMap;
@@ -278,7 +278,7 @@ class CAFFE2_API Workspace {
                ShouldContinue should_continue = StopOnSignal{});
 
   /*
-   * Returns a CPU threadpool instace for parallel execution of
+   * Returns a CPU threadpool instance for parallel execution of
    * work. The threadpool is created lazily; if no operators use it,
    * then no threadpool will be created.
    */
@@ -308,7 +308,7 @@ class CAFFE2_API Workspace {
   }
 
  public:
-  std::atomic<int> last_failed_op_net_position;
+  std::atomic<int> last_failed_op_net_position{};
 
  private:
   struct Bookkeeper {
@@ -319,7 +319,6 @@ class CAFFE2_API Workspace {
   static std::shared_ptr<Bookkeeper> bookkeeper();
 
   BlobMap blob_map_;
-  NetMap net_map_;
   const string root_folder_;
   const Workspace* shared_;
   std::unordered_map<string, std::pair<const Workspace*, string>>
@@ -327,6 +326,7 @@ class CAFFE2_API Workspace {
   std::unique_ptr<ThreadPool> thread_pool_;
   std::mutex thread_pool_creation_mutex_;
   std::shared_ptr<Bookkeeper> bookkeeper_;
+  NetMap net_map_;
 
   C10_DISABLE_COPY_AND_ASSIGN(Workspace);
 };

@@ -1,10 +1,11 @@
 ## @package gradient_checker
 # Module caffe2.python.gradient_checker
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
+
+
+
+
+import os
 import numpy as np
 
 from caffe2.python import core, workspace, net_drawer
@@ -233,7 +234,8 @@ class GradientChecker:
         input_to_check,
         outputs_with_grads,
         grad_ops=None,
-        input_device_options=None
+        input_device_options=None,
+        ensure_outputs_are_inferred=False,
     ):
         """Checks the operator in a very simple fashion by stacking a sum of
         squares on the top.
@@ -250,6 +252,8 @@ class GradientChecker:
               gradient operator from the gradient registry.
           input_device_options: an optional mapping from input names to
               DeviceOptions (to override the default DeviceOption)
+          ensure_outputs_are_inferred: if set will assert that the gradient output
+              shapes matches the inferred shapes
         Outputs:
           boolean: True if it passes, False if it does not pass.
         """
@@ -264,7 +268,7 @@ class GradientChecker:
             # hack.
             grad_ops, g_input = getGradientForOp(op)
 
-        
+
         _input_device_options = input_device_options or \
             core.InferOpBlobDevicesAsDict(op)[0]
         # First, feed in the input.
@@ -278,16 +282,31 @@ class GradientChecker:
         grad_name = g_input[input_to_check]
         loss, grad = self.GetLossAndGrad(
             op, grad_ops, inputs, op.input, input_to_check, grad_name,
-            outputs_with_grads
+            outputs_with_grads,
         )
         grad_estimate = np.zeros_like(inputs[input_to_check])
         if grad_estimate.shape != grad.shape:
             raise Exception(
                 "Mismatched gradient shapes: estimated ({}), grad ({})".format(
                     grad_estimate.shape, grad.shape))
-            
+
+        if ensure_outputs_are_inferred:
+            self._assertInferTensorChecks(op, grad_ops)
+
+        full_grad_check = os.getenv('CAFFE2_FULL_GRAD_CHECK') == '1'
+
         dims_to_check = inputs[input_to_check].size
         for current_dim in range(dims_to_check):
+            # Grad check is very expensive (as it involves running the op from
+            # scratch for each of the input tensor elements). Thus, let's
+            # run it by default only on a small subset of dimensions. Here we
+            # apply very scientific approach: the first and the last 3 elements
+            # of each tensor. Pass CAFFE2_FULL_GRAD_CHECK=1 env var to enable
+            # the full check
+            if not full_grad_check and current_dim >= 3 and \
+                    current_dim + 3 < dims_to_check:
+                grad_estimate.flat[current_dim] = grad.flat[current_dim]
+                continue
             # Positive gradient
             inputs[input_to_check].flat[current_dim] += self._stepsize
             pos_loss, _ = self.GetLossAndGrad(
@@ -322,3 +341,47 @@ class GradientChecker:
             workspace.ResetWorkspace()
             workspace.SwitchWorkspace(old_ws_name)
         return ret, grad, grad_estimate
+
+    def _assertInferTensorChecks(self, op, grad_ops):
+        tmp_net = caffe2_pb2.NetDef()
+        tmp_net.op.extend([op])
+        tmp_net.op.extend(grad_ops)
+        inferred_shapes, inferred_types = workspace.InferShapesAndTypes(
+            [tmp_net],
+            nets_proto=True,
+        )
+
+        outputs = set()
+        for grad_op in grad_ops:
+            outputs.update(grad_op.output)
+
+        for output in outputs:
+            if output not in inferred_shapes:
+                raise Exception(
+                    "expected output {} to be inferred".format(output))
+            blob = workspace.FetchBlob(output)
+            correct_shape = list(blob.shape)
+            inferred_shape = list(inferred_shapes[output])
+            if correct_shape != inferred_shape:
+                raise Exception(
+                    "Mismatched inferred shape: want({}), got({})".format(
+                        correct_shape, inferred_shape))
+
+            if type(blob) is np.ndarray:
+                if blob.dtype == np.dtype('float64'):
+                    correct_type = caffe2_pb2.TensorProto.DOUBLE
+                elif blob.dtype == np.dtype('float32'):
+                    correct_type = caffe2_pb2.TensorProto.FLOAT
+                elif blob.dtype == np.dtype('int32'):
+                    correct_type = caffe2_pb2.TensorProto.INT32
+                elif blob.dtype == np.dtype('int64'):
+                    correct_type = caffe2_pb2.TensorProto.INT64
+                else:
+                    correct_type = "unknown {}".format(np.dtype)
+            else:
+                correct_type = str(type(blob))
+            inferred_type = inferred_types[output]
+            if correct_type != inferred_type:
+                raise Exception(
+                    "Mismatched inferred type: want({}), got({})".format(
+                        correct_type, inferred_type))

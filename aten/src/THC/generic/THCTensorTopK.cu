@@ -1,6 +1,9 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorTopK.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorTopK.cu"
 #else
+
+#include <c10/macros/Macros.h>
+#include <c10/cuda/CUDAException.h>
 
 void THCTensor_(topk)(THCState* state,
                       THCTensor *topK,
@@ -9,9 +12,9 @@ void THCTensor_(topk)(THCState* state,
                       int64_t k, int dim, int dir, int sorted) {
   THAssert(topK != NULL && indices != NULL && input_ != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
-  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  int64_t dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
-  THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
+  dim = at::maybe_wrap_dim(dim, input_);
+  THArgCheck(THCTensor_(nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, indices) <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
   int numDims = THCTensor_(nDimensionLegacyNoScalars)(state, input_);
   THArgCheck(numDims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
@@ -24,8 +27,10 @@ void THCTensor_(topk)(THCState* state,
 
   // Build the output size, which is the dim being selected set to
   // size k
-  std::vector<int64_t> topKSize = THTensor_sizesLegacyNoScalars(input);
-  topKSize[dim] = k;
+  std::vector<int64_t> topKSize = input->sizes().vec();
+  if (topKSize.size() > 0) {
+    topKSize[dim] = k;
+  }
   THCTensor_(resize)(state, topK, topKSize, {});
   THCudaLongTensor_resize(state, indices, topKSize, {});
 
@@ -33,8 +38,8 @@ void THCTensor_(topk)(THCState* state,
   // is provided to the kernel for the arguments.
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
-  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                               \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(            \
       inputInfo,                                                        \
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \
@@ -46,7 +51,8 @@ void THCTensor_(topk)(THCState* state,
       static_cast<INDEX_T>(topKSlices),                                 \
       static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
-      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]))
+      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));   \
+      C10_CUDA_KERNEL_LAUNCH_CHECK()
 
 #define RUN_DIR(INDEX_T, DIM)                   \
   if (dir) {                                    \
@@ -66,17 +72,11 @@ void THCTensor_(topk)(THCState* state,
     RUN_DIR(INDEX_T, -1);                       \
   }
 
-#ifdef __HIP_PLATFORM_HCC__
-#define TOPK_WARP_SIZE 64
-#else
-#define TOPK_WARP_SIZE 32
-#endif
-
 #define RUN_T(INDEX_T)                                                  \
-  TensorInfo<scalar_t, INDEX_T> inputInfo =                                 \
-    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);              \
-  TensorInfo<scalar_t, INDEX_T> topKInfo =                                  \
-    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, topK);               \
+  TensorInfo<scalar_t, INDEX_T> inputInfo =                             \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);          \
+  TensorInfo<scalar_t, INDEX_T> topKInfo =                              \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, topK);           \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
     getTensorInfo<int64_t, THCudaLongTensor, INDEX_T>(state, indices);  \
                                                                         \
@@ -105,7 +105,7 @@ void THCTensor_(topk)(THCState* state,
     THError("Slice to sort is too large");                              \
   }                                                                     \
                                                                         \
-  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) TOPK_WARP_SIZE), (int64_t) 1024)); \
+  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) C10_WARP_SIZE), (int64_t) 1024)); \
                                                                         \
   /* This is used as a template parameter to calculate indices. */      \
   /* We only specialize it if all collapsed dim sizes are the */        \
@@ -118,6 +118,8 @@ void THCTensor_(topk)(THCState* state,
                                                                         \
   RUN_DIM(INDEX_T);
 
+  // the below is safe with 0-dimensional tensors because it is based on
+  // THCTensorInfo which implicitly expands to 1-dimensional.
   if (THCTensor_nElement(state, input) > 0) {
     // Based on required index size, run the algorithm with the
     // appropriate index type
@@ -133,19 +135,26 @@ void THCTensor_(topk)(THCState* state,
 #undef RUN_DIM
 #undef RUN_DIR
 #undef RUN_K
-#undef TOPK_WARP_SIZE
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
-  if (sorted) {
+  if (sorted && THCTensor_(numel)(state, topK) > 1) {
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
-#ifdef __HIP_PLATFORM_HCC__
-    // TODO bitonicSortKVInPlace hangs on ROCm currently.
-    if (0) {
+    // Workaround:
+    // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
+    // and so for the double word types,
+    // we get "too many resources requested for launch" in the 2048 case
+#if CUDA_VERSION >= 8000
+#if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
+    int maxSliceSize = 1024;
 #else
-    if (sliceSize <= 2048) {
+    int maxSliceSize = 2048;
 #endif
+#else
+    int maxSliceSize = 2048;
+#endif
+    if (sliceSize <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
       THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);

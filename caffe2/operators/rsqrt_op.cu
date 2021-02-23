@@ -4,7 +4,7 @@
 #include <functional>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -41,6 +41,8 @@ bool RsqrtGradientFunctor<CUDAContext>::Forward(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(size, dY, Y, dX);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

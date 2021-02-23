@@ -1,0 +1,102 @@
+ir_version: 6
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    output: "2"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "1"
+    input: "2"
+    output: "3"
+    name: "Reshape_1"
+    op_type: "Reshape"
+  }
+  node {
+    input: "0"
+    input: "3"
+    output: "4"
+    output: "5"
+    name: "TopK_2"
+    op_type: "TopK"
+    attribute {
+      name: "axis"
+      i: -1
+      type: INT
+    }
+    attribute {
+      name: "largest"
+      i: 0
+      type: INT
+    }
+    attribute {
+      name: "sorted"
+      i: 0
+      type: INT
+    }
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+        }
+      }
+    }
+  }
+  output {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_param: "TopK4_dim_0"
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+          dim {
+            dim_param: "TopK5_dim_0"
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 11
+}

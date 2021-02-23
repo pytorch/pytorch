@@ -14,8 +14,9 @@ template <class Context>
 class NumpyTileOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  NumpyTileOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit NumpyTileOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~NumpyTileOp() {}
 
   bool RunOnDevice() override {
@@ -30,7 +31,7 @@ class NumpyTileOp : public Operator<Context> {
         input.dim(),
         "repeats input have the same"
         " number of elements as `inputs` has dimensions.");
-    const int64_t *repeats_data = repeats.template data<int64_t>();
+    const int64_t* repeats_data = repeats.template data<int64_t>();
     for (size_t i = 0; i < repeats.numel(); ++i) {
       CAFFE_ENFORCE_GE(repeats_data[i], 0);
     }
@@ -91,7 +92,7 @@ class NumpyTileOp : public Operator<Context> {
 
  private:
   void DoTile(
-      const TypeMeta& meta,
+      const TypeMeta meta,
       int item_size,
       int outer_dim,
       int inner_dim,

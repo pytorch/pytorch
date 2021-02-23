@@ -1,7 +1,7 @@
 #include "caffe2/core/blob_serialization.h"
 
-#include <sstream>
 #include <mutex>
+#include <sstream>
 
 #include "caffe2/core/blob.h"
 #include "caffe2/utils/proto_utils.h"
@@ -21,6 +21,11 @@ C10_DEFINE_bool(
     false,
     "Serialize FLOAT16 tensors using byte_data field");
 
+C10_DEFINE_bool(
+    caffe2_serialize_using_bytes_as_holder,
+    false,
+    "Serialize BOOL, UINT8, INT8, UINT16, INT16, INT64, FLOAT16 tensors using byte_data field instead of int32");
+
 namespace caffe2 {
 /**
  * @brief StringSerializer is the serializer for String.
@@ -31,7 +36,7 @@ namespace caffe2 {
 class StringSerializer : public BlobSerializerBase {
  public:
   StringSerializer() {}
-  ~StringSerializer() {}
+  ~StringSerializer() override {}
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor,
    * otherwise this function produces a fatal error.
@@ -138,7 +143,6 @@ void TensorSerializer::SerializeWithChunkSize(
   };
 
 #ifndef __ANDROID__
-  std::vector<std::future<void>> futures;
   // Poorman's IOBound ThreadPool
   SimpleQueue<size_t> chunkQueue;
   auto task = [&]() {
@@ -147,7 +151,9 @@ void TensorSerializer::SerializeWithChunkSize(
       processChunk(chunkStart);
     }
   };
+  std::vector<std::future<void>> futures;
   if (tensor.numel() > chunk_size) {
+    futures.reserve(FLAGS_caffe2_max_tensor_serializer_threads);
     for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
@@ -180,6 +186,51 @@ void TensorSerializer::SerializeWithChunkSize(
     fut.get();
   }
 #endif
+}
+
+static bool EnableByteEncoding(
+    const TensorProto::DataType& dataType,
+    const size_t& typeSize) {
+  // if typeSize == 1, endianness does not matter. Else check for endianness.
+  bool ret = false;
+  bool safeForEndianness = (typeSize == 1 || kIsLittleEndian);
+  if (safeForEndianness) {
+    ret = FLAGS_caffe2_serialize_using_bytes_as_holder;
+    // Check if special casing for float is enabled if
+    // caffe2_serialize_using_bytes_as_holder is not enabled.
+    if (!ret) {
+      ret =
+          (dataType == TensorProto_DataType_FLOAT16 &&
+           FLAGS_caffe2_serialize_fp16_as_bytes);
+    }
+  }
+  return ret;
+}
+
+template <typename T, typename S = T>
+static void SerializeUsingBytesOrInt32(
+    const Tensor& input,
+    const TensorProto::DataType& dataType,
+    size_t chunkBegin,
+    int32_t chunkSize,
+    BaseContext* context,
+    TensorProto& proto) {
+  const auto typeSize = sizeof(T);
+  if (EnableByteEncoding(dataType, typeSize)) {
+    const auto bufSize = typeSize * chunkSize;
+    auto* byteData =
+        reinterpret_cast<const uint8_t*>(input.template data<S>() + chunkBegin);
+    unique_ptr<uint8_t[]> buffer(new uint8_t[bufSize]);
+    context->template CopyToCPU<uint8_t>(bufSize, byteData, buffer.get());
+    context->FinishDeviceComputation();
+    proto.set_byte_data(buffer.get(), bufSize);
+  } else {
+    detail::CopyToProtoWithCast(
+        chunkSize,
+        reinterpret_cast<const T*>(input.template data<S>()) + chunkBegin,
+        proto.mutable_int32_data(),
+        context);
+  }
 }
 
 void TensorSerializer::Serialize(
@@ -222,6 +273,8 @@ void TensorSerializer::Serialize(
   const TensorProto::DataType data_type = TypeMetaToDataType(input.dtype());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
+  // TODO: use CUDAGuard here instead of context and employ explicit sync
+  // copy
   auto uniq_ptr = CreateContext(input.GetDevice());
   // A lot of copypaste is error prone. Should we create a macro for this?
   switch (data_type) {
@@ -252,39 +305,24 @@ void TensorSerializer::Serialize(
       break;
     }
     case TensorProto_DataType_BOOL:
-      detail::CopyToProtoWithCast(
-          chunkSize,
-          input.template data<bool>() + chunkBegin,
-          proto.mutable_int32_data(),
-          uniq_ptr.get());
+      SerializeUsingBytesOrInt32<bool>(
+          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
       break;
     case TensorProto_DataType_UINT8:
-      detail::CopyToProtoWithCast(
-          chunkSize,
-          input.template data<uint8_t>() + chunkBegin,
-          proto.mutable_int32_data(),
-          uniq_ptr.get());
+      SerializeUsingBytesOrInt32<uint8_t>(
+          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
       break;
     case TensorProto_DataType_INT8:
-      detail::CopyToProtoWithCast(
-          chunkSize,
-          input.template data<int8_t>() + chunkBegin,
-          proto.mutable_int32_data(),
-          uniq_ptr.get());
+      SerializeUsingBytesOrInt32<int8_t>(
+          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
       break;
     case TensorProto_DataType_UINT16:
-      detail::CopyToProtoWithCast(
-          chunkSize,
-          input.template data<uint16_t>() + chunkBegin,
-          proto.mutable_int32_data(),
-          uniq_ptr.get());
+      SerializeUsingBytesOrInt32<uint16_t>(
+          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
       break;
     case TensorProto_DataType_INT16:
-      detail::CopyToProtoWithCast(
-          chunkSize,
-          input.template data<int16_t>() + chunkBegin,
-          proto.mutable_int32_data(),
-          uniq_ptr.get());
+      SerializeUsingBytesOrInt32<int16_t>(
+          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
       break;
     case TensorProto_DataType_INT64:
       detail::CopyToProtoAsIs(
@@ -293,31 +331,10 @@ void TensorSerializer::Serialize(
           proto.mutable_int64_data(),
           uniq_ptr.get());
       break;
-    case TensorProto_DataType_FLOAT16: {
-      if (FLAGS_caffe2_serialize_fp16_as_bytes) {
-        const int kValue = 1;
-        CAFFE_ENFORCE_EQ(
-            reinterpret_cast<const char*>(&kValue)[0],
-            1,
-            "Serialization of FLOAT16 on big endian platform "
-            "is not written yet.");
-        unique_ptr<char[]> buffer(new char[2 * chunkSize]);
-        this->context_->template CopyToCPU<char>(
-            2 * chunkSize,
-            reinterpret_cast<const char*>(
-                input.template data<at::Half>() + chunkBegin),
-            buffer.get());
-        this->context_->FinishDeviceComputation();
-        proto.set_byte_data(buffer.release(), 2 * chunkSize);
-      } else {
-        detail::CopyToProtoWithCast(
-            chunkSize,
-            reinterpret_cast<const uint16_t*>(input.template data<at::Half>()) +
-                chunkBegin,
-            proto.mutable_int32_data(),
-            uniq_ptr.get());
-      }
-    } break;
+    case TensorProto_DataType_FLOAT16:
+      SerializeUsingBytesOrInt32<uint16_t, at::Half>(
+          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
+      break;
     case TensorProto_DataType_DOUBLE:
       detail::CopyToProtoAsIs(
           chunkSize,
@@ -335,6 +352,19 @@ void TensorSerializer::Serialize(
         }
       }
     } break;
+    case TensorProto_DataType_ZERO_COLLISION_HASH: {
+      CAFFE_ENFORCE(
+        false,
+        "Serialization for zero collision hash type is supported by "
+        "specialized serializer ZeroCollisionIdHashSerializer");
+    } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Serialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferSerialier");
+    } break;
+
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
@@ -385,32 +415,150 @@ void DeserializeBlob(const BlobProto& blob_proto, Blob* result) {
   }
 }
 
-void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
-  auto tensor_proto = blob_proto.tensor();
-  Deserialize(
-      tensor_proto,
-      BlobGetMutableTensor(
-          blob,
-          static_cast<DeviceType>(tensor_proto.device_detail().device_type())));
-}
-
-void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
-  // We create a local context for deserializing. Since Caffe2 contexts are
-  // usually lightweight, this should not involve too much overhead.
-  auto uniq_ptr = CreateContext(OptionToDevice(proto.device_detail()));
-  auto context = uniq_ptr.get();
-  context->SwitchToDevice(0);
-  vector<int64_t> dims;
+// === Local helper functions ===
+// Get dimensions from Tensor proto
+std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
+  std::vector<int64_t> dims;
+  dims.reserve(proto.dims().size());
   for (const int64_t d : proto.dims()) {
     dims.push_back(d);
   }
-  tensor->Resize(dims);
+  return dims;
+}
+
+// Get number of elements from Tensor proto
+int64_t NumelFromTensorProto(const TensorProto& tensor_proto) {
+  int64_t numel = 1;
+  for (const int64_t d : tensor_proto.dims()) {
+    numel *= d;
+  }
+  return numel;
+}
+
+// Get data type from Tensor proto
+TypeMeta GetDataType(const TensorProto& tensor_proto) {
+  TypeMeta dtype;
+  if (tensor_proto.data_type() != TensorProto_DataType_UNDEFINED) {
+    dtype = DataTypeToTypeMeta(tensor_proto.data_type());
+  } else {
+    Blob temp_blob;
+    DeserializeBlob(tensor_proto.string_data(0), &temp_blob);
+    dtype = temp_blob.meta();
+  }
+  return dtype;
+}
+
+// Get TensorOptions from Tensor proto
+// Assumes TensorProto is not empty
+static at::TensorOptions TensorOptionsFromProto(
+    const TensorProto& tensor_proto) {
+  return at::dtype(GetDataType(tensor_proto))
+      .device(OptionToDevice(tensor_proto.device_detail()));
+}
+
+std::unique_ptr<BaseContext> ContextFromProto(
+    const TensorProto& tensor_proto) {
+  auto device = OptionToDevice(tensor_proto.device_detail());
+  return CreateContext(device);
+}
+
+// === Local helper functions ===
+
+Tensor EmptyTensorFromProto(const TensorProto& tensor_proto) {
+  auto context = ContextFromProto(tensor_proto);
+  context->SwitchToDevice();
+  if (NumelFromTensorProto(tensor_proto) == 0 &&
+      tensor_proto.data_type() == TensorProto_DataType_UNDEFINED) {
+    // TODO: remove when serialization of dtype uninitialized tensor is removed
+    return caffe2::empty(
+        {0},
+        at::dtype<float>().device(
+            OptionToDevice(tensor_proto.device_detail())));
+  } else {
+    return caffe2::empty(
+        DimsFromTensorProto(tensor_proto),
+        TensorOptionsFromProto(tensor_proto));
+  }
+}
+
+void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
+  const auto& tensor_proto = blob_proto.tensor();
+  auto context = ContextFromProto(tensor_proto);
+  context->SwitchToDevice();
+  if (NumelFromTensorProto(tensor_proto) == 0 &&
+      tensor_proto.data_type() == TensorProto_DataType_UNDEFINED) {
+    // TODO: remove after empty Tensor serialization is forbidden
+    VLOG(1) << "Deseriralizing an empty Tensor.";
+    BlobGetMutableTensor(
+        blob,
+        {0},
+        at::dtype<float>().device(
+            OptionToDevice(tensor_proto.device_detail())));
+  } else {
+    DeserializeToTensor(
+        tensor_proto,
+        BlobGetMutableTensor(
+            blob,
+            DimsFromTensorProto(tensor_proto),
+            TensorOptionsFromProto(tensor_proto)));
+  }
+}
+
+template <typename T, typename D = T>
+void DeserializeFromBytesOrInt32(
+    const TensorProto& tensor_proto,
+    size_t chunkBegin,
+    int32_t chunkSize,
+    BaseContext* context,
+    Tensor* tensor) {
+  if (tensor_proto.has_byte_data()) {
+    auto typeSize = sizeof(T);
+    CAFFE_ENFORCE(
+        kIsLittleEndian || typeSize == 1,
+        "Serialization with bytes not supported on big endian platform.");
+    size_t numElems = tensor_proto.byte_data().size();
+    if (tensor_proto.data_type() == TensorProto_DataType_UINT8) {
+      if (tensor_proto.has_segment()) {
+        const auto& segment = tensor_proto.segment();
+        numElems = segment.end() - segment.begin();
+      }
+    }
+    CAFFE_ENFORCE_EQ(
+        typeSize * chunkSize, numElems, "Incorrect proto field size.");
+    const uint8_t* protoData =
+        reinterpret_cast<const uint8_t*>(tensor_proto.byte_data().data());
+    context->template CopyToCPU<D>(
+        chunkSize,
+        reinterpret_cast<const D*>(protoData),
+        tensor->template mutable_data<D>() + chunkBegin);
+  } else {
+    // Backward compatibility with models which used int32_data field
+    detail::CopyFromProtoWithCast(
+        chunkSize,
+        tensor_proto.int32_data(),
+        reinterpret_cast<T*>(tensor->template mutable_data<D>()) + chunkBegin,
+        context);
+  }
+}
+
+void TensorDeserializer::DeserializeToTensor(
+    const TensorProto& tensor_proto,
+    Tensor* tensor) {
+  CAFFE_ENFORCE(
+      tensor->storage_initialized() && tensor->dtype_initialized(),
+      "Tensor must be initialized before passed into Deserialize function.");
+  // We create a local context for deserializing. Since Caffe2 contexts are
+  // usually lightweight, this should not involve too much overhead.
+  auto uniq_ptr = ContextFromProto(tensor_proto);
+  // since CopyFromProtoAsIs accepts BaseContext*
+  auto context = uniq_ptr.get();
+  context->SwitchToDevice();
 
   int64_t chunkBegin = 0;
   auto chunkEnd = tensor->numel();
-  if (proto.has_segment()) {
-    chunkBegin = proto.segment().begin();
-    chunkEnd = proto.segment().end();
+  if (tensor_proto.has_segment()) {
+    chunkBegin = tensor_proto.segment().begin();
+    chunkEnd = tensor_proto.segment().end();
   }
   CAFFE_ENFORCE(
       0 <= chunkBegin && chunkBegin <= chunkEnd && chunkEnd <= tensor->numel(),
@@ -422,18 +570,28 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       tensor->numel());
   auto chunkSize = chunkEnd - chunkBegin;
 
-  switch (proto.data_type()) {
+  if (!tensor_proto.has_data_type()) {
+    // If the data_type field is not set, this either means it was not present
+    // in the serialized data, or it was set to an enum value that we don't know
+    // about.  This likely means that the serialized data was written by a
+    // different version of the software using a new data type value that we
+    // don't understand.
+    throw std::runtime_error(
+        "Cannot deserialize tensor: unrecognized data type");
+  }
+
+  switch (tensor_proto.data_type()) {
     case TensorProto_DataType_FLOAT:
       detail::CopyFromProtoAsIs(
           chunkSize,
-          proto.float_data(),
+          tensor_proto.float_data(),
           tensor->template mutable_data<float>() + chunkBegin,
           context);
       break;
     case TensorProto_DataType_INT32:
       detail::CopyFromProtoAsIs(
           chunkSize,
-          proto.int32_data(),
+          tensor_proto.int32_data(),
           tensor->template mutable_data<int>() + chunkBegin,
           context);
       break;
@@ -441,10 +599,12 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       // Since BYTE stores the data in a string field instead of a repreated
       // field we will have it special cased.
       CAFFE_ENFORCE_EQ(
-          chunkSize, proto.byte_data().size(), "Incorrect proto field size.");
+          chunkSize,
+          tensor_proto.byte_data().size(),
+          "Incorrect proto field size.");
       context->template CopyToCPU<uint8_t>(
           chunkSize,
-          reinterpret_cast<const uint8_t*>(proto.byte_data().data()),
+          reinterpret_cast<const uint8_t*>(tensor_proto.byte_data().data()),
           tensor->template mutable_data<uint8_t>() + chunkBegin);
       break;
     case TensorProto_DataType_STRING:
@@ -452,83 +612,45 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       {
         string* content = tensor->template mutable_data<string>();
         for (int i = 0; i < chunkSize; ++i) {
-          content[i + chunkBegin] = proto.string_data(i);
+          content[i + chunkBegin] = tensor_proto.string_data(i);
         }
       }
       break;
     case TensorProto_DataType_BOOL:
-      detail::CopyFromProtoWithCast(
-          chunkSize,
-          proto.int32_data(),
-          tensor->template mutable_data<bool>() + chunkBegin,
-          context);
+      DeserializeFromBytesOrInt32<bool>(
+          tensor_proto, chunkBegin, chunkSize, context, tensor);
       break;
     case TensorProto_DataType_UINT8:
-      detail::CopyFromProtoWithCast(
-          chunkSize,
-          proto.int32_data(),
-          tensor->template mutable_data<uint8_t>() + chunkBegin,
-          context);
+      DeserializeFromBytesOrInt32<uint8_t>(
+          tensor_proto, chunkBegin, chunkSize, context, tensor);
       break;
     case TensorProto_DataType_INT8:
-      detail::CopyFromProtoWithCast(
-          chunkSize,
-          proto.int32_data(),
-          tensor->template mutable_data<int8_t>() + chunkBegin,
-          context);
+      DeserializeFromBytesOrInt32<int8_t>(
+          tensor_proto, chunkBegin, chunkSize, context, tensor);
       break;
     case TensorProto_DataType_UINT16:
-      detail::CopyFromProtoWithCast(
-          chunkSize,
-          proto.int32_data(),
-          tensor->template mutable_data<uint16_t>() + chunkBegin,
-          context);
+      DeserializeFromBytesOrInt32<uint16_t>(
+          tensor_proto, chunkBegin, chunkSize, context, tensor);
       break;
     case TensorProto_DataType_INT16:
-      detail::CopyFromProtoWithCast(
-          chunkSize,
-          proto.int32_data(),
-          tensor->template mutable_data<int16_t>() + chunkBegin,
-          context);
+      DeserializeFromBytesOrInt32<int16_t>(
+          tensor_proto, chunkBegin, chunkSize, context, tensor);
       break;
     case TensorProto_DataType_INT64:
       detail::CopyFromProtoAsIs(
           chunkSize,
-          proto.int64_data(),
+          tensor_proto.int64_data(),
           tensor->template mutable_data<int64_t>() + chunkBegin,
           context);
       break;
     case TensorProto_DataType_FLOAT16:
-      if (proto.has_byte_data()) {
-        const int kValue = 1;
-        CAFFE_ENFORCE_EQ(
-            reinterpret_cast<const char*>(&kValue)[0],
-            1,
-            "Serialization of FLOAT16 on big endian platform "
-            "is not written yet.");
-        CAFFE_ENFORCE_EQ(
-            2 * chunkSize,
-            proto.byte_data().size(),
-            "Incorrect proto field size.");
-        context->template CopyToCPU<at::Half>(
-            chunkSize,
-            reinterpret_cast<const at::Half*>(proto.byte_data().data()),
-            tensor->template mutable_data<at::Half>() + chunkBegin);
-      } else {
-        // Backward compatibility with models which used int32_data field
-        detail::CopyFromProtoWithCast(
-            chunkSize,
-            proto.int32_data(),
-            reinterpret_cast<uint16_t*>(
-                tensor->template mutable_data<at::Half>()) +
-                chunkBegin,
-            context);
-      }
+      DeserializeFromBytesOrInt32<uint16_t, at::Half>(
+          tensor_proto, chunkBegin, chunkSize, context, tensor);
       break;
     case TensorProto_DataType_DOUBLE:
       detail::CopyFromProtoAsIs(
           chunkSize,
-          proto.double_data(),
+          tensor_proto.double_data(),
           tensor->template mutable_data<double>() + chunkBegin,
           context);
       break;
@@ -536,7 +658,7 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       Blob temp_blob;
       void* raw_ptr = nullptr;
       for (int i = 0; i < chunkSize; ++i) {
-        DeserializeBlob(proto.string_data(i), &temp_blob);
+        DeserializeBlob(tensor_proto.string_data(i), &temp_blob);
         if (i == 0) {
           raw_ptr = tensor->raw_mutable_data(temp_blob.meta());
         }
@@ -547,9 +669,27 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
             1);
       }
     } break;
+    case TensorProto_DataType_ZERO_COLLISION_HASH: {
+      CAFFE_ENFORCE(
+        false,
+        "Deserialization for zero collision hash type is supported by "
+        "specialized deserializer ZeroCollisionIdHashDeserializer");
+    } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Deserialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferDeserialier");
+    } break;
       // Note: we intentially do not provide "default:" so if any new data types
   }
   context->FinishDeviceComputation();
+}
+
+Tensor TensorDeserializer::Deserialize(const TensorProto& tensor_proto) {
+  auto tensor = EmptyTensorFromProto(tensor_proto);
+  DeserializeToTensor(tensor_proto, &tensor);
+  return tensor;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -564,12 +704,11 @@ std::string SerializeAsString_EnforceCheck(
   if (!error_location) {
     CAFFE_ENFORCE(result, "protobuf::SerializeToString failed");
   } else {
-    CAFFE_ENFORCE(result,
-        "protobuf::SerializeToString failed for ", error_location);
+    CAFFE_ENFORCE(
+        result, "protobuf::SerializeToString failed for ", error_location);
   }
   return serialize_output;
 }
-
 
 namespace {
 // Serialize Tensor
@@ -578,5 +717,5 @@ REGISTER_BLOB_DESERIALIZER(TensorCPU, TensorDeserializer);
 // Serialize std::string
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<std::string>()), StringSerializer);
 REGISTER_BLOB_DESERIALIZER(std::string, StringDeserializer);
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

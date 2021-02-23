@@ -15,7 +15,7 @@ template <typename T, typename Data_T>
 bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
-  auto* output = Output(0);
+
   Tensor* presence_mask = nullptr;
   if (return_presence_mask_) {
     presence_mask = Output(1);
@@ -33,11 +33,6 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     total_length += l[i];
   }
   if (max_length_ != -1) {
-    // Final dim must be greater than the max_length
-    CAFFE_ENFORCE_GE(
-        max_length_,
-        max_length,
-        "Pre-defined max_length should be greater than the real max_length");
     max_length = max_length_;
   }
 
@@ -54,7 +49,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
       data.sizes().vec(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
   shape.insert(shape.begin(), lengths.numel());
-  output->Resize(shape);
+  auto* output = Output(0, shape, at::dtype(data.dtype()));
 
   // create output tensor
   auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
@@ -73,12 +68,31 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   }
 
   // Do padding
+  // Ignore string since math::Set does not support string.
+  // For all other cases, the behavior should mimic the GPU version where the
+  // padding is always zero for types other than float.
+  // TODO(xinyizhang): potentially restructure to clean up the logic here.
   if (output->template IsType<float>()) {
     math::Set<float, CPUContext>(
         output->numel(),
         padding_,
         output->template mutable_data<float>(),
         &context_);
+  } else if (output->template IsType<int32_t>()) {
+    math::Set<int32_t, CPUContext>(
+        output->numel(),
+        0,
+        output->template mutable_data<int32_t>(),
+        &context_);
+  } else if (output->template IsType<int64_t>()) {
+    math::Set<int64_t, CPUContext>(
+        output->numel(),
+        0,
+        output->template mutable_data<int64_t>(),
+        &context_);
+  } else if (output->template IsType<char>()) {
+    math::Set<char, CPUContext>(
+        output->numel(), 0, output->template mutable_data<char>(), &context_);
   }
   if (return_presence_mask_) {
     memset(presence_mask_data, (int)false, presence_mask->numel());
@@ -89,13 +103,14 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto* d = static_cast<const char*>(data.raw_data());
   int64_t start = 0;
   for (int64_t i = 0; i < lengths.size(0); ++i) {
+    auto len = l[i] <= max_length ? l[i] : max_length;
     context_.CopyItemsSameDevice(
         data.dtype(),
-        l[i] * block_size,
+        len * block_size,
         d + block_bytesize * start,
         out + block_bytesize * max_length * i);
     if (return_presence_mask_) {
-      memset(presence_mask_data + max_length * i, (int)true, l[i]);
+      memset(presence_mask_data + max_length * i, (int)true, len);
     }
     start += l[i];
   }
@@ -128,7 +143,14 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   }
   const T* l = lengths.template data<T>();
 
-  int64_t total_l = std::accumulate(l, l + lengths.size(0), (int64_t)0);
+  int64_t total_l = 0;
+  if (max_length_ != -1) {
+    for (int64_t i = 0; i < lengths.size(0); ++i) {
+      total_l += (int64_t)(l[i] <= max_length_ ? l[i] : max_length_);
+    }
+  } else {
+    total_l = std::accumulate(l, l + lengths.size(0), (int64_t)0);
+  }
 
   auto shape = data.sizes().vec();
   CAFFE_ENFORCE_EQ(
@@ -146,12 +168,16 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto* d = static_cast<const char*>(data.raw_data());
   int64_t start = 0;
   for (int64_t i = 0; i < lengths.size(0); ++i) {
+    auto len = l[i];
+    if (max_length_ != -1 && l[i] > max_length_) {
+      len = max_length_;
+    }
     context_.CopyItemsSameDevice(
         data.dtype(),
-        l[i] * block_size,
+        len * block_size,
         d + block_bytesize * data.size(1) * i,
         out + block_bytesize * start);
-    start += l[i];
+    start += len;
   }
   return true;
 }
@@ -222,3 +248,23 @@ class GetUnpackSegmentsGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(UnpackSegments, GetUnpackSegmentsGradient);
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+  PackSegments,
+  "_caffe2::PackSegments("
+    "Tensor lengths, "
+    "Tensor tensor, "
+    "int max_length = -1, "
+    "bool pad_minf = False, "
+    "bool return_presence_mask = False"
+  ") -> (Tensor packed_tensor, Tensor presence_mask)",
+  caffe2::PackSegmentsOp<caffe2::CPUContext>);
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+  UnpackSegments,
+  "_caffe2::UnpackSegments("
+    "Tensor lengths, "
+    "Tensor tensor, "
+    "int max_length = -1"
+  ") -> (Tensor packed_tensor)",
+  caffe2::UnpackSegmentsOp<caffe2::CPUContext>);

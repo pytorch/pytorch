@@ -1,10 +1,6 @@
 #ifndef THCUNN_COMMON_H
 #define THCUNN_COMMON_H
 
-// CUDA: grid stride looping
-#define CUDA_KERNEL_LOOP(i, n) \
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); i += blockDim.x * gridDim.x)
-
 #define THCUNN_assertSameGPU(...) THAssertMsg(THCTensor_(checkGPU)(__VA_ARGS__), \
   "Some of weight/gradient/input tensors are located on different GPUs. Please move them to a single one.")
 
@@ -12,9 +8,15 @@
 const int CUDA_NUM_THREADS = 1024;
 
 // CUDA: number of blocks for threads.
-inline int GET_BLOCKS(const int N)
+inline int GET_BLOCKS(const int64_t N)
 {
-  return (N + CUDA_NUM_THREADS - 1) / CUDA_NUM_THREADS;
+  // Round up division for positive number
+  auto block_num = N / CUDA_NUM_THREADS + (N % CUDA_NUM_THREADS == 0 ? 0 : 1);
+
+  constexpr int64_t max_int = std::numeric_limits<int>::max();
+  THAssertMsg(block_num <= max_int, "Can't schedule too many blocks on CUDA device");
+
+  return static_cast<int>(block_num);
 }
 
 #define THCUNN_resizeAs_indices(STATE, I1, I2)              \
@@ -24,7 +26,7 @@ inline int GET_BLOCKS(const int N)
   }
 
 #define THCUNN_check_shape(STATE, I1, I2)                 \
-  if (I1 != NULL && I2 != NULL && !THCTensor_(isSameSizeAs)(STATE, I1, I2))	\
+  if (I1 != NULL && I2 != NULL && !THCTensor_(isSameSizeAs)(STATE, I1, I2))        \
   { \
        THCDescBuff s1 = THCTensor_(sizeDesc)(STATE, I1);  \
        THCDescBuff s2 = THCTensor_(sizeDesc)(STATE, I2);  \
@@ -47,20 +49,20 @@ inline int GET_BLOCKS(const int N)
     ptrdiff_t n1 = THCTensor_(nElement)(STATE, I1);              \
     ptrdiff_t n2 = THCTensor_(nElement)(STATE, I2);              \
     if (n1 != n2)                                           \
-    {	\
+    {        \
       THCDescBuff s1 = THCTensor_(sizeDesc)(state, I1);     \
       THCDescBuff s2 = THCTensor_(sizeDesc)(state, I2);     \
-      THError(#I1 " and " #I2 " have different number of elements: "	\
+      THError(#I1 " and " #I2 " have different number of elements: "        \
               #I1 "%s has %ld elements, while "             \
               #I2 "%s has %ld elements", s1.str, n1, s2.str, n2); \
-    }	\
+    }        \
   }
 
 #define THCUNN_check_dim_size(STATE, T, DIM, DIM_SIZE, SIZE) \
   if (THCTensor_(nDimensionLegacyNoScalars)(STATE, T) != DIM ||             \
       THCTensor_(sizeLegacyNoScalars)(STATE, T, DIM_SIZE) != SIZE) {        \
       THCDescBuff s1 = THCTensor_(sizeDesc)(state, T);       \
-      THError("Need " #T " of dimension %d and " #T ".size[%d] == %d"	\
+      THError("Need " #T " of dimension %d and " #T ".size[%d] == %d"        \
               " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \
   }
 

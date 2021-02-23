@@ -3,10 +3,10 @@
 
 #include <cuda.h>
 #include <assert.h>
-#include "THCGeneral.h"
-#include "THCTensor.h"
-#include "THCDeviceUtils.cuh"
-#include "THCTensorInfo.cuh"
+#include <THC/THCGeneral.h>
+#include <THC/THCTensor.h>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCTensorInfo.cuh>
 
 // Enum that indicates whether tensor arguments are read/write or
 // read-only
@@ -147,6 +147,6 @@ __device__ T reduceBlockWithNThreadLocalReductions(T *smem,
 void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg);
 
 // Produces a grid with at least one point per tile
-THC_API bool THC_getGridFromTiles(ptrdiff_t gridTiles, dim3& grid);
+TORCH_CUDA_CU_API bool THC_getGridFromTiles(ptrdiff_t gridTiles, dim3& grid);
 
 #endif // THC_REDUCE_APPLY_UTILS_INC

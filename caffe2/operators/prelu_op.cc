@@ -26,10 +26,9 @@ void runNeonPrelu(float* out, const float* in, int size, float w) {
   }
 
   // We want to load aligned from the input, but assume the output is unaligned
-  int prologue =
-    kVecSizeInFloat -
-    // remainder in floats
-    (((uintptr_t) in) % (sizeof(float32x4_t))) / sizeof(float);
+  int prologue = kVecSizeInFloat -
+      // remainder in floats
+      (((uintptr_t)in) % (sizeof(float32x4_t))) / sizeof(float);
 
   int i = 0;
 
@@ -91,15 +90,15 @@ void runNeonPrelu(float* out, const float* in, int size, float w) {
   }
 }
 
-}
+} // namespace
 #endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
 
 template <>
 bool PReluOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& W = Input(1);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const auto* Xdata = X.template data<float>();
   const auto* Wdata = W.template data<float>();
   auto* Ydata = Y->template mutable_data<float>();
@@ -133,9 +132,11 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
       // Pointwise for each channel
       for (int n = 0; n < N; ++n) {
         for (int c = 0; c < C; ++c) {
-          runNeonPrelu(Ydata + (n * C + c) * dim,
-                       Xdata + (n * C + c) * dim,
-                       dim, Wdata[c]);
+          runNeonPrelu(
+              Ydata + (n * C + c) * dim,
+              Xdata + (n * C + c) * dim,
+              dim,
+              Wdata[c]);
         }
       }
 #else
@@ -174,12 +175,10 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& W = Input(3);
 
   CAFFE_ENFORCE(&Y != &X, "Cannot backpropagate through an in-place PReLU");
-  auto* dX = Output(0);
-  auto* dW = Output(1);
 
   DCHECK_EQ(dY.numel(), Y.numel());
-  dX->ResizeLike(Y);
-  dW->ResizeLike(W);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
+  auto* dW = Output(1, W.sizes(), at::dtype<float>());
 
   const auto C = order_ == StorageOrder::NCHW ? X.size(1) : X.size(X.dim() - 1);
   const auto C_shared = (W.numel() == 1);
@@ -337,12 +336,16 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-GRADIENT_OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(
+GRADIENT_OPERATOR_SCHEMA(PReluGradient)
+    .NumInputs(4)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
 
 PReluGradient takes both Y and dY and uses this to update dX and dW according
 to the chain rule and derivatives of the rectified linear function.
 
-)DOC");
+)DOC")
+    .IdenticalTypeAndShapeOfMultipleInputs({2, 3});
 
 class GetPReluGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

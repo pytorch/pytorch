@@ -21,12 +21,12 @@ class NHWC2NCHWOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
-    auto* Y = Output(0);
+
     const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
-    std::vector<int> Y_dims(ndim);
+    std::vector<int64_t> Y_dims(ndim);
     Y_dims[0] = N;
     Y_dims[1] = C;
     int HxW = 1;
@@ -34,7 +34,7 @@ class NHWC2NCHWOp final : public Operator<Context> {
       Y_dims[i] = X.dim32(i - 1);
       HxW *= Y_dims[i];
     }
-    Y->Resize(Y_dims);
+    auto* Y = Output(0, Y_dims, at::dtype<T>());
     if (X.numel() <= 0) {
       return true;
     }
@@ -58,12 +58,12 @@ class NCHW2NHWCOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
-    auto* Y = Output(0);
+
     const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C = X.dim32(1);
-    std::vector<int> Y_dims(ndim);
+    std::vector<int64_t> Y_dims(ndim);
     Y_dims[0] = N;
     Y_dims[ndim - 1] = C;
     int HxW = 1;
@@ -71,7 +71,7 @@ class NCHW2NHWCOp final : public Operator<Context> {
       Y_dims[i] = X.dim32(i + 1);
       HxW *= Y_dims[i];
     }
-    Y->Resize(Y_dims);
+    auto* Y = Output(0, Y_dims, at::dtype<T>());
     if (X.numel() <= 0) {
       return true;
     }

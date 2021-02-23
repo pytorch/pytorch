@@ -18,8 +18,9 @@ template <typename T, class Context, class Engine = DefaultEngine>
 class TTLinearOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  TTLinearOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit TTLinearOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         inp_sizes_(this->template GetRepeatedArgument<int>("inp_sizes")),
         out_sizes_(this->template GetRepeatedArgument<int>("out_sizes")),
         tt_ranks_(this->template GetRepeatedArgument<int>("tt_ranks")),
@@ -30,7 +31,6 @@ class TTLinearOp final : public Operator<Context> {
     const auto& X = Input(0); // Input array
     const auto& b = Input(1); // Bias array
     const auto& cores = Input(2); // 1D array containing the TT-cores
-    auto* Y = Output(0);
 
     CAFFE_ENFORCE(X.dim() > 1, "Number of dimensions in X: ", X.dim());
     CAFFE_ENFORCE(b.dim() == 1, "Number of dimensions in b: ", b.dim());
@@ -55,6 +55,7 @@ class TTLinearOp final : public Operator<Context> {
     auto Y_buf = BlobGetMutableTensor(Y_temp_.get(), Context::GetDeviceType());
     Y_buf->ResizeLike(X);
     Y_buf->CopyFrom(X);
+    Tensor* Y;
 
     // The overall forward pass involves multiplication with each core, where
     // each core has sizes dictated by inp_sizes_ and out_sizes_. Each core thus
@@ -65,7 +66,8 @@ class TTLinearOp final : public Operator<Context> {
 
       // TODO Replace by Reshape(), once wrappers are written
       Y_buf->Resize(Y_buf->numel() / curr_rows, curr_rows);
-      Y->Resize(Y_buf->numel() / curr_rows, curr_cols);
+      Y = Output(
+          0, {Y_buf->numel() / curr_rows, curr_cols}, at::dtype<float>());
 
       // Defensive checks
       CAFFE_ENFORCE(Y_buf->numel() % curr_rows == 0, Y_buf->numel(), curr_rows);
@@ -120,7 +122,7 @@ class TTLinearOp final : public Operator<Context> {
                 .transpose()
                 .eval();
     // TODO Replace by Reshape(), once wrappers are written
-    Y->Resize(batch_size, Y->numel() / batch_size);
+    Y = Output(0, {batch_size, Y->numel() / batch_size}, at::dtype<float>());
 
     // Check that output size of Y is the element-wise product of out_sizes
     int prod_out_sizes = 1;
@@ -137,7 +139,10 @@ class TTLinearOp final : public Operator<Context> {
     // Add bias term
     if (bias_multiplier_.numel() != batch_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(batch_size);
+      ReinitializeTensor(
+          &bias_multiplier_,
+          {batch_size},
+          at::dtype<T>().device(Context::GetDeviceType()));
       math::Set<T, Context>(
           batch_size,
           static_cast<T>(1),
@@ -160,7 +165,7 @@ class TTLinearOp final : public Operator<Context> {
   }
 
  protected:
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
   std::vector<int> inp_sizes_;
   std::vector<int> out_sizes_;
   std::vector<int> tt_ranks_;
@@ -172,8 +177,9 @@ template <typename T, class Context, class Engine = DefaultEngine>
 class TTLinearGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  TTLinearGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit TTLinearGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~TTLinearGradientOp() {}
 
   bool RunOnDevice() override {

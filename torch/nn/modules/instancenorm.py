@@ -1,10 +1,18 @@
-from .batchnorm import _BatchNorm
+from .batchnorm import _NormBase
 from .. import functional as F
 
+from torch import Tensor
 
-class _InstanceNorm(_BatchNorm):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False,
-                 track_running_stats=False):
+
+class _InstanceNorm(_NormBase):
+    def __init__(
+        self,
+        num_features: int,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = False,
+        track_running_stats: bool = False
+    ) -> None:
         super(_InstanceNorm, self).__init__(
             num_features, eps, momentum, affine, track_running_stats)
 
@@ -41,18 +49,21 @@ class _InstanceNorm(_BatchNorm):
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
 
+        assert self.running_mean is None or isinstance(self.running_mean, Tensor)
+        assert self.running_var is None or isinstance(self.running_var, Tensor)
         return F.instance_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training or not self.track_running_stats, self.momentum, self.eps)
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 2D or 3D input (a mini-batch of 1D
+    r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -61,6 +72,8 @@ class InstanceNorm1d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -74,7 +87,7 @@ class InstanceNorm1d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -83,7 +96,7 @@ class InstanceNorm1d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm1d` is applied
         on each channel of channeled data like multidimensional time series, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm1d` usually don't apply affine
         transform.
 
@@ -112,21 +125,26 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100, affine=True)
         >>> input = torch.randn(20, 100, 40)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
-        if input.dim() != 2 and input.dim() != 3:
-            raise ValueError('expected 2D or 3D input (got {}D input)'
+        if input.dim() == 2:
+            raise ValueError(
+                'InstanceNorm1d returns 0-filled tensor to 2D tensor.'
+                'This is because InstanceNorm1d reshapes inputs to'
+                '(1, N * C, ...) from (N, C,...) and this makes'
+                'variances 0.'
+            )
+        if input.dim() != 3:
+            raise ValueError('expected 3D input (got {}D input)'
                              .format(input.dim()))
 
 
 class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -135,6 +153,8 @@ class InstanceNorm2d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -148,7 +168,7 @@ class InstanceNorm2d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -157,7 +177,7 @@ class InstanceNorm2d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm2d` is applied
         on each channel of channeled data like RGB images, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm2d` usually don't apply affine
         transform.
 
@@ -186,9 +206,6 @@ class InstanceNorm2d(_InstanceNorm):
         >>> m = nn.InstanceNorm2d(100, affine=True)
         >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
@@ -200,7 +217,8 @@ class InstanceNorm2d(_InstanceNorm):
 class InstanceNorm3d(_InstanceNorm):
     r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -209,6 +227,8 @@ class InstanceNorm3d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size C (where C is the input size) if :attr:`affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -222,7 +242,7 @@ class InstanceNorm3d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -231,7 +251,7 @@ class InstanceNorm3d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm3d` is applied
         on each channel of channeled data like 3D models with RGB color, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm3d` usually don't apply affine
         transform.
 
@@ -260,9 +280,6 @@ class InstanceNorm3d(_InstanceNorm):
         >>> m = nn.InstanceNorm3d(100, affine=True)
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):

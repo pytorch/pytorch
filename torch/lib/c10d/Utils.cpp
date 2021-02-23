@@ -1,17 +1,18 @@
-#include "Utils.hpp"
-
+#ifdef _WIN32
+#include <c10d/WinSockUtils.hpp>
+#else
+#include <c10d/UnixSockUtils.hpp>
 #include <netdb.h>
 #include <sys/poll.h>
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-
-#include <fcntl.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
+#include <fcntl.h>
 #include <memory>
 #include <string>
 #include <thread>
@@ -21,19 +22,20 @@ namespace tcputil {
 
 namespace {
 
-constexpr int LISTEN_QUEUE_SIZE = 64;
+constexpr int LISTEN_QUEUE_SIZE = 2048;
 
 void setSocketNoDelay(int socket) {
   int flag = 1;
   socklen_t optlen = sizeof(flag);
-  SYSCHECK(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
+  SYSCHECK_ERR_RETURN_NEG1(
+      setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
 }
 
 PortType getSocketPort(int fd) {
   PortType listenPort;
   struct ::sockaddr_storage addrStorage;
   socklen_t addrLen = sizeof(addrStorage);
-  SYSCHECK(getsockname(
+  SYSCHECK_ERR_RETURN_NEG1(getsockname(
       fd, reinterpret_cast<struct ::sockaddr*>(&addrStorage), &addrLen));
 
   if (addrStorage.ss_family == AF_INET) {
@@ -58,11 +60,15 @@ std::string sockaddrToString(struct ::sockaddr* addr) {
   char address[INET6_ADDRSTRLEN + 1];
   if (addr->sa_family == AF_INET) {
     struct ::sockaddr_in* s = reinterpret_cast<struct ::sockaddr_in*>(addr);
-    SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN))
+    SYSCHECK(
+        ::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN),
+        __output != nullptr)
     address[INET_ADDRSTRLEN] = '\0';
   } else if (addr->sa_family == AF_INET6) {
     struct ::sockaddr_in6* s = reinterpret_cast<struct ::sockaddr_in6*>(addr);
-    SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
+    SYSCHECK(
+        ::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN),
+        __output != nullptr)
     address[INET6_ADDRSTRLEN] = '\0';
   } else {
     throw std::runtime_error("unsupported protocol");
@@ -75,7 +81,7 @@ std::pair<int, PortType> listen(PortType port) {
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -94,22 +100,19 @@ std::pair<int, PortType> listen(PortType port) {
   int socket;
   while (true) {
     try {
-      SYSCHECK(
+      SYSCHECK_ERR_RETURN_NEG1(
           socket = ::socket(
               nextAddr->ai_family,
               nextAddr->ai_socktype,
               nextAddr->ai_protocol))
-
-      int optval = 1;
-      SYSCHECK(
-          ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
-
-      SYSCHECK(::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
-      SYSCHECK(::listen(socket, LISTEN_QUEUE_SIZE))
+      SYSCHECK_ERR_RETURN_NEG1(tcputil::setSocketAddrReUse(socket))
+      SYSCHECK_ERR_RETURN_NEG1(
+          ::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
+      SYSCHECK_ERR_RETURN_NEG1(::listen(socket, LISTEN_QUEUE_SIZE))
       break;
 
     } catch (const std::system_error& e) {
-      ::close(socket);
+      tcputil::closeSocket(socket);
       nextAddr = nextAddr->ai_next;
 
       // we have tried all addresses but could not start
@@ -124,6 +127,69 @@ std::pair<int, PortType> listen(PortType port) {
   return {socket, getSocketPort(socket)};
 }
 
+void handleConnectException(
+    struct ::addrinfo** nextAddr,
+    int error_code,
+    bool* anyRefused,
+    bool* anyReset,
+    bool wait,
+    std::chrono::time_point<std::chrono::high_resolution_clock> start,
+    std::shared_ptr<struct ::addrinfo> addresses,
+    std::chrono::milliseconds timeout) {
+  // ECONNREFUSED happens if the server is not yet listening.
+  if (error_code == ECONNREFUSED) {
+    *anyRefused = true;
+  }
+  // ECONNRESET happens if the server's listen backlog is exhausted.
+  if (error_code == ECONNRESET) {
+    *anyReset = true;
+  }
+
+  // We need to move to the next address because this was not available
+  // to connect or to create a socket.
+  *nextAddr = (*nextAddr)->ai_next;
+
+  // We have tried all addresses but could not connect to any of them.
+  if (!*nextAddr) {
+    if (!wait || (!anyRefused && !anyReset)) {
+      throw;
+    }
+
+    // if a timeout is specified, check time elapsed to see if we need to
+    // timeout. A timeout is specified if timeout != kNoTimeout.
+    if (timeout != kNoTimeout) {
+      const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+      if (elapsed > timeout) {
+        throw std::runtime_error(kConnectTimeoutMsg);
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    *anyRefused = false;
+    *anyReset = false;
+    *nextAddr = addresses.get();
+  }
+}
+
+void handleConnectSystemError(
+    struct ::addrinfo** nextAddr,
+    std::system_error& e,
+    bool* anyRefused,
+    bool* anyReset,
+    bool wait,
+    std::chrono::time_point<std::chrono::high_resolution_clock> start,
+    std::shared_ptr<struct ::addrinfo> addresses,
+    std::chrono::milliseconds timeout) {
+  handleConnectException(
+      nextAddr,
+      e.code().value(),
+      anyRefused,
+      anyReset,
+      wait,
+      start,
+      addresses,
+      timeout);
+}
+
 int connect(
     const std::string& address,
     PortType port,
@@ -132,7 +198,7 @@ int connect(
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -150,77 +216,49 @@ int connect(
 
   struct ::addrinfo* nextAddr = addresses.get();
   int socket;
-  // we'll loop over the addresses only if at least of them gave us ECONNREFUSED
-  // Maybe the host was up, but the server wasn't running.
+
+  // Loop over the addresses if at least one of them gave us ECONNREFUSED
+  // or ECONNRESET. This may happen if the server hasn't started listening
+  // yet, or is listening but has its listen backlog exhausted.
   bool anyRefused = false;
+  bool anyReset = false;
+  const auto start = std::chrono::high_resolution_clock::now();
   while (true) {
     try {
-      SYSCHECK(
+      SYSCHECK_ERR_RETURN_NEG1(
           socket = ::socket(
               nextAddr->ai_family,
               nextAddr->ai_socktype,
               nextAddr->ai_protocol))
 
-      ResourceGuard socketGuard([socket]() { ::close(socket); });
+      ResourceGuard socketGuard([socket]() { tcputil::closeSocket(socket); });
 
       // We need to connect in non-blocking mode, so we can use a timeout
-      SYSCHECK(::fcntl(socket, F_SETFL, O_NONBLOCK));
+      waitSocketConnected(socket, nextAddr, timeout, start);
 
-      int ret = ::connect(socket, nextAddr->ai_addr, nextAddr->ai_addrlen);
-
-      if (ret != 0 && errno != EINPROGRESS) {
-        throw std::system_error(errno, std::system_category());
-      }
-
-      struct ::pollfd pfd;
-      pfd.fd = socket;
-      pfd.events = POLLOUT;
-
-      int numReady = ::poll(&pfd, 1, timeout.count());
-      if (numReady < 0) {
-        throw std::system_error(errno, std::system_category());
-      } else if (numReady == 0) {
-        errno = 0;
-        throw std::runtime_error("connect() timed out");
-      }
-
-      socklen_t errLen = sizeof(errno);
-      errno = 0;
-      ::getsockopt(socket, SOL_SOCKET, SO_ERROR, &errno, &errLen);
-
-      // `errno` is set when:
-      //  1. `getsockopt` has failed
-      //  2. there is awaiting error in the socket
-      //  (the error is saved to the `errno` variable)
-      if (errno != 0) {
-        throw std::system_error(errno, std::system_category());
-      }
-
-      // Disable non-blocking mode
-      int flags;
-      SYSCHECK(flags = ::fcntl(socket, F_GETFL));
-      SYSCHECK(::fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
       socketGuard.release();
       break;
 
+    } catch (std::system_error& e) {
+      handleConnectSystemError(
+          &nextAddr,
+          e,
+          &anyRefused,
+          &anyReset,
+          wait,
+          start,
+          addresses,
+          timeout);
     } catch (std::exception& e) {
-      if (errno == ECONNREFUSED) {
-        anyRefused = true;
-      }
-
-      // We need to move to the next address because this was not available
-      // to connect or to create a socket.
-      nextAddr = nextAddr->ai_next;
-
-      // We have tried all addresses but could not connect to any of them.
-      if (!nextAddr) {
-        if (!wait || !anyRefused) {
-          throw;
-        }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        anyRefused = false;
-        nextAddr = addresses.get();
-      }
+      handleConnectException(
+          &nextAddr,
+          errno,
+          &anyRefused,
+          &anyReset,
+          wait,
+          start,
+          addresses,
+          timeout);
     }
   }
 
@@ -234,10 +272,10 @@ std::tuple<int, std::string> accept(
     const std::chrono::milliseconds& timeout) {
   // poll on listen socket, it allows to make timeout
   std::unique_ptr<struct ::pollfd[]> events(new struct ::pollfd[1]);
-  events[0] = {.fd = listenSocket, .events = POLLIN};
+  events[0] = tcputil::getPollfd(listenSocket, POLLIN);
 
   while (true) {
-    int res = ::poll(events.get(), 1, timeout.count());
+    int res = tcputil::poll(events.get(), 1, timeout.count());
     if (res == 0) {
       throw std::runtime_error(
           "waiting for processes to "
@@ -255,12 +293,12 @@ std::tuple<int, std::string> accept(
   }
 
   int socket;
-  SYSCHECK(socket = ::accept(listenSocket, NULL, NULL))
+  SYSCHECK_ERR_RETURN_NEG1(socket = ::accept(listenSocket, NULL, NULL))
 
   // Get address of the connecting process
   struct ::sockaddr_storage addr;
   socklen_t addrLen = sizeof(addr);
-  SYSCHECK(::getpeername(
+  SYSCHECK_ERR_RETURN_NEG1(::getpeername(
       socket, reinterpret_cast<struct ::sockaddr*>(&addr), &addrLen))
 
   setSocketNoDelay(socket);
@@ -268,6 +306,5 @@ std::tuple<int, std::string> accept(
   return std::make_tuple(
       socket, sockaddrToString(reinterpret_cast<struct ::sockaddr*>(&addr)));
 }
-
 } // namespace tcputil
 } // namespace c10d

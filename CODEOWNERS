@@ -1,11 +1,30 @@
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
 
-/docs/cpp @goldsborough @ebetica
-/torch/csrc/api/ @ebetica @goldsborough
-/test/cpp/api/ @ebetica @goldsborough
-/torch/lib/c10d/ @apaszke @pietern @teng-li
-/torch/csrc/distributed/ @apaszke @pietern @teng-li
-/torch/distributed/ @apaszke @pietern @teng-li
-/test/test_c10d.py @apaszke @pietern @teng-li
-/torch/utils/cpp_extension.py @goldsborough @fmassa @apaszke @soumith @ezyang
+/docs/cpp @glaringlee
+/torch/csrc/api/ @glaringlee
+/test/cpp/api/ @glaringlee
+/torch/utils/cpp_extension.py @fmassa @soumith @ezyang
+
+# Not there to strictly require the approval, but to be tagged as a reviewer
+# on the PRs to push them into a high priority inbox.
+/torch/csrc/autograd/ @albanD @soulitzer
+/torch/autograd/ @albanD @soulitzer
+/tools/autograd/ @albanD @soulitzer
+
+# Tensorpipe RPC Agent.
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+
+# Distributed package
+# This list is mostly if you'd like to be tagged as reviewer, feel free to add
+# or remove yourself from it.
+/torch/lib/c10d/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
+
+# Distributed tests
+# This list is mostly if you'd like to be tagged as reviewer, feel free to add
+# or remove yourself from it.
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma

@@ -79,8 +79,7 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
   auto N = data.size(0);
   auto D = data.size_from_dim(1);
 
-  auto* output = Output(0);
-  output->ResizeLike(Input(DATA));
+  auto* output = Output(0, Input(DATA).sizes(), at::dtype<T>());
   auto* output_ptr = output->template mutable_data<T>();
 
   if (data.numel() <= 0) {
@@ -341,3 +340,8 @@ the transform of each column `x` of the input `data`:
 GRADIENT_NOT_IMPLEMENTED_YET(BatchBoxCox);
 } // namespace
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    BatchBoxCox,
+    "_caffe2::BatchBoxCox(Tensor data, Tensor lambda1, Tensor lambda2, int min_block_size = 256) -> Tensor results",
+    caffe2::BatchBoxCoxOp<caffe2::CPUContext>);

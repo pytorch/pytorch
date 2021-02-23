@@ -1,8 +1,8 @@
 #ifndef THC_HALF_AUTO_NUMERICS_INC
 #define THC_HALF_AUTO_NUMERICS_INC
 
-#include "TH/THHalf.h"
-#include "THCNumerics.cuh"
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
 
 // WARNING: THCNumerics is being deprecated. Read the comments and function usage
 //          in THCNumerics to learn about the deprecation
@@ -31,40 +31,8 @@ inline __host__ __device__ double fmaxType(double x, double y) {
 
 // arithmetic functions
 
-inline __host__ __device__ THHalf abs(THHalf a) {
-  return THCNumerics<THHalf>::abs(a);
-}
-
-inline __host__ __device__ THHalf exp(THHalf a) {
-  return THCNumerics<THHalf>::exp(a);
-}
-
-inline __host__ __device__ THHalf log10(THHalf a) {
-  return THCNumerics<THHalf>::log10(a);
-}
-
-inline __host__ __device__ THHalf log1p(THHalf a) {
-  return THCNumerics<THHalf>::log1p(a);
-}
-
-inline __host__ __device__ THHalf log2(THHalf a) {
-  return THCNumerics<THHalf>::log2(a);
-}
-
-inline __host__ __device__ THHalf expm1(THHalf a) {
-  return THCNumerics<THHalf>::expm1(a);
-}
-
 inline __host__ __device__ THHalf pow(THHalf a, THHalf b) {
   return THCNumerics<THHalf>::pow(a, b);
-}
-
-inline __host__ __device__ THHalf sqrt(THHalf a) {
-  return THCNumerics<THHalf>::sqrt(a);
-}
-
-inline __host__ __device__ THHalf tanh(THHalf a) {
-  return THCNumerics<THHalf>::tanh(a);
 }
 
 #endif

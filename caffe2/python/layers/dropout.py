@@ -1,8 +1,8 @@
 # Module caffe2.python.layers.dropout
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
@@ -16,6 +16,7 @@ class Dropout(ModelLayer):
             input_record,
             name='dropout',
             ratio=0.5,
+            dropout_for_eval=False,
             **kwargs):
 
         super(Dropout, self).__init__(model, name, input_record, **kwargs)
@@ -25,6 +26,7 @@ class Dropout(ModelLayer):
 
         self.output_schema = input_record.clone_schema()
         self.output_schema.set_value(self.get_next_blob_reference('output'))
+        self.dropout_for_eval = dropout_for_eval
 
         self.ratio = ratio
 
@@ -42,7 +44,7 @@ class Dropout(ModelLayer):
         self._add_ops(net, is_test=False)
 
     def add_eval_ops(self, net):
-        self._add_ops(net, is_test=True)
+        self._add_ops(net, is_test=(not self.dropout_for_eval))
 
     def add_ops(self, net):
         self.add_eval_ops(net)

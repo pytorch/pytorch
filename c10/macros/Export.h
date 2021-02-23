@@ -30,7 +30,22 @@
 // C10_BUILD_SHARED_LIB to check whether pytorch is building shared or static
 // libraries.
 
+// For build systems that do not directly depend on CMake and directly build
+// from the source directory (such as Buck), one may not have a cmake_macros.h
+// file at all. In this case, the build system is responsible for providing
+// correct macro definitions corresponding to the cmake_macros.h.in file.
+//
+// In such scenarios, one should define the macro
+//     C10_USING_CUSTOM_GENERATED_MACROS
+// to inform this header that it does not need to include the cmake_macros.h
+// file.
+
+#ifndef C10_USING_CUSTOM_GENERATED_MACROS
+#include <c10/macros/cmake_macros.h>
+#endif // C10_USING_CUSTOM_GENERATED_MACROS
+
 #ifdef _WIN32
+#define C10_HIDDEN
 #if defined(C10_BUILD_SHARED_LIBS)
 #define C10_EXPORT __declspec(dllexport)
 #define C10_IMPORT __declspec(dllimport)
@@ -41,11 +56,18 @@
 #else // _WIN32
 #if defined(__GNUC__)
 #define C10_EXPORT __attribute__((__visibility__("default")))
+#define C10_HIDDEN __attribute__((__visibility__("hidden")))
 #else // defined(__GNUC__)
 #define C10_EXPORT
+#define C10_HIDDEN
 #endif // defined(__GNUC__)
 #define C10_IMPORT C10_EXPORT
 #endif // _WIN32
+
+#ifdef NO_EXPORT
+#undef C10_EXPORT
+#define C10_EXPORT
+#endif
 
 // Definition of an adaptive XX_API macro, that depends on whether you are
 // building the library itself or not, routes to XX_EXPORT and XX_IMPORT.
@@ -69,11 +91,51 @@
 #define C10_API C10_IMPORT
 #endif
 
-// This one is being used by libcaffe2.so
+// This one is being used by libtorch.so
 #ifdef CAFFE2_BUILD_MAIN_LIB
-#define CAFFE2_API C10_EXPORT
+#define TORCH_API C10_EXPORT
 #else
-#define CAFFE2_API C10_IMPORT
+#define TORCH_API C10_IMPORT
+#endif
+
+// NB: For now, HIP is overloaded to use the same macro, but ideally
+// HIPify should translate TORCH_CUDA_API to TORCH_HIP_API
+// JX: I removed the || defined(TORCH_HIP_BUILD_MAIN_LIB) check for TORCH_CUDA_*_API
+// since TORCH_HIP_API seems properly initialized below
+// libtorch_cuda_cu.so
+#ifdef TORCH_CUDA_CU_BUILD_MAIN_LIB
+#define TORCH_CUDA_CU_API C10_EXPORT
+#elif defined(BUILD_SPLIT_CUDA)
+#define TORCH_CUDA_CU_API C10_IMPORT
+#endif
+
+// libtorch_cuda_cpp.so
+#ifdef TORCH_CUDA_CPP_BUILD_MAIN_LIB
+#define TORCH_CUDA_CPP_API C10_EXPORT
+#elif defined(BUILD_SPLIT_CUDA)
+#define TORCH_CUDA_CPP_API C10_IMPORT
+#endif
+
+// libtorch_cuda.so (where torch_cuda_cu and torch_cuda_cpp are a part of the same api)
+#ifdef TORCH_CUDA_BUILD_MAIN_LIB
+#define TORCH_CUDA_CPP_API C10_EXPORT
+#define TORCH_CUDA_CU_API C10_EXPORT
+#elif !defined(BUILD_SPLIT_CUDA)
+#define TORCH_CUDA_CPP_API C10_IMPORT
+#define TORCH_CUDA_CU_API C10_IMPORT
+#endif
+
+#if defined(TORCH_HIP_BUILD_MAIN_LIB)
+#define TORCH_HIP_API C10_EXPORT
+#else
+#define TORCH_HIP_API C10_IMPORT
+#endif
+
+// Enums only need to be exported on windows for non-CUDA files
+#if defined(_WIN32) && defined(__CUDACC__)
+#define C10_API_ENUM C10_API
+#else
+#define C10_API_ENUM
 #endif
 
 #endif // C10_MACROS_MACROS_H_

@@ -112,3 +112,44 @@ namespace test_is_type_condition {
     static_assert(!is_type_condition<NotATypeCondition>::value, "");
 }
 }
+
+namespace test_lambda_is_stateless {
+  template<class Result, class... Args>
+  struct MyStatelessFunctor final {
+    Result operator()(Args...) {}
+  };
+
+  template<class Result, class... Args>
+  struct MyStatelessConstFunctor final {
+    Result operator()(Args...) const {}
+  };
+
+  void func() {
+    auto stateless_lambda = [] (int a) {return a;};
+    static_assert(is_stateless_lambda<decltype(stateless_lambda)>::value, "");
+
+    int b = 4;
+    auto stateful_lambda_1 = [&] (int a) {return a + b;};
+    static_assert(!is_stateless_lambda<decltype(stateful_lambda_1)>::value, "");
+
+    auto stateful_lambda_2 = [=] (int a) {return a + b;};
+    static_assert(!is_stateless_lambda<decltype(stateful_lambda_2)>::value, "");
+
+    auto stateful_lambda_3 = [b] (int a) {return a + b;};
+    static_assert(!is_stateless_lambda<decltype(stateful_lambda_3)>::value, "");
+
+    static_assert(!is_stateless_lambda<MyStatelessFunctor<int, int>>::value, "even if stateless, a functor is not a lambda, so it's false");
+    static_assert(!is_stateless_lambda<MyStatelessFunctor<void, int>>::value, "even if stateless, a functor is not a lambda, so it's false");
+    static_assert(!is_stateless_lambda<MyStatelessConstFunctor<int, int>>::value, "even if stateless, a functor is not a lambda, so it's false");
+    static_assert(!is_stateless_lambda<MyStatelessConstFunctor<void, int>>::value, "even if stateless, a functor is not a lambda, so it's false");
+
+    class Dummy final {};
+    static_assert(!is_stateless_lambda<Dummy>::value, "A non-functor type is also not a lambda");
+
+    static_assert(!is_stateless_lambda<int>::value, "An int is not a lambda");
+
+    using Func = int(int);
+    static_assert(!is_stateless_lambda<Func>::value, "A function is not a lambda");
+    static_assert(!is_stateless_lambda<Func*>::value, "A function pointer is not a lambda");
+  }
+}

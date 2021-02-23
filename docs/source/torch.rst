@@ -1,17 +1,32 @@
 torch
-===================================
-.. automodule:: torch
+=====
+The torch package contains data structures for multi-dimensional
+tensors and defines mathematical operations over these tensors.
+Additionally, it provides many utilities for efficient serializing of
+Tensors and arbitrary types, and other useful utilities.
+
+It has a CUDA counterpart, that enables you to run your tensor computations
+on an NVIDIA GPU with compute capability >= 3.0
+
+.. currentmodule:: torch
 
 Tensors
-----------------------------------
-.. autofunction:: is_tensor
-.. autofunction:: is_storage
-.. autofunction:: set_default_dtype
-.. autofunction:: get_default_dtype
-.. autofunction:: set_default_tensor_type
-.. autofunction:: numel
-.. autofunction:: set_printoptions
-.. autofunction:: set_flush_denormal
+-------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_tensor
+    is_storage
+    is_complex
+    is_floating_point
+    is_nonzero
+    set_default_dtype
+    get_default_dtype
+    set_default_tensor_type
+    numel
+    set_printoptions
+    set_flush_denormal
 
 .. _tensor-creation-ops:
 
@@ -32,63 +47,121 @@ Creation Ops
     methods to create :class:`torch.Tensor` s with values sampled from a broader
     range of distributions.
 
-.. autofunction:: tensor
-.. autofunction:: sparse_coo_tensor
-.. autofunction:: as_tensor
-.. autofunction:: from_numpy
-.. autofunction:: zeros
-.. autofunction:: zeros_like
-.. autofunction:: ones
-.. autofunction:: ones_like
-.. autofunction:: arange
-.. autofunction:: range
-.. autofunction:: linspace
-.. autofunction:: logspace
-.. autofunction:: eye
-.. autofunction:: empty
-.. autofunction:: empty_like
-.. autofunction:: full
-.. autofunction:: full_like
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    tensor
+    sparse_coo_tensor
+    as_tensor
+    as_strided
+    from_numpy
+    zeros
+    zeros_like
+    ones
+    ones_like
+    arange
+    range
+    linspace
+    logspace
+    eye
+    empty
+    empty_like
+    empty_strided
+    full
+    full_like
+    quantize_per_tensor
+    quantize_per_channel
+    dequantize
+    complex
+    polar
+    heaviside
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. autofunction:: cat
-.. autofunction:: chunk
-.. autofunction:: gather
-.. autofunction:: index_select
-.. autofunction:: masked_select
-.. autofunction:: narrow
-.. autofunction:: nonzero
-.. autofunction:: reshape
-.. autofunction:: split
-.. autofunction:: squeeze
-.. autofunction:: stack
-.. autofunction:: t
-.. autofunction:: take
-.. autofunction:: transpose
-.. autofunction:: unbind
-.. autofunction:: unsqueeze
-.. autofunction:: where
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    cat
+    chunk
+    column_stack
+    dstack
+    gather
+    hstack
+    index_select
+    masked_select
+    movedim
+    moveaxis
+    narrow
+    nonzero
+    reshape
+    row_stack
+    scatter
+    scatter_add
+    split
+    squeeze
+    stack
+    swapaxes
+    swapdims
+    t
+    take
+    tensor_split
+    tile
+    transpose
+    unbind
+    unsqueeze
+    vstack
+    where
+
+.. _generators:
+
+Generators
+----------------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Generator
 
 .. _random-sampling:
 
 Random sampling
 ----------------------------------
-.. autofunction:: manual_seed
-.. autofunction:: initial_seed
-.. autofunction:: get_rng_state
-.. autofunction:: set_rng_state
-.. autodata:: default_generator
-.. autofunction:: bernoulli
-.. autofunction:: multinomial
-.. autofunction:: normal
-.. autofunction:: rand
-.. autofunction:: rand_like
-.. autofunction:: randint
-.. autofunction:: randint_like
-.. autofunction:: randn
-.. autofunction:: randn_like
-.. autofunction:: randperm
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    seed
+    manual_seed
+    initial_seed
+    get_rng_state
+    set_rng_state
+
+.. autoattribute:: torch.default_generator
+   :annotation:  Returns the default CPU torch.Generator
+
+.. The following doesn't actually seem to exist.
+   https://github.com/pytorch/pytorch/issues/27780
+   .. autoattribute:: torch.cuda.default_generators
+      :annotation:  If cuda is available, returns a tuple of default CUDA torch.Generator-s.
+                    The number of CUDA torch.Generator-s returned is equal to the number of
+                    GPUs available in the system.
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    bernoulli
+    multinomial
+    normal
+    poisson
+    rand
+    rand_like
+    randint
+    randint_like
+    randn
+    randn_like
+    randperm
 
 .. _inplace-random-sampling:
 
@@ -106,24 +179,42 @@ There are a few more in-place random sampling functions defined on Tensors as we
 - :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
 - :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
 
+Quasi-random sampling
+~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: sobolengine.rst
+
+    quasirandom.SobolEngine
 
 Serialization
 ----------------------------------
-.. autofunction:: save
-.. autofunction:: load
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
+    save
+    load
 
 Parallelism
 ----------------------------------
-.. autofunction:: get_num_threads
-.. autofunction:: set_num_threads
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_num_threads
+    set_num_threads
+    get_num_interop_threads
+    set_num_interop_threads
 
 Locally disabling gradient computation
 --------------------------------------
 The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
 :func:`torch.set_grad_enabled` are helpful for locally disabling and enabling
 gradient computation. See :ref:`locally-disable-grad` for more details on
-their usage.
+their usage.  These context managers are thread local, so they won't
+work if you send work to another thread using the ``threading`` module, etc.
 
 Examples::
 
@@ -149,174 +240,330 @@ Examples::
   >>> y.requires_grad
   False
 
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    no_grad
+    enable_grad
+    set_grad_enabled
 
 Math operations
-----------------------------------
+---------------
 
 Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: abs
-.. autofunction:: acos
-.. autofunction:: add
-.. autofunction:: addcdiv
-.. autofunction:: addcmul
-.. autofunction:: asin
-.. autofunction:: atan
-.. autofunction:: atan2
-.. autofunction:: ceil
-.. autofunction:: clamp
-.. autofunction:: cos
-.. autofunction:: cosh
-.. autofunction:: div
-.. autofunction:: digamma
-.. autofunction:: erf
-.. autofunction:: erfc
-.. autofunction:: erfinv
-.. autofunction:: exp
-.. autofunction:: expm1
-.. autofunction:: floor
-.. autofunction:: fmod
-.. autofunction:: frac
-.. autofunction:: lerp
-.. autofunction:: log
-.. autofunction:: log10
-.. autofunction:: log1p
-.. autofunction:: log2
-.. autofunction:: mul
-.. autofunction:: mvlgamma
-.. autofunction:: neg
-.. autofunction:: pow
-.. autofunction:: reciprocal
-.. autofunction:: remainder
-.. autofunction:: round
-.. autofunction:: rsqrt
-.. autofunction:: sigmoid
-.. autofunction:: sign
-.. autofunction:: sin
-.. autofunction:: sinh
-.. autofunction:: sqrt
-.. autofunction:: tan
-.. autofunction:: tanh
-.. autofunction:: trunc
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
+    abs
+    absolute
+    acos
+    arccos
+    acosh
+    arccosh
+    add
+    addcdiv
+    addcmul
+    angle
+    asin
+    arcsin
+    asinh
+    arcsinh
+    atan
+    arctan
+    atanh
+    arctanh
+    atan2
+    bitwise_not
+    bitwise_and
+    bitwise_or
+    bitwise_xor
+    ceil
+    clamp
+    clip
+    conj
+    copysign
+    cos
+    cosh
+    deg2rad
+    div
+    divide
+    digamma
+    erf
+    erfc
+    erfinv
+    exp
+    exp2
+    expm1
+    fake_quantize_per_channel_affine
+    fake_quantize_per_tensor_affine
+    fix
+    float_power
+    floor
+    floor_divide
+    fmod
+    frac
+    imag
+    ldexp
+    lerp
+    lgamma
+    log
+    log10
+    log1p
+    log2
+    logaddexp
+    logaddexp2
+    logical_and
+    logical_not
+    logical_or
+    logical_xor
+    logit
+    hypot
+    i0
+    igamma
+    igammac
+    mul
+    multiply
+    mvlgamma
+    nan_to_num
+    neg
+    negative
+    nextafter
+    polygamma
+    pow
+    rad2deg
+    real
+    reciprocal
+    remainder
+    round
+    rsqrt
+    sigmoid
+    sign
+    sgn
+    signbit
+    sin
+    sinc
+    sinh
+    sqrt
+    square
+    sub
+    subtract
+    tan
+    tanh
+    true_divide
+    trunc
+    xlogy
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
-.. autofunction:: argmax
-.. autofunction:: argmin
-.. autofunction:: cumprod
-.. autofunction:: cumsum
-.. autofunction:: dist
-.. autofunction:: logsumexp
-.. autofunction:: mean
-.. autofunction:: median
-.. autofunction:: mode
-.. autofunction:: norm
-.. autofunction:: prod
-.. autofunction:: std
-.. autofunction:: sum
-.. autofunction:: unique
-.. autofunction:: var
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
+    argmax
+    argmin
+    amax
+    amin
+    all
+    any
+    max
+    min
+    dist
+    logsumexp
+    mean
+    median
+    nanmedian
+    mode
+    norm
+    nansum
+    prod
+    quantile
+    nanquantile
+    std
+    std_mean
+    sum
+    unique
+    unique_consecutive
+    var
+    var_mean
+    count_nonzero
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
-.. autofunction:: allclose
-.. autofunction:: argsort
-.. autofunction:: eq
-.. autofunction:: equal
-.. autofunction:: ge
-.. autofunction:: gt
-.. autofunction:: isfinite
-.. autofunction:: isinf
-.. autofunction:: isnan
-.. autofunction:: kthvalue
-.. autofunction:: le
-.. autofunction:: lt
-.. autofunction:: max
-.. autofunction:: min
-.. autofunction:: ne
-.. autofunction:: sort
-.. autofunction:: topk
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    allclose
+    argsort
+    eq
+    equal
+    ge
+    greater_equal
+    gt
+    greater
+    isclose
+    isfinite
+    isinf
+    isposinf
+    isneginf
+    isnan
+    isreal
+    kthvalue
+    le
+    less_equal
+    lt
+    less
+    maximum
+    minimum
+    fmax
+    fmin
+    ne
+    not_equal
+    sort
+    topk
+    msort
 
 
 Spectral Ops
 ~~~~~~~~~~~~~~~~~~~~~~
-.. autofunction:: fft
-.. autofunction:: ifft
-.. autofunction:: rfft
-.. autofunction:: irfft
-.. autofunction:: stft
-.. autofunction:: bartlett_window
-.. autofunction:: blackman_window
-.. autofunction:: hamming_window
-.. autofunction:: hann_window
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    stft
+    istft
+    bartlett_window
+    blackman_window
+    hamming_window
+    hann_window
+    kaiser_window
 
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
-.. autofunction:: bincount
-.. autofunction:: broadcast_tensors
-.. autofunction:: cross
-.. autofunction:: diag
-.. autofunction:: diag_embed
-.. autofunction:: diagflat
-.. autofunction:: diagonal
-.. autofunction:: einsum
-.. autofunction:: flatten
-.. autofunction:: flip
-.. autofunction:: histc
-.. autofunction:: meshgrid
-.. autofunction:: renorm
-.. autofunction:: tensordot
-.. autofunction:: trace
-.. autofunction:: tril
-.. autofunction:: triu
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    atleast_1d
+    atleast_2d
+    atleast_3d
+    bincount
+    block_diag
+    broadcast_tensors
+    broadcast_to
+    broadcast_shapes
+    bucketize
+    cartesian_prod
+    cdist
+    clone
+    combinations
+    cross
+    cummax
+    cummin
+    cumprod
+    cumsum
+    diag
+    diag_embed
+    diagflat
+    diagonal
+    diff
+    einsum
+    flatten
+    flip
+    fliplr
+    flipud
+    kron
+    rot90
+    gcd
+    histc
+    meshgrid
+    lcm
+    logcumsumexp
+    ravel
+    renorm
+    repeat_interleave
+    roll
+    searchsorted
+    tensordot
+    trace
+    tril
+    tril_indices
+    triu
+    triu_indices
+    vander
+    view_as_real
+    view_as_complex
 
 
 BLAS and LAPACK Operations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: addbmm
-.. autofunction:: addmm
-.. autofunction:: addmv
-.. autofunction:: addr
-.. autofunction:: baddbmm
-.. autofunction:: bmm
-.. autofunction:: btrifact
-.. autofunction:: btrifact_with_info
-.. autofunction:: btrisolve
-.. autofunction:: btriunpack
-.. autofunction:: chain_matmul
-.. autofunction:: cholesky
-.. autofunction:: dot
-.. autofunction:: eig
-.. autofunction:: gels
-.. autofunction:: geqrf
-.. autofunction:: ger
-.. autofunction:: gesv
-.. autofunction:: inverse
-.. autofunction:: det
-.. autofunction:: logdet
-.. autofunction:: slogdet
-.. autofunction:: matmul
-.. autofunction:: matrix_power
-.. autofunction:: matrix_rank
-.. autofunction:: mm
-.. autofunction:: mv
-.. autofunction:: orgqr
-.. autofunction:: ormqr
-.. autofunction:: pinverse
-.. autofunction:: potrf
-.. autofunction:: potri
-.. autofunction:: potrs
-.. autofunction:: pstrf
-.. autofunction:: qr
-.. autofunction:: svd
-.. autofunction:: symeig
-.. autofunction:: trtrs
+    addbmm
+    addmm
+    addmv
+    addr
+    baddbmm
+    bmm
+    chain_matmul
+    cholesky
+    cholesky_inverse
+    cholesky_solve
+    dot
+    eig
+    geqrf
+    ger
+    inner
+    inverse
+    det
+    logdet
+    slogdet
+    lstsq
+    lu
+    lu_solve
+    lu_unpack
+    matmul
+    matrix_power
+    matrix_rank
+    matrix_exp
+    mm
+    mv
+    orgqr
+    ormqr
+    outer
+    pinverse
+    qr
+    solve
+    svd
+    svd_lowrank
+    pca_lowrank
+    symeig
+    lobpcg
+    trapz
+    triangular_solve
+    vdot
 
 Utilities
 ----------------------------------
-.. autofunction:: compiled_with_cxx11_abi
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    compiled_with_cxx11_abi
+    result_type
+    can_cast
+    promote_types
+    use_deterministic_algorithms
+    are_deterministic_algorithms_enabled
+    set_warn_always
+    is_warn_always_enabled
+    vmap
+    _assert

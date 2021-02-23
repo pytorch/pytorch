@@ -140,8 +140,7 @@ void compare(int N, int inputC, int H, int W,
           // For small values / small difference, the relative error
           // can be huge but the absolute error will be small
           EXPECT_TRUE(relErr <= maxRelErr ||
-                      (relErr > maxRelErr &&
-                       absErr <= absErrForRelErrFailure)) <<
+                      (absErr <= absErrForRelErrFailure)) <<
             v1 << " " << v2 << " (rel err " << relErr << ") " <<
             "(" << n << " " << c << " " << h << " " << w << ") " <<
             "running N " << N << " inputC " << inputC <<
@@ -169,7 +168,7 @@ int randInt(int a, int b) {
 }
 
 // TODO(#14383029) cblas_sgemm not yet implemented on limited mobile cases.
-#if (defined(__ARM_NEON__) || defined(__ARM_NEON)) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if (defined(__ARM_NEON__) || defined(__ARM_NEON))
 TEST(ConvTransposeMobile, Test) {
   for (int i = 0; i < 10; ++i) {
     int n = randInt(1, 3);

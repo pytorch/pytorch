@@ -71,8 +71,10 @@ __device__ inline void warpHeapInsert(K k, V v, K* keyHeap, V* valueHeap) {
   // (0 12 3456)
   // log2(8 / 2) = 2 levels of interior nodes for heap size 8 (0 and 12)
   int i = 0;
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
-  for (int levels = 0; levels < math::integerLog2(HeapSize / 2); ++levels) {
+#endif
+  for (int levels = 0; levels < math::IntegerLog2(HeapSize / 2); ++levels) {
     int leftChild = i * 2 + 1;
     int rightChild = leftChild + 1;
     K leftKey = keyHeap[leftChild];
@@ -125,11 +127,7 @@ warpHeap(K k, V v, K& keyHeapHead, K* keyHeap, V* valueHeap) {
   int index = __popcll(getLaneMaskLt() & vote);
   int total = __popcll(vote);
 #else
-#if CUDA_VERSION >= 9000
   unsigned int vote = __ballot_sync(__activemask(), wantInsert);
-#else
-  unsigned int vote = __ballot(wantInsert);
-#endif
 
   if (!vote) {
     // Everything the warp has is smaller than our heap
@@ -263,12 +261,16 @@ __global__ void selectRowsViaHeap(
   V vals[Unroll];
 
   for (int i = threadIdx.x; i < n; i += blockDim.x * Unroll) {
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int j = 0; j < Unroll; ++j) {
       vals[j] = inputStart[i + j * blockDim.x];
     }
 
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int j = 0; j < Unroll; ++j) {
       heap.add(vals[j], (IndexType)i + j * blockDim.x);
     }

@@ -11,8 +11,9 @@ template <class Context>
 class GatherPaddingOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  GatherPaddingOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit GatherPaddingOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         startPaddingWidth_(
             this->template GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
@@ -106,8 +107,9 @@ template <class Context>
 class RemovePaddingOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  RemovePaddingOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit RemovePaddingOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         startPaddingWidth_(
             this->template GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
@@ -120,9 +122,9 @@ class RemovePaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->CopyFrom(Input(0), &context_);
+      Output(0)->CopyFrom(Input(0), true /*async*/);
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(Input(1), &context_);
+        Output(1)->CopyFrom(Input(1), true /*async*/);
       }
       return true;
     }
@@ -146,8 +148,9 @@ template <class Context>
 class AddPaddingOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  AddPaddingOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit AddPaddingOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         startPaddingWidth_(
             this->template GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
@@ -160,9 +163,9 @@ class AddPaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->CopyFrom(Input(0), &context_);
+      Output(0)->CopyFrom(Input(0), true /*async*/);
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(Input(1), &context_);
+        Output(1)->CopyFrom(Input(1), true /*async*/);
       }
       return true;
     }
@@ -205,12 +208,10 @@ class AddPaddingOp final : public Operator<Context> {
       padding_end_ptr = padding_start_ptr;
     }
 
-    auto* out = Output(0);
-    {
-      auto out_dims = in.sizes().vec();
-      out_dims[0] += (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
-      out->Resize(std::move(out_dims));
-    }
+    auto out_dims = in.sizes().vec();
+    out_dims[0] += (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
+    auto* out = Output(0, std::move(out_dims), at::dtype<T>());
+
     const auto* in_ptr = in.template data<T>();
     auto* out_ptr = out->template mutable_data<T>();
 
@@ -249,8 +250,9 @@ template <class Context>
 class PadEmptySamplesOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  PadEmptySamplesOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit PadEmptySamplesOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override;
 };
