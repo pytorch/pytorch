@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include "jit/python/python_dict.h"
 
 #include <torch/csrc/jit/python/python_ivalue.h>
 
@@ -136,6 +137,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
+
+      try {
+        auto script_dict = py::cast<ScriptDict>(obj);
+        return script_dict.dict_;
+      } catch (py::cast_error& e) {
+      }
+
       return createGenericDict(
           py::cast<py::dict>(obj),
           dict_type->getKeyType(),

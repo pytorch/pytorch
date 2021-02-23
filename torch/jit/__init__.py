@@ -46,6 +46,7 @@ from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized
 
 from torch.jit.cuda import stream
 from torch.jit._freeze import freeze, optimize_frozen_module
+from torch.jit._containers import dict, empty_dict
 
 # For backwards compatibility
 _fork = fork
