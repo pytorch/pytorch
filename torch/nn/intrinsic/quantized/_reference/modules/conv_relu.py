@@ -3,7 +3,7 @@ import torch.nn.quantized._reference as nnqr
 import torch.nn.functional as F
 
 class ConvReLU1d(nnqr.Conv1d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d  # type: ignore[assignemnt]
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d  # type: ignore[assignment]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dequant = x.dequantize()
@@ -22,7 +22,7 @@ class ConvReLU1d(nnqr.Conv1d):
 
 
 class ConvReLU2d(nnqr.Conv2d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d  # type: ignore[assignemnt]
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d  # type: ignore[assignment]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dequant = x.dequantize()
@@ -40,7 +40,7 @@ class ConvReLU2d(nnqr.Conv2d):
         return "QuantizedConvReLU2d(Reference)"
 
 class ConvReLU3d(nnqr.Conv3d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d  # type: ignore[assignemnt]
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d  # type: ignore[assignment]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dequant = x.dequantize()

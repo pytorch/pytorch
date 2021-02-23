@@ -72,16 +72,16 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],
             [True, False])
         for (batch_size, in_features, out_features, use_bias,
-             use_fused, per_channel, reference) in options:
+             use_fused, per_channel, is_reference) in options:
             self._test_linear_api_impl(
                 batch_size, in_features, out_features, use_bias, use_fused,
-                per_channel, reference)
+                per_channel, is_reference)
 
-    def _test_linear_api_impl(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel, reference):
+    def _test_linear_api_impl(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel, is_reference):
         if torch.backends.quantized.engine == 'qnnpack':
             per_channel = False
 
-        # (use_fused, reference) -> quantized class
+        # (use_fused, is_reference) -> quantized class
         class_map = {
             (True, True) : nniqr.LinearReLU,
             (True, False) : nniq.LinearReLU,
