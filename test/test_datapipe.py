@@ -456,7 +456,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp = IDP(inputs)
         # Raise TypeError for python function
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(TypeError, r"`transforms` are required to be"):
             dp.iter.Transforms(input_dp, _fake_fn)
 
         # transforms.Compose of several transforms

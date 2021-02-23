@@ -114,17 +114,17 @@ class TransformsIterDataPipe(MapIterDataPipe):
                  transforms: Callable,
                  ) -> None:
         # Type checking for transforms
-        transforms_type: Tuple = (nn.Module, )
+        transforms_types: Tuple = (nn.Module, )
         try:
-            # Specific types other than `nn.Module` from torchvision
+            # Specific types of transforms other than `nn.Module` from torchvision
             import torchvision.transforms as tsfm
-            transforms_type += (tsfm.Compose, tsfm.RandomChoice, tsfm.RandomOrder,
-                                tsfm.ToPILImage, tsfm.ToTensor, tsfm.Lambda)
+            transforms_types += (tsfm.Compose, tsfm.RandomChoice, tsfm.RandomOrder,
+                                 tsfm.ToPILImage, tsfm.ToTensor, tsfm.Lambda)
         except ImportError:
             pass
 
-        if not isinstance(transforms, transforms_type):
-            raise TypeError("`transforms` are required to be a callable from"
+        if not isinstance(transforms, transforms_types):
+            raise TypeError("`transforms` are required to be a callable from "
                             "torchvision.transforms or torchaudio.transforms")
 
         super().__init__(datapipe, fn=transforms)
