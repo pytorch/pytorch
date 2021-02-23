@@ -566,6 +566,51 @@ class FunctionInliner : public IRMutator {
     return result;
   }
 
+  const Expr* mutate(const Load* v) override {
+    const Buf* buf = v->buf();
+    if (buf != buf_) {
+      return IRMutator::mutate(v);
+    }
+
+    if (v->indices().size() != buf->ndim()) {
+      throw malformed_input(
+          "Placeholder indexed access is inconsistent with its rank", v);
+    }
+
+    std::vector<const Var*> index_vars;
+    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
+    for (size_t i = 0; i < buf->ndim(); i++) {
+      const Var* func_callee_arg = producer_index_vars_.at(i);
+      const Expr* func_caller_param = v->indices()[i];
+      auto iter = inline_mapping_.find(func_callee_arg);
+      if (iter != inline_mapping_.end()) {
+        throw std::runtime_error(
+            "Duplicated variables: " + func_callee_arg->name_hint());
+      }
+      // Add a mapping for each function parameter to it's source name.
+      inline_mapping_[func_callee_arg] = func_caller_param;
+      index_vars.push_back(func_callee_arg);
+    }
+
+    // Call the actual replacement.
+    const Expr* body = producer_->value();
+    const Expr* result = body->accept_mutator(this);
+
+    // Remove the mappings we created for this function parameters.
+    for (auto* v : index_vars) {
+      for (auto& pair : random_bindings_) {
+        if (pair.second.erase(v)) {
+          const Expr* inlined = inline_mapping_[v];
+          for (auto* nv : VarFinder::find(inlined)) {
+            pair.second.insert(nv);
+          }
+        }
+      }
+      inline_mapping_.erase(v);
+    }
+    return result;
+  }
+
   // Replace the target variable with the caller expressions.
   const Expr* mutate(const Var* v) override {
     auto iter = inline_mapping_.find(v);
