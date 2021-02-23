@@ -2646,11 +2646,11 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         a = torch.eye(2, dtype=dtype, device=device)
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.linalg.solve(a, b, out=out)
 
         # device should match
