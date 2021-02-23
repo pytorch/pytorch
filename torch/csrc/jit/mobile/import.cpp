@@ -368,7 +368,6 @@ void BytecodeDeserializer::deserialize_only_extra(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   device_ = device;
-  // Now fetch all those records.
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
     if (reader_->hasRecord(key)) {
@@ -617,20 +616,6 @@ void _load_extra_only_for_mobile(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader));
   deserializer.deserialize_only_extra(device, extra_files);
-}
-
-std::vector<std::string> _get_all_archive_file_names(
-    const std::string& filename
-) {
-    caffe2::serialize::PyTorchStreamReader sreader(filename);
-    return sreader.getAllRecords();
-}
-
-std::vector<std::string> _get_all_archive_file_names(
-    std::istream& in
-) {
-    caffe2::serialize::PyTorchStreamReader sreader(&in);
-    return sreader.getAllRecords();
 }
 
 } // namespace jit
