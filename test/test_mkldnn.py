@@ -704,12 +704,11 @@ class TestMkldnn(TestCase):
             torch.rand([5]).to_mkldnn() + torch.rand([0]).to_mkldnn()
 
         C = 7
-        m = mkldnn_utils.to_mkldnn(torch.nn.Conv2d(C, C, 3))
+        m = torch.nn.Conv2d(C, C, 3)
         x = torch.randn(0, C, C, 8, dtype=torch.float)
         out_eager = m(x)
         out_mkldnn = mkldnn_utils.to_mkldnn(m)(x)
         self.assertEqual(out_eager, out_mkldnn)
-
 
     def test_view(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
