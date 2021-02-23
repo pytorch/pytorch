@@ -217,9 +217,48 @@ static void fuseListAndListUnpack(Block* b) {
   }
 }
 
+static void decomposeLinear(Block* b) {
+  std::vector<Node*> linear_nodes;
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      decomposeLinear(child_block);
+    }
+    if (it->kind() == aten::linear) {
+      linear_nodes.push_back(*it);
+    }
+  }
+  for (Node* node : linear_nodes) {
+    auto g = b->owningGraph();
+
+    if (node->inputs()[2]->mustBeNone()) {
+      auto t_weight_n =
+          g->create(aten::t, {node->inputs()[1]}, 1)->insertBefore(node);
+      auto matmul_n =
+          g->create(aten::matmul, {node->inputs()[0], t_weight_n->output()}, 1)
+              ->insertBefore(node);
+      node->output()->replaceAllUsesWith(matmul_n->output());
+      node->destroy();
+    } else {
+      WithInsertPoint guard(node);
+      auto const_1 = g->insertConstant(IValue(1.0));
+      auto t_weight_n =
+          g->insertNode(g->create(aten::t, {node->inputs()[1]}, 1));
+      auto matmul_n = g->insertNode(g->create(
+          aten::matmul, {node->inputs()[0], t_weight_n->output()}, 1));
+      auto add_n = g->insertNode(g->create(
+          aten::add, {matmul_n->output(), node->inputs()[2], const_1}, 1));
+      node->output()->replaceAllUsesWith(add_n->output());
+      node->destroy();
+    }
+  }
+}
+
 } // namespace
 
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
+  GRAPH_DEBUG("priot to decompose linear", graph);
+  decomposeLinear(graph->block());
+  GRAPH_DEBUG("after decompose linear", graph);
   FuseWithListUnpack(graph->block());
   ReplaceAddWithConcat(graph->block());
   fuseListAndListUnpack(graph->block());

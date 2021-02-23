@@ -358,7 +358,7 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t grad_val, scalar_t self_val) {
-          return (self_val >= neg_three && self_val <= three)
+          return (self_val > neg_three && self_val < three)
             ? grad_val * one_sixth
             : zero;
         },
