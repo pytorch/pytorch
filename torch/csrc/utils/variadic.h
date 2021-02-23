@@ -18,6 +18,9 @@ struct CountTensors : IterArgs<CountTensors> {
   void operator()(const at::Tensor& x) {
     out += 1;
   }
+  void operator()(const c10::optional<at::Tensor>& x) {
+    out += x.has_value();
+  }
   void operator()(at::ArrayRef<at::Tensor> xs) {
     out += xs.size();
   }

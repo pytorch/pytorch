@@ -1592,6 +1592,38 @@ class TestQuantizeFx(QuantizationTestCase):
         assert hasattr(m, "mods1_1_packed_weight_0")
         assert hasattr(m, "mods2_packed_weight_0")
 
+    def test_mul_add_fp16_config(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+
+            def forward(self, x):
+                x = x * 5
+                x = x + 5
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+        model = M().eval()
+        qconfig_dict = {"": float16_dynamic_qconfig}
+        m = prepare_fx(model, qconfig_dict)
+        m = convert_fx(m)
+        # make sure it runs
+        m(torch.randn(5, 5))
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
@@ -2107,9 +2139,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """ quantization of the output of cat will be depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
-        class QuantizedCat(torch.nn.Module):
+        class QuantizedInput(torch.nn.Module):
             def __init__(self):
-                super(QuantizedCat, self).__init__()
+                super(QuantizedInput, self).__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2118,19 +2150,19 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 y = self.conv2(y)
                 return torch.cat([x, y], 1)
 
-        # TODO: decide whether to quantize in this case
-        # class NonQuantizedCat(torch.nn.Module):
-        #     def __init__(self):
-        #         super(NonQuantizedCat, self).__init__()
+        class NonQuantizedInput(torch.nn.Module):
+            def __init__(self):
+                super(NonQuantizedInput, self).__init__()
 
-        #     def forward(self, x, y):
-        #         return torch.cat([x, y], 1)
+            def forward(self, x, y):
+                return torch.cat([x, y], 1)
 
         data = (torch.randn(1, 2, 5, 5, dtype=torch.float),
                 torch.randn(1, 2, 5, 5, dtype=torch.float))
         quantized_node = ns.call_function(torch.ops.quantized.cat)
         for quant_type in self.static_quant_types:
-            self.checkGraphModeFxOp(QuantizedCat(), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
 
 
     @skipIfNoFBGEMM
