@@ -9015,8 +9015,8 @@ workflows:
   scheduled-ci:
     triggers:
       - schedule:
-          # runs every 4 hours on the 45th minute
-          cron: "45 0,4,8,12,16,20 * * *"
+          # runs every 12 hours on the 45th minute
+          cron: "45 9,21 * * *"
           filters:
             branches:
               only:
