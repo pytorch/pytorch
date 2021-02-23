@@ -26,9 +26,11 @@ std::vector<c10::optional<const Use>> gatherLastUses(
 // Values which do not have uses or which do not have a last use
 // outside of the subgraph to be merged into we do not need to track.
 struct ValueMapper {
-  ValueMapper(Node* to_merge, AliasDb& db, size_t subgraph_num_outputs) {
+  ValueMapper(Node* to_merge, AliasDb& db, c10::optional<Node*> existing) {
     last_uses_ = gatherLastUses(to_merge->outputs());
-    subgraph_num_outputs_ = subgraph_num_outputs;
+    if (existing) {
+      existing_last_uses_ = gatherLastUses((*existing)->outputs());
+    }
     WithInsertPoint guard(to_merge);
     auto g = to_merge->owningGraph();
     // temporary node to put the aliasing properties of the node before its
@@ -47,20 +49,25 @@ struct ValueMapper {
   }
 
   void copyAliasing(Node* merged_node, AliasDb& db) {
-    auto num_outputs = merged_node->outputs().size();
-    auto new_outputs = merged_node->outputs().slice(
-        subgraph_num_outputs_, num_outputs - subgraph_num_outputs_);
+    auto new_outputs = merged_node->outputs();
     for (Value* v : new_outputs) {
       auto maybe_last_use = firstOrLastUse(v, /*find_first*/ false);
-      if (!maybe_last_use) {
-        if (AliasDb::isMutableType(v->type())) {
-          db.createValue(v);
-        }
-        continue;
-      }
       // if it doesnt have a use it shouldnt have been added as output
       TORCH_INTERNAL_ASSERT(maybe_last_use);
       const Use last_use = *maybe_last_use;
+
+      // existing outputs of the subgraph do not need to have alias db mappings
+      // updated
+      bool is_existing_value = false;
+      for (size_t i = 0; i < existing_last_uses_.size() && !is_existing_value;
+           ++i) {
+        is_existing_value = existing_last_uses_[i].has_value() &&
+            usesEqual(*existing_last_uses_[i], last_use);
+      }
+      if (is_existing_value) {
+        continue;
+      }
+
       size_t i = 0;
       while (i < last_uses_.size() && last_uses_.at(i).has_value() &&
              !usesEqual(*last_uses_.at(i), last_use)) {
@@ -73,7 +80,7 @@ struct ValueMapper {
   }
 
   std::vector<c10::optional<const Use>> last_uses_;
-  size_t subgraph_num_outputs_;
+  std::vector<c10::optional<const Use>> existing_last_uses_;
   Node* placeholder_node_;
 };
 
@@ -87,7 +94,7 @@ Node* executeSubgraphMergeAndUpdateAliasing(
   // Here we create a placeholder node, transfer the aliasing properties
   // to the placeholder, execute the merge, and transfer the aliasing
   // properties to the appropriate fusion group outputs
-  ValueMapper vm(to_merge, db, existing ? (*existing)->outputs().size() : 0);
+  ValueMapper vm(to_merge, db, existing);
   Node* fusion_group = merge_fn();
   vm.copyAliasing(fusion_group, db);
   return fusion_group;
