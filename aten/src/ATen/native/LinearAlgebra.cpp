@@ -266,7 +266,10 @@ namespace {
  * is the one that minimizes the total cost.
  *
  * @param tensors list of 2D tensors
- * @return the optimal order (2D list used by #matrix_chain_multiplication)
+ * @return a 2D vector s used by #matrix_chain_multiplication to construct
+ *         the optimal matrix multiplication order. The optimal multiplication
+ *         order for multiplying tensors i...j is to multiply tensors i...s[i, j]
+ *         and tensors (s[i, j] + 1)...j first and then the result of that.
  */
 std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
   const size_t n = tensors.size();
@@ -304,7 +307,15 @@ std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
   return s;
 }
 
-// Multiplies the tensors following the order from #matrix_chain_order
+/**
+ * @brief Recursively multiplies the tensors i...j using the given order
+ * 
+ * @param tensors matrices to multiply togther
+ * @param order optimal chain multiplication order from #matrix_chain_order
+ * @param i index of first tensor to be multiplied
+ * @param j index of last tensor to be multiplied
+ * @return Tensor result of multiplying tensors[i...j] together.
+ */
 Tensor matrix_chain_multiplication(
     TensorList tensors,
     const std::vector<std::vector<int64_t>>& order,
@@ -331,7 +342,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
     tensors[0] = _tensors[0].unsqueeze(0);
   } else if (_tensors[0].dim() == 2) {
     tensors[0] = _tensors[0];
-    out_shape.push_back(tensors[0].size(0));
+    out_shape.emplace_back(tensors[0].size(0));
   } else {
     TORCH_CHECK(
         false,
@@ -345,7 +356,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
     tensors[n - 1] = _tensors[n - 1].unsqueeze(-1);
   } else if (_tensors[n - 1].dim() == 2) {
     tensors[n - 1] = _tensors[n - 1];
-    out_shape.push_back(tensors[n - 1].size(1));
+    out_shape.emplace_back(tensors[n - 1].size(1));
   } else {
     TORCH_CHECK(
         false,
@@ -418,9 +429,13 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
         " but got ",
         out.device());
 
+    // If the last and last tensors have shapes (a, b) and (b, c) the
+    // output has shape (a, c). If either the first or last tensor is 1D
+    // a and/or c dimensions will be implicitely size 1 and will be ommited
+    // from the output. e.g. for inputs (a, b) x (b) the output has shape (a,).
     at::native::resize_output(out, out_shape);
 
-    // View output as 2D for computations
+    // View output as 2D for simplicity of computation.
     result = out.view({tensors[0].size(0), tensors.back().size(-1)});
   }
 
@@ -440,7 +455,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
 
   // Why the separate implementation for 3 matrices?
   // The logic for three matrices is much faster when done directly
-  // Requires 1 comparison to 4 comparisons and lesser arithmetic operations
+  // Requires 1 comparison to 4 comparisons and fewer arithmetic operations
   if (tensors.size() == 3) {
     const auto a = tensors[0].size(0);
     const auto b = tensors[1].size(0);
@@ -465,11 +480,14 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
     }
   }
 
+  // Algorithm for multiplying 4 or more matrices
   const auto order = matrix_chain_order(tensors);
   const int64_t i = 0;
   const int64_t j = n - 1;
 
   if (out.defined()) {
+    // We manually implement the first recursive layer here so we can use mm_out
+    // for the final multiplication
     return at::mm_out(
         result,
         matrix_chain_multiplication(tensors, order, i, order[i][j]),
@@ -490,6 +508,8 @@ Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
   return result;
 }
 
+// This will eventually become an alias for multi_dot and will expect at least 2
+// input tensors which is BC-breaking.
 Tensor chain_matmul(TensorList matrices) {
   checkAllSameDim(matrices, 2);
 
@@ -500,8 +520,7 @@ Tensor chain_matmul(TensorList matrices) {
     return matrices[0];
   }
 
-  Tensor undefined;
-  return multi_dot_impl(matrices, undefined);
+  return at::native::linalg_multi_dot(matrices);
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {

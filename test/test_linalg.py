@@ -3230,8 +3230,8 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.cfloat)
     @precisionOverride({torch.float: 1e-02, torch.cfloat: 1e-02})
     def test_multi_dot(self, device, dtype):
-        def check(*shapes):
-            tensors = [make_tensor(shape, device, dtype, low=None, high=None) for shape in shapes]
+        def check(*shapes, discontiguous=False):
+            tensors = [make_tensor(shape, device, dtype, discontiguous=discontiguous) for shape in shapes]
             np_arrays = [tensor.cpu().numpy() for tensor in tensors]
             res = torch.linalg.multi_dot(tensors).cpu()
             ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
@@ -3262,12 +3262,7 @@ class TestLinalg(TestCase):
         check([10, 100], [100, 5], [5, 50])
 
         # test discontiguous input
-        shapes = [[3, 2], [2, 2], [2, 3], [3, 4]]
-        tensors = [make_tensor(shape, device, dtype, low=None, high=None, discontiguous=True) for shape in shapes]
-        np_arrays = [tensor.cpu().numpy() for tensor in tensors]
-        res = torch.linalg.multi_dot(tensors)
-        ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
-        self.assertEqual(res.cpu(), ref)
+        check([3, 2], [2, 2], [2, 3], [3, 4], discontiguous=True)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float)
