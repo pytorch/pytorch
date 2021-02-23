@@ -100,6 +100,7 @@ def get_quantize_node_info(activation_post_process):
     of extracted qparams from the module
     '''
     dtype = activation_post_process.dtype
+    quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()
