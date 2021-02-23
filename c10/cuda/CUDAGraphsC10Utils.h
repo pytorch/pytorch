@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/cuda/CUDAStream.h>
+
 // CUDA Graphs utils used by c10 and aten.
 // aten/cuda/CUDAGraphsAtenUtils.cuh adds utils used by aten only.
 
@@ -71,7 +73,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   cudaStreamCaptureStatus is_capturing;
-  AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
+  C10_CUDA_CHECK(cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(),
                                       &is_capturing));
   return CaptureStatus(is_capturing);
 #else

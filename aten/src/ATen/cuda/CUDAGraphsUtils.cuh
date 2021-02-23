@@ -4,7 +4,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/StreamGuard.h>
-#include <c10/core/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 
 // c10/cuda/CUDAGraphsC10Utils.h has utils used by both c10 and aten.
