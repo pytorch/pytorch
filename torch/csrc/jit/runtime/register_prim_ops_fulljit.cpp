@@ -1008,6 +1008,58 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::any.str(str[] self) -> bool",
+        [](Stack* stack) {
+          auto l = pop(stack).toList();
+          for (const auto& elem : l) {
+            if (elem != "") {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.int(int[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.float(float[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.bool(bool[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::all.int(int[] self) -> bool",
         [](Stack* stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
