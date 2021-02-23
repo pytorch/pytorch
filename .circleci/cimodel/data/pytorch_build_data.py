@@ -72,7 +72,7 @@ CONFIG_TREE_DATA = [
                     X(True),
                     ("libtorch", [
                         (True, [
-                            ('build_only', [XImportant(True)]),
+                            ('build_only', [X(True)]),
                         ]),
                     ]),
                 ]),
