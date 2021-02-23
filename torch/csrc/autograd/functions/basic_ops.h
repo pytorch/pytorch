@@ -12,7 +12,7 @@ namespace torch { namespace autograd {
 
 struct TORCH_API Error : public Node {
   Error(std::string msg, edge_list&& next_edges)
-    : Node(std::move(next_edges))
+    : Node(/*sequence_nr=*/UINT64_MAX, std::move(next_edges))
     , msg(std::move(msg)) {}
 
   Error(std::string msg)
@@ -58,7 +58,7 @@ struct TORCH_API UndefinedGrad : public Node {
 
 struct TORCH_API UndefinedGradBackward : public Node {
   UndefinedGradBackward(edge_list&& next_edges)
-    : Node(std::move(next_edges)) {}
+    : Node(/*sequence_nr=*/UINT64_MAX, std::move(next_edges)) {}
 
   UndefinedGradBackward() {}
 
@@ -67,8 +67,8 @@ struct TORCH_API UndefinedGradBackward : public Node {
 
 struct TORCH_API GraphRoot : public Node {
   GraphRoot(edge_list functions, variable_list inputs)
-      : Node(std::move(functions)),
-        outputs(std::move(inputs)) {
+      : Node(/*sequence_nr=*/UINT64_MAX, std::move(functions)),
+      outputs(std::move(inputs)) {
     // Ensures calls to stream() on a GraphRoot instance reflect current stream(s)
     // on devices of root grad tensors at the time the instance is constructed.
     for (const auto& t : outputs) {
