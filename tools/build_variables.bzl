@@ -238,6 +238,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/serialization/pickle.cpp",
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
+    "torch/csrc/jit/tensorexpr/analysis.cpp",
     "torch/csrc/jit/tensorexpr/block_codegen.cpp",
     "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
     "torch/csrc/jit/tensorexpr/bounds_overlap.cpp",
