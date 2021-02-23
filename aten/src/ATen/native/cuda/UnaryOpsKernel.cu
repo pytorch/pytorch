@@ -256,17 +256,16 @@ void frexp_kernel_cuda(TensorIterator& iter) {
 #ifdef __HIP_PLATFORM_HCC__
   // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
   //            https://github.com/ROCm-Developer-Tools/HIP/issues/2169
-  // ROCM does not support frexp function yet
-  TORCH_CHECK(false, "torch.frexp is not implemented on ROCM platform.");
+  // ROCm does not support frexp function yet
+  TORCH_CHECK(false, "torch.frexp is not implemented on ROCm platform.");
 #else
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
-    iter.common_dtype(),
+    iter.dtype(),
     "frexp_cuda", [&]() {
-      using T_ACC = acc_type<scalar_t, true>;
-      gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, scalar_t> {
+      gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, int> {
         int exponent;
         scalar_t mantissa = std::frexp(a, &exponent);
-        return {mantissa, static_cast<T_ACC>(exponent)};
+        return {mantissa, exponent};
       });
   });
 #endif

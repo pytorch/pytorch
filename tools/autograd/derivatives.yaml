@@ -486,7 +486,7 @@
   self: grad
 
 - name: frexp.Tensor(Tensor self) -> (Tensor mantissa, Tensor exponent)
-  self: grad * 1 / exponent.exp2()
+  self: grad / exponent.exp2()
 
 - name: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   self: gather_backward(grad, self, dim, index, sparse_grad)

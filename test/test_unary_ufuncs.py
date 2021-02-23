@@ -21,8 +21,6 @@ from torch.testing._internal.common_device_type import (
     OpDTypes)
 from torch.testing import (
     floating_types_and, all_types_and_complex_and, floating_types)
-from torch.utils.cpp_extension import ROCM_HOME
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
 
 if TEST_SCIPY:
     import scipy
@@ -427,7 +425,7 @@ class TestUnaryUfuncs(TestCase):
     # per-batch computation.
     @ops(unary_ufuncs)
     def test_batch_vs_slicing(self, device, dtype, op):
-        input = make_tensor((2, 1), dtype=dtype, device=device,
+        input = make_tensor((1024, 512), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
 
         actual = op(input)
@@ -457,40 +455,15 @@ class TestUnaryUfuncs(TestCase):
             self.assertTrue(res is output)
             self.assertEqual(output, expected.to(output.dtype))
 
-    def _test_multiple_out_arg(self, op, input, output, expected):
-        expect_fail = True
-        output_num = len(expected)
-
-        for i in range(output_num):
-            if op.safe_casts_outputs:
-                expect_fail = not torch.can_cast(expected[i].dtype, output.dtype)
-            else:
-                expect_fail = output.dtype != expected[i].dtype
-            if not expect_fail:
-                break
-
-        out = [torch.empty_like(output) for _ in range(output_num)]
-        if expect_fail:
-            with self.assertRaises(RuntimeError):
-                op(input, out=out)
-        else:
-            res = op(input, out=out)
-            for i in range(output_num):
-                self.assertTrue(res[i] is out[i])
-                self.assertEqual(out[i], expected[i].to(out[i].dtype))
-
     @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
-        input = make_tensor((2,), dtype=dtype, device=device,
+        input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
         expected = op(input)
 
         for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
             out = torch.empty_like(input, dtype=out_dtype)
-            if isinstance(expected, torch.Tensor):
-                self._test_out_arg(op, input, out, expected)
-            else:
-                self._test_multiple_out_arg(op, input, out, expected)
+            self._test_out_arg(op, input, out, expected)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
@@ -567,6 +540,73 @@ class TestUnaryUfuncs(TestCase):
                                -100.99999994, 0.000000111,
                                -0.000000111, 0, -0, -1, -2, -931], dtype=dtype, device=device)
         self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
+
+    @skipCUDAIfRocm
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
+    def test_frexp_reference_numerics(self, device, dtype):
+        tensors = generate_numeric_tensors(device, dtype)
+        for t in tensors:
+            actual = torch.frexp(t)
+            expected = np.frexp(t.cpu().numpy())
+
+            # Crafts a custom error message for smaller, printable tensors
+            if t.numel() < 10:
+                msg = ("Failed to produce expected results! Input tensor was"
+                       " {0}, torch result is {1}, and reference result is"
+                       " {2}.").format(t, actual, expected)
+            else:
+                msg = None
+
+            mantissa, exponent = actual
+            np_mantissa, np_exponent = expected
+            self.assertEqualHelper(mantissa, np_mantissa, msg, dtype=dtype)
+            self.assertEqualHelper(exponent, np_exponent, msg, dtype=torch.int32)
+
+    @skipCUDAIfRocm
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
+    def test_frexp_out(self, device, dtype):
+        input = make_tensor((50, 50), device, dtype, low=-9, high=9)
+        mantissa = torch.empty_like(input)
+        exponent = torch.empty_like(input, dtype=torch.int)
+
+        torch.frexp(input, out=(mantissa, exponent))
+        np_exponent, np_mantissa = np.frexp(input.cpu().numpy())
+
+        self.assertEqual(mantissa, np_exponent)
+        self.assertEqual(exponent, np_mantissa)
+
+    @skipCUDAIfRocm
+    def test_frexp_assert_raises(self, device):
+        invalid_input_dtypes = torch.testing.get_all_int_dtypes() + \
+                               torch.testing.get_all_complex_dtypes() \
+                               + [torch.bool]
+        for dtype in invalid_input_dtypes:
+            input = make_tensor((50, 50), device, dtype, low=-9, high=9)
+            with self.assertRaisesRegex(RuntimeError, "frexp only supports floating-point dtypes"):
+                torch.frexp(input)
+
+        for dtype in torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False):
+            input = make_tensor((50, 50), device, dtype, low=-9, high=9)
+
+            dtypes = list(torch.testing.all_types_and_complex_and(torch.bool,
+                                                                  torch.half,
+                                                                  torch.bfloat16))
+            dtypes.remove(dtype)
+            for mantissa_dtype in dtypes:
+                mantissa = torch.empty_like(input, dtype=mantissa_dtype)
+                exponent = torch.empty_like(input, dtype=torch.int)
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"Expected mantissa to have dtype \S+ but got \S+"):
+                    torch.frexp(input, out=(mantissa, exponent))
+
+            dtypes.append(dtype)
+            dtypes.remove(torch.int)
+            for exponent_dtype in dtypes:
+                mantissa = torch.empty_like(input)
+                exponent = torch.empty_like(input, dtype=exponent_dtype)
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"Expected exponent to have int dtype but got \S+"):
+                    torch.frexp(input, out=(mantissa, exponent))
 
     # TODO opinfo mvlgamma
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
@@ -1639,25 +1679,6 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
-    @unittest.skipIf(TEST_ROCM, "skip on ROCM")
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False))
-    def test_frexp(self, device, dtype):
-        input = make_tensor((50, 50), device, dtype, low=-9, high=9)
-
-        if self.device_type == 'cuda' and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
-            # torch.frexp currently does not support integral dtypes for cuda tensors
-            # due to the casting issues of gpu_kernel_multiple_outputs
-            # https://github.com/pytorch/pytorch/pull/51097
-            with self.assertRaisesRegex(RuntimeError, r"frexp is not implemented for \w+ on CUDA device"):
-                torch.frexp(input)
-        else:
-            np_input = input.cpu().numpy()
-
-            y1, y2 = torch.frexp(input)
-            y1_np, y2_np = np.frexp(np_input)
-
-            self.assertEqual(y1, y1_np)
-            self.assertEqual(y2, y2_np)
 
 def _generate_reference_input(dtype, device):
     input = []

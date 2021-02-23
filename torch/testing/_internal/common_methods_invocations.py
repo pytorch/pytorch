@@ -1706,20 +1706,19 @@ op_db: List[OpInfo] = [
            ),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
-                   ref=np_unary_ufunc_integer_promotion_wrapper(np.frexp),
-                   dtypesIfCPU=all_types_and(torch.bool, torch.half),
+                   ref=np.frexp,
+                   dtypesIfCPU=floating_types_and(torch.half),
                    dtypesIfCUDA=floating_types_and(torch.half),
-                   # skip testing torch.frexp as it is not supported by ROCM platform yet
-                   dtypesIfROCM=_dispatch_dtypes(()),
+                   # skip testing torch.frexp as it is not supported by ROCm platform yet
+                   decorators=[skipCUDAIfRocm],
                    test_inplace_grad=False,
-                   safe_casts_outputs=True,
                    skips=(
-                       # Reference: https://github.com/pytorch/pytorch/pull/51097
-                       # numpy returns exponents as integral arrays, while torch.frexp promotes integral inputs
-                       # to floating types
+                       # skips OpInfo-based `test_reference_numerics` and `test_out_arg_all_dtypes`,
+                       # as torch.frexp returns two tensors, a floating mantissa and a int32 exponent.
+                       # Test out-variants as well as extremal values with torch.frexp
+                       # in the specific test methods `test_frexp_reference_numerics` and `test_frexp_out`.
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics'),
-                       # gpu_kernel_multiple_outputs does not support casting to outputs
-                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes', device_type='cuda'),
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,

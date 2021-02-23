@@ -3245,14 +3245,16 @@ add_docstr(torch.frexp,
            r"""
 frexp(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
 
-Decompose :attr:`input` into mantissa and twos exponent, elementwise.
+Decomposes :attr:`input` into mantissa and exponent tensors
+such that :math:`\text{input} = \text{mantissa} \times 2^{\text{exponent}}`.
+
 The range of mantissa is the open interval(-1, 1).
 
-.. note:: This function does not support integral dtypes for CUDA inputs.
-
+.. note:: This function requires inputs to be floating-point dtypes.
 
 Args:
-    input (Tensor): the input tensor to be decomposed where ``input = mantissa * 2**exponent``
+    input (Tensor): the input tensor
+
 
 Keyword args:
     out (tuple, optional): the output tensors
@@ -3264,7 +3266,7 @@ Example::
     >>> mantissa
     >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
     >>> exponent
-    >>> tensor([0., 1., 2., 2., 3., 3., 3., 3., 4.])
+    >>> tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
 """)
 
 add_docstr(torch.from_numpy,

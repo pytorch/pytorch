@@ -654,65 +654,33 @@ Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_fl
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
-static inline TensorIterator build_frexp_iter(const Tensor &self,
-                                              Tensor mantissa, Tensor exponent) {
-
-  TensorIteratorConfig config;
-
-  config.set_check_mem_overlap(true)
-  .add_output(mantissa)
-  .add_output(exponent);
-
-  // gpu_kernel_multiple_outputs also has issues of handling non contiguous tensors
-  // Reference: https://github.com/pytorch/pytorch/pull/51097
-  if (self.device().type() == DeviceType::CUDA) {
-    config.add_input(self.contiguous());
-  } else {
-    config.add_input(self);
-  }
-
-  return config
-    .cast_common_dtype_to_outputs(true)
-    .promote_inputs_to_common_dtype(true)
-    .promote_integer_inputs_to_float(true)
-    .enforce_safe_casting_to_output(true)
-    .build();
-}
-
-static inline void frexp_check(const Tensor& self) {
-  // torch.frexp currently does not support integral dtypes for cuda tensors
-  // due to the casting issues of gpu_kernel_multiple_outputs
-  // Reference: https://github.com/pytorch/pytorch/pull/51097
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || self.device().is_cpu(),
-              "frexp is not implemented for ",
-              self.scalar_type(),
-              " on CUDA device.");
-}
-
 std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
-  frexp_check(self);
+  Tensor mantissa = at::empty_like(self);
+  Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));
 
-  Tensor mantissa;
-  Tensor exponent;
-
-  auto iter = build_frexp_iter(self, mantissa, exponent);
-  frexp_stub(iter.device_type(), iter);
-
-  return std::tuple<Tensor, Tensor>(iter.output(0), iter.output(1));
+  at::frexp_out(mantissa, exponent, self);
+  return std::tuple<Tensor, Tensor>(mantissa, exponent);
 }
 
 std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
                                        Tensor& mantissa, Tensor& exponent) {
-  frexp_check(self);
+  // torch.frexp is implemented for floating-point dtypes for now,
+  // should add support for integral dtypes in the future.
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+              "frexp only supports floating-point dtypes");
 
-  // due to the casting issues of gpu_kernel_multiple_outputs,
-  // torch.frexp cannot do casting to outputs for now
-  // Reference: https://github.com/pytorch/pytorch/pull/51097
-  TORCH_CHECK(self.device().type() == DeviceType::CPU ||
-              (self.dtype() == mantissa.dtype() && self.dtype() == exponent.dtype()),
-              "torch.frexp does not support casting to output on CUDA device.");
+  TORCH_CHECK(mantissa.dtype() == self.dtype(),
+              "Expected mantissa to have dtype ", self.dtype(), " but got ", mantissa.dtype());
+  TORCH_CHECK(exponent.dtype() == at::kInt,
+              "Expected exponent to have int dtype but got ", exponent.dtype());
 
-  auto iter = build_frexp_iter(self, mantissa, exponent);
+  auto iter = TensorIteratorConfig()
+    .add_output(mantissa)
+    .add_output(exponent)
+    .add_input(self)
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .build();
   frexp_stub(iter.device_type(), iter);
 
   return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
