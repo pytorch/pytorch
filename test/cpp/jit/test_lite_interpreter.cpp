@@ -876,7 +876,14 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
 
   loaded_extra_files.clear();
-  loaded_extra_files["$__get_all_extra__$"] = "";
+  std::vector<std::string> all_files = torch::jit::_get_all_archive_file_names(iss);
+
+  for (auto &file_name : all_files) {
+    if (file_name.find("extra/") == 0) {
+      loaded_extra_files[file_name.substr(6)] = "";
+    }
+  }
+
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "foo");

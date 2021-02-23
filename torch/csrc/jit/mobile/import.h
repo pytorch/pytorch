@@ -61,5 +61,14 @@ void _load_extra_only_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files);
+
+std::vector<std::string> _get_all_archive_file_names(
+    const std::string& filename
+);
+
+std::vector<std::string> _get_all_archive_file_names(
+    std::istream& in
+);
+
 } // namespace jit
 } // namespace torch
