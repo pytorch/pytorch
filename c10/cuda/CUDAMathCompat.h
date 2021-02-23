@@ -42,11 +42,33 @@ __MATH_FUNCTIONS_DECL__ double ceil(double x) {
   return ::ceil(x);
 }
 
+namespace{
+
+template<typename T>
+T copysign(T a, T b) {
+  return std::copysign(a, b);
+}
+
+// Implement copysign for half precision floats using bit ops
+// Sign is the most significant bit for both half and bfloat16 types
+template<>
+c10::Half copysign(c10::Half a, c10::Half b) {
+  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+}
+
+template<>
+c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
+   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
+}
+
+
+} //namespace
+
 __MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
 #if defined(__CUDA_ARCH__)
   return ::copysignf(x, y);
 #else
-  return (x & 0x7fff'ffff) | (y & 0x8000'0000);
+  return copysign(x, y);
 #endif
 }
 

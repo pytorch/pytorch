@@ -95,6 +95,26 @@ void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
+namespace{
+  
+template<typename T>
+T copysign(T a, T b) {
+  return std::copysign(a, b);
+}
+
+// Implement copysign for half precision floats using bit ops
+// Sign is the most significant bit for both half and bfloat16 types
+template<>
+c10::Half copysign(c10::Half a, c10::Half b) {
+  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+}
+
+template<>
+c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
+   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
+}
+}// namespace
+
 void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   // See NOTE: [Floor Division in Python]
   const auto dtype = iter.common_dtype();
@@ -144,7 +164,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 #if defined(__CUDA_ARCH__)
           floordiv = std::copysign(scalar_t(0), a * inv_b);
 #else
-          floordiv = (a * inv_b) & 0x8000;
+          floordiv = copysign(scalar_t(0), a * inv_b);
 #endif
         }
         return floordiv;
@@ -169,7 +189,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 #if defined(__CUDA_ARCH__)
           floordiv = std::copysign(scalar_t(0), a / b);
 #else
-          floordiv = (a / b) & 0x8000;
+          floordiv = copysign(scalar_t(0), a / b);
 #endif
         }
         return floordiv;
