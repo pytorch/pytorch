@@ -205,8 +205,7 @@ def insert_observer_for_output_of_the_node(
             # propagate observed property from input
             if is_observed(node.args[0]):
                 observed_node_names_set.add(node.name)
-        elif ((isinstance(quantize_handler, Add) or
-                isinstance(quantize_handler, Mul)) and
+        elif (isinstance(quantize_handler, BinaryOp) and
               quantize_handler.num_node_args == 1):
             assert matched_nodes is not None
             input_node = matched_nodes[-1]  # first node in the sequence
@@ -934,6 +933,7 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
         quantized_root = quantized
         quantized_graph = quantized.graph
+
         for node in quantized_graph.nodes:
             prepack_node = folded_nodes.get(node.name, None)
             if prepack_node is node:
