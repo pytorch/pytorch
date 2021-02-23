@@ -1,7 +1,7 @@
 import warnings
 import torch.nn as nn
 from torch.utils.data import IterDataPipe, _utils
-from typing import TypeVar, Callable, Iterator, Sized, Optional, Tuple, Dict
+from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -114,15 +114,17 @@ class TransformsIterDataPipe(MapIterDataPipe):
                  transforms: Callable,
                  ) -> None:
         # Type checking for transforms
+        transforms_type: Tuple = (nn.Module, )
         try:
+            # Specific types other than `nn.Module` from torchvision
             import torchvision.transforms as tsfm
-            if not isinstance(transforms, (nn.Module, tsfm.Compose, tsfm.RandomChoice,
-                                           tsfm.RandomOrder, tsfm.ToPILImage,
-                                           tsfm.ToTensor, tsfm.Lambda)):
-                raise TypeError("`transforms` are required to be a callable from"
-                                "torchvision.transforms or torchaudio.transforms")
+            transforms_type += (tsfm.Compose, tsfm.RandomChoice, tsfm.RandomOrder,
+                                tsfm.ToPILImage, tsfm.ToTensor, tsfm.Lambda)
         except ImportError:
-            if not isinstance(transforms, nn.Module):
-                raise TypeError("`transforms` are required to be a callable from"
-                                "torchvision.transforms or torchaudio.transforms")
+            pass
+
+        if not isinstance(transforms, transforms_type):
+            raise TypeError("`transforms` are required to be a callable from"
+                            "torchvision.transforms or torchaudio.transforms")
+
         super().__init__(datapipe, fn=transforms)
