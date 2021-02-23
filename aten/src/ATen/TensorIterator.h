@@ -433,20 +433,6 @@ public:
 
   TensorIteratorConfig() {}
 
-  // install unary operands at construction time
-  TensorIteratorConfig(const Tensor& out, const Tensor& a) :
-    tensors_{out, a},
-    num_outputs_(1),
-    num_inputs_(1)
-  {}
-
-  // install binary operands at construction time
-  TensorIteratorConfig(const Tensor& out, const Tensor& a, const Tensor& b) :
-    tensors_{out, a, b},
-    num_outputs_(1),
-    num_inputs_(2)
-  {}
-
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
