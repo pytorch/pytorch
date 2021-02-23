@@ -44,23 +44,21 @@ __MATH_FUNCTIONS_DECL__ double ceil(double x) {
 
 namespace{
 
-template<typename T>
-T copysign(T a, T b) {
-  return std::copysign(a, b);
+__MATH_FUNCTIONS_DECL__ float fp32_from_bits(uint32_t w) {
+  union {
+    uint32_t as_bits;
+    float as_value;
+  } fp32 = {w};
+  return fp32.as_value;
 }
 
-// Implement copysign for half precision floats using bit ops
-// Sign is the most significant bit for both half and bfloat16 types
-template<>
-c10::Half copysign(c10::Half a, c10::Half b) {
-  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+__MATH_FUNCTIONS_DECL__ uint32_t fp32_to_bits(float f) {
+  union {
+    float as_value;
+    uint32_t as_bits;
+  } fp32 = {f};
+  return fp32.as_bits;
 }
-
-template<>
-c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
-}
-
 
 } //namespace
 
@@ -68,7 +66,8 @@ __MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
 #if defined(__CUDA_ARCH__)
   return ::copysignf(x, y);
 #else
-  return copysign(x, y);
+  return fp32_from_bits(
+      (fp32_to_bits(x) & 0x7fffffffu) | (fp32_to_bits(y) & 0x80000000u))
 #endif
 }
 
