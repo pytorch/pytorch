@@ -3440,24 +3440,6 @@ class TestNN(NNTestCase):
         self.assertTrue(a.ne(torch.arange(1, 7, dtype=a.dtype).view(2, 3)).all())
         self.assertTrue(a.norm(p=opts["norm_type"], dim=1).le(opts["max_norm"]).all())
 
-    def test_fractional_max_pool2d(self):
-        x = torch.randn(1, 2, 7, 7, requires_grad=True)
-        samples = x.new(1, 2, 2).uniform_()
-
-        def func(x):
-            return F.fractional_max_pool2d(
-                x, (2, 2), output_size=(3, 3), _random_samples=samples)
-
-        self.assertEqual(func(x).shape, (1, 2, 3, 3))
-        gradcheck(func, [x])
-        gradgradcheck(func, [x])
-
-        x = torch.randn(2, 7, 7, requires_grad=True)
-        samples = x.new(2, 2).uniform_()
-        self.assertEqual(func(x).shape, (2, 3, 3))
-        gradcheck(func, [x])
-        gradgradcheck(func, [x])
-
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
         input = torch.randn(5000)
@@ -3793,6 +3775,15 @@ class TestNN(NNTestCase):
 
             # output_2d in shape of [T, 1, D]
             self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
+
+    def test_multihead_attn_no_bias(self):
+        embed_dim = 8
+        num_heads = 4
+        mha = torch.nn.MultiheadAttention(embed_dim, num_heads, bias=False)
+
+        # Verify that bias=False applies to both in and out projection layers.
+        self.assertIsNone(mha.in_proj_bias)
+        self.assertIsNone(mha.out_proj.bias)
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
@@ -4276,6 +4267,37 @@ class TestNN(NNTestCase):
             with torch.backends.mkldnn.flags(enabled=enabled):
                 gradcheck(F.conv2d, (input, mod.weight))
 
+    def test_Conv2d_OneDNN(self):
+        def run_once():
+            group_val = 24
+            ifm = torch.ones([1, group_val, 6, 6], dtype=torch.float32)
+            weights = torch.ones([group_val, 1, 3, 3], dtype=torch.float32)
+            op = torch.nn.Conv2d(
+                in_channels=group_val,
+                out_channels=group_val,
+                kernel_size=[3, 3],
+                stride=[2, 2],
+                padding=[1, 1],
+                dilation=[1, 1],
+                groups=group_val,
+                bias=False,
+                padding_mode='zeros'
+            )
+
+            op.weight.data = weights
+            res = op(ifm)
+            grad_in = torch.ones(res.shape, dtype=torch.float32)
+            res.backward(grad_in)
+            return op.weight.grad
+
+        with torch.backends.mkldnn.flags(enabled=False):
+            without_onednn = run_once()
+
+        with torch.backends.mkldnn.flags(enabled=True):
+            with_onednn = run_once()
+
+        self.assertEqual(without_onednn, with_onednn)
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_cudnn_non_contiguous(self):
@@ -4632,6 +4654,46 @@ class TestNN(NNTestCase):
             output1.backward(grad_output[:, :offset].contiguous())
 
             m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
+            m2.weight.data.copy_(m.weight.data[offset:])
+            m2.bias.data.copy_(m.bias.data[offset:])
+            i2 = i.detach()[:, 1:].clone().requires_grad_()
+            output2 = m2(i2)
+            output2.backward(grad_output[:, offset:].contiguous())
+
+            self.assertEqual(output, torch.cat([output1, output2], 1),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            self.assertEqual(i.grad.data,
+                             torch.cat([i1.grad.data, i2.grad.data], 1),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            self.assertEqual(m.bias.grad.data,
+                             torch.cat([m1.bias.grad.data,
+                                        m2.bias.grad.data], 0),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            self.assertEqual(m.weight.grad.data,
+                             torch.cat([m1.weight.grad.data,
+                                        m2.weight.grad.data], 0),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_Conv3d_depthwise_naive_groups_cuda(self, dtype=torch.float):
+        for depth_multiplier in [1, 2]:
+            m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
+            i = torch.randn(2, 2, 6, 6, 6, device="cuda", dtype=dtype).div_(2).requires_grad_()
+            output = m(i)
+            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4, 4, device="cuda", dtype=dtype) / 2
+            output.backward(grad_output)
+
+            offset = 1 * depth_multiplier
+
+            m1 = nn.Conv3d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
+            m1.weight.data = m.weight.data[:offset].clone()
+            m1.bias.data = m.bias.data[:offset].clone()
+            i1 = i.detach()[:, :1].clone().requires_grad_()
+            output1 = m1(i1)
+            output1.backward(grad_output[:, :offset].contiguous())
+
+            m2 = nn.Conv3d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
             m2.weight.data.copy_(m.weight.data[offset:])
             m2.bias.data.copy_(m.bias.data[offset:])
             i2 = i.detach()[:, 1:].clone().requires_grad_()
@@ -8643,7 +8705,7 @@ class TestNN(NNTestCase):
             kwargs = dict(mode='bicubic', align_corners=align_corners)
             # test float scale factor up & downsampling
             for device in device_list:
-                for scale_factor in [0.5, 1.5, 2]:
+                for scale_factor in [0.5, 1, 1.5, 2]:
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
                     out_size = int(math.floor(in_t.shape[-1] * scale_factor))
@@ -13369,6 +13431,77 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
+    @onlyOnCPUAndCUDA
+    def test_fractional_max_pool2d(self, device):
+        x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
+        samples = x.new(1, 2, 2).uniform_()
+
+        def func(x):
+            return F.fractional_max_pool2d(
+                x, (2, 2), output_size=(3, 3), _random_samples=samples)
+
+        self.assertEqual(func(x).shape, (1, 2, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        x = torch.randn(2, 7, 7, requires_grad=True, device=device)
+        self.assertEqual(func(x).shape, (2, 3, 3))
+        if self.device_type != 'cuda':
+            # Reference: https://github.com/pytorch/pytorch/issues/52427
+            # Raises -> RuntimeError: TensorAccessor expected 4 dims but tensor has 3
+            # on CUDA in gradcheck
+            gradcheck(func, [x])
+            gradgradcheck(func, [x])
+
+        for kernel_size in [(), (1,)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
+                # Incorrect kernel_size
+                F.fractional_max_pool2d(x, kernel_size=kernel_size, output_size=(3, 3), _random_samples=samples)
+
+        err_large_msg = "too large relative to input "
+        err_out_size_msg = "output_size must either"
+        for output_size, msg in [((9, 3), err_large_msg + "height"),
+                                 ((3, 9), err_large_msg + "width"),
+                                 ((3,), err_out_size_msg),
+                                 ((), err_out_size_msg)]:
+            with self.assertRaisesRegex(RuntimeError, msg):
+                # Incorrect output_size
+                F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
+
+    @onlyOnCPUAndCUDA
+    def test_fractional_max_pool3d(self, device):
+        x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
+        samples = x.new(1, 2, 3).uniform_()
+
+        def func(x):
+            return F.fractional_max_pool3d(
+                x, (2, 2, 2), output_size=(3, 3, 3), _random_samples=samples)
+
+        self.assertEqual(func(x).shape, (1, 2, 3, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        x = torch.randn(2, 7, 7, 7, requires_grad=True, device=device)
+        self.assertEqual(func(x).shape, (2, 3, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        for kernel_size in [(), (1,), (1, 1)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
+                # Incorrect kernel_size
+                F.fractional_max_pool3d(x, kernel_size=kernel_size, output_size=(3, 3, 3), _random_samples=samples)
+
+        err_large_msg = "too large relative to input "
+        err_out_size_msg = "output_size must either"
+        for output_size, msg in [((9, 3, 3), err_large_msg + "time"),
+                                 ((3, 9, 3), err_large_msg + "height"),
+                                 ((3, 3, 9), err_large_msg + "width"),
+                                 ((3, 3), err_out_size_msg),
+                                 ((3,), err_out_size_msg),
+                                 ((), err_out_size_msg)]:
+            with self.assertRaisesRegex(RuntimeError, msg):
+                # Incorrect output_size
+                F.fractional_max_pool3d(x, (2, 2, 2), output_size=output_size, _random_samples=samples)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
@@ -14354,11 +14487,13 @@ class TestLazyModules(TestCase):
     def test_linear(self):
         module = nn.LazyLinear(10)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
         module(input)
         self.assertIsInstance(module, nn.Linear)
         self.assertNotIsInstance(module, nn.LazyLinear)
         self.assertTrue(module.weight.shape == (10, 5))
+        self.assertTrue(module.bias.shape == (10,))
         y = module(input)
         self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
 
@@ -14366,9 +14501,11 @@ class TestLazyModules(TestCase):
     def test_lazy_linear_pickle(self):
         module = nn.LazyLinear(10)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         module = pickle.loads(pickle.dumps(module))
         self.assertIsInstance(module, nn.LazyLinear)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
         module(input)  # fully materialized
         new_module = pickle.loads(pickle.dumps(module))
@@ -14376,6 +14513,8 @@ class TestLazyModules(TestCase):
         self.assertNotIsInstance(new_module, nn.LazyLinear)
         self.assertTrue(new_module.weight.shape == (10, 5))
         self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+        self.assertTrue(new_module.bias.shape == (10,))
+        self.assertNotIsInstance(new_module.bias, UninitializedParameter)
 
     @suppress_warnings
     def test_linear_state(self):
@@ -14387,29 +14526,40 @@ class TestLazyModules(TestCase):
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertTrue(lazy_module.weight.shape == (10, 5))
+        self.assertTrue(lazy_module.bias.shape == (10,))
 
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
 
-    def _check_lazy_conv(self, cls, lazy_cls, func, init_args, input_shape, expected_weight_shape):
+    def _check_lazy_conv(self, cls, lazy_cls, func, init_args, input_shape,
+                         expected_weight_shape, expected_bias_shape):
         module = lazy_cls(*init_args)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(*input_shape)
         module(input)
         self.assertIsInstance(module, cls)
         self.assertNotIsInstance(module, lazy_cls)
         self.assertEqual(module.weight.shape, expected_weight_shape)
+        if module.bias is not None:
+            self.assertEqual(module.bias.shape, expected_bias_shape)
         y = module(input)
         self.assertTrue(torch.equal(func(input, module.weight, module.bias), y))
 
-    def _check_lazy_conv_pickle(self, cls, lazy_cls, init_args, input_shape, expected_weight_shape):
+    def _check_lazy_conv_pickle(self, cls, lazy_cls, init_args, input_shape,
+                                expected_weight_shape, expected_bias_shape):
         module = lazy_cls(*init_args)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         module = pickle.loads(pickle.dumps(module))
         self.assertIsInstance(module, lazy_cls)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(*input_shape)
         module(input)  # fully materialized
         new_module = pickle.loads(pickle.dumps(module))
@@ -14417,8 +14567,12 @@ class TestLazyModules(TestCase):
         self.assertNotIsInstance(new_module, lazy_cls)
         self.assertEqual(new_module.weight.shape, expected_weight_shape)
         self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+        if new_module.bias is not None:
+            self.assertEqual(new_module.bias.shape, expected_bias_shape)
+            self.assertNotIsInstance(new_module.bias, UninitializedParameter)
 
-    def _check_lazy_conv_state(self, gen_module, gen_lazy_module, expected_weight_shape):
+    def _check_lazy_conv_state(self, gen_module, gen_lazy_module,
+                               expected_weight_shape, expected_bias_shape):
         module = gen_module()
         lazy_module = gen_lazy_module()
         lazy_module.load_state_dict(module.state_dict())
@@ -14427,6 +14581,8 @@ class TestLazyModules(TestCase):
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertEqual(lazy_module.weight.shape, expected_weight_shape)
+        if lazy_module.bias is not None:
+            self.assertEqual(lazy_module.bias.shape, expected_bias_shape)
 
         module = gen_module()
         lazy_module = gen_lazy_module()
@@ -14436,92 +14592,98 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv1d(self):
         self._check_lazy_conv(nn.Conv1d, nn.LazyConv1d, torch.nn.functional.conv1d,
-                              (32, 2), (192, 16, 50), (32, 16, 2))
+                              (32, 2), (192, 16, 50), (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv1d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv1d, nn.LazyConv1d, (32, 2), (192, 16, 50), (32, 16, 2))
+        self._check_lazy_conv_pickle(nn.Conv1d, nn.LazyConv1d, (32, 2), (192, 16, 50),
+                                     (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv1d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv1d(16, 32, 2),
                                     lambda: nn.LazyConv1d(32, 2),
-                                    (32, 16, 2))
+                                    (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d(self):
         self._check_lazy_conv(nn.Conv2d, nn.LazyConv2d, torch.nn.functional.conv2d,
-                              (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+                              (32, 2), (192, 16, 8, 6), (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv2d, nn.LazyConv2d, (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+        self._check_lazy_conv_pickle(nn.Conv2d, nn.LazyConv2d, (32, 2), (192, 16, 8, 6),
+                                     (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv2d(16, 32, 2),
                                     lambda: nn.LazyConv2d(32, 2),
-                                    (32, 16, 2, 2))
+                                    (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d(self):
         self._check_lazy_conv(nn.Conv3d, nn.LazyConv3d, torch.nn.functional.conv3d,
-                              (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+                              (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv3d, nn.LazyConv3d, (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+        self._check_lazy_conv_pickle(nn.Conv3d, nn.LazyConv3d, (32, 2), (192, 16, 8, 7, 6),
+                                     (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv3d(16, 32, 2),
                                     lambda: nn.LazyConv3d(32, 2),
-                                    (32, 16, 2, 2, 2))
+                                    (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transposed1d(self):
         self._check_lazy_conv(nn.ConvTranspose1d, nn.LazyConvTranspose1d, torch.nn.functional.conv_transpose1d,
-                              (32, 2), (192, 16, 50), (16, 32, 2))
+                              (32, 2), (192, 16, 50), (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose1d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose1d, nn.LazyConvTranspose1d, (32, 2), (192, 16, 50), (16, 32, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose1d, nn.LazyConvTranspose1d, (32, 2),
+                                     (192, 16, 50), (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose1d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose1d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose1d(32, 2),
-                                    (16, 32, 2))
+                                    (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d(self):
         self._check_lazy_conv(nn.ConvTranspose2d, nn.LazyConvTranspose2d, torch.nn.functional.conv_transpose2d,
-                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose2d, nn.LazyConvTranspose2d, (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose2d, nn.LazyConvTranspose2d, (32, 2),
+                                     (192, 16, 8, 6), (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose2d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose2d(32, 2),
-                                    (16, 32, 2, 2))
+                                    (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d(self):
         self._check_lazy_conv(nn.ConvTranspose3d, nn.LazyConvTranspose3d, torch.nn.functional.conv_transpose3d,
-                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose3d, nn.LazyConvTranspose3d, (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose3d, nn.LazyConvTranspose3d, (32, 2),
+                                     (192, 16, 8, 7, 6), (16, 32, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose3d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose3d(32, 2),
-                                    (16, 32, 2, 2, 2))
+                                    (16, 32, 2, 2, 2), (32,))
 
     def _check_lazy_batchnorm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
@@ -14677,7 +14839,9 @@ class TestLazyModules(TestCase):
         net = MyNetwork()
         net(torch.ones(5, 10))
         self.assertTrue(net.linear_1.weight.shape == (15, 10))
+        self.assertTrue(net.linear_1.bias.shape == (15,))
         self.assertTrue(net.linear_2.weight.shape == (10, 15))
+        self.assertTrue(net.linear_2.bias.shape == (10,))
 
     @suppress_warnings
     def test_optimizer_pass(self):

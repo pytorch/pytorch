@@ -188,11 +188,13 @@ def analyze(
     head_report: SimplerReport,
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
-    # most recent master ancestor with at least one S3 report
-    base_sha = next(sha for sha, reports in base_reports.items() if reports)
+    nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
+    # most recent master ancestor with at least one S3 report,
+    # or empty list if there are none (will show all tests as added)
+    base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
     # find all relevant suites (those in either base or head or both)
-    all_reports = [head_report] + base_reports[base_sha]
+    all_reports = [head_report] + base_report
     all_suites = {k for r in all_reports for k in r.keys()}
 
     removed_suites: List[SuiteDiff] = []
@@ -204,12 +206,12 @@ def analyze(
         head_suite = head_report.get(suite_name)
         base_cases: Dict[str, Status] = dict(sorted(set.intersection(*[
             {(n, s) for n, (_, s) in report.get(suite_name, {}).items()}
-            for report in base_reports[base_sha]
+            for report in base_report
         ] or [set()])))
         case_stats: Dict[str, Stat] = {}
         if head_suite:
             now = sum(case[0] for case in head_suite.values())
-            if any(suite_name in report for report in base_reports[base_sha]):
+            if any(suite_name in report for report in base_report):
                 removed_cases: List[CaseDiff] = []
                 for case_name, case_status in base_cases.items():
                     case_stats[case_name] = list_stat(matching_test_times(

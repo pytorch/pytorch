@@ -315,57 +315,52 @@ class TORCH_API Store : public StmtNode<Store> {
 // explicitly freed. An unfreed memory is likely considered an error.
 class TORCH_API Allocate : public StmtNode<Allocate> {
  public:
-  static Allocate* make(
-      const VarHandle& buffer_var,
-      Dtype dtype,
-      const std::vector<ExprHandle>& dims) {
-    std::vector<const Expr*> dims_nodes(dims.size());
-    for (size_t i = 0; i < dims.size(); i++) {
-      dims_nodes[i] = dims[i].node();
-    }
-    return new Allocate(buffer_var.node(), dtype, dims_nodes);
+  static Allocate* make(const BufHandle& buf_handle) {
+    return new Allocate(buf_handle.node());
   }
 
   const Var* buffer_var() const {
-    return buffer_var_;
+    return buf_->base_handle();
   }
 
   Dtype dtype() const {
-    return dtype_;
+    return buf_->dtype();
   }
 
-  const std::vector<const Expr*>& dims() const {
-    return dims_;
+  const std::vector<const Expr*> dims() const {
+    return buf_->dims();
   }
 
-  Allocate(
-      const Var* buffer_var,
-      Dtype dtype,
-      const std::vector<const Expr*>& dims)
-      : buffer_var_(buffer_var), dtype_(dtype), dims_(dims) {}
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  explicit Allocate(const Buf* buf) : buf_(buf) {}
 
  private:
-  const Var* buffer_var_;
-  Dtype dtype_;
-  std::vector<const Expr*> dims_;
+  const Buf* buf_;
   // TODO: add memory types.
 };
 
 // Free the specific buffer. It is an error.
 class TORCH_API Free : public StmtNode<Free> {
  public:
-  static Free* make(const VarHandle& buffer_var) {
-    return new Free(buffer_var.node());
+  static Free* make(const BufHandle& buf_handle) {
+    return new Free(buf_handle.node());
   }
 
   const Var* buffer_var() const {
-    return buffer_var_;
+    return buf_->base_handle();
   }
 
-  Free(const Var* buffer_var) : buffer_var_(buffer_var) {}
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  explicit Free(const Buf* buf) : buf_(buf) {}
 
  private:
-  const Var* buffer_var_;
+  const Buf* buf_;
 };
 
 class TORCH_API Let : public StmtNode<Let> {
