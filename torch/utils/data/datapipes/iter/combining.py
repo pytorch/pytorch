@@ -37,7 +37,7 @@ class UnzipIterDataPipe(IterDataPipe):
         datapipe: Iterable DataPipe being disaggregated
     """
     datapipe: IterDataPipe[Sequence]
-    splits: int
+    num_splits: int
     _it: Iterator[Sequence]
 
     def __new__(cls, datapipe: IterDataPipe[Sequence]):
@@ -48,20 +48,20 @@ class UnzipIterDataPipe(IterDataPipe):
             if not isinstance(data, Sequence):
                 raise TypeError("Element from `datapipe` is required being a, "
                                 "Sequence, but {} is found.".format(type(data)))
-            splits = len(data)
-            source_dp.__init__(datapipe, splits)
-            return tuple(_SplitIterDataPipe(source_dp, i) for i in range(splits))
+            num_splits = len(data)
+            source_dp.__init__(datapipe, num_splits)
+            return tuple(_SplitIterDataPipe(source_dp, i) for i in range(num_splits))
         except StopIteration:
             raise TypeError("`datapipe` is required having available data "
                             "for `UnzipIterDataPipe.")
 
-    def __init__(self, datapipe, splits):
+    def __init__(self, datapipe, num_splits):
         self.datapipe = datapipe
-        self.splits = splits
+        self.num_splits = num_splits
         # Status to check if the split has finished processing
         # End: True
         # In-process: False
-        self._end = {sp: True for sp in range(self.splits)}
+        self._end = {sp: True for sp in range(self.num_splits)}
         # Flag to check if all splits are stopped before reset().
         # It prevents the iterator being reset when any other split
         # is still in process.
@@ -83,11 +83,11 @@ class UnzipIterDataPipe(IterDataPipe):
         if not isinstance(data, Sequence):
             raise RuntimeError("Each element from `datapipe` is required being "
                                "a Sequence, but {} is found.".format(type(data)))
-        if len(data) != self.splits:
+        if len(data) != self.num_splits:
             raise RuntimeError("Each element from `datapipe` is required having "
                                "equal length ({} vs {})."
-                               .format(self.splits, len(data)))
-        for i in range(self.splits):
+                               .format(self.num_splits, len(data)))
+        for i in range(self.num_splits):
             self._buffer[i].append(data[i])
         return self.get(split_id)
 
