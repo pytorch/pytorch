@@ -27,16 +27,6 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             store used for rendezvous. It takes any value accepted for the
             same argument of :meth:`~torch.distributed.init_process_group`
             (default: ``env://``).
-        device_maps (Dict[str, Dict]): Device placement mappings from this
-            worker to the callee. Key is the callee worker name and value the
-            dictionary (``Dict`` of ``int``, ``str``, or ``torch.device``) that
-            maps this worker's devices to the callee worker's devices.
-            (default: ``None``)
-
-    .. warning::
-        The ``device_maps`` argument is a prototype feature and subject to
-        change.
-
     """
     def __init__(
         self,
@@ -44,7 +34,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
-        device_maps: Dict = None,
+        _device_maps: Dict = None,
         _transports: List = None,
         _channels: List = None,
     ):
@@ -54,10 +44,10 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             _channels,
             rpc_timeout,
             init_method,
-            device_maps if device_maps else {}
+            _device_maps if _device_maps else {}
         )
 
-    def set_device_map(self, to: str, device_map: Dict):
+    def _set_device_map(self, to: str, device_map: Dict):
         r"""
         Set device mapping between each RPC caller and callee pair. This
         function can be called multiple times to incrementally add
@@ -78,7 +68,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> # on worker 0
             >>> options = TensorPipeRpcBackendOptions(
             >>>     num_worker_threads=8,
-            >>>     device_maps={"worker1": {0, 1}}
+            >>>     _device_maps={"worker1": {0, 1}}
             >>>     # maps worker0's cuda:0 to worker1's cuda:1
             >>> )
             >>> options.set_device_map("worker1", {1, 2})

@@ -2244,7 +2244,7 @@ class TensorPipeDistAutogradTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
 
         # The reverse of this device mapping should be used for the backward pass.
-        options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
+        options._set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
