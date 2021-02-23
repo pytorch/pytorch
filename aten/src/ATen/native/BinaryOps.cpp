@@ -24,7 +24,6 @@ TORCH_META_FUNC2(mul, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
   build_binary_op(maybe_get_output(), self, other);
-  //native::alpha_check(dtype(), alpha);
 }
 
 } // namespace meta
@@ -363,27 +362,8 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
   return native::floor_divide_out(self, self, other);
 }
 
-//Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  //auto iter = TensorIterator::binary_op(result, self, other);
-  //mul_stub(iter.device_type(), iter);
-  //return result;
-//}
-
-//Tensor mul(const Tensor& self, const Tensor& other) {
-  //Tensor result;
-  //auto iter = TensorIterator::binary_op(result, self, other);
-  //mul_stub(iter.device_type(), iter);
-  //return iter.output();
-//}
-
-//Tensor& mul_(Tensor& self, const Tensor& other) {
-  //return native::mul_out(self, self, other);
-//}
-
-//
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
-
 Tensor mul(const Tensor& self, Scalar other) {
   return at::mul(self, wrapped_scalar_tensor(other));
 }
@@ -391,14 +371,6 @@ Tensor mul(const Tensor& self, Scalar other) {
 Tensor& mul_(Tensor& self, Scalar other) {
   return self.mul_(wrapped_scalar_tensor(other));
 }
-
-//Tensor mul(const Tensor& self, Scalar other) {
-  //return native::mul(self, wrapped_scalar_tensor(other));
-//}
-
-//Tensor& mul_(Tensor& self, Scalar other) {
-  //return native::mul_(self, wrapped_scalar_tensor(other));
-//}
 
 // multiply, alias for mul
 Tensor& multiply_out(Tensor& result, const Tensor& self, const Tensor& other) {
