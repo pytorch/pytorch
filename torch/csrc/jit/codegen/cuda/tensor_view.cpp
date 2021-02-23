@@ -234,39 +234,44 @@ TensorView* TensorView::computeWith(TensorView* consumer, int position) {
   return this;
 }
 
-TensorView* TensorView::split(int axis, Val* factor, bool inner_split) {
+TensorView* TensorView::split(int axis_, Val* factor, bool inner_split) {
   // Only check things associated with axis, factor will be validated in
   // IterDomain
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
 
-  if (axis < 0)
-    axis += domain()->nDims();
+  if (axis_ < 0)
+    axis_ += domain()->nDims();
 
   TORCH_INTERNAL_ASSERT(
-      axis >= 0,
+      axis_ >= 0,
       "Split axis is less than 0 even after adjusting for nDims: ",
-      axis);
+      axis_);
 
   TORCH_CHECK(
-      axis >= (int)getComputeAtPosition(),
+      axis_ >= (int)getComputeAtPosition(),
       "Cannot split axis within compute at position. Axis = ",
-      axis,
+      axis_,
       " computeAtPosition = ",
       getComputeAtPosition());
 
   TORCH_CHECK(
-      axis >= (int)getMaxProducerPosition(),
+      axis_ >= (int)getMaxProducerPosition(),
       "Cannot split axis within max producer position. Axis = ",
-      axis,
+      axis_,
       " maxProducerPosition = ",
       getMaxProducerPosition());
 
-  domain()->split(axis, factor, inner_split);
+  TORCH_CHECK(
+      axis(axis_)->getParallelType() == ParallelType::Serial,
+      "Splitting an axis of non-Serial parallel type is not supported at this time."
+      " Parallelization strategy must be set after calling split.");
+
+  domain()->split(axis_, factor, inner_split);
   return this;
 }
 
 TensorView* TensorView::split(int axis, unsigned int factor, bool inner_split) {
-  domain()->split(axis, new Int(factor), inner_split);
+  split(axis, new Int(factor), inner_split);
   return this;
 }
 
@@ -300,6 +305,12 @@ TensorView* TensorView::merge(int axis_o, int axis_i) {
       axis_i,
       " are within maxProducerPosition = ",
       getMaxProducerPosition());
+
+  TORCH_CHECK(
+      axis(axis_o)->getParallelType() == ParallelType::Serial ||
+          axis(axis_i)->getParallelType() == ParallelType::Serial,
+      "Merging axes of non-Serial parallel type is not supported at this time."
+      " Parallelization strategy must be set after calling split.");
 
   domain()->merge(axis_o, axis_i);
   return this;

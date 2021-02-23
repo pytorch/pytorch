@@ -566,9 +566,6 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   TORCH_CHECK(
       outer->isReduction() == inner->isReduction(),
       "Merging IterDomains requires that their iteration types match.");
-  TORCH_CHECK(
-      outer->getParallelType() == inner->getParallelType(),
-      "Merging IterDomains requires that their parallel types match.");
 
   Val* merged_id_size = mul(outer->extent(), inner->extent());
 
@@ -604,12 +601,6 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   TORCH_CHECK(
       in->start()->isZeroInt(),
       "Splitting IterDomains with starting values that aren't 0 is not supported at this time.");
-
-  if (in->getParallelType() != ParallelType::Serial)
-    TORCH_CHECK(
-        false,
-        "Splitting an axis of non-Serial iteration is not supported at this time."
-        " Parallelization strategy must be set after calling split.");
 
   TORCH_CHECK(factor->isAnInt(), "Cannot split by non-integer value ", factor);
 
