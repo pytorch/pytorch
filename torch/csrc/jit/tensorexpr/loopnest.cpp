@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
-#include <queue>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -56,6 +55,7 @@ class IndexFlattener : public IRMutator {
   Stmt* flatten(Stmt* s) {
     return s->accept_mutator(this);
   }
+
   const Expr* mutate(const Load* v) override {
     if (v->indices().size() == 1) {
       return v;
@@ -441,82 +441,15 @@ class Flattener : public IRMutator {
   }
 };
 
-class DepTracker : public IRVisitor {
- public:
-  std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
-    used_tensors.clear();
-    tensor->stmt()->accept(this);
-    return used_tensors;
-  }
-
- private:
-  void visit(const FunctionCall* v) override {
-    used_tensors.push_back(const_cast<Tensor*>(v->tensor())); // NOLINT
-  }
-
-  std::vector<Tensor*> used_tensors;
-};
-
-std::vector<Tensor*> LoopNest::findAllNeededTensors(
-    const std::vector<Tensor*>& tensors) {
-  DepTracker d;
-  std::queue<Tensor*> q;
-  std::unordered_set<Tensor*> queued;
-  std::vector<Tensor*> result;
-  std::unordered_set<Tensor*> processed;
-  for (Tensor* t : tensors) {
-    if (queued.insert(t).second) {
-      q.push(t);
-    }
-  }
-  while (!q.empty()) {
-    Tensor* t = q.front();
-    q.pop();
-    queued.erase(t);
-    std::vector<Tensor*> deps = d.findUsedTensors(t);
-    bool all_processed = true;
-    for (Tensor* dep : deps) {
-      if (!processed.count(dep)) {
-        if (queued.insert(dep).second) {
-          q.push(dep);
-        }
-        all_processed = false;
-      }
-    }
-    if (all_processed) {
-      result.push_back(t);
-      if (processed.count(t)) {
-        throw malformed_input("failure to find all processed Tensors");
-      }
-
-      processed.insert(t);
-    } else {
-      if (queued.count(t)) {
-        throw malformed_input("failure to find all queued Tensors");
-      }
-
-      q.push(t);
-      queued.insert(t);
-    }
-  }
-
-  return result;
-}
-
-LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
-  // Find all tensors we need to compute (including dependencies) and put them
-  // in a topological order
-  std::vector<Tensor*> tensors_to_compute =
-      findAllNeededTensors(output_tensors);
-
+void LoopNest::initialize(
+    const std::vector<Tensor*>& output_tensors,
+    const std::vector<Tensor*>& tensors_to_compute) {
   for (auto t : output_tensors) {
     output_bufs_.insert(t->buf());
   }
 
   // Find all intermediate tensors, we'll need that for inserting alloc/free
   // statements
-  std::unordered_set<Tensor*> tensors_to_compute_set(
-      tensors_to_compute.begin(), tensors_to_compute.end());
   for (Tensor* t : tensors_to_compute) {
     if (!output_bufs_.count(t->buf())) {
       intermediate_bufs_.insert(t->buf());
@@ -552,6 +485,20 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
       input_bufs_.insert(buf);
     }
   }
+}
+
+LoopNest::LoopNest(
+    const std::vector<Tensor*>& output_tensors,
+    const std::vector<Tensor*>& tensors_to_compute) {
+  initialize(output_tensors, tensors_to_compute);
+}
+
+LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
+  // Find all tensors we need to compute (including dependencies) and put them
+  // in a topological order
+  std::vector<Tensor*> tensors_to_compute =
+      findAllNeededTensors(output_tensors);
+  initialize(output_tensors, tensors_to_compute);
 }
 
 class FunctionInliner : public IRMutator {
@@ -921,13 +868,8 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   // Insert allocations and frees for temporary buffers in the innermost
   // possible scope.
   for (const Buf* buf : intermediate_bufs_) {
-    const Expr* flat_size = new IntImm(1);
-    for (auto& d : buf->dims()) {
-      flat_size = new Mul(flat_size, d);
-    }
-    flat_size = IRSimplifier::simplify(flat_size);
-    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), {flat_size});
-    Stmt* free = new Free(buf->base_handle());
+    Stmt* alloc = new Allocate(buf);
+    Stmt* free = new Free(buf);
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);
     alloc_block->append_stmt(free);
