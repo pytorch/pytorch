@@ -364,6 +364,8 @@ class MultiProcessTestCase(TestCase):
         # We're retrieving a corresponding test and executing it.
         try:
             getattr(self, test_name)()
+            # Close pipe after done with test.
+            pipe.close()
         except Exception as e:
             logging.error(
                 'Caught exception: \n{}exiting process with exit code: {}'
@@ -415,6 +417,10 @@ class MultiProcessTestCase(TestCase):
             else:
                 self._check_return_codes(elapsed_time)
         finally:
+            # Close all pipes
+            for pid, pipe in self.pid_to_pipe.items():
+                pipe.close()
+
             global TEST_SKIPS
             TEST_SKIPS = self.old_test_skips
 
