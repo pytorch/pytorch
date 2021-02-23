@@ -1688,7 +1688,8 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16),
            assert_autodiffed=True,
-           handles_large_floats=False,
+           # Reference for disabling extremals
+           # https://github.com/pytorch/pytorch/issues/51948
            handles_extremals=False),
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
