@@ -52,11 +52,10 @@ _float_vals = (0.,
                -math.pi + .00001, math.pi - .00001,
                -math.pi, math.pi,
                -math.pi - .00001, math.pi + .00001)
-_large_float_vals = (-501, 501,
-                     -1001.2, 1001.2,
-                     -13437.7, 13437.7,
-                     -4988429.2, 4988429.2,
-                     -1e20, 1e20)
+_large_float16_vals = (-501, 501,
+                       -1001.2, 1001.2,
+                       -13437.7, 13437.7)
+_large_float_vals = _large_float16_vals + (-4988429.2, 4988429.2, -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
 
 
@@ -101,7 +100,12 @@ def generate_numeric_tensors(device, dtype, *,
 
     # Acquires dtype-specific vals
     if dtype.is_floating_point or dtype.is_complex:
-        large_vals = _large_float_vals if include_large_values else tuple()
+        if include_large_values and dtype is torch.float16:
+            large_vals = _large_float16_vals
+        elif include_large_values:
+            large_vals = _large_float_vals
+        else:
+            large_vals = tuple()
         extremals = _float_extremals if include_extremal_values else tuple()
         vals = _float_vals + large_vals + extremals
 
@@ -1693,7 +1697,6 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
     _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                        refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                        ref_backend='scipy'),
