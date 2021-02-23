@@ -141,6 +141,10 @@ bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars) {
     }
   }
 
+//if (!has_same_attributes(expected_device, tensors)) {
+//    return false;
+//}
+
   return true;
 #endif
 }
