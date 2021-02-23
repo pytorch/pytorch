@@ -7,6 +7,7 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 #include <ATen/ATen.h>
+#include <ATen/CPUFunctions.h>
 #include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
@@ -380,7 +381,7 @@ bool test_mul() {
   return TEST(x, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::native::mul(X1, X2);
+    auto Y1 = at::cpu::mul(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto Y2 = mpscnn::mul(MX1, MX2).cpu();
@@ -394,7 +395,7 @@ bool test_mul_broadcast() {
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::native::mul(X1, X2);
+    auto Y1 = at::cpu::mul(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto Y2 = mpscnn::mul(MX1, MX2).cpu();
@@ -408,7 +409,7 @@ bool test_mul_broadcast2() {
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::native::mul(X1, X2);
+    auto Y1 = at::cpu::mul(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto Y2 = mpscnn::mul(MX1, MX2).cpu();

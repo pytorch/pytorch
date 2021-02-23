@@ -20,6 +20,13 @@ TORCH_META_FUNC2(add, Tensor) (
   native::alpha_check(dtype(), alpha);
 }
 
+TORCH_META_FUNC2(mul, Tensor) (
+  const Tensor& self, const Tensor& other
+) {
+  build_binary_op(maybe_get_output(), self, other);
+  //native::alpha_check(dtype(), alpha);
+}
+
 } // namespace meta
 
 
@@ -79,6 +86,12 @@ TORCH_IMPL_FUNC(add_out) (
 ) {
   add_stub(device_type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
+}
+
+TORCH_IMPL_FUNC(mul_out) (
+  const Tensor& self, const Tensor& other, const Tensor& result
+) {
+  mul_stub(device_type(), *this);
 }
 
 Tensor& add_relu_impl(
@@ -350,30 +363,42 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
   return native::floor_divide_out(self, self, other);
 }
 
-Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  mul_stub(iter.device_type(), iter);
-  return result;
-}
+//Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  //auto iter = TensorIterator::binary_op(result, self, other);
+  //mul_stub(iter.device_type(), iter);
+  //return result;
+//}
 
-Tensor mul(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  mul_stub(iter.device_type(), iter);
-  return iter.output();
-}
+//Tensor mul(const Tensor& self, const Tensor& other) {
+  //Tensor result;
+  //auto iter = TensorIterator::binary_op(result, self, other);
+  //mul_stub(iter.device_type(), iter);
+  //return iter.output();
+//}
 
-Tensor& mul_(Tensor& self, const Tensor& other) {
-  return native::mul_out(self, self, other);
-}
+//Tensor& mul_(Tensor& self, const Tensor& other) {
+  //return native::mul_out(self, self, other);
+//}
+
+//
+// TODO: Make this structured to undo the perf regression from native:: removal
+// in call here
 
 Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, wrapped_scalar_tensor(other));
+  return at::mul(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, wrapped_scalar_tensor(other));
+  return self.mul_(wrapped_scalar_tensor(other));
 }
+
+//Tensor mul(const Tensor& self, Scalar other) {
+  //return native::mul(self, wrapped_scalar_tensor(other));
+//}
+
+//Tensor& mul_(Tensor& self, Scalar other) {
+  //return native::mul_(self, wrapped_scalar_tensor(other));
+//}
 
 // multiply, alias for mul
 Tensor& multiply_out(Tensor& result, const Tensor& self, const Tensor& other) {

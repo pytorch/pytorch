@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/CPUFunctions.h>
 
 namespace at { namespace native {
 
@@ -62,7 +63,7 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
     if (beta.toComplexDouble() == 0.0) {
       result.zero_();
     } else {
-      at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+      at::cpu::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
     }
   } else {
     if (!result.is_same(self_)) {
