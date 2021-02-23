@@ -602,6 +602,35 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
+    def test_dict_return_type(self):
+        # verify that we can traverse up nodes which return dictionaries
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x0):
+                x1 = torch.add(x0, 1.0)
+                y1 = torch.add(x0, 1.0)
+                z1 = {'x1': x1, 'y1': (y1,)}
+                return z1
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        results = get_matching_subgraph_pairs(mp, mq)
+        print(results)
+
+        expected_types = {
+            # 'cat_1': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
+            'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
+            'add_2': ((torch.add, torch.add), (toq.add, toq.add)),
+        }
+        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
+
+    @override_qengines
     def test_nodes_with_equal_types_do_not_get_matched(self):
         # verifies that by default, nodes with equivalent types do not get matched.
         # This is important for user defined types, for which we do not know

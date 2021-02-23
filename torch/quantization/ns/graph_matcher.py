@@ -14,7 +14,7 @@ from torch.fx.graph import Graph, Node
 
 from .utils import getattr_from_fqn
 
-from typing import Dict, Tuple, List, Optional, Set, Callable
+from typing import Dict, Tuple, List, Optional, Set, Callable, Any
 
 def _get_output_nodes(g: Graph) -> List[Node]:
     return [n for n in g.nodes if n.op == 'output']
@@ -187,12 +187,7 @@ class _NSGraphMatchableSubgraphsIterator:
             # add args of previous nodes to stack
             # TODO(future PR): handle kwargs as needed
             for arg in cur_start_node.args:
-                if isinstance(arg, Node):
-                    self.stack.append(arg)
-                elif isinstance(arg, torch.fx.immutable_collections.immutable_list):
-                    for inner_node in arg:
-                        if isinstance(inner_node, Node):
-                            self.stack.append(inner_node)
+                self._recursively_add_node_arg_to_stack(arg)
 
             # skip observers, etc
             # note: this check is done on the start_node, i.e.
@@ -204,6 +199,20 @@ class _NSGraphMatchableSubgraphsIterator:
             return cur_start_node, cur_end_node
 
         raise StopIteration
+
+    def _recursively_add_node_arg_to_stack(self, arg: Any) -> None:
+        """
+        Adds all of the nodes in this arg to the stack, properly navigating
+        through list, dicts and tuples.
+        """
+        if isinstance(arg, Node):
+            self.stack.append(arg)
+        elif isinstance(arg, torch.fx.immutable_collections.immutable_list) or type(arg) is tuple:
+            for inner_arg in arg:
+                self._recursively_add_node_arg_to_stack(inner_arg)
+        elif isinstance(arg, torch.fx.immutable_collections.immutable_dict):
+            for key, value in arg.items():
+                self._recursively_add_node_arg_to_stack(value)
 
     def _is_matchable(self, node: Node) -> bool:
         if node.op == 'call_function':
