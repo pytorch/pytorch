@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from typing import Any, TypeVar, Optional, List, NamedTuple, Union, Sequence, Dict, Callable
+from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
 import textwrap
 import torch
 from torch._C import TupleType, OptionalType, ListType
