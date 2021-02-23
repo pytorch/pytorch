@@ -2,6 +2,8 @@ import cimodel.lib.miniutils as miniutils
 
 class MacOsJob:
     def __init__(self, os_version, is_build=False, is_test=False, extra_props=tuple()):
+        # extra_props is tuple type, because mutable data structures for argument defaults
+        # is not recommended.
         self.os_version = os_version
         self.is_build = is_build
         self.is_test = is_test
@@ -18,9 +20,6 @@ class MacOsJob:
 
         full_job_name = "_".join(list(filter(None, full_job_name_list)))
 
-        # phase_name = "test" if self.is_test else "build"
-        # full_job_name = "_".join(non_phase_parts + [extra_name])
-
         test_build_dependency = "_".join(non_phase_parts + ["build"])
         extra_dependencies = [test_build_dependency] if self.is_test else []
         job_dependencies = extra_dependencies
@@ -28,9 +27,6 @@ class MacOsJob:
         # Yes we name the job after itself, it needs a non-empty value in here
         # for the YAML output to work.
         props_dict = {"requires": job_dependencies, "name": full_job_name}
-
-        # if self.extra_props:
-        #     props_dict.update(self.extra_props)
 
         return [{full_job_name: props_dict}]
 
