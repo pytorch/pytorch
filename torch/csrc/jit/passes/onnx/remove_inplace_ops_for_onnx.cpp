@@ -584,7 +584,6 @@ Value* registerSetAttrInBlocks(
     Value* origValue,
     const std::string& output_name) {
   RegisterInplaceNodeInLoopBlocks(origValue, cloneNode->output());
-
   RegisterInplaceNodeInIfBlocks(origValue, cloneNode->output(), output_name);
 
   Value* output = nullptr;
