@@ -441,7 +441,7 @@ class TestOptimizer(TestCase):
         m = optimize_for_mobile(m)
 
         # run forward 3 times until segfault, see https://github.com/pytorch/pytorch/issues/52463
-        x=torch.zeros(1,3,56,56)
+        x = torch.zeros(1, 3, 56, 56)
         self.assertEqual(m(x).numel(), 1000)
         self.assertEqual(m(x).numel(), 1000)
         self.assertEqual(m(x).numel(), 1000)
