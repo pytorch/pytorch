@@ -51,10 +51,10 @@ const AnnotatedKernel OperatorEntry::ambiguousAutogradOtherKernel_ = AnnotatedKe
 
 void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
-  for (auto i = kernels_.begin(); i != kernels_.end(); ++i) {
-    for (auto j = i->second.begin(); j != i->second.end(); ++j) {
-      if (j->inferred_function_schema != nullptr) {
-        checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
+  for (const auto& kernel : kernels_) {
+    for (const auto &j : kernel.second) {
+      if (j.inferred_function_schema != nullptr) {
+        checkSchema(name_, schema, debug, *j.inferred_function_schema, j.debug);
       }
     }
   }

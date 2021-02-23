@@ -252,7 +252,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // shape out_dims + sum_dims. For this, we create a mapping of label
   // to index into the permuted shape.
   std::vector<int64_t> label_perm_index(TOTAL_LABELS, -1);
-  
+
   // Current index in the permuted shape
   int64_t perm_index = 0;
 
@@ -332,7 +332,7 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   // Here we unsqueeze missing dimensions to make all operands have the same
   // number of dimensions. We take diagonals for repeated labels within the
-  // same operand. Finally we permute the operands to align dimensions as 
+  // same operand. Finally we permute the operands to align dimensions as
   // per the perm_out_index we computed above.
   std::vector<Tensor> permuted_operands;
   for (auto i = decltype(num_ops){0}; i < num_ops; ++i) {
@@ -609,12 +609,8 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t1.size(i));
     }
   }
-  for (size_t i = 0; i < dims1.size(); i++) {
-    p1.emplace_back(dims1[i]);
-  }
-  for (size_t i = 0; i < dims2.size(); i++) {
-    p2.emplace_back(dims2[i]);
-  }
+  p1.insert(p1.end(), dims1.begin(), dims1.end());
+  p2.insert(p1.end(), dims2.begin(), dims2.end());
   for (int64_t i = 0; i < input2.dim(); i++) {
     if (! cdims2[i]) {
       p2.emplace_back(i);

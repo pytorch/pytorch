@@ -191,8 +191,8 @@ int64_t hsum(const uint8_t* A, int len) {
 
   alignas(64) int32_t temp[8];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
-  for (int k = 0; k < 8; ++k) {
-    row_sum += temp[k];
+  for (const auto k : temp) {
+    row_sum += k;
   }
 #endif // CPU_CAPABILITY_AVX2
 
@@ -227,8 +227,8 @@ int64_t hsum(const int8_t* A, int len) {
 
   alignas(64) int32_t temp[8];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
-  for (int k = 0; k < 8; ++k) {
-    row_sum += temp[k];
+  for (const auto k : temp) {
+    row_sum += k;
   }
 #endif // CPU_CAPABILITY_AVX2
 
@@ -262,8 +262,8 @@ int64_t hsum(const int32_t* A, int len) {
 
   alignas(64) int64_t temp[4];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_epi64);
-  for (int k = 0; k < 4; ++k) {
-    row_sum += temp[k];
+  for (const auto k : temp) {
+    row_sum += k;
   }
 #endif // CPU_CAPABILITY_AVX2
 
@@ -303,8 +303,8 @@ int64_t hsum_sq(const uint8_t* A, int len) {
 
   alignas(64) int32_t temp[8];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epu32);
-  for (int k = 0; k < 8; ++k) {
-    row_sum += temp[k];
+  for (const auto k : temp) {
+    row_sum += k;
   }
 #endif // CPU_CAPABILITY_AVX2
 
@@ -344,8 +344,8 @@ int64_t hsum_sq(const int8_t* A, int len) {
 
   alignas(64) int32_t temp[8];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epi32);
-  for (int k = 0; k < 8; ++k) {
-    row_sum += temp[k];
+  for (const auto k : temp) {
+    row_sum += k;
   }
 #endif // CPU_CAPABILITY_AVX2
 
@@ -374,8 +374,8 @@ float hsum_sq(const int32_t* A, int len) {
 
   alignas(64) float temp[8];
   _mm256_store_ps(temp, sum_ps);
-  for (int k = 0; k < 8; ++k) {
-    row_sum += static_cast<float>(temp[k]);
+  for (const auto k : temp) {
+    row_sum += static_cast<float>(k);
   }
 #endif // CPU_CAPABILITY_AVX2
 
@@ -475,11 +475,10 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
            */
           auto dx_vec_vec = qx_vec.dequantize(i_scale_vec, i_zp_vec,
                                               i_scale_zp_neg_premul_vec);
-          for (int idx = 0; idx < dx_vec_vec.size(); ++idx) {
-            const auto dx_vec = dx_vec_vec[idx];
+          for (auto & dx_vec : dx_vec_vec) {
             const auto multiplicand = Vec::blendv(negval_vec, one_vec,
                                                   dx_vec > zero_vec);
-            dx_vec_vec[idx] = dx_vec * multiplicand;
+            dx_vec *= multiplicand;
           }
           return qVec::quantize(dx_vec_vec, o_scale, o_zp, o_inv_scale);
         });
@@ -518,11 +517,11 @@ void qsigmoid_kernel(
         [&](Vec value_qx) -> Vec {
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          for (int idx = 0; idx < value_dx.size(); ++idx) {
-            value_dx[idx] = value_dx[idx].neg();
-            value_dx[idx] = value_dx[idx].exp();
-            value_dx[idx] = Vec256<float>(1.0f) + value_dx[idx];
-            value_dx[idx] = value_dx[idx].reciprocal();
+          for (auto & value : value_dx) {
+            value = value.neg();
+            value = value.exp();
+            value = Vec256<float>(1.0f) + value;
+            value = value.reciprocal();
           }
           return Vec::quantize(
               value_dx, output_scale, output_zero_point, inv_output_scale);
@@ -580,10 +579,10 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         [&](qVec value_qx) -> qVec {
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          for (int idx = 0; idx < value_dx.size(); ++idx) {
-            value_dx[idx] =
+          for (auto & value : value_dx) {
+            value =
                 vec256::minimum(
-                    vec256::maximum(value_dx[idx] + kThreeVec, kZeroVec),
+                    vec256::maximum(value + kThreeVec, kZeroVec),
                     kSixVec) /
                 kSixVec;
           }
@@ -733,12 +732,12 @@ void qthreshold_kernel(
           // dequantize
           auto dx_vec = value_qx.dequantize(
             input_scale_vec, input_zero_point_vec, input_scale_neg_zp_premul_vec);
-          for (int idx = 0; idx < dx_vec.size(); ++idx) {
+          for (auto & value : dx_vec) {
             // check if any elements are below threshold
-            auto cmp_to_threshold = dx_vec[idx] > threshold_vec;
+            auto cmp_to_threshold = value > threshold_vec;
             if (cmp_to_threshold.zero_mask()) {
               // blend
-              dx_vec[idx] = Vec::blendv(value_vec, dx_vec[idx], cmp_to_threshold);
+              value = Vec::blendv(value_vec, value, cmp_to_threshold);
               }
             }
           // quantize
@@ -778,9 +777,9 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
         [&](qVec value) -> qVec {
           auto value_dx = value.dequantize(i_scale_vec, i_zero_point_vec,
                                            i_scale_neg_zp_premul_vec);
-          for (int idx = 0; idx < value_dx.size(); idx++) {
-            value_dx[idx] = value_dx[idx] * vec256::minimum(
-              vec256::maximum(value_dx[idx] + three_vec, zero_vec),
+          for (auto & value : value_dx) {
+            value = value * vec256::minimum(
+              vec256::maximum(value + three_vec, zero_vec),
               six_vec
             ) / six_vec;
           }
@@ -900,25 +899,25 @@ void qelu_kernel(
         // dequantize
         auto dx_vec_vec = value_qx.dequantize(i_scale_vec, i_zero_point_vec,
                                             i_scale_neg_zp_premul_vec);
-        for (int idx = 0; idx < dx_vec_vec.size(); idx++) {
+        for (auto & dv_value : dx_vec_vec) {
 
           // quickly check if any elements are below zero
-          auto cmp_to_zero = dx_vec_vec[idx] > zero_vec;
+          auto cmp_to_zero = dv_value > zero_vec;
 
           if (cmp_to_zero.zero_mask()) {
 
-            Vec dx_vec_copy_neg_elu = dx_vec_vec[idx] * one_vec;
+            Vec dx_vec_copy_neg_elu = dv_value * one_vec;
             // calculate the negative part of ELU on the copy
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * input_scale_coef_vec;
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.exp();
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu - one_vec;
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * alpha_vec;
             // blend
-            dx_vec_vec[idx] = Vec::blendv(dx_vec_copy_neg_elu, dx_vec_vec[idx],
-                                        dx_vec_vec[idx] > zero_vec);
+            dv_value = Vec::blendv(dx_vec_copy_neg_elu, dv_value,
+                                        dv_value > zero_vec);
           }
 
-          dx_vec_vec[idx] = dx_vec_vec[idx] * scale_coef_vec;
+          dv_value = dv_value * scale_coef_vec;
         }
         // quantize
         return qVec::quantize(dx_vec_vec, o_scale, o_zp, inv_o_scale);

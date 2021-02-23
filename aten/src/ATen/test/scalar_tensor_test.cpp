@@ -151,28 +151,28 @@ void test(DeprecatedTypeProperties &T) {
         t.fill_(t.sum(0)), ASSERT_GT(t.dim(), 1), ASSERT_LE(t.dim(), 1));
   }
 
-  for (auto lhs_it = sizes.begin(); lhs_it != sizes.end(); ++lhs_it) {
-    for (auto rhs_it = sizes.begin(); rhs_it != sizes.end(); ++rhs_it) {
+  for (const auto& lhs_size: sizes) {
+    for (const auto& rhs_size : sizes) {
       // is_same_size should only match if they are the same shape
       {
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
-        if (*lhs_it != *rhs_it) {
+        auto lhs = ones(lhs_size, T);
+        auto rhs = ones(rhs_size, T);
+        if (lhs_size != rhs_size) {
           ASSERT_FALSE(lhs.is_same_size(rhs));
           ASSERT_FALSE(rhs.is_same_size(lhs));
         }
       }
       // forced size functions (resize_, resize_as, set_)
       {// resize_
-       {auto lhs = ones(*lhs_it, T);
-      auto rhs = ones(*rhs_it, T);
-      lhs.resize_(*rhs_it);
+       {auto lhs = ones(lhs_size, T);
+      auto rhs = ones(rhs_size, T);
+      lhs.resize_(rhs_size);
       require_equal_size_dim(lhs, rhs);
     }
     // resize_as_
     {
-      auto lhs = ones(*lhs_it, T);
-      auto rhs = ones(*rhs_it, T);
+      auto lhs = ones(lhs_size, T);
+      auto rhs = ones(rhs_size, T);
       lhs.resize_as_(rhs);
       require_equal_size_dim(lhs, rhs);
     }
@@ -180,15 +180,15 @@ void test(DeprecatedTypeProperties &T) {
     {
       {
         // with tensor
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(lhs_size, T);
+        auto rhs = ones(rhs_size, T);
         lhs.set_(rhs);
         require_equal_size_dim(lhs, rhs);
       }
       {
         // with storage
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(lhs_size, T);
+        auto rhs = ones(rhs_size, T);
         lhs.set_(rhs.storage());
         // should not be dim 0 because an empty storage is dim 1; all other
         // storages aren't scalars
@@ -196,8 +196,8 @@ void test(DeprecatedTypeProperties &T) {
       }
       {
         // with storage, offset, sizes, strides
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(lhs_size, T);
+        auto rhs = ones(rhs_size, T);
         lhs.set_(rhs.storage(), rhs.storage_offset(), rhs.sizes(), rhs.strides());
         require_equal_size_dim(lhs, rhs);
       }
@@ -206,9 +206,8 @@ void test(DeprecatedTypeProperties &T) {
 
   // view
   {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = ones(*rhs_it, T);
-    auto rhs_size = *rhs_it;
+    auto lhs = ones(lhs_size, T);
+    auto rhs = ones(rhs_size, T);
     TRY_CATCH_ELSE(auto result = lhs.view(rhs_size),
                    ASSERT_NE(lhs.numel(), rhs.numel()),
                    ASSERT_EQ(lhs.numel(), rhs.numel());
@@ -217,8 +216,8 @@ void test(DeprecatedTypeProperties &T) {
 
   // take
   {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = zeros(*rhs_it, T).toType(ScalarType::Long);
+    auto lhs = ones(lhs_size, T);
+    auto rhs = zeros(rhs_size, T).toType(ScalarType::Long);
     TRY_CATCH_ELSE(auto result = lhs.take(rhs), ASSERT_EQ(lhs.numel(), 0);
                    ASSERT_NE(rhs.numel(), 0),
                    require_equal_size_dim(result, rhs));
@@ -226,8 +225,8 @@ void test(DeprecatedTypeProperties &T) {
 
   // ger
   {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = ones(*rhs_it, T);
+    auto lhs = ones(lhs_size, T);
+    auto rhs = ones(rhs_size, T);
     TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
                    ASSERT_TRUE(
                        (lhs.numel() == 0 || rhs.numel() == 0 ||
@@ -242,10 +241,8 @@ void test(DeprecatedTypeProperties &T) {
 
   // expand
   {
-    auto lhs = ones(*lhs_it, T);
-    auto lhs_size = *lhs_it;
-    auto rhs = ones(*rhs_it, T);
-    auto rhs_size = *rhs_it;
+    auto lhs = ones(lhs_size, T);
+    auto rhs = ones(rhs_size, T);
     bool should_pass = should_expand(lhs_size, rhs_size);
     TRY_CATCH_ELSE(auto result = lhs.expand(rhs_size),
                    ASSERT_FALSE(should_pass),
@@ -260,7 +257,7 @@ void test(DeprecatedTypeProperties &T) {
       TRY_CATCH_ELSE(lhs.add_(rhs),
                      ASSERT_FALSE(should_pass_inplace),
                      ASSERT_TRUE(should_pass_inplace);
-                     require_equal_size_dim(lhs, ones(*lhs_it, T)););
+                     require_equal_size_dim(lhs, ones(lhs_size, T)););
     }
   }
 }

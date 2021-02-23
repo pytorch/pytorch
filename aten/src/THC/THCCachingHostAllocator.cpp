@@ -197,9 +197,9 @@ struct HostAllocator
     std::lock_guard<std::mutex> lock(mutex);
 
     // remove events for freed blocks
-    for (auto it = cuda_events.begin(); it != cuda_events.end(); ++it) {
-      cudaEvent_t event = it->first;
-      Block& block = blocks.at(it->second);
+    for (const auto & cuda_event : cuda_events) {
+      const cudaEvent_t event = cuda_event.first;
+      Block& block = blocks.at(cuda_event.second);
       if (!block.allocated) {
         THCudaCheckWarn(cudaEventDestroy(event));
         block.event_count--;
@@ -233,15 +233,15 @@ struct HostAllocator
     if (err != cudaSuccess) return err;
 
     std::unordered_set<at::cuda::CUDAStream> streams(std::move(block.streams));
-    for (auto it = streams.begin(); it != streams.end(); ++it) {
-      err = cudaSetDevice(it->device_index());
+    for (auto stream : streams) {
+      err = cudaSetDevice(stream.device_index());
       if (err != cudaSuccess) break;
 
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
       if (err != cudaSuccess) break;
 
-      err = cudaEventRecord(event, it->stream());
+      err = cudaEventRecord(event, stream.stream());
       if (err != cudaSuccess) break;
 
       block.event_count++;
