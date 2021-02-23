@@ -756,17 +756,40 @@ class TestJit(JitTestCase):
     def test_debug_flush_compilation_cache(self):
         def foo(x):
             return x + 2
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+
+            def forward(self, t):
+                return t + 2
+
+        m = torch.jit.script(Mod())
         x = torch.rand(1, 10)
+
         with enable_profiling_mode_for_profiling_tests():
             jitted = self.checkScript(foo, (x,))
             # shouldn't throw
             states = jitted.get_debug_state()
+
             # after flushing there shouldn't be
             # no opt plan
-
             jitted._debug_flush_compilation_cache()
             with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
                 states = jitted.get_debug_state() # noqa
+
+            NUM_RUNS = 1
+            with num_profiled_runs(NUM_RUNS):
+                m(x)
+                m(x)
+                fwd = m._c._get_method("forward")
+                states = m.get_debug_state()
+
+                # after flushing there shouldn't be
+                # no opt plan
+                fwd._debug_flush_compilation_cache()
+                with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
+                    states = m.get_debug_state() # noqa
 
     def test_numel(self):
         @torch.jit.script
@@ -4528,9 +4551,9 @@ a")
             return pow(a, b)
 
         def func2(a, b, c, d):
-            return pow(pow(c+a, b), d)
+            return pow(pow(c + a, b), d)
 
-        def func3(a:int, b:float):
+        def func3(a : int, b : float):
             # type: (int, float) -> float
             return pow(a, b)
 
@@ -4541,7 +4564,7 @@ a")
         def func5(x, y):
             return pow(x.item(), y.item())
 
-        def func6(a:int, b:int):
+        def func6(a : int, b : int):
             # type: (int, int) -> float
             return pow(a, b)
 
@@ -9130,6 +9153,51 @@ dedent """
         m.apply(lambda s: s._unpack())
         torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
 
+    def test_torch_any(self):
+        def fn(x):
+            return torch.any(x)
+
+        def fn1(x, dim: int):
+            return torch.any(x, dim)
+
+        self.checkScript(fn, (torch.randn(3, 4), ))
+        self.checkScript(fn, (torch.empty(3), ))
+        self.checkScript(fn, (torch.empty(1), ))
+        self.checkScript(fn, (torch.ones(3, 4),))
+        self.checkScript(fn, (torch.zeros(5, 7, 1),))
+        self.checkScript(fn1, (torch.empty(3, 4), -2))
+        self.checkScript(fn1, (torch.randn(3, 8), 1))
+        self.checkScript(fn1, (torch.zeros(3, 6, 9), -3))
+        self.checkScript(fn1, (torch.empty(5), 0))
+
+    def test_any(self):
+        def fn(x: List[int]):
+            return any(x)
+
+        def fn1(x: List[float]):
+            return any(x)
+
+        def fn2(x: List[bool]):
+            return any(x)
+
+        def fn3(x: List[str]):
+            return any(x)
+
+        self.checkScript(fn, ([0, 0, 0, 0], ))
+        self.checkScript(fn, ([0, 3, 0], ))
+        self.checkScript(fn, ([], ))
+        self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
+        self.checkScript(fn1, ([0.0, 0.0, 0.0], ))
+        self.checkScript(fn1, ([0, 0, 0], ))
+        self.checkScript(fn1, ([], ))
+        self.checkScript(fn2, ([True, False, False], ))
+        self.checkScript(fn2, ([False, False, False], ))
+        self.checkScript(fn2, ([True, True, True, True], ))
+        self.checkScript(fn2, ([], ))
+        self.checkScript(fn3, (["", "", ""], ))
+        self.checkScript(fn3, (["", "", "", "-1"], ))
+        self.checkScript(fn3, ([], ))
+
     def test_script_module_not_tuple(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['mods']
@@ -9609,8 +9677,17 @@ dedent """
                 return x - 1
 
         inp = torch.randn(3, 3)
-
         self.checkScript(test_if_tracing, (inp,))
+
+    def test_script_is_tracing(self):
+        def test_is_tracing(x):
+            if torch.jit.is_tracing():
+                return x + 1
+            else:
+                return x - 1
+
+        inp = torch.randn(3, 3)
+        self.checkScript(test_is_tracing, (inp,))
 
     def test_is_scripting(self):
         def foo():

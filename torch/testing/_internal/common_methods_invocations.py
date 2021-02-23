@@ -18,7 +18,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
-     skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
+     skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -677,6 +677,47 @@ def sample_inputs_index_select(op_info, device, dtype, requires_grad):
                                      requires_grad=requires_grad),
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
+
+def sample_inputs_sort(op_info, device, dtype, requires_grad):
+    def apply_grad(t):
+        if dtype in floating_types_and(torch.float16, torch.bfloat16):
+            t.requires_grad_(requires_grad)
+
+    def small_3d_unique(dtype, device):
+        res = torch.randperm(S * S * S, dtype=torch.int64, device=device).view(S, S, S)
+        res = res.to(dtype)
+        apply_grad(res)
+        return res
+
+    samples = []
+
+    # Test cases for small 3d tensors.
+    # Imitates legacy tests from test/test_torch.py
+    self = small_3d_unique(dtype, device)
+    dims = range(-3, 3)
+    flag = [True, False]
+    for dim, descending, stable in product(dims, flag, flag):
+        # default schema without stable sort
+        samples.append(SampleInput((self, dim, descending)))
+        # schema with stable sort, no CUDA support yet
+        if torch.device(device).type == 'cpu':
+            samples.append(
+                SampleInput(self, kwargs=dict(dim=dim, descending=descending, stable=stable))
+            )
+
+    # Test cases for scalar tensor
+    scalar = torch.tensor(1, dtype=dtype, device=device)
+    apply_grad(scalar)
+    samples.append(SampleInput((scalar)))
+    samples.append(SampleInput((scalar, 0)))
+    samples.append(SampleInput((scalar, 0, True)))
+    # no CUDA support for stable sort yet
+    if not device.startswith('cuda'):
+        samples.append(SampleInput(scalar, kwargs=dict(stable=True)))
+        samples.append(SampleInput(scalar, kwargs=dict(dim=0, stable=True)))
+        samples.append(SampleInput(scalar, kwargs=dict(dim=0, descending=True, stable=True)))
+
+    return samples
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
     samples = []
@@ -1532,6 +1573,24 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs'),
                    ),
                    sample_inputs_func=sample_inputs_clamp),
+    UnaryUfuncInfo('conj',
+                   ref=np.conj,
+                   dtypes=all_types_and_complex_and(torch.bool,
+                                                    torch.bfloat16, torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None,
+                   dtypesIfROCM=None,
+                   skips=(
+                       # File "test_unary_ufuncs.py", line 289, in test_reference_numerics
+                       #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
+                       # KeyError: <class 'numpy.intc'>
+                       # Following error in Windows CI
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.int],
+                                active_if=IS_WINDOWS),
+                   ),
+                   supports_tensor_out=True,
+                   test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2250,6 +2309,14 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float16, torch.bfloat16]),
            ),
            sample_inputs_func=sample_inputs_index_select),
+    OpInfo('sort',
+           dtypes=all_types_and(torch.bool, torch.float16),
+           # sort on CUDA is still in the TH, no torch.bool/torch.float16 support yet
+           dtypesIfCUDA=all_types_and(torch.float16),
+           dtypesIfROCM=all_types_and(torch.float16),
+           supports_tensor_out=False,
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_sort),
     OpInfo('stack',
            # gradcheck expects the input arguments as a flat list
            op=lambda *args, idx: torch.stack([*args], idx),
@@ -2748,7 +2815,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('conj', (S, S, S), NO_ARGS),
         ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
         ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
         ('copysign', (S, S), ((S, S, S),), 'broadcast_lhs', (False,)),
@@ -3338,12 +3404,6 @@ def method_tests():
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
-        ('sort', (S, M, S), NO_ARGS),
-        ('sort', (S, M, S), (1,), 'dim'),
-        ('sort', (S, M, S), (1, True), 'dim_desc'),
-        ('sort', (), NO_ARGS, 'scalar'),
-        ('sort', (), (0,), 'dim_scalar'),
-        ('sort', (), (0, True), 'dim_desc_scalar'),
         ('msort', (S, M, S), NO_ARGS),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
