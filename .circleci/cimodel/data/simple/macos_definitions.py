@@ -1,11 +1,11 @@
 import cimodel.lib.miniutils as miniutils
 
 class MacOsJob:
-    def __init__(self, os_version, is_build=False, is_test=False, extra_props={}):
+    def __init__(self, os_version, is_build=False, is_test=False, extra_props=tuple()):
         self.os_version = os_version
         self.is_build = is_build
         self.is_test = is_test
-        self.extra_props = extra_props
+        self.extra_props = dict(extra_props)
 
     def gen_tree(self):
         non_phase_parts = ["pytorch", "macos", self.os_version, "py3"]
@@ -47,9 +47,9 @@ WORKFLOW_DATA = [
         "10_13",
         is_build=True,
         is_test=True,
-        extra_props={
-            "lite_interpreter": True,
-        },
+        extra_props=tuple({
+            "lite_interpreter": True
+        }.items()),
     )
 ]
 
