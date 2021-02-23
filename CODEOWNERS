@@ -8,8 +8,9 @@
 
 # Not there to strictly require the approval, but to be tagged as a reviewer
 # on the PRs to push them into a high priority inbox.
-/torch/csrc/autograd/ @albanD
-/torch/autograd/ @albanD
+/torch/csrc/autograd/ @albanD @soulitzer
+/torch/autograd/ @albanD @soulitzer
+/tools/autograd/ @albanD @soulitzer
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
