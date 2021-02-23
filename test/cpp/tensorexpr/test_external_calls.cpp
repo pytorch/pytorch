@@ -285,6 +285,11 @@ TEST(ExternalCall, ComputeInterop) {
       });
 
   LoopNest l({Input, Weight, ConvResult, MatmulResult, Result});
+
+  // Inlining should not inline anything here since all Bufs are either defined
+  // or used in ExternalCalls - we run it just for testing
+  l.inlineIntermediateBufs(true);
+
   l.prepareForCodegen();
   l.simplify();
 

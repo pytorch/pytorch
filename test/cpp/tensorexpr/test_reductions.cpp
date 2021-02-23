@@ -1305,7 +1305,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   // TODO: The alloc free should be eliminated here since it is size 0.
   const std::string& verification_pattern =
       R"IR(
-# CHECK: Allocate(tmp_buf, float, {0});
+# CHECK: Allocate(tmp_buf); // dtype=float, dims=[0]
 # CHECK: sum[0] = 0.f;
 # CHECK: for (int n = 0; n < 10; n++) {
 # CHECK:   for (int k_tail = 0; k_tail < 10; k_tail++) {
@@ -1496,7 +1496,7 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(d_local, float, {1});
+#CHECK: Allocate(d_local); // dtype=float, dims=[1]
 #CHECK: sum[l1] = 0
 #CHECK: d_local[0] = 0
 #CHECK: for (int n1
@@ -1547,7 +1547,7 @@ TEST(Reductions, ReductionCacheAccessesInner) {
       R"IR(
 #CHECK: sum[l1] = 0
 #CHECK: for (int n1
-#CHECK:   Allocate(d_local, float, {1});
+#CHECK:   Allocate(d_local); // dtype=float, dims=[1]
 #CHECK:   d_local[0] = 0
 #CHECK:   for (int m1
 #CHECK:     d_local[0] = (d_local[0]) + (scale[
@@ -1590,7 +1590,7 @@ TEST(Reductions, ReductionCacheBodyAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(scale_local, float, {384});
+#CHECK: Allocate(scale_local); // dtype=float, dims=[1, 32, 12]
 #CHECK: for (int j = 0; j < 32; j++) {
 #CHECK:   for (int k = 0; k < 12; k++) {
 #CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];
@@ -1636,7 +1636,7 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: sum[l1] = (sum[l1]) + (scale[
-#CHECK: Allocate(sum_local, float, {4});
+#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1684,7 +1684,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((12 * n1_1 + 384 * l1_inner) + m1_1) + 1536 * l1_outer]);
-#CHECK: Allocate(sum_local, float, {4});
+#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1733,7 +1733,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: sum[l1] = (sum[l1]) + (scale[(12 * n1_1 + m1_1) + 384 * l1]);
-#CHECK: Allocate(sum_local, float, {4});
+#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK: scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1776,9 +1776,9 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   oss << *s;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(tmp_buf, float, {n});
+#CHECK: Allocate(tmp_buf); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
-#CHECK:   Allocate(tmp2, float, {n});
+#CHECK:   Allocate(tmp2); // dtype=float, dims=[n]
 #CHECK:   for (int i = 0; i < n
 #CHECK:     tmp2[i] = 0
 #CHECK:   }
@@ -1835,10 +1835,10 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   oss << *s;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(tmp_buf, float, {n});
+#CHECK: Allocate(tmp_buf); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int b = 0; b < n
-#CHECK:     Allocate(tmp2, float, {1});
+#CHECK:     Allocate(tmp2); // dtype=float, dims=[1]
 #CHECK:     tmp2[0] = 0
 #CHECK:     for (int c
 #CHECK:       tmp2[0] = (tmp2[0]) + (B[
