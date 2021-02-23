@@ -1,8 +1,5 @@
 #ifndef THC_DEVICE_ALLOCATOR_INC
 #define THC_DEVICE_ALLOCATOR_INC
-
-#include <ATen/cuda/CUDAGraph.h>
-
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/core/Allocator.h>
