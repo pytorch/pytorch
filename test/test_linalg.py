@@ -4277,22 +4277,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
                 torch.orgqr(reflectors, tau)
 
-    @onlyCUDA
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @dtypes(torch.float32)
-    def test_orgqr_many_batches(self, device, dtype):
-        """
-        This test checks whether torch.orgqr works correcly with batchsize beyond
-        the MAGMA's limit of 65535.
-        Calling torch.orgqr for such inputs shouldn't give CUDA error.
-        """
-        batch_limit = 65535
-        batch_size = batch_limit + 5
-
-        reflectors = torch.randn(batch_size, 3, 3, dtype=dtype, device=device)
-        tau = torch.randn(batch_size, 3, dtype=dtype, device=device)
-        torch.orgqr(reflectors, tau)
-
     @precisionOverride({torch.complex64: 5e-6})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
