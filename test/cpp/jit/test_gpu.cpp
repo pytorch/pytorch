@@ -6371,6 +6371,42 @@ TEST(NVFuserTest, FusionComputeAtExprOrder2_CUDA) {
       &fusion, {cg_output}, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const size_t dimx = 13;
+  const size_t dimy = 15;
+
+  TensorView* tv0 = makeConcreteTensor({dimx, dimy});
+  fusion.addInput(tv0);
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(2));
+  TensorView* tv3 = add(tv2, new Double(3));
+  TensorView* tv4 = add(tv3, new Double(4));
+  TensorView* tv5 = mul(tv2, tv4);
+  fusion.addOutput(tv5);
+
+  tv1->computeAt(tv2, 2);
+  tv3->computeAt(tv4, 1);
+  tv4->computeAt(tv5, 2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn({dimx, dimy}, options);
+  auto t1 = aten_input.add(1.);
+  auto t2 = t1.add(2.);
+  auto t3 = t2.add(3.);
+  auto t4 = t3.add(4.);
+  auto aten_output = t2.mul(t4);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({aten_input});
+
+  testValidate(
+      &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionZeroDimComputeAt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -7149,12 +7185,13 @@ TEST(NVFuserTest, FusionCacheFork_CUDA) {
   //          TV2 = TV1 * 1
   // Output:  TV3, TV2
 
+  // cache_fork !!does not!! automatically apply ComputeAt to the cache
+  // TensorView TODO: enforce
+  auto tv3 = tv1->cache_fork();
+
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
   tv0->computeAt(tv2, -1);
-
-  // cache_fork automatically applies ComputeAt to the cache TensorView
-  auto cf1 = tv1->cache_fork();
 
   // Thread and Block binding
   tv2->axis(0)->parallelize(ParallelType::BIDx);

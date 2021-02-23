@@ -75,9 +75,11 @@ struct ExprGroupConnections {
 };
 
 struct ExprSortPayload : public PolymorphicBase {
-  // Track the active domains that start at the compute at point of the
-  // expression and increment outward
+  // Need to track compute at domains as well as produce at domains. Produce at
+  // domains will be matched to producers compute at domains. Track the active
+  // domains that will be matched from inner most dim to outer most.
   std::vector<IterDomain*> ca_domains_;
+  std::vector<IterDomain*> pa_domains_;
 
   // Maximum path distance from an input expr group required for
   // Theorem 4.2
@@ -301,6 +303,43 @@ class ExprSegmentationSorter {
   bool fallback_mode_enabled_ = false;
 };
 
+// Debug printing, disabled due to clang-tidy see above for declarations.
+// std::ostream& operator<<(std::ostream& os, ExprGroup* group) {
+//   os << "g{";
+//   for (size_t i = 0; i < group->exprs().size(); i++) {
+//     os << group->exprs()[i]->name();
+//     if (i + 1 != group->exprs().size())
+//       os << ", ";
+//   }
+//   os << "} (" << group->payload()->ca_domains_.size() << ", "
+//      << group->payload()->pa_domains_.size() << ")";
+//   os << " ca_ids {";
+//   for (size_t i = 0; i < group->payload()->ca_domains_.size(); i++) {
+//     os << group->payload()->ca_domains_[i];
+//     if (i + 1 != group->payload()->ca_domains_.size())
+//       os << ", ";
+//   }
+//   os << "} pa_ids {";
+//   for (size_t i = 0; i < group->payload()->pa_domains_.size(); i++) {
+//     os << group->payload()->pa_domains_[i];
+//     if (i + 1 != group->payload()->pa_domains_.size())
+//       os << ", ";
+//   }
+//   os << "}";
+//   return os;
+// }
+
+// std::ostream& operator<<(std::ostream& os, const ExprGroupConnections* edge)
+// {
+//   os << "e{ " << edge->from << " -> " << edge->to << " }" << std::endl;
+//   return os;
+// }
+
+// std::ostream& operator<<(std::ostream& os, const ExprSegmentationSorter* scf)
+// {
+//   return os << scf->toString();
+// }
+
 std::vector<ExprGroup*> ExprGroup::getNeighbors() {
   std::vector<ExprGroup*> neighbors;
   for (auto inp : producer_edges_) {
@@ -488,11 +527,11 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
   if (ir_utils::isTVOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
     // Grab all id's that are shared with other tensors.
-    for (size_t tv_i = 0; tv_i <
-         std::max(out_tv->getMaxProducerPosition(),
-                  out_tv->getComputeAtPosition());
-         tv_i++) {
+    for (size_t tv_i = 0; tv_i < out_tv->getComputeAtPosition(); tv_i++) {
       group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
+    }
+    for (size_t tv_i = 0; tv_i < out_tv->getMaxProducerPosition(); tv_i++) {
+      group->payload()->pa_domains_.push_back(out_tv->axis(tv_i));
     }
   }
   return group;
@@ -501,41 +540,42 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
 // Debug function that prints the current state of the sorter.
 std::string ExprSegmentationSorter::toString(int verbosity) const {
   std::stringstream ss;
+  ss << "{\n";
   for (auto& group : groups_) {
-    ss << group.get() << "\n";
+    ss << "  " << group.get() << "\n";
 
     if (verbosity > 1) {
       if (group->producerEdges().size() > 0) {
-        ss << "  produced by groups: { \n";
+        ss << "    produced by groups: { \n";
         for (auto producer_edge : group->producerEdges()) {
-          ss << "    " << producer_edge->from << " via " << producer_edge->val
+          ss << "      " << producer_edge->from << " via " << producer_edge->val
              << "\n";
         }
-        ss << "  }"
+        ss << "    }"
            << "\n";
       }
     }
 
     if (verbosity > 0) {
       if (group->consumerEdges().size() > 0) {
-        ss << "  Consumed by groups: { \n";
+        ss << "    Consumed by groups: { \n";
         for (auto consumer_edge : group->consumerEdges()) {
-          ss << "    " << consumer_edge->to << "\n";
+          ss << "      " << consumer_edge->to << "\n";
         }
-        ss << "  }"
+        ss << "    }"
            << "\n";
       }
     }
 
     if (verbosity > 2) {
-      ss << "  Exprs{\n";
+      ss << "    Exprs{\n";
       for (auto expr : group->exprs()) {
-        ss << "    " << expr;
+        ss << expr;
       }
-      ss << "  }\n";
+      ss << "    }\n";
     }
   }
-
+  ss << "}\n";
   return ss.str();
 }
 
@@ -583,7 +623,7 @@ std::vector<ExprGroupConnections*> getMergedConsumerEdges(
 }
 
 // Assuming sg1 and sg2 are connected, figure out which is the consumer
-const ExprGroup* getProducer(const ExprGroup* sg1, const ExprGroup* sg2) {
+ExprGroup* getProducer(ExprGroup* sg1, ExprGroup* sg2) {
   for (auto producer_edge : sg1->producerEdges()) {
     if (producer_edge->from == sg2) {
       return sg2;
@@ -597,6 +637,57 @@ const ExprGroup* getProducer(const ExprGroup* sg1, const ExprGroup* sg2) {
   }
 
   return nullptr;
+}
+
+std::vector<IterDomain*> mergeDomains(
+    const std::vector<IterDomain*>& domain1,
+    const std::vector<IterDomain*>& domain2) {
+  std::vector<IterDomain*> resulting_domain;
+  auto it1 = domain1.begin();
+  auto it2 = domain2.begin();
+
+  // Need to merge domains together. These domains are representative of what's
+  // within all the compute at positions of their respective groups (could be
+  // many Exprs). The domains do not necessarily match, and we want to pull in
+  // all iteration domains, maintaining relative ordering of both domains, while
+  // removing as many duplicate iter domains (iter domains that map to eachother
+  // through index map).
+  while (it1 != domain1.end() || it2 != domain2.end()) {
+    // no lint is for repeated branching, don't lint to avoid running any_of
+    // when not necessary.
+    if (it1 == domain1.end()) { // NOLINT
+      // domain1 has all been pushed, finish pushing domain 2
+      resulting_domain.push_back(*it2++);
+    } else if (it2 == domain2.end()) { // NOLINT
+      // domain2 has all been pushed, finish pushing domain 1
+      resulting_domain.push_back(*it1++);
+    } else if (GpuLower::current()->caLoopMap().areMapped(
+                   *it1, *it2)) { // NOLINT
+      resulting_domain.push_back(*it1);
+      ++it1;
+      ++it2;
+    } else if (std::any_of(it1 + 1, domain1.end(), [&](IterDomain* id1) {
+                 return GpuLower::current()->caLoopMap().areMapped(id1, *it2);
+               })) { // NOLINT
+      // Increment it1, as a later iter domain matches the current one in
+      // domain2
+      resulting_domain.push_back(*it1++);
+
+    } else if (std::any_of(it2 + 1, domain2.end(), [&](IterDomain* id2) {
+                 return GpuLower::current()->caLoopMap().areMapped(id2, *it1);
+               })) { // NOLINT
+      // Increment it2, as a later iter domain matches the current one in
+      // domain1
+      resulting_domain.push_back(*it2++);
+    } else {
+      // This should not be reachalble since the axes here only
+      // include the shared axes between the two expr groups.
+      TORCH_INTERNAL_ASSERT(false, "Should not be reachable.");
+      resulting_domain.push_back(*it1++);
+      resulting_domain.push_back(*it2++);
+    }
+  }
+  return resulting_domain;
 }
 
 } // namespace
@@ -628,60 +719,12 @@ std::unordered_set<ExprGroupConnections*> ExprSegmentationSorter::
 ExprGroup* ExprSegmentationSorter::makeMergedNode(
     ExprGroup* sg1,
     ExprGroup* sg2) {
-  std::vector<IterDomain*> resulting_ca_axes;
-  auto& domain1 = sg1->payload()->ca_domains_;
-  auto& domain2 = sg2->payload()->ca_domains_;
-  auto it1 = domain1.begin();
-  auto it2 = domain2.begin();
-
-  // Need to merge domains together. These domains are representative of what's
-  // within all the compute at positions of their respective groups (could be
-  // many Exprs). The domains do not necessarily match, and we want to pull in
-  // all iteration domains, maintaining relative ordering of both domains, while
-  // removing as many duplicate iter domains (iter domains that map to eachother
-  // through index map).
-  while (it1 != domain1.end() || it2 != domain2.end()) {
-    // no lint is for repeated branching, don't lint to avoid running any_of
-    // when not necessary.
-    if (it1 == domain1.end()) { // NOLINT
-      // domain1 has all been pushed, finish pushing domain 2
-      resulting_ca_axes.push_back(*it2++);
-    } else if (it2 == domain2.end()) { // NOLINT
-      // domain2 has all been pushed, finish pushing domain 1
-      resulting_ca_axes.push_back(*it1++);
-    } else if (GpuLower::current()->caLoopMap().areMapped(
-                   *it1, *it2)) { // NOLINT
-      resulting_ca_axes.push_back(*it1);
-      ++it1;
-      ++it2;
-    } else if (std::any_of(it1 + 1, domain1.end(), [&](IterDomain* id1) {
-                 return GpuLower::current()->caLoopMap().areMapped(id1, *it2);
-               })) { // NOLINT
-      // Increment it1, as a later iter domain matches the current one in
-      // domain2
-      resulting_ca_axes.push_back(*it1++);
-
-    } else if (std::any_of(it2 + 1, domain2.end(), [&](IterDomain* id2) {
-                 return GpuLower::current()->caLoopMap().areMapped(id2, *it1);
-               })) { // NOLINT
-      // Increment it2, as a later iter domain matches the current one in
-      // domain1
-      resulting_ca_axes.push_back(*it2++);
-    } else {
-      // This should not be reachalble since the axes here only
-      // include the shared axes between the two expr groups.
-      TORCH_INTERNAL_ASSERT(false, "Should not be reachable.");
-      resulting_ca_axes.push_back(*it1++);
-      resulting_ca_axes.push_back(*it2++);
-    }
-  }
+  // Keep Expr's sorted in topological order.
+  const auto producer = getProducer(sg1, sg2);
+  const auto consumer = sg1 == producer ? sg2 : sg1;
 
   // Make the new joined node
   auto joined_groups = makeEmptyGroup();
-
-  // Keep Expr's sorted in topological order.
-  auto producer = getProducer(sg1, sg2);
-  auto consumer = sg1 == producer ? sg2 : sg1;
 
   TORCH_INTERNAL_ASSERT(
       producer != nullptr,
@@ -718,9 +761,94 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     edge->to->addProducerEdge(edges_.back().get());
   }
 
-  joined_groups->payload()->ca_domains_ = resulting_ca_axes;
+  if (std::all_of(
+          producer->consumerEdges().begin(),
+          producer->consumerEdges().end(),
+          [&consumer](ExprGroupConnections* connection) {
+            return connection->to == consumer;
+          })) {
+    // If all consumers of producer were resolved (i.e. last consumer of
+    // producer is the one we're merging with), don't forward the compute at
+    // axes of producer
+    joined_groups->payload()->ca_domains_ = consumer->payload()->ca_domains_;
+  } else {
+    // Merge all compute at domains of producer and consumer
+    std::vector<IterDomain*> resulting_ca_axes =
+        mergeDomains(sg1->payload()->ca_domains_, sg2->payload()->ca_domains_);
+    joined_groups->payload()->ca_domains_ = resulting_ca_axes;
+  }
+
+  if (std::all_of(
+          consumer->producerEdges().begin(),
+          consumer->producerEdges().end(),
+          [&producer](ExprGroupConnections* connection) {
+            return connection->from == producer;
+          })) {
+    // If all producere edges were resolved (i.e. last producer of consumer is
+    // the one we're merging with), don't forward the produce at axes of
+    // consumer
+    joined_groups->payload()->pa_domains_ = producer->payload()->pa_domains_;
+  } else {
+    // Merge all produce at domains of producer and consumer
+    std::vector<IterDomain*> resulting_pa_axes =
+        mergeDomains(sg1->payload()->pa_domains_, sg2->payload()->pa_domains_);
+
+    joined_groups->payload()->pa_domains_ = resulting_pa_axes;
+  }
 
   return joined_groups;
+}
+
+bool canReduceCA(ExprGroup* group) {
+  IterDomain* g_last_id = nullptr;
+
+  if (group->payload()->ca_domains_.size() > 0) {
+    g_last_id = group->payload()->ca_domains_.back();
+  }
+  if (g_last_id == nullptr) {
+    return false;
+  }
+
+  // Compute at can sometimes get in a strange position as the update rules are
+  // not fool proof. All consumers should have a match to this groups inner most
+  // compute at axis, otherwise it should be lowered.
+  for (auto consumer_edge : group->consumerEdges()) {
+    auto consumer = consumer_edge->to;
+    bool has_match = false;
+    for (auto c_id : consumer->payload()->pa_domains_) {
+      if (GpuLower::current()->caLoopMap().areMapped(c_id, g_last_id)) {
+        has_match = true;
+        break;
+      }
+    }
+    if (!has_match) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool canReducePA(ExprGroup* group) {
+  IterDomain* g_last_id = nullptr;
+
+  if (group->payload()->pa_domains_.size() > 0) {
+    g_last_id = group->payload()->pa_domains_.back();
+  }
+  if (g_last_id == nullptr) {
+    return false;
+  }
+
+  for (auto producer_edge : group->producerEdges()) {
+    auto producer = producer_edge->from;
+    for (auto p_id : producer->payload()->ca_domains_) {
+      if (GpuLower::current()->caLoopMap().areMapped(p_id, g_last_id)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 // Update in between attempts to segment. This is called once no more groups
@@ -729,40 +857,25 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
 // merged after we've done this, we may need to stop as we could have multiple
 // disjoint groups that won't be merged.
 bool ExprSegmentationSorter::interIterUpdate() {
-  // Go through groups and lower compute at domain
-  bool lowered_ca_domain = false;
+  // Go through groups and lower either pa or ca domain return if anything was
+  // lowered
+  bool lowered_a_domain = false;
   for (auto& group : groups_) {
-    IterDomain* g_last_id = nullptr;
-    if (group->payload()->ca_domains_.size() > 0) {
-      g_last_id = group->payload()->ca_domains_.back();
-    }
-    if (g_last_id == nullptr) {
-      continue;
-    }
-
-    bool matching_neighbor = false;
-    for (auto neighbor : group->getNeighbors()) {
-      if (matching_neighbor) {
-        break;
-      }
-      for (auto p_id : neighbor->payload()->ca_domains_) {
-        if (GpuLower::current()->caLoopMap().areMapped(p_id, g_last_id)) {
-          matching_neighbor = true;
-          break;
-        }
-      }
-    }
-
-    if (!matching_neighbor) {
+    while (canReduceCA(group.get())) {
       group->payload()->ca_domains_.pop_back();
-      lowered_ca_domain = true;
+      lowered_a_domain = true;
+    }
+
+    if (canReducePA(group.get())) {
+      group->payload()->pa_domains_.pop_back();
+      lowered_a_domain = true;
     }
   }
 
   // If we couldn't lower compute at domain any further, and we haven't merged
   // any new groups after fallback_mode_enabled_ has been turned on, make sure
   // we've finished successfully
-  if (!lowered_ca_domain && n_groups_ == groups_.size()) {
+  if (!lowered_a_domain && n_groups_ == groups_.size()) {
     // Make sure none of the groups are still connected, as that would mean we
     // should have been able to merge them.
     bool successfully_finished = std::all_of(
@@ -816,19 +929,32 @@ void ExprSegmentationSorter::mergeNodes() {
 }
 
 bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
-  auto domain1 = sg1->payload()->ca_domains_;
-  auto domain2 = sg2->payload()->ca_domains_;
+  auto producer_group = getProducer(sg1, sg2);
+  auto consumer_group = sg1 == producer_group ? sg2 : sg1;
 
-  if (domain1.empty() && domain2.empty()) {
+  if (producer_group->payload()->ca_domains_.size() <
+      producer_group->payload()->pa_domains_.size()) {
+    return false;
+  }
+
+  if (consumer_group->payload()->pa_domains_.size() <
+      consumer_group->payload()->ca_domains_.size()) {
+    return false;
+  }
+
+  auto producer_domain = producer_group->payload()->ca_domains_;
+  auto consumer_domain = consumer_group->payload()->pa_domains_;
+
+  if (producer_domain.empty() && consumer_domain.empty()) {
     return true;
   }
 
-  if (domain1.empty() || domain2.empty()) {
+  if (producer_domain.empty() || consumer_domain.empty()) {
     return false;
   }
 
   return GpuLower::current()->caLoopMap().areMapped(
-      domain1.back(), domain2.back());
+      producer_domain.back(), consumer_domain.back());
 }
 
 bool ExprSegmentationSorter::testStillDag(ExprGroup* sg1, ExprGroup* sg2) {
@@ -969,25 +1095,35 @@ void ExprSegmentationSorter::sort() {
         }
 
         auto candidate_it = candidates.begin();
-        while (candidate_it != candidates.end() &&
-               !supportedMerge(group.get(), *candidate_it)) {
+
+        while (candidate_it != candidates.end()) {
+          while (candidate_it != candidates.end() &&
+                 !supportedMerge(group.get(), *candidate_it)) {
+            candidate_it++;
+          }
+
+          if (candidate_it == candidates.end()) {
+            break;
+          }
+
+          if (testStillDag(group.get(), *candidate_it)) {
+            // Mark in same style as default algorithm for convenience even
+            // though we will only merge once with the fallback
+            to_merge_.emplace(group.get());
+            to_merge_.emplace(*candidate_it);
+
+            group->payload()->merged = true;
+            group->payload()->merge_with = *candidate_it;
+
+            (*candidate_it)->payload()->merged = true;
+            (*candidate_it)->payload()->merge_with = group.get();
+            break;
+          }
+
           candidate_it++;
         }
-        if (candidate_it == candidates.end()) {
-          continue;
-        }
 
-        if (testStillDag(group.get(), *candidate_it)) {
-          // Mark in same style as default algorithm for convenience even though
-          // we will only merge once with the fallback
-          to_merge_.emplace(group.get());
-          to_merge_.emplace(*candidate_it);
-
-          group->payload()->merged = true;
-          group->payload()->merge_with = *candidate_it;
-
-          (*candidate_it)->payload()->merged = true;
-          (*candidate_it)->payload()->merge_with = group.get();
+        if (to_merge_.size() > 0) {
           break;
         }
       }
@@ -1004,36 +1140,6 @@ void ExprSegmentationSorter::sort() {
     }
   }
 }
-
-// Debug printing, disabled due to clang-tidy see above for declarations.
-//  std::ostream& operator<<(std::ostream& os, ExprGroup* group) {
-//   os << "g{";
-//   for (size_t i = 0; i < group->exprs().size(); i++) {
-//     os << group->exprs()[i]->name();
-//     if (i + 1 != group->exprs().size())
-//       os << ", ";
-//   }
-//   os << "} ca_ids {";
-//   for (size_t i = 0; i < group->payload()->ca_domains_.size(); i++) {
-//     os << group->payload()->ca_domains_[i];
-//     if (i + 1 != group->payload()->ca_domains_.size())
-//       os << ", ";
-//   }
-
-//   os << "}";
-//   return os;
-// }
-//
-// std::ostream& operator<<(std::ostream& os, const ExprGroupConnections* edge)
-// {
-//   os << "e{ " << edge->from << " -> " << edge->to << " }" << std::endl;
-//   return os;
-// }
-//
-// std::ostream& operator<<(std::ostream& os, const ExprSegmentationSorter* scf)
-// {
-//   return os << scf->toString();
-// }
 
 std::vector<Expr*> ExprSegmentationSorter::getExprs() const {
   std::vector<Expr*> exprs;
