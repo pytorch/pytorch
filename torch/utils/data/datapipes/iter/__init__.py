@@ -10,6 +10,8 @@ from torch.utils.data.datapipes.iter.callable import \
     (MapIterDataPipe as Map, CollateIterDataPipe as Collate)
 from torch.utils.data.datapipes.iter.combinatorics import \
     (SamplerIterDataPipe as Sampler)
+from torch.utils.data.datapipes.iter.combining import \
+    (UnzipIterDataPipe as Unzip, ZipIterDataPipe as Zip)
 from torch.utils.data.datapipes.iter.grouping import \
     (BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch)
 from torch.utils.data.datapipes.iter.selecting import \
@@ -17,4 +19,4 @@ from torch.utils.data.datapipes.iter.selecting import \
 
 
 __all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
-           'Batch', 'BucketBatch', 'Collate', 'Filter', 'Map', 'Sampler']
+           'Batch', 'BucketBatch', 'Collate', 'Filter', 'Map', 'Sampler', 'Unzip', 'Zip']

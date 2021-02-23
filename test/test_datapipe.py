@@ -437,6 +437,81 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
 
+    def test_unzip_datapipe(self):
+        with self.assertRaises(TypeError):
+            dp.iter.Unzip(list(range(5)))
+        with self.assertRaises(TypeError):
+            dp.iter.Unzip([])
+
+        input_dp = IDP([(1, 1), (2, 2), (3, 3), (4, 4)])
+        unzipped_dps = dp.iter.Unzip(input_dp)
+        self.assertEqual(len(unzipped_dps), 2)
+        for unzipped_dp in unzipped_dps:
+            self.assertEqual(len(unzipped_dp), 4)
+        for a, b in zip(*unzipped_dps):
+            self.assertEqual(a, b)
+
+        input_dp = IDP_NoLen([(1, 1), (2, 2), (3, 3), (4, 4)])
+        unzipped_dps = dp.iter.Unzip(input_dp)
+        self.assertEqual(len(unzipped_dps), 2)
+        for unzipped_dp in unzipped_dps:
+            with self.assertRaises(NotImplementedError):
+                len(unzipped_dp)
+        for a, b in zip(*unzipped_dps):
+            self.assertEqual(a, b)
+
+        # RuntimeError
+        unzipped_dps = dp.iter.Unzip(IDP([(1, 2), 3, (4, 5)]))
+        with self.assertRaisesRegex(RuntimeError, r"Each element from `datapipe` "
+                                    "is required being a Sequence"):
+            for _ in zip(*unzipped_dps):
+                pass
+
+        unzipped_dps = dp.iter.Unzip(IDP([(1, 2), (3, ), (4, 5)]))
+        with self.assertRaisesRegex(RuntimeError, r"Each element from `datapipe` "
+                                    "is required having equal length"):
+            for _ in zip(*unzipped_dps):
+                pass
+
+        # RuntimeError for reset UnzipIterDataPipe before all
+        # splits have finished processing
+        input_dp = IDP([(1, 1), (2, 2), (3, 3), (4, 4)])
+        unzipped_dps = dp.iter.Unzip(input_dp)
+        its = tuple(iter(unzipped_dp) for unzipped_dp in unzipped_dps)
+        # One element is left for each split
+        for _ in range(3):
+            for it in its:
+                next(it)
+        for unzipped_dp in unzipped_dps:
+            # New iterator
+            it = iter(unzipped_dp)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"Can not reset `UnzipIterDataPipe`"):
+                next(it)
+        # Drain one iterator
+        for _ in its[0]:
+            pass
+        # Create new iterator
+        it = iter(unzipped_dps[0])
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Can not reset `UnzipIterDataPipe`"):
+            next(it)
+
+    def test_zip_datapipe(self):
+        with self.assertRaises(TypeError):
+            dp.iter.Zip(IDP(range(10)), list(range(10)))
+
+        input_dps = (IDP(range(10)), IDP_NoLen(range(5)))
+        zipped_dp = dp.iter.Zip(*input_dps)
+        with self.assertRaises(NotImplementedError):
+            len(zipped_dp)
+
+        input_dps = (IDP(range(10)), IDP(range(5)))
+        zipped_dp = dp.iter.Zip(*input_dps)
+        self.assertEqual(len(zipped_dp), 5)
+        for a, b in zipped_dp:
+            self.assertEqual(a, b)
+
 
 if __name__ == '__main__':
     run_tests()
