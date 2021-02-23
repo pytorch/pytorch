@@ -3,7 +3,7 @@
 #include <c10/cuda/CUDAStream.h>
 
 // CUDA Graphs utils used by c10 and aten.
-// aten/cuda/CUDAGraphsAtenUtils.cuh adds utils used by aten only.
+// aten/cuda/CUDAGraphsUtils.cuh adds utils used by aten only.
 
 namespace c10 {
 namespace cuda {
