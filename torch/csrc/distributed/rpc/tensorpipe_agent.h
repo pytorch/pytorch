@@ -21,10 +21,10 @@
 
 namespace tensorpipe {
 
-class CpuBuffer;
+struct CpuBuffer;
 
 #ifdef USE_CUDA_NOT_ROCM
-class CudaBuffer;
+struct CudaBuffer;
 #endif
 
 class Context;
