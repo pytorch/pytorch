@@ -16,14 +16,14 @@ namespace native {
 namespace {
 
 __device__ __forceinline__ size_t
-idx_3d(
+idx_3d(const size_t nc,
     const size_t depth,
     const size_t height,
     const size_t width,
     const size_t z,
     const size_t y,
     const size_t x) {
-  return (z * height + y) * width + x;
+  return ((nc * depth + z) * height + y) * width + x;
 }
 
 template <typename scalar_t, typename accscalar_t>
@@ -113,14 +113,14 @@ __global__ void upsample_trilinear3d_out_frame(
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_trilinear3d_backward_out_frame(
-    const int n,
+    const int num_kernels,
     const accscalar_t rdepth,
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 5> idata,
     const PackedTensorAccessor64<scalar_t, 5> odata,
-    scalar_t* idata_ptr_) {
+    scalar_t* idata_ptr) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -134,7 +134,7 @@ __global__ void upsample_trilinear3d_backward_out_frame(
 
   const size_t i_numel = batchsize * channels * depth1 * height1 * width1;
 
-  if (index < n) {
+  if (index < num_kernels) {
     const int w2 = (index % (height2 * width2)) % width2; // 0:width2-1
     const int h2 = (index % (height2 * width2)) / width2; // 0:height2-1
     const int t2 = index / (height2 * width2); // 0:depth2-1
@@ -176,53 +176,53 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     //
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
-        scalar_t* idata_ptr = idata_ptr_ + c * depth1 * height1 * width1;
         const scalar_t d2val = odata[n][c][t2][h2][w2];
+        const size_t nc = n * channels + c;
         fastAtomicAdd(
           idata_ptr,
-          idx_3d(depth1, height1, width1, t1, h1, w1),
+          idx_3d(nc, depth1, height1, width1, t1, h1, w1),
           i_numel,
           static_cast<scalar_t>(t0lambda * h0lambda * w0lambda * d2val),
           true);
         fastAtomicAdd(
           idata_ptr,
-          idx_3d(depth1, height1, width1, t1, h1, w1 + w1p),
+          idx_3d(nc, depth1, height1, width1, t1, h1, w1 + w1p),
           i_numel,
           static_cast<scalar_t>(t0lambda * h0lambda * w1lambda * d2val),
           true);
         fastAtomicAdd(
           idata_ptr,
-          idx_3d(depth1, height1, width1, t1, h1 + h1p, w1),
+          idx_3d(nc, depth1, height1, width1, t1, h1 + h1p, w1),
           i_numel,
           static_cast<scalar_t>(t0lambda * h1lambda * w0lambda * d2val),
           true);
         fastAtomicAdd(
           idata_ptr,
-          idx_3d(depth1, height1, width1, t1, h1 + h1p, w1 + w1p),
+          idx_3d(nc, depth1, height1, width1, t1, h1 + h1p, w1 + w1p),
           i_numel,
           static_cast<scalar_t>(t0lambda * h1lambda * w1lambda * d2val),
           true);
         fastAtomicAdd(
           idata_ptr,
-          idx_3d(depth1, height1, width1, t1 + t1p, h1, w1),
+          idx_3d(nc, depth1, height1, width1, t1 + t1p, h1, w1),
           i_numel,
           static_cast<scalar_t>(t1lambda * h0lambda * w0lambda * d2val),
           true);
         fastAtomicAdd(
           idata_ptr,
-          idx_3d(depth1, height1, width1, t1 + t1p, h1, w1 + w1p),
+          idx_3d(nc, depth1, height1, width1, t1 + t1p, h1, w1 + w1p),
           i_numel,
           static_cast<scalar_t>(t1lambda * h0lambda * w1lambda * d2val),
           true);
         fastAtomicAdd(
           idata_ptr,
-          idx_3d(depth1, height1, width1, t1 + t1p, h1 + h1p, w1),
+          idx_3d(nc, depth1, height1, width1, t1 + t1p, h1 + h1p, w1),
           i_numel,
           static_cast<scalar_t>(t1lambda * h1lambda * w0lambda * d2val),
           true);
         fastAtomicAdd(
           idata_ptr,
-          idx_3d(depth1, height1, width1, t1 + t1p, h1 + h1p, w1 + w1p),
+          idx_3d(nc, depth1, height1, width1, t1 + t1p, h1 + h1p, w1 + w1p),
           i_numel,
           static_cast<scalar_t>(t1lambda * h1lambda * w1lambda * d2val),
           true);
