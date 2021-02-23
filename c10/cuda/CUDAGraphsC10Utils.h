@@ -1,7 +1,7 @@
 #pragma once
 
 // CUDA Graphs utils used by c10 and aten.
-// aten/cuda/CUDAGraphsAtenUtils.cuh has utils used by aten only.
+// aten/cuda/CUDAGraphsAtenUtils.cuh adds utils used by aten only.
 
 namespace c10 {
 namespace cuda {
@@ -24,6 +24,60 @@ struct TORCH_CUDA_CPP_API CUDAStreamCaptureModeGuard {
   cudaStreamCaptureMode strictness_;
 };
 #endif
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+// Protects against enum cudaStreamCaptureStatus implementation changes.
+// Some compilers seem not to like static_assert without the messages.
+static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) == 0,
+              "unexpected int(cudaStreamCaptureStatusNone) value");
+static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) == 1,
+              "unexpected int(cudaStreamCaptureStatusActive) value");
+static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated) == 2,
+              "unexpected int(cudaStreamCaptureStatusInvalidated) value");
+#endif
+
+enum class CaptureStatus: int {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  None = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone),
+  Active = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive),
+  Invalidated = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated)
+#else
+  None = 0
+#endif
+};
+
+inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
+  switch(status) {
+    case CaptureStatus::None:
+      os << "cudaStreamCaptureStatusNone";
+      break;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+    case CaptureStatus::Active:
+      os << "cudaStreamCaptureStatusActive";
+      break;
+    case CaptureStatus::Invalidated:
+      os << "cudaStreamCaptureStatusInvalidated";
+      break;
+#endif
+    default:
+      TORCH_INTERNAL_ASSERT(false,
+                            "Unknown CUDA graph CaptureStatus",
+                            int(status));
+  }
+  return os;
+}
+
+// Use this version where you're sure a CUDA context exists already.
+inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  cudaStreamCaptureStatus is_capturing;
+  AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
+                                      &is_capturing));
+  return CaptureStatus(is_capturing);
+#else
+  return CaptureStatus::None;
+#endif
+}
 
 } // namespace c10
 } // namespace cuda

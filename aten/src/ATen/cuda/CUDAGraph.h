@@ -11,8 +11,6 @@ class CUDAGeneratorImpl;
 
 namespace cuda {
 
-using CaptureId_t = c10::cuda::CaptureId_t;
-
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
