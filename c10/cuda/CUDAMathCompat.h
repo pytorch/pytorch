@@ -43,8 +43,13 @@ __MATH_FUNCTIONS_DECL__ double ceil(double x) {
 }
 
 __MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
+#if defined(__CUDA_ARCH__)
   return ::copysignf(x, y);
+#else
+  return (x & 0x7fff'ffff) | (y & 0x8000'0000);
+#endif
 }
+
 __MATH_FUNCTIONS_DECL__ double copysign(double x, double y) {
   return ::copysign(x, y);
 }

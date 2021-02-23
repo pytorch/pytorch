@@ -141,7 +141,11 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
             floordiv += scalar_t(1.0);
           }
         } else {
+#if defined(__CUDA_ARCH__)
           floordiv = std::copysign(scalar_t(0), a * inv_b);
+#else
+          floordiv = (a * inv_b) & 0x8000;
+#endif
         }
         return floordiv;
       });
@@ -162,7 +166,11 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
             floordiv += scalar_t(1.0);
           }
         } else {
+#if defined(__CUDA_ARCH__)
           floordiv = std::copysign(scalar_t(0), a / b);
+#else
+          floordiv = (a / b) & 0x8000;
+#endif
         }
         return floordiv;
       });
