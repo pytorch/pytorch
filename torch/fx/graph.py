@@ -14,7 +14,8 @@ _origin_type_map = {
     list: List,
     dict: Dict,
     set: Set,
-    frozenset: FrozenSet
+    frozenset: FrozenSet,
+    tuple: Tuple,
 }
 
 class _CustomBuiltin(NamedTuple):

@@ -925,6 +925,16 @@ class TestFX(JitTestCase):
         offsets = torch.LongTensor([0, 4])
         self.assertEqual(loaded(input, offsets), traced(input, offsets))
 
+    def test_return_tuple(self):
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                return (x, x + x)
+
+
+        original = M()
+        traced = symbolic_trace(original)
+        self.assertEqual(traced(torch.ones(1)), original.forward(torch.ones(1)))
+
     def test_construct_root_dict(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')

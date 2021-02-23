@@ -335,7 +335,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
 
             for i, val in enumerate(v["quantized"]):
-                if "lstm_1.stats" not in act_compare_dict:
+                if "lstm.stats" not in act_compare_dict:
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
                 else:
                     self.assertTrue(

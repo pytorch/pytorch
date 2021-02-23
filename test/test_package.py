@@ -84,6 +84,59 @@ the_math = math
         self.assertEqual(package_a_i.result, 'package_a')
         self.assertIsNot(package_a_i, package_a)
 
+    def test_file_structure(self):
+        filename = self.temp()
+
+        export_plain = """\
+    ├── main
+    │   └── main
+    ├── obj
+    │   └── obj.pkl
+    ├── package_a
+    │   ├── __init__.py
+    │   └── subpackage.py
+    └── module_a.py
+"""
+        export_include = """\
+    ├── obj
+    │   └── obj.pkl
+    └── package_a
+        └── subpackage.py
+"""
+        import_exclude = """\
+    ├── .data
+    │   ├── extern_modules
+    │   └── version
+    ├── main
+    │   └── main
+    ├── obj
+    │   └── obj.pkl
+    ├── package_a
+    │   ├── __init__.py
+    │   └── subpackage.py
+    └── module_a.py
+"""
+
+        with PackageExporter(filename, verbose=False) as he:
+            import module_a
+            import package_a
+            import package_a.subpackage
+            obj = package_a.subpackage.PackageASubpackageObject()
+            he.save_module(module_a.__name__)
+            he.save_module(package_a.__name__)
+            he.save_pickle('obj', 'obj.pkl', obj)
+            he.save_text('main', 'main', "my string")
+
+            export_file_structure = he.file_structure()
+            # remove first line from testing because WINDOW/iOS/Unix treat the filename differently
+            self.assertEqual('\n'.join(str(export_file_structure).split('\n')[1:]), export_plain)
+            export_file_structure = he.file_structure(include=["**/subpackage.py", "**/*.pkl"])
+            self.assertEqual('\n'.join(str(export_file_structure).split('\n')[1:]), export_include)
+
+        hi = PackageImporter(filename)
+        import_file_structure = hi.file_structure(exclude="**/*.storage")
+        self.assertEqual('\n'.join(str(import_file_structure).split('\n')[1:]), import_exclude)
+
     def test_save_module_binary(self):
         f = BytesIO()
         with PackageExporter(f, verbose=False) as he:
