@@ -3440,24 +3440,6 @@ class TestNN(NNTestCase):
         self.assertTrue(a.ne(torch.arange(1, 7, dtype=a.dtype).view(2, 3)).all())
         self.assertTrue(a.norm(p=opts["norm_type"], dim=1).le(opts["max_norm"]).all())
 
-    def test_fractional_max_pool2d(self):
-        x = torch.randn(1, 2, 7, 7, requires_grad=True)
-        samples = x.new(1, 2, 2).uniform_()
-
-        def func(x):
-            return F.fractional_max_pool2d(
-                x, (2, 2), output_size=(3, 3), _random_samples=samples)
-
-        self.assertEqual(func(x).shape, (1, 2, 3, 3))
-        gradcheck(func, [x])
-        gradgradcheck(func, [x])
-
-        x = torch.randn(2, 7, 7, requires_grad=True)
-        samples = x.new(2, 2).uniform_()
-        self.assertEqual(func(x).shape, (2, 3, 3))
-        gradcheck(func, [x])
-        gradgradcheck(func, [x])
-
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
         input = torch.randn(5000)
@@ -3793,6 +3775,15 @@ class TestNN(NNTestCase):
 
             # output_2d in shape of [T, 1, D]
             self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
+
+    def test_multihead_attn_no_bias(self):
+        embed_dim = 8
+        num_heads = 4
+        mha = torch.nn.MultiheadAttention(embed_dim, num_heads, bias=False)
+
+        # Verify that bias=False applies to both in and out projection layers.
+        self.assertIsNone(mha.in_proj_bias)
+        self.assertIsNone(mha.out_proj.bias)
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
@@ -13440,6 +13431,77 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
+    @onlyOnCPUAndCUDA
+    def test_fractional_max_pool2d(self, device):
+        x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
+        samples = x.new(1, 2, 2).uniform_()
+
+        def func(x):
+            return F.fractional_max_pool2d(
+                x, (2, 2), output_size=(3, 3), _random_samples=samples)
+
+        self.assertEqual(func(x).shape, (1, 2, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        x = torch.randn(2, 7, 7, requires_grad=True, device=device)
+        self.assertEqual(func(x).shape, (2, 3, 3))
+        if self.device_type != 'cuda':
+            # Reference: https://github.com/pytorch/pytorch/issues/52427
+            # Raises -> RuntimeError: TensorAccessor expected 4 dims but tensor has 3
+            # on CUDA in gradcheck
+            gradcheck(func, [x])
+            gradgradcheck(func, [x])
+
+        for kernel_size in [(), (1,)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
+                # Incorrect kernel_size
+                F.fractional_max_pool2d(x, kernel_size=kernel_size, output_size=(3, 3), _random_samples=samples)
+
+        err_large_msg = "too large relative to input "
+        err_out_size_msg = "output_size must either"
+        for output_size, msg in [((9, 3), err_large_msg + "height"),
+                                 ((3, 9), err_large_msg + "width"),
+                                 ((3,), err_out_size_msg),
+                                 ((), err_out_size_msg)]:
+            with self.assertRaisesRegex(RuntimeError, msg):
+                # Incorrect output_size
+                F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
+
+    @onlyOnCPUAndCUDA
+    def test_fractional_max_pool3d(self, device):
+        x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
+        samples = x.new(1, 2, 3).uniform_()
+
+        def func(x):
+            return F.fractional_max_pool3d(
+                x, (2, 2, 2), output_size=(3, 3, 3), _random_samples=samples)
+
+        self.assertEqual(func(x).shape, (1, 2, 3, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        x = torch.randn(2, 7, 7, 7, requires_grad=True, device=device)
+        self.assertEqual(func(x).shape, (2, 3, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        for kernel_size in [(), (1,), (1, 1)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
+                # Incorrect kernel_size
+                F.fractional_max_pool3d(x, kernel_size=kernel_size, output_size=(3, 3, 3), _random_samples=samples)
+
+        err_large_msg = "too large relative to input "
+        err_out_size_msg = "output_size must either"
+        for output_size, msg in [((9, 3, 3), err_large_msg + "time"),
+                                 ((3, 9, 3), err_large_msg + "height"),
+                                 ((3, 3, 9), err_large_msg + "width"),
+                                 ((3, 3), err_out_size_msg),
+                                 ((3,), err_out_size_msg),
+                                 ((), err_out_size_msg)]:
+            with self.assertRaisesRegex(RuntimeError, msg):
+                # Incorrect output_size
+                F.fractional_max_pool3d(x, (2, 2, 2), output_size=output_size, _random_samples=samples)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
