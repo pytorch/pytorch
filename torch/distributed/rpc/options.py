@@ -32,6 +32,11 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             dictionary (``Dict`` of ``int``, ``str``, or ``torch.device``) that
             maps this worker's devices to the callee worker's devices.
             (default: ``None``)
+
+    .. warning::
+        The ``device_maps`` argument is a prototype feature and subject to
+        change.
+
     """
     def __init__(
         self,
@@ -95,6 +100,9 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> # cuda:1 on worker0
             >>> print(rets[0])  # tensor([2., 2.], device='cuda:0')
             >>> print(rets[0])  # tensor([2., 2.], device='cuda:1')
+
+        .. warning::
+            This method is a prototype feature and subject to change.
         """
         device_index_map = {}
         curr_device_maps = super().device_maps
