@@ -865,7 +865,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   std::ostringstream oss;
   std::unordered_map<std::string, std::string> extra_files;
   extra_files["metadata.json"] = "abc";
-  extra_files["mobile_info.json"] = "foo";
+  extra_files["mobile_info.json"] = "{\"key\": 23}";
   module->_save_for_mobile(oss, extra_files);
 
   std::istringstream iss(oss.str());
@@ -887,7 +887,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
 
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
-  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "foo");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
 }
 
 TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
