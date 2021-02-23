@@ -1776,8 +1776,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             else:
                 qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
             prepare_node_occurrence = {
-                # activation, weight, output
-                ns.call_module(torch.quantization.ObserverBase): 3
+                # weight
+                ns.call_module(torch.quantization.PlaceholderObserver): 1
             }
             convert_node_occurrence = {
                 qlinear_fun: 1,
@@ -1788,6 +1788,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 model, data, QuantType.DYNAMIC, qlinear_fun,
                 is_reference=is_reference,
                 custom_qconfig=float16_dynamic_qconfig,
+                prepare_expected_node_occurrence=prepare_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
 
     @skipIfNoFBGEMM
