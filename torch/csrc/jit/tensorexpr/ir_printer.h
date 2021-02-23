@@ -80,6 +80,8 @@ class TORCH_API IRPrinter : public IRVisitor {
   };
 
  protected:
+  std::string to_string(CompareSelectOperation op);
+
   UniqueNameManager* name_manager() {
     return &name_manager_;
   }

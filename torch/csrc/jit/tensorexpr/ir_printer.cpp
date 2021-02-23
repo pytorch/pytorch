@@ -19,6 +19,24 @@ void IRPrinter::print(const Expr& expr) {
 void IRPrinter::print(const Stmt& stmt) {
   stmt.accept(this);
 }
+std::string IRPrinter::to_string(CompareSelectOperation op) {
+  switch (op) {
+    case CompareSelectOperation::kEQ:
+      return "==";
+    case CompareSelectOperation::kNE:
+      return "!=";
+    case CompareSelectOperation::kGT:
+      return ">";
+    case CompareSelectOperation::kGE:
+      return ">=";
+    case CompareSelectOperation::kLT:
+      return "<";
+    case CompareSelectOperation::kLE:
+      return "<=";
+    default:
+      throw std::runtime_error("invalid compare select operator");
+  }
+}
 
 // TODO: change whether to include the parenthesis to the parent expression,
 // we need to look at the operator precedence to make the output simpler.
@@ -127,28 +145,8 @@ void IRPrinter::visit(const CompareSelect* v) {
   if (lhs_prec >= self_prec) {
     os() << ")";
   }
-  switch (cmp_op) {
-    case CompareSelectOperation::kEQ:
-      os() << "==";
-      break;
-    case CompareSelectOperation::kNE:
-      os() << "!=";
-      break;
-    case CompareSelectOperation::kGT:
-      os() << ">";
-      break;
-    case CompareSelectOperation::kGE:
-      os() << ">=";
-      break;
-    case CompareSelectOperation::kLT:
-      os() << "<";
-      break;
-    case CompareSelectOperation::kLE:
-      os() << "<=";
-      break;
-    default:
-      throw std::runtime_error("invalid compare select operator");
-  }
+
+  os() << to_string(cmp_op);
 
   if (rhs_prec >= self_prec) {
     os() << "(";
@@ -191,7 +189,7 @@ static void formatImm(std::ostream& os, T v) {
   if (std::isnan(v)) {
     os << "NAN";
   } else if (std::isinf(v)) {
-    os << (v > 0 ? "POS_INFINITY" : "NEG_INFINITY");
+    os << (v > 0 ? "INFINITY" : "-INFINITY");
   } else {
     os << std::setprecision(precision) << v;
     formatFPSuffix(os, v);
@@ -457,7 +455,7 @@ void IRPrinter::visit(const Let* v) {
   emitIndent();
   os() << v->dtype().ToCppString() << " " << *v->var();
   os() << " = " << *v->value();
-  os() << "; " << std::endl;
+  os() << ";" << std::endl;
 }
 
 void IRPrinter::visit(const Cond* v) {
