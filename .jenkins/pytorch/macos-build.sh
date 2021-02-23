@@ -28,7 +28,12 @@ if which sccache > /dev/null; then
   export PATH="${WORKSPACE_DIR}:$PATH"
 fi
 
-USE_DISTRIBUTED=1 python setup.py install
+if [ -z "${CROSS_COMPILE_ARM}" ]; then
+  USE_DISTRIBUTED=1 python setup.py install
+else
+  export MACOSX_DEPLOYMENT_TARGET=11.0
+  USE_DISTRIBUTED=1 CMAKE_OSX_ARCHITECTURES=arm64 USE_MKLDNN=OFF USE_NNPACK=OFF USE_QNNPACK=OFF BUILD_TEST=OFF python setup.py bdist_wheel
+fi
 
 assert_git_not_dirty
 
