@@ -1,6 +1,6 @@
 from collections import defaultdict, deque
 from torch.utils.data import IterDataPipe
-from typing import Iterator, Optional, Sequence, Sized, Tuple, TypeVar
+from typing import Dict, Iterator, Optional, Sequence, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -8,7 +8,7 @@ T_co = TypeVar('T_co', covariant=True)
 class UnzipIterDataPipe(IterDataPipe):
     r""" :class:`UnzipIterDataPipe`.
 
-    The inverse of :class:`ZipIterDataPipe`, this class disaggregates
+    The inverse of :class:`ZipIterDataPipe`, this DataPipe disaggregates
     the elements of the zipped iterable DataPipe. The first element
     determines the number of output DataPipe. A :class:`ZipIterDataPipe`
     is often attached later to aggregate these output DataPipes back.
@@ -38,36 +38,35 @@ class UnzipIterDataPipe(IterDataPipe):
     """
     datapipe: IterDataPipe[Sequence]
     num_splits: int
+    _split_stopped: Dict[int, bool]
+    _all_stopped: bool
     _it: Iterator[Sequence]
 
     def __new__(cls, datapipe: IterDataPipe[Sequence]):
         source_dp = super().__new__(cls)
+        # TODO(Erjia): Valid type inference mechanism without fetching data
+        #              at construction time
         it = iter(datapipe)
-        try:
-            data = next(it)
-            if not isinstance(data, Sequence):
-                raise TypeError("Element from `datapipe` is required being a, "
-                                "Sequence, but {} is found.".format(type(data)))
-            num_splits = len(data)
-            source_dp.__init__(datapipe, num_splits)
-            return tuple(_SplitIterDataPipe(source_dp, i) for i in range(num_splits))
-        except StopIteration:
-            raise TypeError("`datapipe` is required having available data "
-                            "for `UnzipIterDataPipe.")
+        data = next(it)
+        num_splits = len(data)
+        source_dp.__init__(datapipe, num_splits, it, data)
+        return tuple(_SplitIterDataPipe(source_dp, i) for i in range(num_splits))
 
-    def __init__(self, datapipe, num_splits):
+    def __init__(self, datapipe, num_splits, first_it, first_data):
         self.datapipe = datapipe
         self.num_splits = num_splits
         # Status to check if the split has finished processing
         # End: True
         # In-process: False
-        self._end = {sp: True for sp in range(self.num_splits)}
-        # Flag to check if all splits are stopped before reset().
-        # It prevents the iterator being reset when any other split
-        # is still in process.
-        self._stopped = True
-        self._it = iter(self.datapipe)
+        self._split_stopped = {sp: True for sp in range(self.num_splits)}
+        # Flag to check if all splits have finished processing.
+        # It prevents the other splits resetting the iterator after
+        # one split has already called reset() and the iterator has
+        # already been re-initialized.
+        self._all_stopped = True
         self._buffer = defaultdict(deque)
+        self._it = first_it
+        self._first_data = first_data
 
     def get(self, split_id):
         if len(self._buffer[split_id]) > 0:
@@ -75,10 +74,10 @@ class UnzipIterDataPipe(IterDataPipe):
         try:
             data = next(self._it)
         except StopIteration:
-            self._end[split_id] = True
-            # Set the flag whenever all splits finish processing
-            if all(self._end.values()):
-                self._stopped = True
+            self._split_stopped[split_id] = True
+            # Set the flag whenever all splits have finished processing
+            if all(self._split_stopped.values()):
+                self._all_stopped = True
             raise StopIteration
         if not isinstance(data, Sequence):
             raise RuntimeError("Each element from `datapipe` is required being "
@@ -92,18 +91,24 @@ class UnzipIterDataPipe(IterDataPipe):
         return self.get(split_id)
 
     def reset(self, split_id):
-        if not self._end[split_id] or not self._stopped:
+        if not self._split_stopped[split_id] or not self._all_stopped:
             raise RuntimeError("Can not reset `UnzipIterDataPipe` when it's "
                                "still in process.")
         else:
-            # First reset() will reset the iterator
-            if all(self._end.values()):
-                self._it = iter(self.datapipe)
-            self._end[split_id] = False
-            # Last reset() will change flag to prevent any reset() is called
-            # by any split when new iteration has started and not finished yet
-            if not any(self._end.values()):
-                self._stopped = False
+            # The first split being re-initialized will reset the
+            # iterator over the source DataPipe
+            if all(self._split_stopped.values()):
+                if self._first_data is not None:
+                    for i in range(self.num_splits):
+                        self._buffer[i].append(self._first_data[i])
+                    self._first_data = None
+                else:
+                    self._it = iter(self.datapipe)
+            self._split_stopped[split_id] = False
+            # The last split being re-initialized will change flag
+            # showing all splits have re-started.
+            if not any(self._split_stopped.values()):
+                self._all_stopped = False
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
@@ -160,8 +165,8 @@ class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
     length: Optional[int]
 
     def __init__(self, *datapipes: IterDataPipe):
-        if not all(tuple(isinstance(dp, IterDataPipe) for dp in datapipes)):
-            raise TypeError("All inputs are equired to be `IterDataPipe` "
+        if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
+            raise TypeError("All inputs are required to be `IterDataPipe` "
                             "for `ZipIterDataPipe`.")
         super().__init__()
         self.datapipes = datapipes  # type: ignore
@@ -176,8 +181,8 @@ class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
             if self.length == -1:
                 raise NotImplementedError
             return self.length
-        if all(list(isinstance(dp, Sized) for dp in self.datapipes)):
-            self.length = min(list(len(dp) for dp in self.datapipes))  # type: ignore
+        if all(isinstance(dp, Sized) for dp in self.datapipes):
+            self.length = min(len(dp) for dp in self.datapipes)  # type: ignore
         else:
             self.length = -1
         return len(self)

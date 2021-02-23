@@ -438,11 +438,6 @@ class TestFunctionalIterDataPipe(TestCase):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
 
     def test_unzip_datapipe(self):
-        with self.assertRaises(TypeError):
-            dp.iter.Unzip(list(range(5)))
-        with self.assertRaises(TypeError):
-            dp.iter.Unzip([])
-
         input_dp = IDP([(1, 1), (2, 2), (3, 3), (4, 4)])
         unzipped_dps = dp.iter.Unzip(input_dp)
         self.assertEqual(len(unzipped_dps), 2)
