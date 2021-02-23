@@ -148,10 +148,10 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
     - https://arxiv.org/pdf/1902.08153.pdf
     - https://arxiv.org/pdf/1903.08066.pdf
     """
+    per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int64)
     grad_X = _fake_quantize_per_channel_affine_grad_reference(
         dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max).to(device)
     per_channel_scale = per_channel_scale.detach().type(torch.float)
-    per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int64)
 
     grad_scale = torch.zeros([per_channel_scale.size(0)]).to(device)
     grad_zero_point = torch.zeros([per_channel_zero_point.size(0)]).to(device)
@@ -873,7 +873,7 @@ class TestFakeQuantize(TestCase):
                 scale, zero_point = float(scale), int(zero_point)
                 quant_min, quant_max = obs._calculate_qmin_qmax()
 
-                Y_test, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
+                Y_test = torch.fake_quantize_per_tensor_affine(
                     X, scale, zero_point, quant_min, quant_max)
                 Y_ref = _fake_quantize_per_tensor_affine_reference(
                     X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
@@ -900,7 +900,7 @@ class TestFakeQuantize(TestCase):
             quant_min, quant_max = obs._calculate_qmin_qmax()
 
             # forward pass
-            Y_test, mask = torch.fake_quantize_per_tensor_affine_cachemask(
+            Y_test = torch.fake_quantize_per_tensor_affine(
                 X, scale, zero_point, quant_min, quant_max)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
@@ -1247,7 +1247,7 @@ class TestFakeQuantize(TestCase):
 
             Y = _fake_quantize_per_channel_affine_reference(
                 X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
-            Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+            Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
@@ -1265,14 +1265,14 @@ class TestFakeQuantize(TestCase):
             quant_min, quant_max = 0, 2 ** (n_bits) - 1
 
             scale_base = scale_base.to(device)
-            zero_point_base = zero_point_base.clamp(quant_min, quant_max)
+            zero_point_base = zero_point_base.to(device)
 
             X_curr = X_base.clone()
             scale_curr = scale_base.clone()
-            zero_point_curr = zero_point_base.to(dtype=torch.int64, device=device)
+            zero_point_curr = zero_point_base.clone()
 
             Y = _fake_quantize_per_channel_affine_reference(
-                X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max).to(device)
+                X_curr, scale_curr, zero_point_curr.round().clamp(quant_min, quant_max), axis, quant_min, quant_max).to(device)
             for grad_factor in [0.1, 1.0, 10.0]:
                 Y_prime = torch._fake_quantize_learnable_per_channel_affine(
                     X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor).to(device)
@@ -1340,7 +1340,7 @@ class TestFakeQuantize(TestCase):
             zero_point = zero_point.to(torch.int64)
             quant_min, quant_max = obs._calculate_qmin_qmax()
             X.requires_grad_()
-            Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+            Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             dout = torch.rand(X.shape, dtype=torch.float).to(device)
             dX = _fake_quantize_per_channel_affine_grad_reference(
@@ -1369,7 +1369,7 @@ class TestFakeQuantize(TestCase):
             X_curr.requires_grad_()
             scale_curr = scale_base.clone()
             scale_curr.requires_grad_()
-            zero_point_curr = zero_point_base.clamp(quant_min, quant_max)
+            zero_point_curr = zero_point_base.clone()
             zero_point_curr.requires_grad_()
 
             for grad_factor in [0.1, 1.0, 10.0]:

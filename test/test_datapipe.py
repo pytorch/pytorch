@@ -235,32 +235,40 @@ class IDP(IterDataPipe):
         return self.length
 
 
-def _fake_fn(self, data, *args, **kwargs):
+def _fake_fn(data, *args, **kwargs):
     return data
 
+def _fake_filter_fn(data, *args, **kwargs):
+    return data >= 5
 
 class TestFunctionalIterDataPipe(TestCase):
 
     def test_picklable(self):
         arr = range(10)
-        picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, List, Dict[str, Any]]] = [
-            (dp.iter.Callable, IDP(arr), [], {}),
-            (dp.iter.Callable, IDP(arr), [0], {'fn': _fake_fn, 'test': True}),
-            (dp.iter.Collate, IDP(arr), [], {}),
-            (dp.iter.Collate, IDP(arr), [0], {'collate_fn': _fake_fn, 'test': True}),
+        picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
+            (dp.iter.Map, IDP(arr), (), {}),
+            (dp.iter.Map, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Collate, IDP(arr), (), {}),
+            (dp.iter.Collate, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Filter, IDP(arr), (_fake_filter_fn, (0, ), {'test': True}), {}),
         ]
-        for dpipe, input_dp, args, kargs in picklable_datapipes:
-            p = pickle.dumps(dpipe(input_dp, *args, **kargs))  # type: ignore
+        for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
+            p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore
 
-        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, List, Dict[str, Any]]] = [
-            (dp.iter.Callable, IDP(arr), [], {'fn': lambda x: x}),
-            (dp.iter.Collate, IDP(arr), [], {'collate_fn': lambda x: x}),
+        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
+            (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
+            (dp.iter.Collate, IDP(arr), (lambda x: xi, ), {}),
+            (dp.iter.Filter, IDP(arr), (lambda x: x >= 5, ), {}),
         ]
-        for dpipe, input_dp, args, kargs in unpicklable_datapipes:
-            with self.assertRaises(AttributeError):
-                p = pickle.dumps(dpipe(input_dp, *args, **kargs))  # type: ignore
+        for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
+            with warnings.catch_warnings(record=True) as wa:
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)
+                self.assertEqual(len(wa), 1)
+                self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
+                with self.assertRaises(AttributeError):
+                    p = pickle.dumps(datapipe)  # type: ignore
 
-    def test_callable_datapipe(self):
+    def test_map_datapipe(self):
         arr = range(10)
         input_dp = IDP(arr)
         input_dp_nl = IDP_NoLen(arr)
@@ -269,20 +277,26 @@ class TestFunctionalIterDataPipe(TestCase):
             data = torch.tensor(item, dtype=dtype)
             return data if not sum else data.sum()
 
-        callable_dp = dp.iter.Callable(input_dp, fn=fn)  # type: ignore
-        self.assertEqual(len(input_dp), len(callable_dp))
-        for x, y in zip(callable_dp, input_dp):
+        map_dp = dp.iter.Map(input_dp, fn=fn)  # type: ignore
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
-        callable_dp = dp.iter.Callable(input_dp, torch.int, fn=fn, sum=True)  # type: ignore
-        self.assertEqual(len(input_dp), len(callable_dp))
-        for x, y in zip(callable_dp, input_dp):
+        map_dp = dp.iter.Map(input_dp, fn=fn, fn_args=(torch.int, ), fn_kwargs={'sum': True})  # type: ignore
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
 
-        callable_dp_nl = dp.iter.Callable(input_dp_nl)  # type: ignore
+        from functools import partial
+        map_dp = dp.iter.Map(input_dp, fn=partial(fn, dtype=torch.int, sum=True))  # type: ignore
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
+
+        map_dp_nl = dp.iter.Map(input_dp_nl)  # type: ignore
         with self.assertRaises(NotImplementedError):
-            len(callable_dp_nl)
-        for x, y in zip(callable_dp_nl, input_dp_nl):
+            len(map_dp_nl)
+        for x, y in zip(map_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
     def test_collate_datapipe(self):
@@ -381,22 +395,45 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(batch_size=7, drop_last=False, bucket_size_mul=5, sort_key=_sort_fn)
         _helper(batch_size=7, drop_last=True, bucket_size_mul=5, sort_key=_sort_fn)
 
+    def test_filter_datapipe(self):
+        input_ds = IDP(range(10))
+
+        def _filter_fn(data, val, clip=False):
+            if clip:
+                return data >= val
+            return True
+
+        filter_dp = dp.iter.Filter(input_ds, filter_fn=_filter_fn, fn_args=(5, ))
+        for data, exp in zip(filter_dp, range(10)):
+            self.assertEqual(data, exp)
+
+        filter_dp = dp.iter.Filter(input_ds, filter_fn=_filter_fn, fn_kwargs={'val': 5, 'clip': True})
+        for data, exp in zip(filter_dp, range(5, 10)):
+            self.assertEqual(data, exp)
+
+        with self.assertRaises(NotImplementedError):
+            len(filter_dp)
+
+        def _non_bool_fn(data):
+            return 1
+
+        filter_dp = dp.iter.Filter(input_ds, filter_fn=_non_bool_fn)
+        with self.assertRaises(ValueError):
+            temp = list(d for d in filter_dp)
+
     def test_sampler_datapipe(self):
-        arrs = range(10)
-        input_dp = IDP(arrs)
+        input_dp = IDP(range(10))
         # Default SequentialSampler
         sampled_dp = dp.iter.Sampler(input_dp)  # type: ignore
         self.assertEqual(len(sampled_dp), 10)
-        i = 0
-        for x in sampled_dp:
+        for i, x in enumerate(sampled_dp):
             self.assertEqual(x, i)
-            i += 1
 
         # RandomSampler
-        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, replacement=True)  # type: ignore
+        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, sampler_kwargs={'replacement': True})  # type: ignore
 
-        # Requires `__len__` to build SamplerDataset
-        input_dp_nolen = IDP_NoLen(arrs)
+        # Requires `__len__` to build SamplerDataPipe
+        input_dp_nolen = IDP_NoLen(range(10))
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
 
