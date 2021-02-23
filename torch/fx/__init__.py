@@ -17,8 +17,8 @@ demonstration of these components in action:
             self.param = torch.nn.Parameter(torch.rand(3, 4))
             self.linear = torch.nn.Linear(4, 5)
 
-    def forward(self, x):
-        return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+        def forward(self, x):
+            return self.linear(x + self.param).clamp(min=0.0, max=1.0)
 
     module = MyModule()
 

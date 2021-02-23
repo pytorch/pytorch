@@ -1401,6 +1401,42 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
 
+    def test_div_rounding_mode(self):
+        class TrueDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x.div(y, rounding_mode='true'),
+                        torch.div(x, y, rounding_mode='true'))
+
+        class TruncDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x.div(y, rounding_mode='trunc'),
+                        torch.div(x, y, rounding_mode='trunc'))
+
+        class FloorDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x.div(y, rounding_mode='floor'),
+                        torch.div(x, y, rounding_mode='floor'))
+
+        modules = [TrueDivModule(), TruncDivModule()]
+        if self.opset_version >= 9:
+            modules.append(FloorDivModule())
+
+        x = (torch.randn(2, 3, 4) * 100).to(torch.int)
+        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
+
+        for module in modules:
+            self.run_test(module, (x, y))
+            self.run_test(torch.jit.trace(module, (x, y)), (x, y))
+            self.run_test(torch.jit.script(module), (x, y))
+
+        x = torch.randn(2, 3, 4)
+        y = torch.rand(2, 3, 4) * 10.0 + 0.1
+
+        for module in modules:
+            self.run_test(module, (x, y))
+            self.run_test(torch.jit.trace(module, (x, y)), (x, y))
+            self.run_test(torch.jit.script(module), (x, y))
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -5999,6 +6035,20 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_fake_quantize_per_channel(self):
+        class FakeQuantizePerChannelModel(torch.nn.Module):
+            def forward(self, input):
+                amax = torch.ones(4)
+                scale = amax / 127.
+                zero_point = torch.zeros_like(amax, dtype=torch.long)
+                # Quantize twice to test differnet branches
+                y = torch.fake_quantize_per_channel_affine(input, scale, zero_point, 1, 0, 255)
+                return torch.fake_quantize_per_channel_affine(y, scale, zero_point, 1, -128, 127)
+
+        x = torch.randn(6, 4, 3, 3)
+        self.run_test(FakeQuantizePerChannelModel(), (x))
+
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -6247,7 +6297,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(32, 3)
         f = io.BytesIO()
-        torch.onnx._export(test_model, (x,), f, _retain_param_name=True)
+        torch.onnx._export(test_model, (x,), f, _retain_param_name=True, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
@@ -6297,7 +6347,7 @@ class TestONNXRuntime(unittest.TestCase):
         example_output = (test_model(x, y),)
         f = io.BytesIO()
 
-        torch.onnx.export(test_model, (x, y), f, example_outputs=example_output, _retain_param_name=True)
+        torch.onnx.export(test_model, (x, y), f, example_outputs=example_output, _retain_param_name=True, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]

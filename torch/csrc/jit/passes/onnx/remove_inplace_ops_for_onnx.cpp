@@ -584,7 +584,6 @@ Value* registerSetAttrInBlocks(
     Value* origValue,
     const std::string& output_name) {
   RegisterInplaceNodeInLoopBlocks(origValue, cloneNode->output());
-
   RegisterInplaceNodeInIfBlocks(origValue, cloneNode->output(), output_name);
 
   Value* output = nullptr;
@@ -760,6 +759,8 @@ void RemoveInplaceOpsForONNX(
   MutationRemover mr(graph);
   ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
+  if (model)
+    RegisterInplaceOpAsBlockOutputs(model, graph);
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
   RegisterInplaceOpAsBlockOutputs(model, graph, mr);

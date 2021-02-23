@@ -20,6 +20,35 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestList(JitTestCase):
+    def test_list_bool_conversion(self):
+        def if_predicate(l: List[int]):
+            if l:
+                s = 0
+                for n in l:
+                    s += n
+
+                return s
+            else:
+                return -1
+
+        self.checkScript(if_predicate, ([1, 2, 3],))
+        self.checkScript(if_predicate, ([],))
+
+        def while_predicate(l: List[int]):
+            s = 0
+
+            while l:
+                s += l.pop()
+
+        self.checkScript(while_predicate, ([1, 2, 3],))
+        self.checkScript(while_predicate, ([],))
+
+        def ternary_predicate(l: List[int]):
+            return "non-empty" if l else "empty"
+
+        self.checkScript(ternary_predicate, ([1, 2, 3],))
+        self.checkScript(ternary_predicate, ([],))
+
     def test_in_check(self):
         def int_in(x: List[int]) -> bool:
             return 2 in x
@@ -142,6 +171,105 @@ class TestList(JitTestCase):
 
         self.checkScript(foo3, ())
         FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
+
+    def test_dict_keyword_with_kwargs(self):
+        def fn():
+            return dict(foo=1, bar=2, baz=3)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_kwargs_using_container_values(self):
+        def fn():
+            return dict(foo=[1, 2, 3], bar=[4, 5, 6], baz=[7, 8, 9])
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_iterable(self):
+        def fn():
+            return dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_empty_iterable(self):
+        def fn():
+            return dict([])    # noqa: C406
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_internal_aggregate_function(self):
+        def fn():
+            return dict(zip(["foo", "baz", "bar"], [1, 2, 3]))
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mapping(self):
+        def fn():
+            return dict({"foo" : 1, "bar" : 2, "baz" : 3})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mapping_and_kwargs(self):
+        def fn():
+            return dict({"foo" : 1, "bar" : 2}, baz=3)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_dict_comprehension(self):
+        def fn():
+            return dict({i: chr(i + 65) for i in range(4)})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_dict_comprehension_and_kwargs(self):
+        def fn():
+            return dict({chr(65 + i) : i for i in range(4)}, foo=2)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_empty_dict_comprehension(self):
+        def fn():
+            return dict({})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_is_correctly_typed(self):
+        def fn():
+            x: Dict[str, int] = dict()
+            x["foo"] = 1
+            return x
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mismatched_annotations(self):
+        # TODO: This fails during function schema matching, so the error
+        # message is not very informative to the user. Change logic so
+        # that the error is thrown at a different time?
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call "
+                                                  "are not valid"):
+            @torch.jit.script
+            def fn():
+                x: Dict[int, str] = dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
+                return x
+
+    def test_dict_keyword_with_nested_call(self):
+        def fn():
+            return dict(dict(foo=1, bar=2, baz=3))
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_previously_declared_variable(self):
+        def fn():
+            d = {"foo" : 1, "bar" : 2}
+            return dict(d)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_previously_declared_variable_and_kwargs(self):
+        def fn():
+            d = {"foo" : 1, "bar" : 2}
+            return dict(d, baz=3)
+
+        self.checkScript(fn, ())
 
     def test_min_bool_list(self):
         def jit_min_list(a: List[bool], b: List[bool]) -> List[bool]:
@@ -448,7 +576,6 @@ class TestList(JitTestCase):
             return x
         with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
             self.checkScript(test_index_slice_out_of_bounds_index, (a,))
-
 
     def test_mutable_list_append(self):
         def test_append():
@@ -1174,6 +1301,34 @@ class TestDict(JitTestCase):
 
     def dict_bool(self):
         return {True: 1}
+
+    def test_dict_bool_conversion(self):
+        def if_predicate(d: Dict[int, int]):
+            if d:
+                s, t = 0, 0
+                for k, v in d.items():
+                    s += k
+                    t += v
+
+                return s, t
+            else:
+                return -1, -1
+
+        self.checkScript(if_predicate, ({1: 2, 3: 5},))
+        self.checkScript(if_predicate, ({},))
+
+        def while_predicate(d: Dict[int, int]):
+            while d:
+                d.clear()
+
+        self.checkScript(while_predicate, ({1: 2, 3: 5},))
+        self.checkScript(while_predicate, ({},))
+
+        def ternary_predicate(d: Dict[int, int]):
+            return "non-empty" if d else "empty"
+
+        self.checkScript(ternary_predicate, ({1: 2, 3: 5},))
+        self.checkScript(ternary_predicate, ({},))
 
     def test_del(self):
         def inputs():
