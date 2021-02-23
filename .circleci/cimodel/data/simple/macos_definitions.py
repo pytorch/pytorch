@@ -1,5 +1,3 @@
-import cimodel.lib.miniutils as miniutils
-
 class MacOsJob:
     def __init__(self, os_version, is_build=False, is_test=False, extra_props=tuple()):
         # extra_props is tuple type, because mutable data structures for argument defaults
