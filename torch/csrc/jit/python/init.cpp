@@ -1070,8 +1070,7 @@ void initJITBindings(PyObject* module) {
                           self_func.ptr(),
                           module_name.c_str()));
                 }
-                return invokeOperatorFromPython(
-                    operations, args, kwargs);
+                return invokeOperatorFromPython(operations, args, kwargs);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
