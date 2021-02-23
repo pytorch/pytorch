@@ -611,8 +611,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
             def forward(self, x0):
                 x1 = torch.add(x0, 1.0)
                 y1 = torch.add(x0, 1.0)
-                z1 = {'x1': x1, 'y1': (y1,)}
-                return z1
+                z1 = torch.add(x0, 1.0)
+                a1 = {'x1': x1, 'y1': (y1,), 'z1': [{'key': (z1,)}]}
+                return a1
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
@@ -621,12 +622,11 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
-        print(results)
 
         expected_types = {
-            # 'cat_1': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
             'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
             'add_2': ((torch.add, torch.add), (toq.add, toq.add)),
+            'add_3': ((torch.add, torch.add), (toq.add, toq.add)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
