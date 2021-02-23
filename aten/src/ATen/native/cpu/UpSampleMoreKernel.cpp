@@ -524,9 +524,6 @@ std::vector<Tensor> compute_indices_weights_linear(
   auto lambda0_ptr = output[1].data_ptr<scalar_t>();
   auto input_index1_ptr = output[2].data_ptr<int64_t>();
   auto lambda1_ptr = output[3].data_ptr<scalar_t>();
-
-  double xd;
-  int64_t xl;
   
   for (int64_t i=0; i<output_size; i++) {
 
@@ -552,7 +549,7 @@ std::vector<Tensor> compute_indices_weights_linear(
 // Internally, it uses TensorIterator to optimize the computations.
 // - out_ndims is the number of interpolated dims: 1, 2, 3
 // - scale_type is template type for scales, typically c10::optional<double>
-template <typename index_t, int out_ndims, typename scale_type>
+template <int out_ndims, typename scale_type>
 void upsample_linearNd_kernel_impl(
     const Tensor& output,
     const Tensor& input,
@@ -612,7 +609,7 @@ void upsample_linear1d_kernel_impl(
     const Tensor& input,
     bool align_corners,
     c10::optional<double> scales_w) {
-  upsample_linearNd_kernel_impl<int64_t, 1, scale_t>(
+  upsample_linearNd_kernel_impl<1, scale_t>(
     output, input, align_corners, {scales_w});
 }
 
@@ -627,7 +624,7 @@ void upsample_bilinear2d_kernel_impl(
       cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
     });
   } else {
-    upsample_linearNd_kernel_impl<int64_t, 2, scale_t>(output, input, align_corners, {scales_h, scales_w});
+    upsample_linearNd_kernel_impl<2, scale_t>(output, input, align_corners, {scales_h, scales_w});
   }
 }
 
@@ -643,7 +640,7 @@ void upsample_trilinear3d_kernel_impl(
       cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
     });
   } else {
-    upsample_linearNd_kernel_impl<int64_t, 3, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
+    upsample_linearNd_kernel_impl<3, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
   }
 }
 
