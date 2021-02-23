@@ -2492,8 +2492,31 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs)
 # TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     tensors = (
-        make_tensor((2, 3, 2), device=device, dtype=dtype, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((2, 0, 3), device=device, dtype=dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+    )
+
+    requires_grad = tensors[0].requires_grad
+    lb = torch.empty((S, M, S), device=device, dtype=dtype, requires_grad=requires_grad)
+    ub = torch.empty((S, M, S), device=device, dtype=dtype, requires_grad=requires_grad)
+    with torch.no_grad():
+        lb[:] = tensors[1].min(tensors[2])
+        ub[:] = tensors[1].max(tensors[2])
+
+    def detach(tensor):
+        return tensor.clone().detach_().requires_grad_(requires_grad)
+
+    return [
+        SampleInput(tensors[0], args=(lb, ub)),
+        SampleInput(tensors[0], args=(detach(lb[0]), detach(ub[0]))),
+        SampleInput(tensors[0], args=(detach(lb[:, :1]),)),
+    ]
+
+def sample_inputs_clamp_scalar(op_info, device, dtype, requires_grad):
+    tensors = (
+        make_tensor((2, 3, 2), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((2, 0, 3), device, dtype, low=None, high=None, requires_grad=requires_grad),
     )
     if dtype is torch.uint8:
         min_max_vals = ((2, 5), (3, 7))
@@ -2505,7 +2528,7 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     output += [SampleInput(empty_tensor, args=(0.0, 1.0)), ]
     return output
 
-def sample_kwargs_clamp(device, dtype, input):
+def sample_kwargs_clamp_scalar(device, dtype, input):
     if dtype is torch.uint8:
         min_val, max_val = (random.randint(1, 3), random.randint(4, 8))
     elif dtype.is_floating_point:
@@ -3680,7 +3703,15 @@ op_db: List[OpInfo] = [
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
            ),
+    OpInfo('clamp',
+           aliases=('clip',),
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('clamp',
+                   variant_test_name='scalar',
                    aliases=('clip', ),
                    decorators=(precisionOverride({torch.bfloat16: 7e-2, torch.float16: 1e-2}),),
                    ref=np.clip,
@@ -3693,8 +3724,8 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
                    ),
-                   sample_kwargs=sample_kwargs_clamp,
-                   sample_inputs_func=sample_inputs_clamp),
+                   sample_kwargs=sample_kwargs_clamp_scalar,
+                   sample_inputs_func=sample_inputs_clamp_scalar),
     UnaryUfuncInfo('positive',
                    ref=np.positive,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),

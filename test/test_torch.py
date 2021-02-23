@@ -7453,6 +7453,23 @@ class TestDevicePrecision(TestCase):
         x.copy_(y)
         self.assertEqual(x[3], y)
 
+    def test_clamp(self, device):
+        x = torch.randn(100, 50)
+        y = torch.randn(100, 50)
+        z = torch.randn(100, 50)
+        ub, lb = y.max(z), y.min(z)
+
+        expect = x.max(lb).min(ub)
+        actual = x.clip(lb, ub)
+        self.assertEqual(expect, actual)
+
+        lb = lb[0]
+        ub = ub[:, :1]
+
+        expect = x.max(lb).min(ub)
+        actual = x.clip(lb, ub)
+        self.assertEqual(expect, actual)
+
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
 # the results. In-place variants of the ops can also be run.

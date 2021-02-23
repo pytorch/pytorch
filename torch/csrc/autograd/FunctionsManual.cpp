@@ -666,6 +666,19 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
   }
 }
 
+Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Tensor& min, const Tensor& max) {
+  // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
+  if (max.defined() && min.defined()) {
+    return grad * ((self >= min) * (self <= max)).type_as(grad);
+  } else if (min.defined()) {
+    return grad * (self >= min).type_as(grad);
+  } else if (max.defined()) {
+    return grad * (self <= max).type_as(grad);
+  } else {
+    return grad;
+  }
+}
+
 // This function is used by load_derivatives.py to replace tensor.strides()
 // calls that appear in derivative formulas. If the tensor has requires_grad
 // set, this function returns its strides or throws an error if the tensor
