@@ -2071,17 +2071,18 @@ void fake_quantize_tensor_cachemask_kernel(
     .add_input(input)
     .build();
 
-  // TODO(#51090): make it work for other dtypes
-  iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    for (int64_t i = 0; i < n; i++) {
-      float* output_val = (float*)(data[0] + i * strides[0]);
-      bool* mask_val = (bool*)(data[1] + i * strides[1]);
-      float* input_val = (float*)(data[2] + i * strides[2]);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
+    iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
+      for (int64_t i = 0; i < n; i++) {
+        scalar_t* output_val = (scalar_t*)(data[0] + i * strides[0]);
+        bool* mask_val = (bool*)(data[1] + i * strides[1]);
+        scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
-      const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
-      *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
-      *mask_val = ((quant_min <= qval) && (qval <= quant_max));
-    }
+        const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+        *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
+        *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+      }
+    });
   });
 
 }
