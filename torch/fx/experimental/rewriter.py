@@ -9,7 +9,7 @@ from torch.fx.graph import Graph
 from torch.jit.frontend import normalize_source_lines
 import torch
 
-class AST_Rewriter(ast.NodeTransformer):
+class Assert_Rewriter(ast.NodeTransformer):
     """
     Take a FunctionType object representing a `forward` method, then
     perform an AST rewrite to swap out nodes that are not symbolically
@@ -65,28 +65,62 @@ class AST_Rewriter(ast.NodeTransformer):
         return ast.copy_location(expr_wrapper, node)
 
 
-class RewritingTracer(Tracer):
+class AssertRewritingTracer(Tracer):
     def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
-        return super().trace(_rewrite(root), concrete_args)
+        foo = _rewrite(root)
+        return super().trace(foo, concrete_args)
 
 
 def _rewrite(fn: Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:
+
     if isinstance(fn, torch.nn.Module):
-        # Rewrite this module's `forward` as well as the `forward`s of
-        # all of this module's recursive descendents. Return the new,
-        # rewritten module hierarchy.
+
+
         def rewrite_module(m : torch.nn.Module):
+
             class RewrittenModule(torch.nn.Module):
                 def __init__(self, orig):
                     super().__init__()
+
+                    def is_helper_method(k: str) -> bool:
+
+                        def is_dunder(name: str) -> bool:
+                            return (len(name) > 4
+                                    and name.startswith('__') 
+                                    and name.endswith('__'))
+
+                        o = getattr(orig, k)
+
+                        if not callable(o):
+                            return False
+
+                        if is_dunder(k):
+                            return False
+
+                        if isinstance(o, torch.nn.Module):
+                            return False
+
+                        if k in dir(self):
+                            return False
+
+                        return True
+
+                    # Copy over any potential helper methods
+                    for k in dir(orig):
+                        if is_helper_method(k):
+                            self.__dict__[k] = getattr(orig, k)
+
                     for k, v in orig.__dict__.items():
-                        if isinstance(v, torch.nn.Module):
-                            self.__dict__[k] = copy.copy(rewrite_module(v))
+                        if k == "_modules":
+                            for mod_k, mod_v in v.items():
+                                res = copy.copy(rewrite_module(mod_v))
+                                self.add_module(mod_k, res)
+                                self.__dict__[mod_k] = res
                         else:
                             self.__dict__[k] = copy.copy(v)
-            RewrittenModule.forward = AST_Rewriter().rewrite(cast(FunctionType, m.forward))
+            RewrittenModule.forward = Assert_Rewriter().rewrite(cast(FunctionType, m.forward))
             return RewrittenModule(m)
         return rewrite_module(fn)
     else:
         # Rewrite this single free function
-        return AST_Rewriter().rewrite(cast(FunctionType, fn))
+        return Assert_Rewriter().rewrite(cast(FunctionType, fn))

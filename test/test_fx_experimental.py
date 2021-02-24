@@ -7,7 +7,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.experimental import graph_manipulation
 from torch.fx.experimental.accelerator_partitioner import Partitioner
-from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.experimental.rewriter import AssertRewritingTracer
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -34,11 +34,10 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
-    return GraphModule(
-        root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
-        RewritingTracer().trace(root),
-    )
-
+    tracer = AssertRewritingTracer()
+    graph = tracer.trace(root)
+    name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
+    return GraphModule(tracer.root, graph, name)
 
 class TestFXExperimental(JitTestCase):
     def test_serialize_graph(self):
@@ -584,7 +583,7 @@ class TestFXExperimental(JitTestCase):
 
         self.assertEqual(fused(inp), rn18(inp))
 
-    def test_call_to_assert_no_msg(self):
+    def test_assert_rewriter_rewrites_assert(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
                 assert a == b
@@ -593,10 +592,8 @@ class TestFXExperimental(JitTestCase):
         m = M()
         traced = symbolic_trace_with_rewrite(m)
 
-        # Make sure the graph is well-formed
         traced.graph.lint(traced)
 
-        # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
                 node.op == "call_function" and node.target == torch._assert
@@ -604,15 +601,12 @@ class TestFXExperimental(JitTestCase):
             )
         )
 
-        # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
-        traced(3, 3)
         with self.assertRaisesRegex(AssertionError, ""):
             traced(3, 5)
 
-        # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
 
-    def test_call_to_assert_with_msg(self):
+    def test_assert_rewriter_rewrites_assert_with_message(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
                 assert a == b, "test message"
@@ -621,10 +615,8 @@ class TestFXExperimental(JitTestCase):
         m = M()
         traced = symbolic_trace_with_rewrite(m)
 
-        # Make sure the graph is well-formed
         traced.graph.lint(traced)
 
-        # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
                 node.op == "call_function" and node.target == torch._assert
@@ -632,15 +624,12 @@ class TestFXExperimental(JitTestCase):
             )
         )
 
-        # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
-        traced(3, 3)
         with self.assertRaisesRegex(AssertionError, "test message"):
             traced(3, 5)
 
-        # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
 
-    def test_call_to_assert_with_empty_msg(self):
+    def test_assert_rewriter_rewrites_assert_with_empty_message(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
                 assert a == b, ""
@@ -649,10 +638,8 @@ class TestFXExperimental(JitTestCase):
         m = M()
         traced = symbolic_trace_with_rewrite(m)
 
-        # Make sure the graph is well-formed
         traced.graph.lint(traced)
 
-        # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
                 node.op == "call_function" and node.target == torch._assert
@@ -660,15 +647,12 @@ class TestFXExperimental(JitTestCase):
             )
         )
 
-        # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
-        traced(3, 3)
         with self.assertRaisesRegex(AssertionError, ""):
             traced(3, 5)
 
-        # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
 
-    def test_call_to_assert_with_multiline_message(self):
+    def test_assert_rewriter_rewrites_assert_with_multiline_message(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
                 error_msg = """
@@ -681,10 +665,8 @@ terrible spacing
         m = M()
         traced = symbolic_trace_with_rewrite(m)
 
-        # Make sure the graph is well-formed
         traced.graph.lint(traced)
 
-        # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
                 node.op == "call_function" and node.target == torch._assert
@@ -692,17 +674,73 @@ terrible spacing
             )
         )
 
-        # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
         error_msg = """
 An error message with
 terrible spacing
     """
-        traced(3, 3)
+
         with self.assertRaisesRegex(AssertionError, error_msg):
             traced(3, 5)
 
-        # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
+
+    def test_assert_rewriter_rewrites_submodules(self):
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+                self.linear = torch.nn.Linear(100, 200)
+
+            def forward(self, x, z):
+                assert z < 5
+                return self.linear(x)
+
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+                self.linear = torch.nn.Linear(200, 200)
+                self.net_b = B()
+
+            def forward(self, x: torch.Tensor, y: int):
+                assert y < 5
+                return self.linear(self.net_b(x, y))
+
+        m = A()
+
+        traced = symbolic_trace_with_rewrite(m)
+
+        traced.graph.lint(traced)
+
+        x = torch.randn(20, 100)
+
+        self.assertEqual(traced(x, 2), m(x, 2))
+
+        with self.assertRaisesRegex(AssertionError, ""):
+            traced(x, 6)
+
+    def test_assert_rewriter_call_to_helper_method(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def fn(self, x):
+                return torch.relu(x)
+
+            def forward(self, x):
+                return self.linear(x) + self.fn(x)
+
+        def comparison(x):
+            return torch.relu(x) + torch.nn.Linear(3, 3)(x)
+
+        m = M()
+
+        traced = symbolic_trace_with_rewrite(m)
+
+        traced.graph.lint(traced)
+
+        x = torch.randn(20, 3)
+
+        self.assertEqual(traced(x), m(x))
 
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
