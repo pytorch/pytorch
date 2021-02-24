@@ -1622,7 +1622,10 @@ op_db: List[OpInfo] = [
                        #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
                        # KeyError: <class 'numpy.intc'>
                        # Following error in Windows CI
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                dtypes=[torch.int],
+                                active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
                    ),
