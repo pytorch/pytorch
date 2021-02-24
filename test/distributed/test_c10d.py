@@ -349,7 +349,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store.set("key0", "value0")
         self.assertEqual(b"value0", store.get("key0"))
         old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"wrong_old_value", old_value_result)
+        self.assertEqual(b"value0", old_value_result)
         self.assertEqual(b"value0", store.get("key0"))
         new_value_result = store.compare_set("key0", "value0", "new_value0")
         self.assertEqual(b"new_value0", new_value_result)
