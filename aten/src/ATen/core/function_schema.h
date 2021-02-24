@@ -72,6 +72,14 @@ struct Argument {
           name(),
           "' to be of type 'Tensor' ",
           "because it was not annotated with an explicit type.\n");
+    } else if(type()->repr_str() == "float" || type()->repr_str() == "int") {
+      if (actual_type == "int" || actual_type == "float") {
+      inferred_type_hint = c10::str(
+          "Did you forget to assign a '",
+           type()->repr_str(),
+          "' literal for argument '",
+          name(), "'?");
+      }
     }
     return c10::str(
         "Expected a value of type '",
@@ -81,12 +89,7 @@ struct Argument {
         "' but instead found type '",
         actual_type,
         "'.\n",
-        inferred_type_hint,
-        "Consider assigning a value of type '",
-        type()->repr_str(),
-        "' for argument '",
-        name(),
-        "'.\n");
+        inferred_type_hint);
   }
 
   Argument cloneWithType(TypePtr new_type) const {
