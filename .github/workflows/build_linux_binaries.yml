@@ -60,6 +60,10 @@ jobs:
           version=$(.github/scripts/generate_pytorch_version.py)
           echo "Generated version: ${version}"
           echo "PYTORCH_BUILD_VERSION=${version}" >> $GITHUB_ENV
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ matrix.gpu_arch_type == 'cuda' && matrix.gpu_arch_version == '11.1' }}
+        run: |
+          echo "BUILD_SPLIT_CUDA=1" >> $GITHUB_ENV
       # TODO: Remove this once we remove the need for the directories to be
       #       in specific locations
       - name: Symlink repositories to root directory (for legacy scripts purposes)

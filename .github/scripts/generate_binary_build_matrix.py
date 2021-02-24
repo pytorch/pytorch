@@ -17,7 +17,7 @@ import itertools
 CUDA_ARCHES = [
     "10.1",
     "10.2",
-    "11.0"
+    "11.1"
 ]
 
 ROCM_ARCHES = [
