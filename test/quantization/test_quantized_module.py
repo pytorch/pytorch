@@ -106,7 +106,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         B = torch.rand(out_features).float() if use_bias else None
         scale = 0.5
         zero_point = 3
-        qlinear = class_map[(use_fused, reference)](in_features, out_features)
+        qlinear = class_map[(use_fused, is_reference)](in_features, out_features)
 
         qlinear_copy = qlinear  # deepcopy does not work right now
         # qlinear_copy = copy.deepcopy(qlinear)
@@ -126,7 +126,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Check if the module implementation matches calling the
         # ops directly
-        if reference:
+        if is_reference:
             weight = qlinear._qweight
             bias = qlinear._bias
             weight_dequant = weight.dequantize()
@@ -162,10 +162,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             else:
                 self.assertEqual(model_dict[key], loaded_dict[key])
 
-        loaded_qlinear = class_map[(use_fused, reference)](
+        loaded_qlinear = class_map[(use_fused, is_reference)](
             in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
-        if reference:
+        if is_reference:
             self.assertEqual(qlinear._qweight, loaded_qlinear._qweight)
             self.assertEqual(qlinear._bias, loaded_qlinear._bias)
         else:
