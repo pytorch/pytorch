@@ -54,7 +54,10 @@ _wait = wait
 
 def export_opnames(m):
     r"""
-        Returns a list of operator names of a script module and its submodules
+        Generates new bytecode for a Script module and returns what the op list
+        would be for a Script Module based off the current code base. If you
+        have a LiteScriptModule and want to get the currently present
+        list of ops call _export_operator_list instead.
     """
     return torch._C._jit._export_opnames(m._c)
 

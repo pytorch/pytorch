@@ -32,16 +32,6 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("cuda", [
-            ("9.2", [
-                ("3.6", [
-                    X(True),
-                    ("cuda_gcc_override", [
-                        ("gcc5.4", [
-                            ('build_only', [XImportant(True)]),
-                        ]),
-                    ]),
-                ])
-            ]),
             ("10.1", [
                 ("3.6", [
                     ('build_only', [X(True)]),
@@ -58,16 +48,6 @@ CONFIG_TREE_DATA = [
                 ]),
             ]),
             ("11.1", [
-                ("3.8", [
-                    X(True),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [XImportant(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-            ("11.2", [
                 ("3.8", [
                     X(True),
                     ("libtorch", [

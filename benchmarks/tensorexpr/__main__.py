@@ -116,6 +116,12 @@ Works only with Python3.\n A few examples:
         action='store_true',
         help="Disable shape randomization in dynamic benchmarks.",
     )
+    parser.add_argument(
+        "--cpu_fusion",
+        default=False,
+        action='store_true',
+        help="Enable CPU fusion.",
+    )
 
     args = parser.parse_args()
 
@@ -138,6 +144,13 @@ Works only with Python3.\n A few examples:
         torch._C._jit.set_profiling_mode(True)
     else :
         raise ValueError("Undefined fuser: {}".format(args.cuda_fuser))
+
+    if args.cpu_fusion:
+        import torch
+        torch._C._jit.override_can_fuse_on_cpu(True)
+    else:
+        import torch
+        torch._C._jit.override_can_fuse_on_cpu(False)
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)

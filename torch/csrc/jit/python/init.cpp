@@ -142,6 +142,7 @@ void initJITBindings(PyObject* module) {
 
   // Register pass and profiler functions on both torch._C and torch.C._jit
   // modules for backward compatibility. Prefix them with "_jit_" in torch._C.
+  // See https://github.com/pytorch/pytorch/issues/52720.
   std::vector<py::module> modules({top, m});
   const std::vector<std::string> prefixes({"_jit_", ""});
   for (size_t i = 0; i < modules.size(); ++i) {
@@ -923,7 +924,11 @@ void initJITBindings(PyObject* module) {
              size_t size) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
-          });
+          })
+      .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def(
+          "get_all_written_records",
+          &PyTorchStreamWriter::getAllWrittenRecords);
 
   py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
@@ -1000,11 +1005,12 @@ void initJITBindings(PyObject* module) {
     bool use_readinto_;
   };
 
-  py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchStreamReader, std::shared_ptr<PyTorchStreamReader>>(
+      m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto adapter = std::make_unique<BufferAdapter>(buffer);
-        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
+        return std::make_shared<PyTorchStreamReader>(std::move(adapter));
       }))
       .def(
           "get_record",
@@ -1364,6 +1370,9 @@ void initJITBindings(PyObject* module) {
 
   initPythonCustomClassBindings(m.ptr());
   initPythonIRBindings(m.ptr());
+
+  // Duplicate _get_tracing_state in torch._C due to existing call in
+  // torchvision. See https://github.com/pytorch/pytorch/issues/52720.
   tracer::initPythonTracerBindings(m.ptr());
   top.def(
       "_get_tracing_state", []() { return jit::tracer::getTracingState(); });
