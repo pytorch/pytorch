@@ -16,7 +16,16 @@ namespace c10d {
 
 namespace {
 
-enum class QueryType : uint8_t { SET, COMPARE_SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE_KEY };
+enum class QueryType : uint8_t {
+  SET,
+  COMPARE_SET,
+  GET,
+  ADD,
+  CHECK,
+  WAIT,
+  GETNUMKEYS,
+  DELETE_KEY
+};
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
@@ -167,7 +176,8 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
   std::vector<uint8_t> currentValue = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValue = tcputil::recvVector<uint8_t>(socket);
 
-  // sets value to new value if the key exists and it's existing value is the current value
+  // sets value to new value if the key exists and it's existing value is the
+  // current value
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end() && it->second == currentValue) {
     it->second = newValue;
@@ -384,7 +394,7 @@ void TCPStoreDaemon::run() {
 TCPStore::TCPStore(
     const std::string& masterAddr,
     PortType masterPort,
-    int numWorkers,
+    c10::optional<int> numWorkers,
     bool isServer,
     const std::chrono::milliseconds& timeout,
     bool waitWorkers)
@@ -406,7 +416,7 @@ TCPStore::TCPStore(
   // Connect to the daemon
   storeSocket_ = tcputil::connect(
       tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-  if (waitWorkers) {
+  if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
     waitForWorkers();
   }
 }
@@ -432,7 +442,7 @@ void TCPStore::waitForWorkers() {
       auto buf = reinterpret_cast<const char*>(value.data());
       auto len = value.size();
       int numWorkersCompleted = std::stoi(std::string(buf, len));
-      if (numWorkersCompleted >= numWorkers_) {
+      if (numWorkersCompleted >= numWorkers_.value_or(-1)) {
         break;
       }
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -453,7 +463,10 @@ void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   tcputil::sendVector<uint8_t>(storeSocket_, data);
 }
 
-std::vector<uint8_t> TCPStore::compareSet(const std::string& key, const std::vector<uint8_t>& currentValue, const std::vector<uint8_t>& newValue) {
+std::vector<uint8_t> TCPStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& currentValue,
+    const std::vector<uint8_t>& newValue) {
   std::string regKey = regularPrefix_ + key;
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::COMPARE_SET);
   tcputil::sendString(storeSocket_, regKey, true);

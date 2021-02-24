@@ -707,13 +707,12 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
   VarHandle n("n", kInt);
 
   std::vector<Stmt*> block;
-  VarHandle c_var("c", kHandle);
   std::vector<const Expr*> dims;
   dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf(c_var.node(), dims, kFloat)};
+  BufHandle c{new Buf("c", dims, kFloat)};
   {
     // alloc(c, 64);
-    Allocate* alloc = Allocate::make(c_var, kFloat, {N});
+    Allocate* alloc = Allocate::make(c);
     block.push_back(alloc);
   }
 
@@ -755,7 +754,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
 
   {
     //    free(c)
-    Free* free_stmt = Free::make(c_var);
+    Free* free_stmt = Free::make(c);
     block.push_back(free_stmt);
   }
 
@@ -843,10 +842,7 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  VarHandle c_var("c", kHandle);
-  std::vector<const Expr*> dims;
-  dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf(c_var.node(), dims, kFloat)};
+  BufHandle c{new Buf("c", {new IntImm(1)}, kFloat)};
   std::vector<Stmt*> block_k;
   {
     //    b(k) = 0
@@ -856,7 +852,7 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   std::vector<Stmt*> block_n;
   {
     // alloc(c, 1);
-    Allocate* alloc = Allocate::make(c_var, kFloat, {1});
+    Allocate* alloc = Allocate::make(c);
     block_n.push_back(alloc);
   }
   {
@@ -884,7 +880,7 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   }
   {
     //      free(c)
-    Free* free_stmt = Free::make(c_var);
+    Free* free_stmt = Free::make(c);
     block_n.push_back(free_stmt);
   }
   {

@@ -43,6 +43,8 @@ allow_list = [
     ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
     ("aten::quantile", datetime.date(2021, 1, 31)),
     ("aten::nanquantile", datetime.date(2021, 1, 31)),
+    ("aten::make_dual", datetime.date(2021, 2, 20)),
+    ("aten::unpack_dual", datetime.date(2021, 2, 20)),
     ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
     ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
     ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
@@ -70,6 +72,7 @@ allow_list = [
     ("aten::_foreach_div", datetime.date(2021, 2, 25)),
     ("aten::_foreach_div_", datetime.date(2021, 2, 25)),
     ("aten::_foreach_addcdiv", datetime.date(2021, 2, 25)),
+    ("aten::mkldnn_linear", datetime.date(2021, 3, 2)),
 ]
 
 def allow_listed(schema, allow_list):

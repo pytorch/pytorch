@@ -1439,6 +1439,25 @@ bool ClassType::hasMethod(const std::string& name) const {
   return findMethod(name) != nullptr;
 }
 
+void ClassType::addStaticMethod(torch::jit::Function* method) {
+  TORCH_CHECK(
+      findStaticMethod(method->name()) == nullptr &&
+          findMethod(method->name()) == nullptr, "Can't redefine method: ",
+      method->name(),
+      " on class: ",
+      repr_str());
+  staticmethods_.emplace_back(method);
+}
+
+torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const {
+  for (auto method : staticmethods_) {
+    if (name == method->name()) {
+      return method;
+    }
+  }
+  return nullptr;
+}
+
 void ClassType::unsafeRemoveMethod(const std::string& name) {
   size_t slot = 0;
   for (auto method : methods_) {

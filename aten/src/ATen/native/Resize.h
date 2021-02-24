@@ -2,7 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/ResizeCommon.h>
+#include <ATen/TensorUtils.h>
 #include <TH/THTensor.hpp>
+
 
 namespace at { namespace native {
 
@@ -126,9 +128,7 @@ static inline void checkSetStorage(Tensor& result, Storage storage, int64_t stor
   }
 
   // storageOffset
-  if (storage_offset < 0) {
-    TORCH_CHECK("Tensor: invalid storage offset ", storage_offset);
-  }
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
 }
 
 /**

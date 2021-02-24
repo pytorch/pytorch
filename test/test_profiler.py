@@ -385,6 +385,20 @@ class TestProfiler(TestCase):
         profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
         self.assertIn("FLOPS", profiler_output)
 
+        if not (kineto_available() and torch.cuda.is_available()):
+            return
+
+        with profile(activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA],
+                record_shapes=True,
+                with_flops=True,
+        ) as kineto_profiler:
+            model(inputs)
+        profiler_output = kineto_profiler.key_averages().table(
+            sort_by="self_cuda_time_total", row_limit=-1)
+        self.assertIn("FLOPS", profiler_output)
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_kineto_profiler_api(self):
@@ -463,10 +477,11 @@ class TestProfiler(TestCase):
                 schedule=torch.profiler.schedule(
                     wait=1,
                     warmup=1,
-                    active=2),
+                    active=2,
+                    repeat=3),
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(dname)
             ) as p:
-                for _ in range(8):
+                for _ in range(18):
                     self.payload()
                     p.step()
 
@@ -478,7 +493,7 @@ class TestProfiler(TestCase):
                 self.assertTrue(parts[-4].isdigit() and int(parts[-4]) > 0, "Wrong tracing file name pattern")
                 self.assertEqual(parts[-3:], ['pt', 'trace', 'json'])
                 file_num += 1
-            self.assertEqual(file_num, 2)
+            self.assertEqual(file_num, 3)
 
 
 if __name__ == '__main__':

@@ -55,16 +55,18 @@ from torch.testing._internal.common_quantized import (
 
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
-    res = (torch.clamp(torch.round(X * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
-    return res
+    dtype = X.dtype
+    res = ((torch.clamp(torch.round(X.to(torch.float32) * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale)
+    return res.to(dtype)
 
 # Reference method for the gradient of the fake quantize operator
 def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max):
-    Xq = torch.round(X * (1.0 / scale) + zero_point)
+    dtype = X.dtype
+    Xq = torch.round(X.to(torch.float32) * (1.0 / scale) + zero_point)
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
     res[mask] = dY[mask]
-    return res
+    return res.to(dtype)
 
 # Reference method for the gradients of the fake quantize operator
 def _fake_quantize_learnable_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max, device):
@@ -148,10 +150,10 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
     - https://arxiv.org/pdf/1902.08153.pdf
     - https://arxiv.org/pdf/1903.08066.pdf
     """
+    per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int64)
     grad_X = _fake_quantize_per_channel_affine_grad_reference(
         dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max).to(device)
     per_channel_scale = per_channel_scale.detach().type(torch.float)
-    per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int64)
 
     grad_scale = torch.zeros([per_channel_scale.size(0)]).to(device)
     grad_zero_point = torch.zeros([per_channel_zero_point.size(0)]).to(device)
@@ -206,7 +208,6 @@ def to_tensor(X, device):
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
-
 
 class TestObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
@@ -862,17 +863,57 @@ class TestFakeQuantize(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
+    def test_forward_backward_per_tensor_with_amp(self):
+        net = nn.Sequential(nn.Conv2d(1, 1, 3))
+        net.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        net_prep = torch.quantization.prepare_qat(net)
+
+        with torch.cuda.amp.autocast():
+            x = torch.randn(4, 1, 5, 5)
+            out = net_prep(x).sum()
+            out.backward()
+            self.assertTrue(net_prep[0].weight.grad is not None)
+
+    def test_forward_per_tensor_half_precision_numerics(self):
+        scale = .1
+        zero = 0
+        maxi = 255
+        mini = 0
+
+        for i in range(20):
+            X1 = torch.randn(5, 5).to(torch.float16)
+            Y1 = torch.fake_quantize_per_tensor_affine(X1, scale, zero, mini, maxi)
+            Y1r = _fake_quantize_per_tensor_affine_reference(X1, scale, zero, mini, maxi)
+            self.assertTrue(torch.allclose(Y1, Y1r, rtol=tolerance, atol=tolerance))
+
+        # to force overflow
+        X2 = torch.tensor(2**15 + .01).to(torch.float16)
+        Y2 = torch.fake_quantize_per_tensor_affine(X2, scale, zero, mini, maxi)
+        Y2r = _fake_quantize_per_tensor_affine_reference(X2, scale, zero, mini, maxi)
+        self.assertTrue(torch.allclose(Y2, Y2r, rtol=tolerance, atol=tolerance))
+
+        scale = 10
+
+        # to force underflow
+        X3 = torch.tensor(2**-24).to(torch.float16)
+        Y3 = torch.fake_quantize_per_tensor_affine(X3, scale, zero, mini, maxi)
+        Y3r = _fake_quantize_per_tensor_affine_reference(X3, scale, zero, mini, maxi)
+        self.assertTrue(torch.allclose(Y3, Y3r, rtol=tolerance, atol=tolerance))
+
     def _test_forward_per_tensor_cachemask_impl(self, device):
-        for torch_type in (torch.qint8, torch.quint8):
-            X = torch.randn(4, 8).to(device)
+        float_types = (torch.float32, torch.float16, torch.float64)
+        torch_types = (torch.qint8, torch.quint8)
+        Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
+        for float_type, torch_type, X in itertools.product(float_types, torch_types, Xs):
             # pick the scale + zp so that some values get clipped
+            X = X.to(float_type)
             obs = torch.quantization.MinMaxObserver(torch_type)
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
             scale, zero_point = float(scale), int(zero_point)
             quant_min, quant_max = obs._calculate_qmin_qmax()
 
-            Y_test, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
+            Y_test = torch.fake_quantize_per_tensor_affine(
                 X, scale, zero_point, quant_min, quant_max)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
@@ -888,8 +929,10 @@ class TestFakeQuantize(TestCase):
         self._test_forward_per_tensor_cachemask_impl(device)
 
     def _test_backward_per_tensor_cachemask_impl(self, device):
-        for torch_type in (torch.qint8, torch.quint8):
-            X = torch.randn(4, 8).to(device)
+        float_types = (torch.float32, torch.float16, torch.float64)
+        torch_types = (torch.qint8, torch.quint8)
+        for float_type, torch_type in itertools.product(float_types, torch_types):
+            X = torch.randn(4, 8).to(device).to(float_type)
             X.requires_grad_()
             # pick the scale + zp so that some values get clipped
             obs = torch.quantization.MinMaxObserver(torch_type)
@@ -899,7 +942,7 @@ class TestFakeQuantize(TestCase):
             quant_min, quant_max = obs._calculate_qmin_qmax()
 
             # forward pass
-            Y_test, mask = torch.fake_quantize_per_tensor_affine_cachemask(
+            Y_test = torch.fake_quantize_per_tensor_affine(
                 X, scale, zero_point, quant_min, quant_max)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
@@ -1246,7 +1289,7 @@ class TestFakeQuantize(TestCase):
 
             Y = _fake_quantize_per_channel_affine_reference(
                 X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
-            Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+            Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
@@ -1264,14 +1307,14 @@ class TestFakeQuantize(TestCase):
             quant_min, quant_max = 0, 2 ** (n_bits) - 1
 
             scale_base = scale_base.to(device)
-            zero_point_base = zero_point_base.clamp(quant_min, quant_max)
+            zero_point_base = zero_point_base.to(device)
 
             X_curr = X_base.clone()
             scale_curr = scale_base.clone()
-            zero_point_curr = zero_point_base.to(dtype=torch.int64, device=device)
+            zero_point_curr = zero_point_base.clone()
 
             Y = _fake_quantize_per_channel_affine_reference(
-                X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max).to(device)
+                X_curr, scale_curr, zero_point_curr.round().clamp(quant_min, quant_max), axis, quant_min, quant_max).to(device)
             for grad_factor in [0.1, 1.0, 10.0]:
                 Y_prime = torch._fake_quantize_learnable_per_channel_affine(
                     X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor).to(device)
@@ -1339,7 +1382,7 @@ class TestFakeQuantize(TestCase):
             zero_point = zero_point.to(torch.int64)
             quant_min, quant_max = obs._calculate_qmin_qmax()
             X.requires_grad_()
-            Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+            Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             dout = torch.rand(X.shape, dtype=torch.float).to(device)
             dX = _fake_quantize_per_channel_affine_grad_reference(
@@ -1368,7 +1411,7 @@ class TestFakeQuantize(TestCase):
             X_curr.requires_grad_()
             scale_curr = scale_base.clone()
             scale_curr.requires_grad_()
-            zero_point_curr = zero_point_base.clamp(quant_min, quant_max)
+            zero_point_curr = zero_point_base.clone()
             zero_point_curr.requires_grad_()
 
             for grad_factor in [0.1, 1.0, 10.0]:
