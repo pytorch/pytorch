@@ -419,9 +419,6 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
-        if not op.supports_tensor_out:
-            self.skipTest("Skipping! Operator doesn't support `out` kwarg")
-
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
         expected = op(input)

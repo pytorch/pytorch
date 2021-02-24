@@ -2220,7 +2220,6 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
                    ),
-                   supports_tensor_out=False,
                    decorators=(precisionOverride({torch.bfloat16: 7e-2}),)),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
