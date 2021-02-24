@@ -15,31 +15,48 @@ def _local_invoke_async_execution(rref, func_name, args, kwargs):
 def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
     # Since rref._get_type can potentially issue an RPC, it should respect the
     # passed in timeout here.
-    # if rpc_sync, allow get_type to block, else, add invoke logic as a callback
-    block_on_type = rpc_api in [torch.distributed.rpc.rpc_sync, torch.distributed.rpc.remote]
-    rref_type = rref._get_type(timeout=timeout, blocking=block_on_type)
-    should_wait_on_rref_type = isinstance(rref_type, torch._C.Future)
+    rref_type = rref._get_type(timeout=timeout, blocking=False)
+    # Controls whether we are running in a callback or inline in invoke_on_owner
+    # to appropriately handle errors.
+    block_on_type = rpc_api in [
+        torch.distributed.rpc.rpc_sync, torch.distributed.rpc.remote
+    ]
+
     # Helper function to allow invoke to be run as a chained callback instead of
     # inline.
 
     def invoke_on_owner(rref_type):
         _invoke_func = _local_invoke
-        if should_wait_on_rref_type:
+        if not block_on_type:
+            # Running as a callback, need to propagate error due to
+            # https://github.com/pytorch/pytorch/issues/52132
             try:
                 rref_type = rref_type.wait()
             except BaseException as err:
                 # Future corresponding to rref type had an error, propagate
-                # error instead of issuing RPC.
+                # error instead of issuing RPC
                 ret = torch.futures.Future()  # type: ignore
                 ret.set_exception(err)
                 return ret
+        else:
+            rref_type = rref_type.wait()
 
         # Bypass ScriptModules when checking for async function attribute.
         bypass_type = issubclass(rref_type, torch.jit.ScriptModule) or issubclass(
             rref_type, torch._C.ScriptModule
         )
         if not bypass_type:
-            func = getattr(rref_type, func_name)
+            if not block_on_type:
+                # Running as a callback, need to propagate error due to
+                # https://github.com/pytorch/pytorch/issues/52132
+                try:
+                    func = getattr(rref_type, func_name)
+                except BaseException as err:
+                    ret = torch.futures.Future()  # type: ignore
+                    ret.set_exception(err)
+                    return ret
+            else:
+                func = getattr(rref_type, func_name)
             if hasattr(func, "_wrapped_async_rpc_function"):
                 _invoke_func = _local_invoke_async_execution
 
@@ -50,9 +67,8 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
             timeout=timeout
         )
 
-    # If we don't need to wait on the rref type (i.e. was cached) or are not
-    # running rpc_async, invoke the RPC API inline
-    if not should_wait_on_rref_type or block_on_type:
+    # If we are not running rpc_async, invoke the RPC API inline
+    if block_on_type:
         return invoke_on_owner(rref_type)
     else:
         # Create a future whose result is the result of the above rpc_api()
