@@ -6970,6 +6970,13 @@ def make_test(name, base, layer, bidirectional, initial_state,
 
     # Cannot export with older opsets because of 'ConstantFill' op
     # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime
+    # There are still some issues prevent us from enabling script test for these scenarios:
+    # test_gru_*:
+    #   Operator aten::as_tensor is not supported by exporter yet.
+    #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1055382
+    #   Operator aten::_pack_padded_sequence is not supported by exporter yet.
+    #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1055384
+    @disableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     def f(self):
         self._dispatch_rnn_test(
