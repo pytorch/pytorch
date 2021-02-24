@@ -800,8 +800,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const Var* buffer_var = v->buffer_var();
     std::vector<const Expr*> dims = v->dims();
     int total_byte_size = v->dtype().byte_size();
-    for (size_t i = 0; i < dims.size(); i++) {
-      dims[i]->accept(this);
+    for (auto& dim : dims) {
+      dim->accept(this);
       total_byte_size *= value_.as<int>();
     }
     int int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
