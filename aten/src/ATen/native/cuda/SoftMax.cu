@@ -739,7 +739,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             int64_t chunk_size = (1<<31 - 1) / dim_size;
             while(remaining > 0) {
               dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax, int>(
-                  output_ptr, input_ptr, dim_size, dim_size, outer_size);
+                  output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
               input_ptr += chunk_size * dim_size;
               output_ptr += chunk_size;
               remaining -= chunk_size;
@@ -811,12 +811,6 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (inner_size == 1) {
     dim3 grid(outer_size);
-    std::cout << gI.sizes() << std::endl;
-    std::cout << grad.sizes() << std::endl;
-    std::cout << output.sizes() << std::endl;
-    std::cout << gI.strides() << std::endl;
-    std::cout << grad.strides() << std::endl;
-    std::cout << output.strides() << std::endl;
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, gI.scalar_type(), "host_softmax_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
     if (!half_to_float) {
@@ -828,10 +822,10 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         int64_t chunk_size = (1<<31 - 1) / dim_size;
         while(remaining > 0) {
           dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax, int>(
-            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, outer_size);
+            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
           gI_ptr += chunk_size * dim_size;
-          grad_ptr += chunk_size;
-          output_ptr += chunk_size;
+          grad_ptr += chunk_size * dim_size;
+          output_ptr += chunk_size * dim_size;
           remaining -= chunk_size;
         }
       } else {
@@ -851,11 +845,11 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         int64_t remaining = outer_size;
         int64_t chunk_size = (1<<31 - 1) / dim_size;
         while(remaining > 0) {
-          dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax, int64_t>(
-            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, outer_size);
+          dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax, int>(
+            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
           gI_ptr += chunk_size * dim_size;
-          grad_ptr += chunk_size;
-          output_ptr += chunk_size;
+          grad_ptr += chunk_size * dim_size;
+          output_ptr += chunk_size * dim_size;
           remaining -= chunk_size;
         }
       } else {
