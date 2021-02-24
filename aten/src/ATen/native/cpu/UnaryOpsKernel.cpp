@@ -630,7 +630,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
   }                                                                           \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
-#define IMPLEMENT_COMPLEX_KERNEL(dispatchtypes, op)                             \
+#define IMPLEMENT_COMPLEX_KERNEL(dispatchtypes, op)                           \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {\
@@ -661,34 +661,18 @@ static void rsqrt_kernel(TensorIterator& iter) {
   }                                                                           \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
-  #define IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(dispatchtypes, op)                             \
+  #define IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(dispatchtypes, op)              \
   static void op##_kernel(TensorIteratorBase& iter) {                         \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {\
-      iter.serial_for_each(                                                   \
-          [&](char** data_, const int64_t* strides, int64_t n) {              \
-            scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
-            scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);        \
-            int64_t out_stride = strides[0] / sizeof(scalar_t);               \
-            int64_t in_stride = strides[1] / sizeof(scalar_t);                \
-            if (out_stride == 1 && in_stride == 1) {                          \
-              vml::v##op(out_data, in_data, n);                               \
-            } else {                                                          \
-              static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);     \
-              for (int64_t i = 0; i < n; i += WIDTH) {                        \
-                scalar_t buffer[WIDTH];                                       \
-                int64_t width = WIDTH;                                        \
-                width = std::min(width, n - i);                               \
-                for (int64_t j = 0; j < width; j++)                           \
-                  buffer[j] = in_data[in_stride * (i + j)];                   \
-                vml::v##op(buffer, buffer, width);                            \
-                for (int64_t j = 0; j < width; j++)                           \
-                  out_data[out_stride * (i + j)] = buffer[j];                 \
-              }                                                               \
-            }                                                                 \
-          },                                                                  \
-          {0, iter.numel()});                                                 \
-    });                                                                       \
+      cpu_kernel_vec(iter,                                                    \
+        [=](scalar_t a) __ubsan_ignore_undefined__ -> scalar_t {              \
+          return std::op(a);                                                  \
+        },                                                                    \
+        [=](Vec256<scalar_t> a) __ubsan_ignore_undefined__ {                  \
+          return a.op();                                                      \
+        });                                                                   \
+      });                                                                     \
   }                                                                           \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
