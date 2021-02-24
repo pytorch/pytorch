@@ -96,6 +96,7 @@ class AllReduceFirstKStepsState(object):
             )
         )
 
+    # TODO: Consider consolidating this method with `maybe_increase_iter` of `PowerSGDState`.
     def maybe_increase_step(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `step` when bucket 0 is processed.
@@ -122,7 +123,8 @@ def allreduce_first_k_steps_hook(
             only exactly one tensor is stored in this bucket.
 
     Returns:
-        Future handler of the communication, which updates the gradients in place.
+        Future handler of the communication, which updates the gradients in place for the first K steps,
+        and returns the same local gradients afterwards.
 
     Example::
         state = AllReduceFirstKStepsState(process_group=process_group, k=1000)
@@ -139,6 +141,6 @@ def allreduce_first_k_steps_hook(
         return _allreduce_fut(group_to_use, input_tensors[0])
     else:
         # Afterwards K steps, directly return the input tensors as the output future.
-        ret_fut = torch.futures.Future()
+        ret_fut = torch.futures.Future()  # type: torch.futures.Future
         ret_fut.set_result(input_tensors)
         return ret_fut

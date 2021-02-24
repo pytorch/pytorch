@@ -1,4 +1,5 @@
 import copy
+import logging
 import math
 import operator
 import os
@@ -577,6 +578,19 @@ class RendezvousEnvTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_connect_failures
+    def test_logging_init(self):
+        os.environ.update({"WORLD_SIZE": "1"})
+        os.environ.update({"MASTER_ADDR": "127.0.0.1"})
+        os.environ.update({"MASTER_PORT": str(common.find_free_port())})
+        os.environ.update({"RANK": "0"})
+
+        handlers_before = logging.root.handlers
+        c10d.init_process_group(backend="gloo", init_method="env://")
+        handlers_after = logging.root.handlers
+        self.assertEqual(handlers_before, handlers_after)
+        c10d.destroy_process_group()
 
 
 class RendezvousFileTest(TestCase):
@@ -3917,13 +3931,18 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_default_ddp_comm_hooks_nccl_is_view(self):
-        self._test_default_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
+    def test_stateless_ddp_comm_hooks_nccl_is_view(self):
+        self._test_stateless_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_builtin_ddp_comm_hooks_nccl_grad_is_view(self):
         self._test_builtin_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allreduce_first_k_steps_ddp_comm_hook_nccl_grad_is_view(self):
+        self._test_allreduce_first_k_steps_ddp_comm_hook_nccl(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
