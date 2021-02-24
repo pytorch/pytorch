@@ -512,10 +512,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     loss_ddp = cast(torch.Tensor, ddp_optimizer.step(closure=closure_ddp))
                     loss_sharded_optim = cast(torch.Tensor, sharded_optimizer.step(closure=closure_sharded))
 
-                    assert torch.allclose(
-                        loss_ddp, loss_sharded_optim
-                    ), f"Losses differ in between Pytorch optim and ZeroRedundancyOptimizer : {loss_ddp} - {loss_sharded_optim}"
-
                     check_same_model_params(sharded_ddp_model, ddp_model)
 
                     # Change the models trainability, check that parity is maintained
