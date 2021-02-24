@@ -128,9 +128,7 @@ static inline void checkSetStorage(Tensor& result, Storage storage, int64_t stor
   }
 
   // storageOffset
-  if (storage_offset < 0) {
-    TORCH_CHECK("Tensor: invalid storage offset ", storage_offset);
-  }
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
 }
 
 /**
