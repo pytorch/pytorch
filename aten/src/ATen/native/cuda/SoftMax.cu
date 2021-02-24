@@ -738,7 +738,6 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             int64_t remaining = outer_size;
             constexpr int64_t chunk_size = (1<<30);
             while(remaining > 0) {
-            if (input.numel() > (1<<30)) {
               dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax, int>(
                   output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
               input_ptr += chunk_size * dim_size;
