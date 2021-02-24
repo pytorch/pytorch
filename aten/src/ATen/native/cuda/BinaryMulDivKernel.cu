@@ -172,7 +172,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 #if defined(__CUDA_ARCH__)
           floordiv = std::copysign(scalar_t(0), a * inv_b);
 #else
-          floordiv = copysignfp16(scalar_t(0), a * inv_b);
+          floordiv = copysignfp16(scalar_t(0), scalar_t(a * inv_b));
 #endif
         }
         return floordiv;
@@ -197,7 +197,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 #if defined(__CUDA_ARCH__)
           floordiv = std::copysign(scalar_t(0), a / b);
 #else
-          floordiv = copysignfp16(scalar_t(0), a / b);
+          floordiv = copysignfp16(scalar_t(0), scalar_t(a / b));
 #endif
         }
         return floordiv;
