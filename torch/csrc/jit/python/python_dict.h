@@ -42,7 +42,8 @@ class ScriptDictIterator final {
 
 /// A wrapper around c10::Dict that can be exposed in Python via pybind
 /// with an API identical to the Python dictionary class. This allows
-/// dictionaries to have reference semantics across the Python/TorchScript boundary.
+/// dictionaries to have reference semantics across the Python/TorchScript
+/// boundary.
 class ScriptDict final {
  public:
   // Constructor for empty dictionaries whose type cannot be inferred.
@@ -98,12 +99,14 @@ class ScriptDict final {
     return ScriptDictIterator(begin, end);
   }
 
-  // Interpret the dictionary as a boolean; empty means false, non-empty means true.
+  // Interpret the dictionary as a boolean; empty means false, non-empty means
+  // true.
   bool toBool() const {
     return !(dict_.toGenericDict().empty());
   }
 
-  // Get the value for the given key. Throws std::out_of_range if the key does not exist.
+  // Get the value for the given key. Throws std::out_of_range if the key does
+  // not exist.
   IValue getItem(const IValue& key) {
     return dict_.toGenericDict().at(key);
   };

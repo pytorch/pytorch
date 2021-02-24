@@ -43,10 +43,12 @@ void initScriptDictBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   py::class_<ScriptDictKeyIterator>(m, "ScriptDictKeyIterator")
-      .def("__next__", [](ScriptDictKeyIterator& iter) {
-        auto result = iter.next();
-        return toPyObject(result);
-      })
+      .def(
+          "__next__",
+          [](ScriptDictKeyIterator& iter) {
+            auto result = iter.next();
+            return toPyObject(result);
+          })
       .def("__iter__", [](ScriptDictKeyIterator& iter) { return iter; });
 
   py::class_<ScriptDictIterator>(m, "ScriptDictIterator")
@@ -100,7 +102,9 @@ void initScriptDictBindings(PyObject* module) {
               throw py::key_error();
             }
           },
-          py::return_value_policy::reference_internal) // Return value is a reference to an object that resides in the ScriptDict
+          py::return_value_policy::
+              reference_internal) // Return value is a reference to an object
+                                  // that resides in the ScriptDict
       .def(
           "__delitem__",
           [](const std::shared_ptr<ScriptDict>& self, py::object key) {
