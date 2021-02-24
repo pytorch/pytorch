@@ -1293,6 +1293,11 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             return self.function_->get_executor().getDebugState();
           })
+      .def(
+          "_debug_flush_compilation_cache",
+          [](const StrongFunctionPtr& self) {
+            return self.function_->get_executor().debugFlushCompilationCache();
+          })
       .def_property_readonly(
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
@@ -1335,6 +1340,11 @@ void initJitScriptBindings(PyObject* module) {
             PythonPrint pp(constants, deps);
             pp.printMethod(self.function());
             return pp.str();
+          })
+      .def(
+          "_debug_flush_compilation_cache",
+          [](Method& self) {
+            return self.get_executor().debugFlushCompilationCache();
           })
       .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::IValue> constants;
