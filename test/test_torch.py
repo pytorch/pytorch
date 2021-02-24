@@ -2847,9 +2847,23 @@ class TestTorchDeviceType(TestCase):
     @onlyCPU
     def test_set_deterministic_deprecated_warning(self, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling set_deterministic throws a warning about deprecation once per process
-            with self.assertWarnsOnceRegex(UserWarning, "torch.set_deterministic is deprecated"):
-                torch.set_deterministic(True)
+            # Calling set_deterministic throws a warning about deprecation once
+            # per process but testing this is tricky here since we actually get
+            # two warnings: one for the deprecated use of `set_deterministic`
+            # and one for the 'beta' use of `use_deterministic_algorithms`.
+            # The assertWarnsOnceRegex cannot handle two different warnings
+            with warnings.catch_warnings(record=True) as ws:
+                warnings.simplefilter("always")  # allow any warning to be raised
+                prev = torch.is_warn_always_enabled()
+                torch.set_warn_always(True)
+                try:
+                    torch.set_deterministic(True)
+                finally:
+                    torch.set_warn_always(prev)
+                for w in ws:
+                    txt = str(w.message)
+                    assert ("torch.use_deterministic_algorithms is in beta" in txt or
+                            "torch.set_deterministic is deprecated" in txt)
 
     @onlyCPU
     def test_is_deterministic_deprecated_warning(self, device):
@@ -3297,12 +3311,11 @@ class TestTorchDeviceType(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
             torch.from_numpy(a)
 
-        # Make sure emitting two warnings, even if they pass the regex, will fail
-        # the assertWarnsOnceRegex context manager which only allows a single warning
-        with self.assertRaisesRegex(AssertionError, '.*too many.*non-writeable.*'):
-            with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
-                torch.from_numpy(a)
-                torch.from_numpy(a)
+        # Make sure emitting two warnings will pass the assertWarnsOnceRegex
+        # context manager
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+            torch.from_numpy(a)
+            torch.from_numpy(a)
 
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
