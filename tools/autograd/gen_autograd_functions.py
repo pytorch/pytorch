@@ -212,23 +212,13 @@ if (prop.isComplex()) {
 """
 
 MISC_GETTER_DEFS = {
-    'c10::optional<int64_t>': GETTER_DEFINITION_OPT,
-    'double': GETTER_DEFINITION,
-    'c10::optional<double>': GETTER_DEFINITION_OPT,
-    'bool': GETTER_DEFINITION,
-    'std::string': GETTER_DEFINITION,
-    'Scalar': GETTER_DEFINITION,
-    'c10::optional<Scalar>': GETTER_DEFINITION_OPT,
-}
-
-MISC_GETTER_BODY = {
-    'c10::optional<int64_t>': GETTER_BODY_INT64_T,
-    'double': GETTER_BODY_DOUBLE,
-    'c10::optional<double>': GETTER_BODY_DOUBLE,
-    'bool': GETTER_BODY_BOOL,
-    'std::string': GETTER_BODY_STRING,
-    'Scalar': GETTER_BODY_SCALAR,
-    'c10::optional<Scalar>': GETTER_BODY_SCALAR,
+    'c10::optional<int64_t>': (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
+    'double': (GETTER_DEFINITION, GETTER_BODY_DOUBLE),
+    'c10::optional<double>': (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
+    'bool': (GETTER_DEFINITION, GETTER_BODY_BOOL),
+    'std::string': (GETTER_DEFINITION, GETTER_BODY_STRING),
+    'Scalar': (GETTER_DEFINITION, GETTER_BODY_SCALAR),
+    'c10::optional<Scalar>': (GETTER_DEFINITION_OPT, GETTER_BODY_SCALAR),
 }
 
 # These functions have backwards which cannot be traced, and so must have
@@ -356,8 +346,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             saved_variables.append(f'{var.type} {name};')
 
             if var.type in MISC_GETTER_DEFS:
-                body = MISC_GETTER_BODY[var.type]
-                getter_definitions.append(MISC_GETTER_DEFS[var.type].substitute(op=info.op, name=name, body=body))
+                getter_def, body = MISC_GETTER_DEFS[var.type]
+                getter_definitions.append(getter_def.substitute(op=info.op, name=name, body=body))
             else:
                 # Types we don't expose python bindings to yet:
                 #   TypeAndSize, ScalarType, TensorOptions, TensorGeometry,
