@@ -2,7 +2,6 @@
 
 #include <functional>
 
-#include <ATen/CPUFunctions.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
@@ -392,7 +391,7 @@ void Reducer::copy_grad_to_bucket(
     auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor_);
     wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
     // Divides while copying into the bucket view.
-    at::cpu::mul_out(bucket_view, grad, wrapped);
+    at::mul_out(bucket_view, grad, wrapped);
   } else {
     bucket_view.copy_(grad);
   }
