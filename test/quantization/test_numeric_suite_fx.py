@@ -335,7 +335,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
 
             for i, val in enumerate(v["quantized"]):
-                if "lstm_1.stats" not in act_compare_dict:
+                if "lstm.stats" not in act_compare_dict:
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
                 else:
                     self.assertTrue(
@@ -445,7 +445,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
 
-        expected_act_compare_dict_keys = {"x.stats", "hid.stats", "lstm_1.stats"}
+        expected_act_compare_dict_keys = {"x.stats", "hid.stats", "lstm.stats"}
         self.compare_and_validate_model_outputs_results_fx(
             prepared_float_model,
             q_model,
@@ -489,7 +489,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'linear_1': ((F.linear, F.linear), (toq.linear, toq.linear))}
+        expected_types = {'linear': ((F.linear, F.linear), (toq.linear, toq.linear))}
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
@@ -595,9 +595,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         expected_types = {
-            'cat_1': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
+            'cat': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
             'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add_2': ((torch.add, torch.add), (toq.add, toq.add)),
+            'add': ((torch.add, torch.add), (toq.add, toq.add)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -638,7 +638,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # matched because they use the same function in mp and mq.
         expected_types = {
             'conv1': ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
-            'mul_1': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
+            'mul': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
