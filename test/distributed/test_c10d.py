@@ -1,5 +1,4 @@
 import copy
-import logging
 import math
 import operator
 import os
@@ -3907,11 +3906,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_powerSGD_ddp_comm_hook_nccl(self):
         self._test_powerSGD_ddp_comm_hook_nccl()
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
-        self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
     def test_invalid_powerSGD_state(self):
         for start_powerSGD_iter, use_error_feedback, warm_start in product([0, 1], [True, False], [True, False]):
