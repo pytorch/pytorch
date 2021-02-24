@@ -371,8 +371,8 @@ class TestCUDA(JitTestCase):
             device_index = torch.cuda._current_device()
             prev_current_stream = torch.cuda.current_stream(device_index)
             d = torch.device("cuda:0")
-            s1 = torch.jit.cuda.Stream(d, 0)
-            s2 = torch.jit.cuda.Stream(d, 0)
+            s1 = torch.jit.cuda.Stream(d)
+            s2 = torch.jit.cuda.Stream(d)
             event = torch.jit.cuda.Event(False, False, False)
 
             A = torch.rand(1000, 1000, device="cuda")
