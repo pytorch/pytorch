@@ -15,9 +15,13 @@ IValue ScriptDictIterator::next() {
     throw py::stop_iteration();
   }
 
+  // Since this is the iterator for .items(), the current key and value
+  // should be returned as a tuple.
   IValue result = ivalue::Tuple::create({iter_->key(), iter_->value()});
-  ;
+
+  // Advance the iterator for next time.
   iter_++;
+
   return result;
 }
 
@@ -26,8 +30,12 @@ IValue ScriptDictKeyIterator::next() {
     throw py::stop_iteration();
   }
 
+  // Since this is the iterator for .keys() and __iter__(), return only the key.
   IValue result = iter_->key();
+
+  // Advance the iterator for next time.
   iter_++;
+
   return result;
 }
 
@@ -38,7 +46,8 @@ void initScriptDictBindings(PyObject* module) {
       .def("__next__", [](ScriptDictKeyIterator& iter) {
         auto result = iter.next();
         return toPyObject(result);
-      });
+      })
+      .def("__iter__", [](ScriptDictKeyIterator& iter) { return iter; });
 
   py::class_<ScriptDictIterator>(m, "ScriptDictIterator")
       .def(
@@ -90,7 +99,8 @@ void initScriptDictBindings(PyObject* module) {
             } catch (const std::out_of_range& e) {
               throw py::key_error();
             }
-          })
+          },
+          py::return_value_policy::reference_internal) // Return value is a reference to an object that resides in the ScriptDict
       .def(
           "__delitem__",
           [](const std::shared_ptr<ScriptDict>& self, py::object key) {
@@ -100,11 +110,18 @@ void initScriptDictBindings(PyObject* module) {
       .def(
           "__iter__",
           [](const std::shared_ptr<ScriptDict>& self) { return self->iter(); },
-          py::keep_alive<0, 1>())
+          py::keep_alive<0, 1>()) // ScriptDict needs to be alive at least as
+                                  // long as the iterator
       .def(
           "items",
           [](const std::shared_ptr<ScriptDict>& self) { return self->items(); },
-          py::keep_alive<0, 1>());
+          py::keep_alive<0, 1>()) // ScriptDict needs to be alive at least as
+                                  // long as the iterator
+      .def(
+          "keys",
+          [](const std::shared_ptr<ScriptDict>& self) { return self->iter(); },
+          py::keep_alive<0, 1>()); // ScriptDict needs to be alive at least as
+                                   // long as the iterator
 }
 
 } // namespace jit

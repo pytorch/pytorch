@@ -1697,7 +1697,24 @@ class TestDict(JitTestCase):
 
 
 class TestScriptDict(JitTestCase):
-    def _script_dict_add(self, d, k, v):
+    """
+    This class contains a suite of tests for torch.jit.dict, a
+    function that returns a dictionary-like object that has reference
+    semantics across the Python/TorchScript boundary. That is,
+    it can be passed to a TorchScript function that mutates it
+    and those modifications are visible in the scope of the Python
+    caller of said TorchScript function.
+
+    The vast majority of tests are for making sure that objects returned
+    by torch.jit.dict behave like dictionaries do so that they are fungible
+    in almost all cirumstances with regular dictionaries.
+    """
+    def _script_dict_add(self, d: torch._C.ScriptDict, k: int, v: int):
+        """
+        This is a helper function that inserts the pair (k, v) into the
+        dictionary d in TorchScript. It is used for testing reference
+        semantics.
+        """
         @torch.jit.script
         def dict_add(d: Dict[int, int], k: int, v: int):
             d[k] = v
@@ -1705,11 +1722,19 @@ class TestScriptDict(JitTestCase):
         dict_add(d, k, v)
 
     def test_repr(self):
-        t = torch.jit.dict({1: 2})
-        exp = "{1: 2}"
+        """
+        Test the __repr__ method.
+        """
+        data = {1: 2}
+        t = torch.jit.dict(data)
+        exp = repr(data)
         self.assertEqual(repr(t), exp)
 
     def test_bool(self):
+        """
+        Test the __bool__ method. This should return True
+        if the dictionary is non-empty and False otherwise.
+        """
         true = torch.jit.dict({1: 2})
         false = torch.jit.empty_dict(Dict[int, int])
 
@@ -1717,6 +1742,9 @@ class TestScriptDict(JitTestCase):
         self.assertEqual(bool(false), False)
 
     def test_iter(self):
+        """
+        Test iteration over a dictionary's keys.
+        """
         t = torch.jit.dict({1: 2, 3: 4})
 
         s = 0
@@ -1726,6 +1754,9 @@ class TestScriptDict(JitTestCase):
         self.assertEqual(s, 4)
 
     def test_items(self):
+        """
+        Test .items().
+        """
         t = torch.jit.dict({1: 2, 3: 4})
 
         s = 0
@@ -1735,31 +1766,46 @@ class TestScriptDict(JitTestCase):
         self.assertEqual(s, 14)
 
     def test_getitem(self):
+        """
+        Test accessing dictionary values using the [] operator.
+        TODO: Add test for KeyError.
+        """
         t = torch.jit.dict({1: 2, 3: 4})
 
         self.assertEqual(t[1], 2)
         self.assertEqual(t[3], 4)
 
     def test_contains(self):
+        """
+        Test membership checks (x in y, x not in y).
+        TODO: Add test for KeyError.
+        """
         data = torch.jit.dict({1: 2, 3: 4})
 
-        self.assertEqual(1 in data, True)
-        self.assertEqual(2 in data, False)
-        self.assertEqual(3 in data, True)
-        self.assertEqual(4 in data, False)
+        self.assertTrue(1 in data)
+        self.assertTrue(2 not in data)
+        self.assertTrue(3 in data)
+        self.assertTrue(4 not in data)
 
     def test_delitem(self):
+        """
+        Test deletion.
+        TODO: Add test for KeyError.
+        """
         data = torch.jit.dict({1: 2, 3: 4})
 
-        self.assertEqual(1 in data, True)
-        self.assertEqual(3 in data, True)
+        self.assertTrue(1 in data)
+        self.assertTrue(3 in data)
 
         del data[1]
 
-        self.assertEqual(1 in data, False)
-        self.assertEqual(3 in data, True)
+        self.assertFalse(1 in data)
+        self.assertTrue(3 in data)
 
     def test_len(self):
+        """
+        Test len() builtin function.
+        """
         one = torch.jit.dict({1: 2})
         zero = torch.jit.empty_dict(Dict[int, int])
 
@@ -1767,6 +1813,10 @@ class TestScriptDict(JitTestCase):
         self.assertEqual(len(zero), 0)
 
     def test_nested(self):
+        """
+        Test that reference semantics are honoured when the ScriptDict that is
+        mutated using TorchScript is inside another.
+        """
         nested = torch.jit.dict({1: {1: 2}, 2: {3: 4}}, Dict[int, Dict[int, int]])
 
         one = nested[1]
@@ -1775,13 +1825,20 @@ class TestScriptDict(JitTestCase):
         self._script_dict_add(one, 9, 10)
         self._script_dict_add(two, 11, 12)
 
+        # The mutation should be visible in the original dictionary, nested.
+        self.assertEqual(len(one), 2)
+        self.assertEqual(len(two), 2)
         self.assertEqual(len(nested[1]), 2)
         self.assertEqual(len(nested[2]), 2)
 
     def test_reference_semantics(self):
+        """
+        Test that reference semantics are honoured; that modifications made
+        to a ScriptDict in TorchScript are visible in Python.
+        """
         data = torch.jit.dict({1: 2})
         self._script_dict_add(data, 3, 4)
 
         self.assertEqual(len(data), 2)
-        self.assertEqual(3 in data, True)
+        self.assertTrue(3 in data)
         self.assertEqual(data[3], 4)

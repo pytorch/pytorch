@@ -696,13 +696,6 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
   } else if (ivalue.isGenericDict()) {
     return py::cast(ScriptDict(ivalue));
-    // auto dict = std::move(ivalue).toGenericDict();
-    // py::dict py_dict;
-    // for (auto& pair : dict) {
-    //   py_dict[toPyObject(IValue{pair.key()})] =
-    //       toPyObject(IValue{pair.value()});
-    // }
-    // return std::move(py_dict);
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     auto RRefPtr =

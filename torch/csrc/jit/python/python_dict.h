@@ -3,16 +3,15 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <pybind11/detail/common.h>
 #include <torch/csrc/utils/pybind.h>
-#include "c10/util/Exception.h"
-#include "c10/util/intrusive_ptr.h"
 
 namespace torch {
 namespace jit {
 
 void initScriptDictBindings(PyObject* module);
 
+/// An iterator over the keys of ScriptDict. This is used to support
+/// .keys() and iteration.
 class ScriptDictKeyIterator final {
  public:
   ScriptDictKeyIterator(
@@ -26,6 +25,8 @@ class ScriptDictKeyIterator final {
   c10::impl::GenericDict::iterator end_;
 };
 
+/// An iterator over the key-value pairs of ScriptDict. This is used to support
+/// .items().
 class ScriptDictIterator final {
  public:
   ScriptDictIterator(
@@ -39,8 +40,12 @@ class ScriptDictIterator final {
   c10::impl::GenericDict::iterator end_;
 };
 
+/// A wrapper around c10::Dict that can be exposed in Python via pybind
+/// with an API identical to the Python dictionary class. This allows
+/// dictionaries to have reference semantics across the Python/TorchScript boundary.
 class ScriptDict final {
  public:
+  // Constructor for empty dictionaries whose type cannot be inferred.
   ScriptDict(const TypePtr& type) {
     auto dict_type = type->expect<DictType>();
     auto d = c10::impl::GenericDict(
@@ -48,6 +53,8 @@ class ScriptDict final {
     dict_ = IValue(d);
   }
 
+  // Constructor for instances based on existing dictionaries (e.g. a
+  // Python instance or a dictionary nested inside another).
   ScriptDict(IValue data) {
     TORCH_INTERNAL_ASSERT(data.isGenericDict());
     dict_ = std::move(data);
@@ -57,7 +64,11 @@ class ScriptDict final {
     return dict_.type()->cast<DictType>();
   }
 
+  // Set the value corresponding to the given key.
   void setItem(const IValue& key, IValue value);
+
+  // Return a string representation that can be used
+  // to reconstruct the instance.
   std::string repr() const {
     std::ostringstream s;
     s << '{';
@@ -73,36 +84,46 @@ class ScriptDict final {
     return s.str();
   }
 
+  // Return an iterator over the keys of the dictionary.
   ScriptDictKeyIterator iter() const {
     auto begin = dict_.toGenericDict().begin();
     auto end = dict_.toGenericDict().end();
     return ScriptDictKeyIterator(begin, end);
   }
 
+  // Return an iterator over the key-value pairs of the dictionary.
   ScriptDictIterator items() const {
     auto begin = dict_.toGenericDict().begin();
     auto end = dict_.toGenericDict().end();
     return ScriptDictIterator(begin, end);
   }
 
+  // Interpret the dictionary as a boolean; empty means false, non-empty means true.
   bool toBool() const {
     return !(dict_.toGenericDict().empty());
   }
 
+  // Get the value for the given key. Throws std::out_of_range if the key does not exist.
   IValue getItem(const IValue& key) {
     return dict_.toGenericDict().at(key);
   };
 
+  // Check whether the dictionary contains the given key.
   bool contains(const IValue& key) {
     return dict_.toGenericDict().contains(key);
   }
+
+  // Delete the given key from the dictionary.
   void delItem(const IValue& key) {
     (void)dict_.toGenericDict().erase(key);
   }
+
+  // Get the size of the dictionary.
   int64_t len() const {
     return dict_.toGenericDict().size();
   }
 
+  // A c10::Dict instance that holds the actual data.
   IValue dict_;
 };
 
