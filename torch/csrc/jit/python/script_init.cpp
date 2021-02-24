@@ -1226,22 +1226,8 @@ void initJitScriptBindings(PyObject* module) {
             // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
-            try {
-              OverloadedFunction& overload_func = dynamic_cast<OverloadedFunction&>(callee);
-              auto methods = overload_func.getClass()->findOverloadedMethod(overload_func.name());
-              for (auto method: methods) {
-                auto overloaded_method = dynamic_cast<OverloadedFunction*>(method);
-                if (overloaded_method->matchesPyArgs(tuple_slice(std::move(args), 1), std::move(kwargs))) {
-                  return invokeScriptFunctionFromPython(*method, tuple_slice(std::move(args), 1), std::move(kwargs));
-                }
-              }
-
-            } catch(const std::bad_cast& e) {
-
-            }
-
             py::object result = invokeScriptFunctionFromPython(
-                  callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+                callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             return result;
             END_HANDLE_TH_ERRORS_PYBIND
           })
@@ -1331,8 +1317,26 @@ void initJitScriptBindings(PyObject* module) {
             // see: [pybind11 varargs]
             HANDLE_TH_ERRORS
             Method& method = py::cast<Method&>(args[0]);
+            auto self = method.owner();
+            auto methods = self.get_overloaded_methods(method.name());
+
+            auto input_args = tuple_slice(std::move(args), 1);
+            auto input_kwargs = std::move(kwargs);
+
+            for (auto& overloaded_method: methods){
+              // TODO: this is pretty stupid method that is essentially a copy of
+              // createStackFromSchema. When createStackFromSchema throws a schema
+              // error, for some reason this code seg faults. So I created a function
+              // that gives a boolean instead of throwing error.
+              if (canCreateStackFromSchema(overloaded_method.function().getSchema(), input_args, input_kwargs, self._ivalue())){
+                return invokeScriptMethodFromPython(
+                  overloaded_method, input_args, input_kwargs);
+              }
+
+            }
+
             return invokeScriptMethodFromPython(
-                method, tuple_slice(std::move(args), 1), std::move(kwargs));
+                 method, input_args, input_kwargs);
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)

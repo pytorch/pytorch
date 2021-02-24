@@ -942,6 +942,9 @@ struct CodeImpl {
         break;
       case prim::CallMethod:
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
+          // TODO: this is pretty bad because we are doing schema matching again here.
+          // I can't really think of a way we can avoid this step. Maybe messing with the
+          // method names and do table lookup?
           if (class_type->findOverloadedMethod(node->s(attr::name)).size() > 1) {
             for (auto & method : class_type->findOverloadedMethod(node->s(attr::name))) {
               if (auto overloaded_method = dynamic_cast<OverloadedFunction*>(method)) {

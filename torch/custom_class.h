@@ -236,7 +236,7 @@ class class_ {
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
     auto qualMethodName = qualClassName + "." + name;
     auto method = std::make_unique<jit::OverloadedFunction>(
-        qualMethodName, std::move(schema), std::move(func), std::move(classTypePtr), std::move(doc_string));
+        qualMethodName, std::move(schema), std::move(func), std::move(doc_string));
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
     return *this;
@@ -392,7 +392,7 @@ class class_ {
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
     auto method = std::make_unique<jit::OverloadedFunction>(
-        qualMethodName, std::move(schema), std::move(wrapped_func), std::move(classTypePtr), std::move(doc_string));
+        qualMethodName, std::move(schema), std::move(wrapped_func), std::move(doc_string));
 
     // Register the method here to keep the Method alive.
     // ClassTypes do not hold ownership of their methods (normally it

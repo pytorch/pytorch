@@ -3,8 +3,7 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include "ATen/core/overloaded_function.h"
-#include "ATen/core/builtin_function.h"
+
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -398,7 +397,6 @@ struct FunctionValue : public SugaredValue {
       size_t n_binders) override {
     std::vector<const FunctionSchema*> schemas;
     for (Function* callee : callees_) {
-      std::cout << "FUNCTION: " << callee->name() << std::endl;
       try {
         callee->ensure_defined();
       } catch (const RecursiveMethodCallError&) {

@@ -1071,7 +1071,6 @@ void ClassType::addMethod(torch::jit::Function* method) {
 }
 
 void ClassType::addOverloadedMethod(torch::jit::Function* method) {
-  std::cout << method->name() << std::endl;
   if (overloaded_methods_.find(method->name()) == overloaded_methods_.end()){
     overloaded_methods_[method->name()] = std::vector<torch::jit::Function*>();
   }
