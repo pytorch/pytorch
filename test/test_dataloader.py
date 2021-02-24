@@ -21,7 +21,7 @@ from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_ROCM, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
     import psutil
@@ -1287,7 +1287,7 @@ except RuntimeError as e:
         dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
             # windows doesn't support sharing cuda tensor; ROCm does not yet fully support IPC
-            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS and not TEST_WITH_ROCM:
+            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS:
                 ds_cls = CUDACountingDataset
             else:
                 ds_cls = CountingDataset
@@ -2132,7 +2132,6 @@ class TestCustomPinFn(TestCase):
         self.dataset = TensorDataset(inps, tgts)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_custom_batch_pin(self):
         test_cases = [
             (collate_wrapper, SimpleCustomBatch),
@@ -2147,7 +2146,6 @@ class TestCustomPinFn(TestCase):
                 self.assertTrue(sample.is_pinned())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_custom_batch_pin_worker(self):
         test_cases = [
             (collate_wrapper, SimpleCustomBatch),
