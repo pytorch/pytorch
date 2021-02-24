@@ -1300,12 +1300,12 @@ class TestCase(expecttest.TestCase):
                 yield
             finally:
                 torch.set_warn_always(prev)
-                if len(ws) == 0:
-                    self.fail('no warning caught')
-                for w in ws:
-                    self.assertTrue(type(w.message) is category)
-                    self.assertTrue(re.match(pattern, str(w.message)),
-                                    f'{pattern}, {w.message}')
+            if len(ws) == 0:
+                self.fail('no warning caught')
+            for w in ws:
+                self.assertTrue(type(w.message) is category)
+                self.assertTrue(re.match(pattern, str(w.message)),
+                                f'{pattern}, {w.message}')
 
     def assertExpected(self, s, subname=None):
         r"""
