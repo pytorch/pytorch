@@ -1,4 +1,5 @@
 import collections
+import enum
 
 import torch
 import torch.nn as nn
@@ -26,7 +27,25 @@ from .graph_passes import (
     create_a_shadows_b,
 )
 
-from typing import Dict, Tuple, Callable, List, Optional
+from typing import Dict, Tuple, Callable, List, Optional, Any
+
+class NSSingleResultValuesType(str, enum.Enum):
+    WEIGHT = 'weight'
+    NODE_OUTPUT = 'node_output'
+
+# TODO(future PR): see if we can use typing_extensions's TypedDict instead
+# to properly type the various keys
+# {
+#   'logger_name_1': {
+#     'model_name_a': {
+#       # one of NSSingleResultValuesType
+#       'type': 'weight',
+#       # the values of type specified above
+#       'values': [torch.Tensor(...), ...],
+#     },
+#   },
+# }
+NSSingleResultType = Dict[str, Any]
 
 # {
 #   'logger_name_1': {
@@ -35,7 +54,7 @@ from typing import Dict, Tuple, Callable, List, Optional
 #   },
 # }
 #
-NSResultsType = Dict[str, Dict[str, List[torch.Tensor]]]
+NSResultsType = Dict[str, Dict[str, NSSingleResultType]]
 
 def add_weight_info_to_dict(
     model_name: str,
@@ -61,7 +80,10 @@ def add_weight_info_to_dict(
 
             if related_to_linear:
                 weight = get_linear_fun_weight(node, model)
-                results[ref_node_name][model_name] = [weight]
+                results[ref_node_name][model_name] = {
+                    'type': NSSingleResultValuesType.WEIGHT.value,
+                    'values': [weight],
+                }
 
         else:  # call_module
             # for call_module, we need to look up the modules to do the type check
@@ -76,7 +98,10 @@ def add_weight_info_to_dict(
             # TODO(future PR): other module types
             if related_to_conv2d_mod:
                 weight = get_conv_mod_weight(mod)
-                results[ref_node_name][model_name] = [weight]
+                results[ref_node_name][model_name] = {
+                    'type': NSSingleResultValuesType.WEIGHT.value,
+                    'values': [weight],
+                }
 
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
@@ -200,7 +225,10 @@ def add_activation_info_to_dict(
             key = mod.ref_node_name + '.stats'
             if key not in results:
                 results[key] = {}
-            results[key][model_name] = mod.stats
+            results[key][model_name] = {
+                'type': NSSingleResultValuesType.NODE_OUTPUT.value,
+                'values': mod.stats,
+            }
 
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
@@ -289,7 +317,13 @@ def get_matching_activations_a_shadows_b(
             # If logger_obj.ref_node_name is populated, then this logger
             # is from model A, and ref_node_name is the name from model B.
             if mod.ref_node_name is None:
-                results[mod.node_name + '.stats'][mod.model_name] = mod.stats
+                results[mod.node_name][mod.model_name] = {
+                    'type': NSSingleResultValuesType.NODE_OUTPUT.value,
+                    'values': mod.stats,
+                }
             else:
-                results[mod.ref_node_name + '.stats'][mod.model_name] = mod.stats
+                results[mod.ref_node_name][mod.model_name] = {
+                    'type': NSSingleResultValuesType.NODE_OUTPUT.value,
+                    'values': mod.stats,
+                }
     return dict(results)
