@@ -97,7 +97,7 @@ void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
 
 namespace{
 
-  template<typename scalar_t>
+template<typename scalar_t>
 scalar_t fp16_from_bits(uint16_t w) {
     union {
       uint32_t as_bits;
