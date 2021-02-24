@@ -195,10 +195,11 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
     lift_lowering_attrs_to_nodes(fx_module)
     for node in fx_module.graph.nodes:
         node_rep: Dict[str, Any] = {}
-        # Get shape/type info, currently not needed for call_module.
-        if node.op != "call_module" or not isinstance(
+        # Get shape/type info, currently not needed for call_module node
+        # whose target is a GraphModule and output node.
+        if not (node.op == "call_module" and isinstance(
             submodules[node.target], GraphModule
-        ):
+        )) and node.op != "output":
             shape, dtype = get_shape_and_dtype(node)
             node_rep["shape"] = serialize_shape(shape)
             node_rep["dtype"] = str(dtype)
