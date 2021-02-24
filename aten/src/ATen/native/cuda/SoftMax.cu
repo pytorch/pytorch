@@ -733,12 +733,17 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           }
         } else {
           if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
+            auto output_ptr = output.data_ptr<scalar_t>();
+            auto input_ptr = input.data_ptr<scalar_t>();
+            int64_t remaining = outer_size;
+            constexpr int64_t chunk_size = (1<<30);
+            while(remaining > 0) {
             if (input.numel() > (1<<30)) {
-              dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax, int64_t>(
-                  output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
-            } else {
               dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax, int>(
                   output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
+              input_ptr += chunk_size * dim_size;
+              output_ptr += chunk_size;
+              remaining -= chunk_size;
             }
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
