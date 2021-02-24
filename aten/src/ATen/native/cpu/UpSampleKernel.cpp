@@ -325,7 +325,7 @@ void upsample_nearest2d_kernel_impl(
 }
 
 void upsample_nearest3d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
@@ -361,7 +361,7 @@ void upsample_nearest2d_backward_kernel_impl(
 }
 
 void upsample_nearest3d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
