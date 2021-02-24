@@ -1095,12 +1095,10 @@ class Quantizer:
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (
                     (is_activation and
-                        activation_is_quantized(qconfig)) or
-                    (is_weight and weight_is_quantized(qconfig) or
-                    (is_bias and
-                     activation_dtype(qconfig) == torch.float16) and
-                     weight_dtype(qconfig) == torch.float16)
-                )
+                     activation_is_quantized(qconfig)) or
+                    (is_weight and weight_is_quantized(qconfig)) or
+                    (is_bias and activation_dtype(qconfig) == torch.float16)
+                    and weight_dtype(qconfig) == torch.float16)
 
                 if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \

@@ -176,14 +176,16 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
   std::vector<uint8_t> currentValue = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValue = tcputil::recvVector<uint8_t>(socket);
 
-  // sets value to new value if the key exists and it's existing value is the
-  // current value
-  auto it = tcpStore_.find(key);
-  if (it != tcpStore_.end() && it->second == currentValue) {
-    it->second = newValue;
-    tcputil::sendVector<uint8_t>(socket, newValue);
-  } else {
+  auto pos = tcpStore_.find(key);
+  if (pos == tcpStore_.end()) {
+    // TODO: This code path is not ideal as we are "lying" to the caller in case
+    // the key does not exist. We should come up with a working solution.
     tcputil::sendVector<uint8_t>(socket, currentValue);
+  } else {
+    if (pos->second == currentValue) {
+      pos->second = std::move(newValue);
+    }
+    tcputil::sendVector<uint8_t>(socket, pos->second);
   }
 }
 

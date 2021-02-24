@@ -99,7 +99,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
     '''
-    dtype = activation_post_process.dtype
+    dtype = activation_post_process.dtype  # type: ignore
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
