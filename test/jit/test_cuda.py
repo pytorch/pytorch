@@ -57,26 +57,26 @@ class TestCUDA(JitTestCase):
             return s.device_index() == torch.cuda._current_device()
 
         @torch.jit.script
-        def stream_default_args_1() -> bool:
+        def stream_default_args_for_device() -> bool:
             s = torch.jit.cuda.Stream(priority=0)
             return s.device_index() == torch.cuda._current_device()
 
         @torch.jit.script
-        def stream_default_args_2() -> bool:
+        def stream_default_args_for_priority() -> bool:
             d = torch.device("cuda:1")
             s = torch.jit.cuda.Stream(d)
             return s.device_index() == 1
 
         @torch.jit.script
-        def stream_args() -> bool:
+        def stream_args_all() -> bool:
             d = torch.device("cuda:0")
             s = torch.jit.cuda.Stream(d, 0)
             return s.device_index() == 0
 
         self.assertTrue(stream_default_args)
-        self.assertTrue(stream_default_args_1)
-        self.assertTrue(stream_default_args_2)
-        self.assertTrue(stream_args)
+        self.assertTrue(stream_default_args_for_device)
+        self.assertTrue(stream_default_args_for_priority)
+        self.assertTrue(stream_args_all)
 
     def test_event_args(self):
         # Test Event creation with default arguments
@@ -86,36 +86,56 @@ class TestCUDA(JitTestCase):
             return e is not None
 
         @torch.jit.script
-        def event_default_args_1() -> bool:
+        def event_arg_blocking() -> bool:
             e = torch.jit.cuda.Event(blocking=True)
-            return e is not None
+            s0 = torch.cuda.current_stream(0)
+            s = torch.jit.cuda.Stream()
+            e.record(s0)
+            e.wait(s)
+            A = torch.rand(1000, 1000, device="cuda")
+            with torch.jit.cuda.stream(s):
+                B = torch.mm(A, A)
+            s.synchronize()
+            e.record(s0)
+
+            return s.query() and e.query()
 
         @torch.jit.script
-        def event_default_args_2() -> bool:
-            e = torch.jit.cuda.Event(enable_timing=True)
-            return e is not None
+        def event_arg_enable_timing() -> float:
+            e_tik = torch.jit.cuda.Event(enable_timing=True)
+            e_tok = torch.jit.cuda.Event(enable_timing=True)
+            s0 = torch.cuda.current_stream(0)
+            e_tik.record(s0)
+            A = torch.rand(1000, 1000, device="cuda")
+            with torch.jit.cuda.stream(s0):
+                B = torch.mm(A, A)
+            s0.synchronize()
+            e_tok.record(s0)
+            e_tok.synchronize()
+            return e_tik.elapsed_time(e_tok)
 
         @torch.jit.script
-        def event_default_args_3() -> bool:
+        def event_arg_interprocess() -> bool:
             e = torch.jit.cuda.Event(interprocess=True)
-            return e is not None
+            s1 = torch.jit.cuda.Stream()
+            s2 = torch.jit.cuda.Stream()
+            A = torch.rand(1000, 1000, device="cuda")
+            with torch.jit.cuda.stream(s1):
+                B = torch.mm(A, A)
+                s1.record_event(e)
 
-        @torch.jit.script
-        def event_default_args_4() -> bool:
-            e = torch.jit.cuda.Event(interprocess=True, blocking=True)
-            return e is not None
+            with torch.jit.cuda.stream(s2):
+                C = torch.mm(A, A)
+                s2.record_event(e)
+            s1.synchronize()
+            s2.synchronize()
 
-        @torch.jit.script
-        def event_default_args_5() -> bool:
-            e = torch.jit.cuda.Event(enable_timing=True, blocking=True)
-            return e is not None
+            return s1.query() and s2.query() and e.query()
 
         self.assertTrue(event_default_args)
-        self.assertTrue(event_default_args_1)
-        self.assertTrue(event_default_args_2)
-        self.assertTrue(event_default_args_3)
-        self.assertTrue(event_default_args_4)
-        self.assertTrue(event_default_args_5)
+        self.assertTrue(event_arg_blocking)
+        self.assertGreater(event_arg_enable_timing(), 0)
+        self.assertTrue(event_arg_interprocess)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
@@ -217,7 +237,7 @@ class TestCUDA(JitTestCase):
         @torch.jit.script
         def test_simple_stream():
             device_index = torch.cuda._current_device()
-            s = torch.jit.cuda.Stream(priority=0)
+            s = torch.jit.cuda.Stream()
             return device_index == s.device_index()
 
         self.assertTrue(test_simple_stream(), "Could not create Stream!")
@@ -240,7 +260,7 @@ class TestCUDA(JitTestCase):
             device_index = torch.cuda._current_device()
             current_stream = torch.cuda.current_stream(device_index)
             default_stream = torch.cuda.default_stream(device_index)
-            user_stream = torch.jit.cuda.Stream(priority=0)
+            user_stream = torch.jit.cuda.Stream()
 
             # Check if the current and default streams are the same on the device
             is_current_and_default_stream_same = current_stream.id() == default_stream.id()
@@ -282,7 +302,7 @@ class TestCUDA(JitTestCase):
         def test_stream_context():
             device_index = torch.cuda._current_device()
             current_stream = torch.cuda.current_stream(device_index)
-            user_stream = torch.jit.cuda.Stream(priority=0)
+            user_stream = torch.jit.cuda.Stream()
             A = torch.rand(1000, 1000, device="cuda")
 
             with torch.jit.cuda.stream(user_stream):
@@ -415,7 +435,7 @@ class TestCUDA(JitTestCase):
         @torch.jit.script
         def test_stream_synchronize() -> float:
             device_index = torch.cuda._current_device()
-            s = torch.jit.cuda.Stream(priority=0)
+            s = torch.jit.cuda.Stream()
             e_tik = torch.jit.cuda.Event(True, False, False)
             e_tok = torch.jit.cuda.Event(True, False, False)
 
@@ -440,7 +460,7 @@ class TestCUDA(JitTestCase):
         # and the stream.query evaluates to true.
         @torch.jit.script
         def test_event_synchronize() -> float:
-            s = torch.jit.cuda.Stream(priority=0)
+            s = torch.jit.cuda.Stream()
             e_tik = torch.jit.cuda.Event(True, False, False)
             e_tok = torch.jit.cuda.Event(True, False, False)
 
@@ -469,7 +489,7 @@ class TestCUDA(JitTestCase):
         def test_event_wait() -> float:
             device_index = torch.cuda._current_device()
             s0 = torch.cuda.current_stream(device_index)
-            s1 = torch.jit.cuda.Stream(priority=0)
+            s1 = torch.jit.cuda.Stream()
             e_tik = torch.jit.cuda.Event(True, True, False)
             e_tok = torch.jit.cuda.Event(True, True, False)
 
@@ -519,7 +539,7 @@ class TestCUDA(JitTestCase):
         def test_save_load(self):
             class Model(torch.nn.Module):
                 def forward(self):
-                    s = torch.jit.cuda.Stream(priority=0)
+                    s = torch.jit.cuda.Stream()
                     a = torch.rand(3, 4, device="cuda")
                     b = torch.rand(3, 4, device="cuda")
 
