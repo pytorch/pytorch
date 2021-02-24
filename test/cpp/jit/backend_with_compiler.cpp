@@ -5,7 +5,7 @@ namespace jit {
 
 // Implementation of a PyTorch Backend that can process, compile and execute
 // TorchScript Modules composed of 'add' and 'sub' operators. It just supports
-// for Modules that implement a sum or subtraction of 2 inputs (i.e. in1 + in2
+// for modules that implement a sum or subtraction of 2 inputs (i.e. in1 + in2
 // or in1 - in2). Hence the methods of the models expect exactly 2 inputs of
 // type Tensor. This backend is used to demonstrate the flow of compilation and
 // execution with minimum amount of work. It's not intended to a practical
