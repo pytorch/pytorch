@@ -179,42 +179,6 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         o.step()
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
 
-    def test_local_state_dict(self):
-        """Check that it's possible to pull a local state dict
-        .. warning: probably deprecated in the near future
-        """
-        self.dist_init(self.rank)
-
-        x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.1)
-        local_state_dict = o.local_state_dict()
-        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
-        o.load_local_state_dict(local_state_dict)
-        # We should now be using a lr of 0.1.
-        self.assertEqual(o.optim.param_groups[0]["lr"], 0.1)
-        self.assertEqual(o.param_groups[0]["lr"], 0.1)
-        x.backward()
-        o.step()
-        self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
-
-    def test_implicit_local_state_dict(self):
-        """Check that it's possible to pull a local state dict
-        .. warning: probably deprecated in the near future
-        """
-        self.dist_init(self.rank)
-
-        x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.1)
-        local_state_dict = o.state_dict()
-        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
-        o.load_state_dict(local_state_dict)
-        # We should now be using a lr of 0.1.
-        self.assertEqual(o.optim.param_groups[0]["lr"], 0.1)
-        self.assertEqual(o.param_groups[0]["lr"], 0.1)
-        x.backward()
-        o.step()
-        self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
-
     def test_zero_grad(self):
         """Check that the zero_grad attribute is properly handled"""
         self.dist_init(self.rank)
@@ -403,7 +367,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         # - load it again
         if self.rank == RECIPIENT_RANK:
             optimizer_state_dict = optimizer.state_dict()
-            self.assertEqual(len(optimizer_state_dict["state"]), self.world_size)
+            self.assertEqual(len(optimizer_state_dict["state"]), len(list(model.parameters())))
         else:
             optimizer_state_dict = {}
 
