@@ -359,7 +359,7 @@ void recurseThroughNestedModules(
     if (prefix != "") {
       submodule_prefix = prefix + ".";
     }
-    submodule_prefix = submodule_prefix + key_string;
+    submodule_prefix += key_string;
     recurseThroughNestedModules(
         loc, m, keys, values, module_value, submodule_prefix, field);
   };
@@ -382,7 +382,7 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
   for (const auto& name : paramNames) {
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
-    Value* tensor_v = m.graph()->insertGetAttr(self_, name);
+    m.graph()->insertGetAttr(self_, name);
     values.push_back(tryGetAttr(loc, m, name));
     keys.push_back(name_v);
   }
@@ -765,6 +765,9 @@ std::shared_ptr<SugaredValue> PythonClassValue::attr(
     const std::string& field) {
   // Resolve values from the Python object first (e.g. for static methods on
   // this type, resolve them as functions)
+  if (auto* fn = type_->findStaticMethod(field)) {
+    return std::make_shared<FunctionValue>(fn);
+  }
   auto py_attr = py::getattr(py_type_, field.c_str(), py::none());
   if (!py_attr.is_none()) {
     return toSugaredValue(py_attr, m, loc);
@@ -961,14 +964,6 @@ std::shared_ptr<PythonClassValue> createPythonClassValue(
   return nullptr;
 }
 
-bool isScriptClassWrapper(const py::object& obj) {
-  auto script_class_wrapper_obj =
-      py::module::import("torch.jit._script").attr("ScriptClassWrapper");
-  py::bool_ is_script_class_wrapper =
-      py::isinstance(obj, script_class_wrapper_obj);
-  return py::cast<bool>(is_script_class_wrapper);
-}
-
 bool isEnumClass(py::object obj) {
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
@@ -1014,9 +1009,9 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
     return given;
   };
 
-  Value* start;
-  Value* stop;
-  Value* step;
+  Value* start = nullptr;
+  Value* stop = nullptr;
+  Value* step = nullptr;
   size_t n = args.size();
   // Slice's constructor signature is Slice(start=None, stop, step=None)
   if (n == 1) {
@@ -1045,7 +1040,7 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
-    SourceRange loc,
+    const SourceRange& loc,
     bool is_constant) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
@@ -1181,13 +1176,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::bool_ is_enum_value = py::isinstance(obj, enum_type);
   if (py::cast<bool>(is_enum_value)) {
     return createSimpleEnumValue(obj, m, loc);
-  }
-
-  if (isScriptClassWrapper(obj)) {
-    py::object cls = obj.attr("get_wrapped_class")();
-    if (auto pcv = createPythonClassValue(cls, m, loc)) {
-      return pcv;
-    }
   }
 
   py::bool_ is_class = py::module::import("inspect").attr("isclass")(obj);

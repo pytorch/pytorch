@@ -249,7 +249,7 @@ class TestTypeSharing(JitTestCase):
             def __init__(self):
                 super(M, self).__init__()
                 # assign a type we know can't be converted to TorchScript
-                self.foo = object
+                self.foo = NotScriptable()
 
             def forward(self):
                 # try to use it in forward

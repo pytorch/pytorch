@@ -8,6 +8,7 @@ functionalities in `torch.jit`.
 """
 import functools
 import collections
+import enum
 import inspect
 import copy
 import pickle
@@ -21,7 +22,7 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_method
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass, get_function_from_type
+from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
 from torch.jit._fuser import _graph_for
@@ -52,47 +53,16 @@ else:
         return value
 
 
+# Gets a function from the name of a method on a type
+def _get_function_from_type(cls, name):
+    return getattr(cls, name, None)
+
+
 # ScriptClasses must be new-style classes because we construct them using their
 # __new__ method.
 def _is_new_style_class(cls):
     if hasattr(cls, "__class__"):
         return "__dict__" in dir(cls) or hasattr(cls, "__slots__")
-
-
-class ScriptClassWrapper:
-    """
-    A wrapper class returned when Python classes are decorated with @torch.jit.script.
-    This allows construction of instances of the class to be overriden (similar to
-    how using a metaclass would) so that the result is always a RecursiveScriptClass,
-    which can be seamless passed to scripted functions.
-
-    Attributes:
-        obj [type]: The class that has been scripted.
-    """
-    def __init__(self, obj):
-        self.obj = obj
-
-    def __getattr__(self, attr):
-        """
-        Forward getattr lookups to the wrapped class.
-        """
-        return getattr(self.obj, attr)
-
-    def get_wrapped_class(self):
-        return self.obj
-
-    def __call__(self, *args, **kwargs):
-        """
-        Construct an instance of self.obj in C++ using the JIT
-        type of obj with the given arguments, and return a Python
-        wrapper containing that C++ object.
-
-        Returns:
-            A RecursiveScriptClass that wraps a C++ Object instance
-            with the JIT type corresponding to self.obj.
-        """
-        instance = self.obj(*args, **kwargs)
-        return torch.jit._recursive.create_script_class(instance)
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -799,7 +769,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__dir__"
             ):
                 return super(RecursiveScriptModule, self).__dir__()
@@ -810,7 +780,7 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__bool__"
             ):
                 return True
@@ -1107,10 +1077,12 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
 
+    # No-op for modules and functions that are already scripted
     if isinstance(obj, RecursiveScriptClass):
         return obj
-
     if isinstance(obj, ScriptModule):
+        return obj
+    if isinstance(obj, ScriptFunction):
         return obj
 
     if isinstance(obj, torch.nn.Module):
@@ -1130,6 +1102,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                 " pass an instance instead".format(obj)
             )
 
+        # Enums are automatically usable in TorchScript, explicitly scripting
+        # is not necessary, but not harmful either.
+        if issubclass(obj, enum.Enum):
+            return obj
+
         if not _is_new_style_class(obj):
             raise RuntimeError(
                 "TorchScript classes must be new-style classes. "
@@ -1143,10 +1120,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
-
-        # Wrap obj in a ScriptClassWrapper so that any attempt to construct it will
-        # produce a RecursiveScriptClass.
-        return ScriptClassWrapper(obj)
+        return obj
     elif inspect.isfunction(obj):
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb

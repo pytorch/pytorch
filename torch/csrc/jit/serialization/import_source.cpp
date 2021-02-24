@@ -432,7 +432,8 @@ struct SourceImporterImpl : public Resolver,
                     setter = StringLiteral(prop_data[2]).text();
                   }
 
-                  properties.emplace_back(std::make_tuple(name, getter, setter));
+                  properties.emplace_back(
+                      std::make_tuple(name, getter, setter));
                 }
               } else if (name == "__forward_pre_hooks__") {
                 TORCH_INTERNAL_ASSERT(
@@ -580,7 +581,8 @@ struct SourceImporterImpl : public Resolver,
       std::string name, getter_name, setter_name;
       std::tie(name, getter_name, setter_name) = prop;
       auto* getter = class_type->findMethod(getter_name);
-      auto* setter = !setter_name.empty() ? class_type->findMethod(setter_name) : nullptr;
+      auto* setter =
+          !setter_name.empty() ? class_type->findMethod(setter_name) : nullptr;
       class_type->addProperty(name, getter, setter);
     }
   }

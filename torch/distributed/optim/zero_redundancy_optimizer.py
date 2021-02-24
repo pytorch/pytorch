@@ -3,16 +3,18 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 
+import collections
 from collections import OrderedDict, deque
 import copy
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Deque
+import logging
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Deque
 
 import torch
 import torch.distributed as dist
 from torch.nn import Parameter
-from torch._six import container_abcs
 from torch.optim import Optimizer
+import io
 
 __all__ = ["ZeroRedundancyOptimizer"]
 
@@ -35,12 +37,40 @@ def _recursive_copy_to_device(value: Any, non_blocking: bool, device: torch.devi
         values = [_recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for val in value]
         return values if isinstance(value, list) else tuple(values)
 
-    if isinstance(value, container_abcs.Mapping):
+    if isinstance(value, collections.abc.Mapping):
         return {
             key: _recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for key, val in value.items()
         }
 
     return value
+
+
+def _broadcast_object(
+    obj: Any, src_rank: int, group: object = dist.group.WORLD, dist_device: torch.device = torch.device("cpu")
+) -> Any:
+    """
+    Either broadcast from master to the fleet (default),
+    or use the src setting as the original rank.
+    """
+
+    if dist.get_rank() == src_rank:
+        # Emit data
+        buffer = io.BytesIO()
+        torch.save(obj, buffer)
+        data = bytearray(buffer.getbuffer())
+        length_tensor = torch.LongTensor([len(data)]).to(dist_device)
+        data_send_tensor = torch.ByteTensor(data).to(dist_device)
+        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
+    else:
+        # Fetch from the source
+        length_tensor = torch.LongTensor([0]).to(dist_device)
+        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        data_recv_tensor = torch.empty([int(length_tensor.item())], dtype=torch.uint8, device=dist_device)
+        dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
+        buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
+        obj = torch.load(buffer, map_location=dist_device)
+    return obj
 
 
 def _get_global_rank(group: Any, rank: int) -> int:
@@ -77,51 +107,6 @@ class ZeroRedundancyOptimizer(Optimizer):
 
     .. _ZeRO: https://arxiv.org/abs/1910.02054
 
-
-    Example::
-    >>> from torch.distributed.optim import ZeroRedundancyOptimizer
-    >>> from torch import optim
-    >>> from torch.nn.parallel import DistributedDataParallel as DDP
-    >>>
-    >>> # Problem statement
-    >>> model = myAwesomeModel().to(rank)
-    >>> model = DDP(model, device_ids=[rank])
-    >>> dataloader = mySuperFastDataloader()
-    >>> loss_ln = myVeryRelevantLoss()
-    >>>
-    >>> # optimizer specific arguments e.g. LR, momentum, etc...
-    >>> base_optimizer_arguments = { "lr": 1e-4, **smart_options}
-    >>> optimizer = ZeroRedundancyOptimizer(
-    >>>     params=model.parameters(),
-    >>>     optim=optim.AdamW
-    >>>     **base_optimizer_arguments)
-    >>>
-    >>> # Any relevant training loop, almost nothing specific to ZeroRedundancyOptimizer
-    >>> reference_rank = 0  # This rank will be able to checkpoint
-    >>> model.train()
-    >>> for e in range(epochs):
-    >>>     for (data, target) in dataloader:
-    >>>         data, target = data.to(rank), target.to(rank)
-    >>>
-    >>>         # Train
-    >>>         model.zero_grad()
-    >>>         outputs = model(data)
-    >>>         loss = loss_fn(outputs, target)
-    >>>         loss.backward()
-    >>>         optimizer.step()
-    >>>
-    >>>         ...
-    >>>         # WARNING - Checkpointing requires has some specificities:
-    >>>         # - all ranks: consolidate needed before one rank can save
-    >>>         optimizer.consolidate_state_dict(reference_rank)
-    >>>
-    >>>         # - reference rank: the state can be saved
-    >>>         if rank == reference_rank:
-    >>>            checkpoint = optimizer.state_dict()
-    >>>            ...
-    >>>
-    >>>         # - all ranks: load a checkpoint, can be a checkpoint from normal PyTorch
-    >>>         optimizer.load_state_dict(a_normal_checkpointed_state)
     """
 
     def __init__(
@@ -228,29 +213,32 @@ class ZeroRedundancyOptimizer(Optimizer):
                 if rank == self.rank:
                     self._all_states.append(
                         _recursive_copy_to_device(
-                            self.optim.state_dict(), non_blocking=True, device=torch.device("cpu")
+                            self.local_state_dict(), non_blocking=True, device=torch.device("cpu")
                         )
                     )
                 else:
                     # Fetch the optim state from the other replicas
-                    replica_state = [empty_messenger]
-                    dist.broadcast_object_list(object_list=replica_state, src=global_rank, group=self.group)
+                    replica_state = _broadcast_object(
+                        empty_messenger, src_rank=global_rank, group=self.group, dist_device=self._device
+                    )
 
                     self._all_states.append(
-                        _recursive_copy_to_device(replica_state[0], non_blocking=True, device=torch.device("cpu"))
+                        _recursive_copy_to_device(replica_state, non_blocking=True, device=torch.device("cpu"))
                     )
             else:
                 # Acknowledge broadcasts, and send this rank's shard when needed
                 # Default to CPU space to gain some memory headroom
                 if rank == self.rank:
                     # Send the state to the reference replica
-                    dist.broadcast_object_list(
-                        object_list=[self.optim.state_dict()], src=self.global_rank, group=self.group
+                    _ = _broadcast_object(
+                        self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
                     )
 
                 elif rank != recipient_rank:
                     # Discard this tensor/rank, broadcast was being use for compatibility reasons
-                    dist.broadcast_object_list(object_list=[empty_messenger], src=global_rank, group=self.group)
+                    _ = _broadcast_object(
+                        empty_messenger, src_rank=global_rank, group=self.group, dist_device=self._device
+                    )
 
     def partition_parameters(self) -> List[List[Dict]]:
         """Partitions parameters across distributed data parallel ranks.
@@ -340,93 +328,117 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         return loss
 
+    def load_local_state_dict(self, state_dict: dict) -> None:
+        """Loads this rank's state_dict.
+
+        .. warning: This is not meant to load the global state dict.
+        """
+
+        self.optim.load_state_dict(state_dict)
+
+        # Workaround PyTorch bug that casts state (https://github.com/pytorch/pytorch/issues/43706)
+        # Copied from https://github.com/pytorch/fairseq/blob/v0.9.0/fairseq/optim/fp16_optimizer.py#L251-L268
+        groups = self.optim.param_groups
+        saved_groups = state_dict["param_groups"]
+        id_map = {
+            old_id: p
+            for old_id, p in zip(chain(*(g["params"] for g in saved_groups)), chain(*(g["params"] for g in groups)))
+        }
+        for k, v in state_dict["state"].items():
+            if k in id_map:
+                param = id_map[k]
+                self.optim.state[param] = _recursive_copy_to_device(v, non_blocking=True, device=param.device)
+
+        # Restore the global param_groups (the params themselves are already correct)
+        for global_group, local_group in zip(self.param_groups, groups):
+            for k, v in local_group.items():
+                if k != "params":
+                    global_group[k] = v
+
+        # Force a re-partitioning, in case the model changed with the new state
+        self._partition_parameters.clear()
+        self._per_device_params.clear()
+        self._param_rank.clear()
+
+        # Update the bucketing strategy accordingly
+        self._setup_bucket_strategy()
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        """Restore the global parameter groups as well as the shard.
+
+        Arguments:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`
+        """
+
+        # Check whether we got a local or global dict
+        if "local_state_dict" in state_dict and state_dict["local_state_dict"]:
+            self.load_local_state_dict(state_dict)
+        else:
+            # Dispatch this rank's state dictionary to the wrapped shard optimizer
+            self.load_local_state_dict(ZeroRedundancyOptimizer.rank_local_state_dict(self.rank, state_dict))
+
+    def local_state_dict(self) -> Dict:
+        """Gets this rank's ``state_dict``.
+
+        Returns:
+            The state of the optimizer as a :class:`dict`.
+            It contains two entries:
+
+            * state - a dict holding current optimization state. Its content
+                differs between optimizer classes.
+            * param_groups - a dict containing all parameter groups
+        """
+        return self.optim.state_dict()
+
     def state_dict(self) -> Dict[str, Any]:
-        """Return the last known global optimizer state. The returned state is compatible with Pytorch, in that the
-        sharded properties are not exposed. It contains two entries:
-        * state - a dict holding current optimization state. Its content
-            differs between optimizer classes.
-        * param_groups - a dict containing all parameter groups
+        """
+        Returns:
+            the last known global optimizer state, which consist of a list of the shards.
+
         .. warning:
             If the state has not been consolidated, this returns a shard's worth, not the global state.
+
         .. warning:
             Returning the global state is limited to the replica which was responsible for the consolidation.
             The state may also not be up to date, depending on when `consolidate_state_dict` was last called.
         """
 
         if len(self._all_states) == 0:
-            raise RuntimeError(
-                "Optimizer state has not been consolidated on this rank. \
-                Please call `consolidate_state_dict()` on all ranks beforehand if you meant to save the global state"
-            )
+            logging.warning("Optimizer state has not been consolidated. Returning the local state")
+            logging.warning("Please call `consolidate_state_dict()` beforehand if you meant to save the global state")
+            state_dict = self.local_state_dict()
+            state_dict["local_state_dict"] = True
+            return state_dict
 
-        # Unify the shard states and the state that pytorch would expect, given the model.
-        # Indexation needs several redirections, since each shard only knows a limited scope of the model
-        # - get the pytorch compliant parameter indexing
-        state_dict = super().state_dict()
+        # Flatten the param_groups, save the partition which logs the rank <> shard correspondence
+        partition: List[Tuple[int, int]] = []
+        param_groups: List[Dict[Any, Any]] = []
 
-        # - get an id map which links the parameter id to the index in the reference state
-        global_id_map = {id(p): i for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
+        start = 0
+        for i, s in enumerate(self._all_states):
+            param_groups.extend(s["param_groups"])
+            end = start + len(s["param_groups"])
+            partition.append((start, end))
+            start = end
 
-        # - go through the per-shard states, which are all indexed locally
-        for rank, s in enumerate(self._all_states):
-            # -- match the local indexing and the global partition, update the corresponding saved state globally
-            for local_pg, global_pg in zip(s["param_groups"], self.partition_parameters()[rank]):
-                # Go through the parameters indexed locally, pick up the global corresponding param
-                local_index_to_param_id = {
-                    i_param: id(global_pg["params"][i]) for i, i_param in enumerate(local_pg["params"])
-                }
+        return {
+            "state": [s["state"] for s in self._all_states],
+            "param_groups": param_groups,
+            "partition": partition,
+            "local_state_dict": False,
+        }
 
-                for local_param_index in local_pg["params"]:
-                    # Update the state, if any
-                    if local_param_index in s["state"].keys():
-                        global_id = global_id_map[local_index_to_param_id[local_param_index]]
-                        state_dict["state"][global_id] = s["state"][local_param_index]
+    @staticmethod
+    def rank_local_state_dict(rank: int, state_dict: dict) -> dict:
+        """Returns the local_state_dict for a given rank.
 
-        return state_dict
-
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """Restore the global parameter groups as well as the shard.
         Arguments:
-            state_dict (dict): optimizer state. Should be an object returned
-                from a call to :meth:`state_dict`
-
-        .. note: all the parameters present in the loaded state dict will be exposed by this optimizer
-            through the `param_groups` attribute, but the actual parameter update computations will be spread
-            in between the ranks. The actual per-rank optimizer will thus only effectively work on a subset
-            of the parameters.
+            rank (int): rank to get local_state_dict for
+            state_dict (dict): global state_dict
         """
-
-        # Param index to param map
-        index_to_param = {i: p for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
-
-        # Prune the state_dict from the states which this rank does not own, then normal base load
-        other_state = []
-        for i_param, key in enumerate(state_dict["state"].keys()):
-            # Check that this rank owns this param, if not remove from the state
-            if self.param_to_rank[index_to_param[i_param]] != self.rank:
-                state_dict["state"][key] = None
-
-        super().load_state_dict(state_dict)
-
-        # Set the sharded optimizer state.
-        # Keep the original type (not respected by PyTorch which casts to the model type)
-        for k, (_, v) in enumerate(state_dict["state"].items()):
-            if k in index_to_param:
-                param = index_to_param[k]
-
-                # Only add this state to the sharded optimizer if it owns this param
-                for pg in self.optim.param_groups:
-                    if id(param) in map(lambda x: id(x), pg["params"]):
-                        self.optim.state[param] = _recursive_copy_to_device(v, non_blocking=True, device=param.device)
-
-        # Update the param_group keys
-        for new_pg, pg in zip(state_dict["param_groups"], self.param_groups):
-            for key in new_pg.keys():
-                if key != "params":
-                    pg[key] = new_pg[key]
-
-        # Sync with the optimizer param groups
-        self._update_param_groups(local_to_global=False)
+        param_groups = state_dict["param_groups"][state_dict["partition"][rank][0] : state_dict["partition"][rank][1]]
+        return {"state": state_dict["state"][rank], "param_groups": param_groups}
 
     def _broadcast_params(self) -> None:
         """Helper function to broadcast all the parameters from a given device"""

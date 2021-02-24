@@ -334,7 +334,7 @@ class FutureTypingTest:
         res = script_use_future()
         self.assertEqual(res, expected_res)
 
-
+@torch.jit.script
 class MyScriptClass:
     def __init__(self, a: int):
         self.a = a
@@ -364,7 +364,7 @@ class MyScriptModule(torch.jit.ScriptModule):
 
 
 def owner_create_rref_my_script_class(a):
-    return rpc.RRef(torch.jit.script(MyScriptClass(a))._c)
+    return rpc.RRef(MyScriptClass(a))
 
 
 def owner_create_rref_my_script_module(a):
@@ -388,7 +388,7 @@ class LocalRRefTest:
             return
 
         # Create a local RRef<MyScriptClass>.
-        rref_script_class = rpc.RRef(torch.jit.script(MyScriptClass(self.rank)))
+        rref_script_class = rpc.RRef(MyScriptClass(self.rank))
         ret = rref_script_class.to_here().get_value()
         self.assertEqual(ret, self.rank)
 
@@ -904,7 +904,6 @@ class JitRpcTest(
 
         # rpc_sync still accepts script class and run it in
         # the same code path as python call.
-        torch.jit.script(MyScriptClass)
         ret = rpc.rpc_sync(dst_worker_name, MyScriptClass, args=(self.rank,))
 
         # rpc_sync does not accept script module method.

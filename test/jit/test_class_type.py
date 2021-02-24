@@ -27,8 +27,6 @@ class TestClassType(JitTestCase):
         Test that modifications made to a class instance in TorchScript
         are visible in eager.
         """
-        global Foo
-
         @torch.jit.script
         class Foo(object):
             def __init__(self, a: int):
@@ -40,18 +38,21 @@ class TestClassType(JitTestCase):
             def get_a(self) -> int:
                 return self.a
 
-            @staticmethod
-            def static_method(a):
-                pass
+            @property
+            def attr(self):
+                return self.a
+
+        make_global(Foo)  # see [local resolution in python]
 
         def test_fn(obj: Foo):
             obj.set_a(2)
 
         scripted_fn = torch.jit.script(test_fn)
-        obj = Foo(1)
+        obj = torch.jit.script(Foo(1))
 
         scripted_fn(obj)
         self.assertEqual(obj.get_a(), 2)
+        self.assertEqual(obj.attr, 2)
 
     def test_get_with_method(self):
         class FooTest(object):
@@ -330,13 +331,12 @@ class TestClassType(JitTestCase):
         self.assertEqual(y, f.y)
 
         # pass in and out of script
-        f2 = use_foo(torch.jit.script(f))
+        f2 = use_foo(f)
 
         self.assertEqual(x, f2.x)
         self.assertEqual(y, f2.y)
 
     def test_class_specialization(self):
-        @torch.jit.script
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
@@ -361,7 +361,6 @@ class TestClassType(JitTestCase):
         FileCheck().check_count("prim::GetAttr", 4).run(graphstr)
 
     def test_class_sorting(self):
-        @torch.jit.script
         class Foo(object):  # noqa: B903
             def __init__(self, x: int) -> None:
                 self.x = x
@@ -463,7 +462,7 @@ class TestClassType(JitTestCase):
             def two(self, x):
                 return x + self.b
 
-        with self.assertRaisesRegex(TypeError, r"takes 2 positional arguments but 4 were given"):
+        with self.assertRaisesRegex(RuntimeError, "does not support inheritance"):
             @torch.jit.script
             class Derived(Base):
                 def two(self, x):
@@ -679,7 +678,7 @@ class TestClassType(JitTestCase):
                 pass
 
         with self.assertRaisesRegex(RuntimeError,
-                                    "is not a TorchScript compatible type"):
+                                    "the value is not a TorchScript compatible type"):
             torch.jit.script(TestPyAssignError(PyClass()))
         # TODO test: interface-interface class-interface inheritance errors,
         # NamedTuple inheritance errors
@@ -947,6 +946,27 @@ class TestClassType(JitTestCase):
             self.assertEqual(m(input), m_loaded(input))
             # Make sure class constant is accessible from module
             self.assertEqual(m.w, m_loaded.w)
+
+    def test_py_class_to_ivalue_missing_attribute(self):
+        class Foo(object):
+            i : int
+            f : float
+
+            def __init__(self, i : int, f : float):
+                self.i = i
+                self.f = f
+
+        make_global(Foo)  # see [local resolution in python]
+
+        @torch.jit.script
+        def test_fn(x : Foo) -> float:
+            return x.i + x.f
+
+        test_fn(Foo(3, 4.0))
+
+        with self.assertRaisesRegex(RuntimeError, 'missing attribute i'):
+            test_fn(torch.rand(3, 4))
+
 
     def test_unused_method(self):
         """

@@ -1,6 +1,5 @@
 import os
 import sys
-import unittest
 
 from typing import Any, List, Tuple
 from collections import OrderedDict
@@ -423,7 +422,6 @@ class TestModuleContainers(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.jit.script(Mod())
 
-    @unittest.skip("")
     def test_unannotated_module_attribute_error(self):
         """
         Test that an attempt to script a module with an unannotated attribute

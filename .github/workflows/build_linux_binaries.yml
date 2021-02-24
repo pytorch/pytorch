@@ -9,7 +9,7 @@ on:
 jobs:
   generate-build-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
