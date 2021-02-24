@@ -76,6 +76,10 @@ def _get_global_rank(group: Any, rank: int) -> int:
     return rank if group is dist.group.WORLD else dist.distributed_c10d._get_global_rank(group, rank)  # type: ignore
 
 
+def _is_trainable(param: torch.Tensor) -> bool:
+    return param.requires_grad
+
+
 class ZeroRedundancyOptimizer(Optimizer):
     """Wraps an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>`
     optimizer and shards its state as described by ZeRO_.
@@ -128,6 +132,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         self._param_to_index: Dict[int, int] = {}
         self._partition_parameters: List[List[Dict]] = []
         self._index_to_param: Dict[int, torch.Tensor] = {}
+        self._all_params = params
+        self._reference_is_trainable_mask = list(map(_is_trainable, self._all_params))
 
         # Build the wrapped optimizer, responsible for a shard of the params
         self.group = group if group is not None else dist.group.WORLD
@@ -146,7 +152,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         self._device = list(self.per_device_params.keys())[0]
         self.buckets: Dict[torch.device, List[torch.Tensor]] = {}
 
-        self.refresh_trainable()
+        self._update_trainable()
         self.initialized = True
 
     def _clear_cache(self) -> None:
@@ -262,7 +268,7 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         return self._partition_parameters
 
-    def refresh_trainable(self) -> None:
+    def _update_trainable(self) -> None:
         """Updates the partitioning and communication patterns if the trainability (`requires_grad`)
         of some parameters changed.
         """
@@ -336,6 +342,15 @@ class ZeroRedundancyOptimizer(Optimizer):
             optional loss, depends on the underlying optimizer
 
         .. note: Any extra parameter is passed to the base optimizer as-is"""
+
+        # Check whether the model trainability graph changed
+        trainable_mask = list(map(_is_trainable, self._all_params))
+        if trainable_mask != self._reference_is_trainable_mask:
+            logging.warning(
+                "ZeroRedundancyOptimizer detected that the trainable params changed, updating the partitioning"
+            )
+            self._update_trainable()
+            self._reference_is_trainable_mask = trainable_mask
 
         # Sync oss param_groups attributes in case they've been updated by a scheduler.
         self._sync_param_groups(self.param_groups, self.optim.param_groups)
@@ -465,7 +480,7 @@ class ZeroRedundancyOptimizer(Optimizer):
     def _setup_flat_buffers(self) -> None:
         """Make all params which are on the same device and tied to the same rank views of a single buffer.
         This is used at construction time, and anytime parameter trainability is changed (frozen or unfrozen) and
-        `refresh_trainable` is called.
+        `_update_trainable` is called.
         """
 
         for device, per_rank_params in self.per_device_params.items():
@@ -483,7 +498,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                         param.data = param.data.detach().clone()
 
                     # Merge all the trainable params in a single bucket
-                    trainable_params = list(filter(lambda x: x.requires_grad, params))
+                    trainable_params = list(filter(_is_trainable, params))
                     buffer_size = sum(map(lambda x: x.numel(), trainable_params))
                     bucket = torch.empty(buffer_size, dtype=params[0].dtype, device=device)
                     offset = 0

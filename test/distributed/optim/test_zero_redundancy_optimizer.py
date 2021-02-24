@@ -519,7 +519,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     if i > BATCHS // 2:
                         next(ddp_model.parameters()).requires_grad = bool(i % 2)
                         next(sharded_ddp_model.parameters()).requires_grad = bool(i % 2)
-                        sharded_optimizer.refresh_trainable()
 
             for opt in [torch.optim.SGD, torch.optim.Adam]:
                 check_optimizer_equivalence(opt)
