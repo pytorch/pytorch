@@ -232,7 +232,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
     return false;
   }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
-    (input.options().backend() == at::Backend::CPU &&
+    (input.device().is_cpu() &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
      !transposed && // or transposed tensors
      (is_strided() || is_dilated() || input.size(0) >= 16 ||
@@ -253,7 +253,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
 auto ConvParams::use_nnpack(const at::Tensor& input, const at::Tensor& weight) const -> bool {
 #if AT_NNPACK_ENABLED()
   return at::_nnpack_available() &&
-         input.options().backend() == at::Backend::CPU &&
+         input.device().is_cpu() &&
          input.scalar_type() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors
@@ -752,11 +752,11 @@ at::Tensor _convolution(
   } else if (params.use_mkldnn(input, weight)) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(input.options().type_equal(weight.options())
-             || (input.is_mkldnn() && weight.type().backend() == at::Backend::CPU && weight.scalar_type() == kFloat),
+             || (input.is_mkldnn() && weight.device().is_cpu() && weight.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
              ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
     TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
-             || (input.is_mkldnn() && bias.type().backend() == at::Backend::CPU && bias.scalar_type() == kFloat),
+             || (input.is_mkldnn() && bias.device().is_cpu() && bias.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
              ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
     if (!input_is_mkldnn) {

@@ -3816,6 +3816,14 @@ class TestNN(NNTestCase):
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
+    @unittest.skipIf(TEST_WITH_UBSAN, "signed integer overflow error with UBSAN")
+    def test_adaptive_pooling_size_overflow(self):
+        # 0x0x3fffffffffffffff * 2 * 2 = 0xfffffffffffffffc = -4 as int64_t
+        # Tensor::numel() return int64_t, so following check that negative allocs are correctly handled
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.nn.AdaptiveMaxPool1d(0x3fffffffffffffff)(torch.empty([2, 2, 2])))
+
     def test_adaptive_pooling_avg_nhwc(self):
         device_list = ['cpu']
         if TEST_CUDA:
