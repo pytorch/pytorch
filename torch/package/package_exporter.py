@@ -148,6 +148,7 @@ class PackageExporter:
         """
         return _create_folder_from_file_list(self.zip_file.archive_name(), self.zip_file.get_all_written_records(),
                                              include, exclude)
+
     def get_unique_id(self) -> str:
         """Get an id. This id is guaranteed to only be handed out once for this package."""
         ret = str(self._unique_id)
