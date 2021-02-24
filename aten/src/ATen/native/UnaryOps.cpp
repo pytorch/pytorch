@@ -287,8 +287,8 @@ Tensor& floor_out(Tensor& result, const Tensor& self) {
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
-Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, i0_stub); }
-Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
+Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, i0_stub); }
+Tensor i0(const Tensor& self) { return unary_op_impl_float(self, i0_stub); }
 Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
 Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, log_stub); }
