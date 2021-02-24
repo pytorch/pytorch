@@ -1,9 +1,9 @@
 from .graph_module import GraphModule
 from .graph import Graph
-from .node import Argument, Node, Target, map_arg
+from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
 from .symbolic_trace import Tracer
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple, Union
 
 class Interpreter:
     """
@@ -389,6 +389,7 @@ class Transformer(Interpreter):
         """
         result = super().run()
         if result is not None:
-            assert isinstance(result, Proxy)
-            self.new_graph.output(result.node)
+            def strip_proxy(a : Union[Argument, Proxy]) -> Any:
+                return a.node if isinstance(a, Proxy) else a
+            self.new_graph.output(map_aggregate(result, strip_proxy))
         return GraphModule(self.module, self.new_graph)
