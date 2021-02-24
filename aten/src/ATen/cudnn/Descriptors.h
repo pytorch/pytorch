@@ -206,7 +206,7 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
   void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
-    AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
+    TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
     AT_ASSERT(options.device().type() == kCUDA);
@@ -217,7 +217,7 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
   void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
-    AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
+    TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     state = state_;
     void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);

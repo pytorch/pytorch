@@ -493,8 +493,7 @@ Tensor cudnn_convolution_transpose_backward_weight(
 
 Tensor cudnn_convolution_bias_relu(
     const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32)
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
 {
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
@@ -521,6 +520,9 @@ Tensor cudnn_convolution_bias_relu(
   // Avoid ambiguity of "output" when this is being used as backwards
   TensorArg output{ output_t, "result", 0 };
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
+  checkAllSameType(c, {output, bias});
+  checkAllSameGPU(c, {output, bias});
+  checkSize(c, bias, { output->size(output_channels_dim) });
 
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
@@ -533,7 +535,7 @@ Tensor cudnn_convolution_bias_relu(
 
   raw_cudnn_convolution_bias_relu_out(
       *output, input_contig, weight_contig, bias_contig,
-      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+      padding, stride, dilation, groups, false, true, true);
 
   return *output;
 }

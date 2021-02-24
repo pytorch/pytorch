@@ -239,6 +239,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/serialization/pickle.cpp",
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
+    "torch/csrc/jit/tensorexpr/analysis.cpp",
     "torch/csrc/jit/tensorexpr/block_codegen.cpp",
     "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
     "torch/csrc/jit/tensorexpr/bounds_overlap.cpp",
@@ -332,6 +333,19 @@ jit_sources_full = [
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
+
+torch_mobile_core = [
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/observer.cpp",
+    "torch/csrc/jit/runtime/register_prim_ops.cpp",
+    "torch/csrc/jit/runtime/register_special_ops.cpp",
+]
+
+# TODO: core_trainer_sources is not necessary for libtorch lite
+libtorch_lite_cmake_sources = sorted(core_trainer_sources + core_sources_common + torch_mobile_core)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 

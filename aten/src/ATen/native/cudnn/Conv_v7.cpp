@@ -821,7 +821,6 @@ void raw_cudnn_convolution_backward_weight_out(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
-// Not running the benchamrk mode for now
 void raw_cudnn_convolution_bias_relu_out(
     const Tensor& output, const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
@@ -836,8 +835,10 @@ void raw_cudnn_convolution_bias_relu_out(
   args.odesc.set(output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
+  // See Note [CuDNN broadcast padding].  Handle the left padding
+  // ourselves, but use TensorDescriptor's padding argument to do the rest.
   TensorDescriptor bdesc;
-  bdesc.set(bias);
+  bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
 
   ActivationDescriptor adesc;
   adesc.set(CUDNN_ACTIVATION_RELU);

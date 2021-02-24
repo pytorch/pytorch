@@ -146,6 +146,7 @@ endif()
 if(USE_CUDNN OR USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_relu_fusion.cpp
       )
     if(USE_STATIC_CUDNN)
         set_source_files_properties(
@@ -155,6 +156,9 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
+if(USE_MLCOMPUTE)
+    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
+endif()
 
 if(USE_VALGRIND AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
@@ -342,10 +346,13 @@ endif()
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
   COMMAND
+    touch ${TOOLS_PATH}/generate_torch_version.py
+  COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
       --is_debug=${TORCH_VERSION_DEBUG}
       --cuda_version=${CUDA_VERSION}
       --hip_version=${HIP_VERSION}
+  DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_custom_target(
