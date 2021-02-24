@@ -56,7 +56,7 @@ DeviceType parse_type(const std::string& device_string) {
   if (device != types.end()) {
     return device->second;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, xla, vulkan device type at start of device string: ",
       device_string);
 }
@@ -76,7 +76,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
     try {
       index_ = c10::stoi(match[2].str());
     } catch (const std::exception &) {
-      AT_ERROR(
+      TORCH_CHECK(false,
         "Could not parse device index '", match[2].str(),
         "' in device string '", device_string, "'");
     }
