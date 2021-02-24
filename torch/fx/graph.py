@@ -845,9 +845,6 @@ class Graph:
             emit_node(node)
             delete_unused_values(node)
 
-        # repr() for inf and nan floating point values aren't parseable by
-        # python as literals. Explicitly import the names from the ``math`` module.
-
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
             # have been emitted. To continue to have valid Python code, emit a

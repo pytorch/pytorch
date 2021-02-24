@@ -1695,22 +1695,11 @@ class TestQuantizeFx(QuantizationTestCase):
 
         checkModel(m, data, ref_weight, ref_bias, ref_res)
 
-        # check quantized linear works
-        # m = M1().eval()
-        # m = prepare_fx(m, qconfig_dict)
-        # m = convert_fx(m)
-        # with TemporaryFileName() as fname:
-        #     torch.save(m.state_dict(), fname)
-        #     m.load_state_dict(torch.load(fname))
-
-        # checkModel(m, data, ref_weight, ref_bias, ref_res)
-
         # Test save to disk and load back
         m = M2().eval()
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
         with TemporaryFileName() as fname:
-            print(state_dict)
             torch.save(m.state_dict(), fname)
             m.load_state_dict(torch.load(fname))
 

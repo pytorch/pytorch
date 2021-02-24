@@ -48,23 +48,24 @@ def is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)
 
 
+def _save_packed_weight(self, destination, prefix, keep_vars):
+    for attr_name in dir(self):
+        if "_packed_weight" in attr_name and \
+           isinstance(getattr(self, attr_name), torch._C.ScriptObject):  # type: ignore
+            packed_weight = getattr(self, attr_name)
+            destination[prefix + attr_name] = packed_weight
+
 class QuantizedGraphModule(GraphModule):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
         super().__init__(root, graph)
-
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super()._save_to_state_dict(destination, prefix, keep_vars)
-        for attr_name in dir(self):
-            if "_packed_weight" in attr_name and \
-               isinstance(getattr(self, attr_name), torch._C.ScriptObject):  # type: ignore
-                packed_weight = getattr(self, attr_name)
-                destination[prefix + attr_name] = packed_weight
+        self._register_state_dict_hook(_save_packed_weight)
+        # self._register_load_state_dict_pre_hook(_load_packed_weight)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         attrs_to_pop = []
         for attr_name in state_dict:
-            if "_packed_weight" in attr_name and isinstance(state_dict[attr_name], torch._C.ScriptObject):  # type: ignore
+            if attr_name.startswith("_packed_weight") and isinstance(state_dict[attr_name], torch._C.ScriptObject):  # type: ignore
                 setattr(self, attr_name, state_dict[attr_name])
                 attrs_to_pop.append(attr_name)
 
@@ -72,6 +73,4 @@ class QuantizedGraphModule(GraphModule):
         for attr_name in attrs_to_pop:
             state_dict.pop(attr_name)
 
-        super()._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
