@@ -10,7 +10,9 @@ import os
 
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
-from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence, RnnModelWithPackedSequenceWithState, RnnModelWithPackedSequenceWithoutState
+from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequence, 
+                                                       RnnModelWithPackedSequenceWithState, 
+                                                       RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, disableOldJitPassesTest,
                                  skipIfUnsupportedMaxOpsetVersion, skipIfONNXShapeInference)
@@ -6027,18 +6029,22 @@ class TestONNXRuntime(unittest.TestCase):
 
         if packed_sequence == 0:
             if initial_state:
-                model = GRUNoSeqLengthWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout, batch_first=batch_first)
+                model = GRUNoSeqLengthWithStateModel(layers=layers, bidirect=bidirectional, 
+                                                     dropout=dropout, batch_first=batch_first)
             else:
-                model = GRUNoSeqLengthWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout, batch_first=batch_first)            
+                model = GRUNoSeqLengthWithoutStateModel(layers=layers, bidirect=bidirectional, 
+                                                        dropout=dropout, batch_first=batch_first)            
         else:
             if initial_state:
-                model = GRUWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout, batch_first=batch_first)
+                model = GRUWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout, 
+                                          batch_first=batch_first)
                 if packed_sequence == 1: 
                     model = RnnModelWithPackedSequenceWithState(model, False)
                 if packed_sequence == 2:
                     model = RnnModelWithPackedSequenceWithState(model, True)                
             else:
-                model = GRUWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout, batch_first=batch_first)
+                model = GRUWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout, 
+                                             batch_first=batch_first)
                 if packed_sequence == 1:
                     model = RnnModelWithPackedSequenceWithoutState(model, False)
                 if packed_sequence == 2:
