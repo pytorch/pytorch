@@ -61,8 +61,8 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 // input_t=half,  acc_t=float, output_t=float => read half tensor, float accumulators, write float tensor.
 // input_t_float, acc_t=float, output_t=half  => read float tensor, float accumulators, write half tensor.
 
-template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax, typename index_t=int>
-__global__ void softmax_warp_forward(output_t *dst, const input_t *src, index_t batch_size, int stride, int element_count)
+template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax>
+__global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batch_size, int stride, int element_count)
 {
     // WARP_SIZE and WARP_BATCH must match the return values batches_per_warp and warp_size of method warp_softmax_forward_kernel.
     constexpr int next_power_of_two = 1 << log2_elements;
@@ -70,11 +70,11 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, index_t 
     constexpr int WARP_ITERATIONS = next_power_of_two / WARP_SIZE;
     constexpr int WARP_BATCH = (next_power_of_two <= 128) ? 2 : 1;
 
-    index_t first_batch = (static_cast<index_t>(blockDim.y) * blockIdx.x + threadIdx.y) * WARP_BATCH;
+    int first_batch = (blockDim.y * blockIdx.x + threadIdx.y) * WARP_BATCH;
 
     // batch_size might not be a multiple of WARP_BATCH. Check how
     // many batches have to computed within this WARP.
-    index_t local_batches = batch_size - first_batch;
+    int local_batches = batch_size - first_batch;
     if (local_batches > WARP_BATCH)
         local_batches = WARP_BATCH;
 
@@ -152,8 +152,8 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, index_t 
     }
 }
 
-template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax, typename index_t=int>
-__global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, const input_t *output, index_t batch_size, int stride, int element_count)
+template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax>
+__global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, const input_t *output, int batch_size, int stride, int element_count)
 {
     // WARP_SIZE and WARP_BATCH must match the return values batches_per_warp and warp_size of method warp_softmax_backward_kernel.
     constexpr int next_power_of_two = 1 << log2_elements;
@@ -161,11 +161,11 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     constexpr int WARP_ITERATIONS = next_power_of_two / WARP_SIZE;
     constexpr int WARP_BATCH = (next_power_of_two <= 128) ? 2 : 1;
 
-    index_t first_batch = (static_cast<index_t>(blockDim.y) * blockIdx.x + threadIdx.y) * WARP_BATCH;
+    int first_batch = (blockDim.y * blockIdx.x + threadIdx.y) * WARP_BATCH;
 
     // batch_size might not be a multiple of WARP_BATCH. Check how
     // many batches have to computed within this WARP.
-    index_t local_batches = batch_size - first_batch;
+    int local_batches = batch_size - first_batch;
     if (local_batches > WARP_BATCH)
         local_batches = WARP_BATCH;
 
@@ -173,7 +173,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     int local_idx = threadIdx.x % WARP_SIZE;
 
     // the first element to process by the current thread
-    index_t thread_offset = first_batch * stride + local_idx;
+    int thread_offset = first_batch * stride + local_idx;
     grad += thread_offset;
     output += thread_offset;
     gradInput += thread_offset;
@@ -233,8 +233,8 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
 
 } // end of anonymous namespace
 
-template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax, typename index_t=int>
-void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_elements, int softmax_elements_stride, index_t batch_count)
+template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax>
+void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_elements, int softmax_elements_stride, int batch_count)
 {
     TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 1024 );
     if (softmax_elements == 0) {
@@ -254,15 +254,15 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
 
         int warps_per_block = (threads_per_block / warp_size);
         int batches_per_block = warps_per_block * batches_per_warp;
-        index_t blocks = (batch_count + batches_per_block - 1) / batches_per_block;
+        int blocks = (batch_count + batches_per_block - 1) / batches_per_block;
         dim3 threads(warp_size, warps_per_block, 1);
         // Launch code would be more elegant if C++ supported FOR CONSTEXPR
         switch (log2_elements) {
-            #define LAUNCH_SOFTMAX_WARP_FORWARD(L2E) case L2E:                             \
-            softmax_warp_forward<input_t, output_t, acc_t, L2E, is_log_softmax, index_t>   \
-                <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst,            \
-                    src, batch_count, softmax_elements_stride, softmax_elements);          \
-            C10_CUDA_KERNEL_LAUNCH_CHECK();                                                \
+            #define LAUNCH_SOFTMAX_WARP_FORWARD(L2E) case L2E:                    \
+            softmax_warp_forward<input_t, output_t, acc_t, L2E, is_log_softmax>   \
+                <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst,   \
+                    src, batch_count, softmax_elements_stride, softmax_elements); \
+            C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
             break;
 
             LAUNCH_SOFTMAX_WARP_FORWARD(0);  // 1
@@ -282,8 +282,8 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
     }
 }
 
-template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax, typename index_t=int>
-void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const input_t *output, int softmax_elements, int softmax_elements_stride, index_t batch_count)
+template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax>
+void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const input_t *output, int softmax_elements, int softmax_elements_stride, int batch_count)
 {
     TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 1024 );
     if (softmax_elements == 0) {
@@ -303,16 +303,16 @@ void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const 
 
         int warps_per_block = (threads_per_block / warp_size);
         int batches_per_block = warps_per_block * batches_per_warp;
-        index_t blocks = (batch_count + batches_per_block - 1) / batches_per_block;
+        int blocks = (batch_count + batches_per_block - 1) / batches_per_block;
         dim3 threads(warp_size, warps_per_block, 1);
         // Launch code would be more elegant if C++ supported FOR CONSTEXPR
         switch (log2_elements) {
-            #define LAUNCH_SOFTMAX_WARP_BACKWARD(L2E) case L2E:                           \
-            softmax_warp_backward<input_t, output_t, acc_t, L2E, is_log_softmax, index_t> \
-                <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>                \
-                (grad_input, grad, output, batch_count, softmax_elements_stride,          \
-                softmax_elements);                                                        \
-            C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
+            #define LAUNCH_SOFTMAX_WARP_BACKWARD(L2E) case L2E:                      \
+            softmax_warp_backward<input_t, output_t, acc_t, L2E, is_log_softmax> \
+                <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>       \
+                (grad_input, grad, output, batch_count, softmax_elements_stride, \
+                softmax_elements);                                              \
+            C10_CUDA_KERNEL_LAUNCH_CHECK();                                      \
             break;
 
             LAUNCH_SOFTMAX_WARP_BACKWARD(0); // 1
