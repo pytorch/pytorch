@@ -28,11 +28,20 @@ from .graph_passes import (
 
 from typing import Dict, Tuple, Callable, List, Optional
 
+# {
+#   'logger_name_1': {
+#     'model_name_a': [torch.Tensor(...), ...],
+#     'model_name_b': [torch.Tensor(...), ...],
+#   },
+# }
+#
+NSResultsType = Dict[str, Dict[str, List[torch.Tensor]]]
+
 def add_weight_info_to_dict(
     model_name: str,
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
-    results: Dict[str, Dict[str, torch.Tensor]],
+    results: NSResultsType,
 ) -> None:
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
@@ -52,7 +61,7 @@ def add_weight_info_to_dict(
 
             if related_to_linear:
                 weight = get_linear_fun_weight(node, model)
-                results[ref_node_name][model_name] = weight
+                results[ref_node_name][model_name] = [weight]
 
         else:  # call_module
             # for call_module, we need to look up the modules to do the type check
@@ -67,7 +76,7 @@ def add_weight_info_to_dict(
             # TODO(future PR): other module types
             if related_to_conv2d_mod:
                 weight = get_conv_mod_weight(mod)
-                results[ref_node_name][model_name] = weight
+                results[ref_node_name][model_name] = [weight]
 
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
@@ -77,7 +86,7 @@ def compare_weights(
     gm_a: GraphModule,
     model_name_b: str,
     gm_b: GraphModule,
-) -> Dict[str, Dict[str, torch.Tensor]]:
+) -> NSResultsType:
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
@@ -92,7 +101,7 @@ def compare_weights(
         nodes_and_names_to_instrument_b.append((node_start_b, match_name))
 
     # populate the results, one model at a time
-    results: Dict[str, Dict[str, torch.Tensor]] = {}
+    results: NSResultsType = {}
     add_weight_info_to_dict(
         model_name_a, gm_a, nodes_and_names_to_instrument_a, results)
     add_weight_info_to_dict(
@@ -175,7 +184,7 @@ def prepare_model_outputs(
 def add_activation_info_to_dict(
     model_name: str,
     model: GraphModule,
-    results: Dict[str, Dict[str, List[torch.Tensor]]],
+    results: NSResultsType,
     logger_cls: Callable,
 ) -> None:
     for gm_name, mod in model.named_modules():
@@ -204,7 +213,7 @@ def get_matching_activations(
     model_name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
-) -> Dict[str, Dict[str, List[torch.Tensor]]]:
+) -> NSResultsType:
     """
     Same thing as ns.get_matching_activations, but for FX models prepared with
     this module.
@@ -228,7 +237,7 @@ def get_matching_activations(
        the return type for calibrating with 1 input vs N inputs.
     3. `logger_cls` is included in the API for easy result extraction
     """
-    results: Dict[str, Dict[str, List[torch.Tensor]]] = {}
+    results: NSResultsType = {}
     for gm in (gm_a, gm_b):
         add_activation_info_to_dict(model_name_a, gm_a, results, logger_cls)
         add_activation_info_to_dict(model_name_b, gm_b, results, logger_cls)
@@ -261,13 +270,12 @@ def prepare_model_with_stubs(
 def get_matching_activations_a_shadows_b(
     gm_a_shadows_b: GraphModule,
     logger_cls: Callable,
-) -> Dict[str, Dict[str, List[torch.Tensor]]]:
+) -> NSResultsType:
     """
     Same thing as get_matching_activations, but for an `a_shadows_b` model.
     TODO(future PR): real docblock
     """
-    results: Dict[str, Dict[str, List[torch.Tensor]]] = \
-        collections.defaultdict(dict)
+    results: NSResultsType = collections.defaultdict(dict)
     for name, mod in gm_a_shadows_b.named_modules():
         # TODO(future PR): better check when scripted
         is_logger = (
