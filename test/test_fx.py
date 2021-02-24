@@ -628,6 +628,20 @@ class TestFX(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(loaded(x), traced(x))
 
+    def test_pickle_custom_import(self):
+        graph = torch.fx.Graph()
+        a = graph.placeholder('x')
+        b = graph.placeholder('y')
+        c = graph.call_function(a_non_torch_leaf, (a, b))
+        d = graph.call_function(torch.sin, (c,))
+        graph.output(d)
+        gm = GraphModule(torch.nn.Module(), graph)
+        pickled = pickle.dumps(gm)
+        loaded = pickle.loads(pickled)
+        loaded.graph.lint(loaded)
+        x, y = torch.rand(1), torch.rand(1)
+        self.assertEqual(loaded(x, y), gm(x, y))
+
     def test_all_input_nodes(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.placeholder('x')
@@ -833,6 +847,21 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
+    def test_pickle_torch_custom_ops(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.sigmoid(a)
+                c = torch.ops.aten.cat([a, b])
+                return torch.ops.aten.cat((c, c))
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        gm.graph.lint(gm)
+        pickled = pickle.dumps(gm)
+        loaded = pickle.loads(pickled)
+        self.assertEqual(loaded(input), gm(input))
+
     def test_pretty_print(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
@@ -885,6 +914,16 @@ class TestFX(JitTestCase):
     def test_nonetype_annotation(self):
         eb = torch.nn.EmbeddingBag(3, 4)
         symbolic_trace(eb)
+
+    def test_pickle_nonetype_annotation(self):
+        eb = torch.nn.EmbeddingBag(10, 3, mode='sum')
+        traced = symbolic_trace(eb)
+        pickled = pickle.dumps(traced)
+        loaded = pickle.loads(pickled)
+        loaded.graph.lint(loaded)
+        input = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.LongTensor([0, 4])
+        self.assertEqual(loaded(input, offsets), traced(input, offsets))
 
     def test_construct_root_dict(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -1566,7 +1605,7 @@ class TestFX(JitTestCase):
                 return self.other(x)
 
         traced = symbolic_trace(ReturnTypeModule())
-        self.assertIn("-> typing.List[str]", traced._code)
+        self.assertIn("-> typing_List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
 
