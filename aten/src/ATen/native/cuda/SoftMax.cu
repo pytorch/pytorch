@@ -741,7 +741,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
               dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
                   output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
               input_ptr += chunk_size * dim_size;
-              output_ptr += chunk_size;
+              output_ptr += chunk_size * dim_size;
               remaining -= chunk_size;
             }
           } else {

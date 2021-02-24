@@ -11975,6 +11975,24 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(grad_input, ref_grad_input)
                         self.assertEqual(input.grad, ref_input.grad)
 
+    @onlyCUDA
+    @dtypesIfCUDA(torch.float, torch.half)
+    @largeTensorTest("20GB")
+    def test_softmax_64bit_indexing(self, device, dtype):
+        def run_test(*shape):
+            x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
+            y = F.log_softmax(x, dim=-1, dtype=dtype)
+            y.backward(y)
+            with torch.no_grad():
+                xx = x.cpu().requires_grad_()
+            yy = F.log_softmax(xx.float(), dim=-1, dtype=dtype)
+            yy.backward(yy)
+            self.assertEqual(y, yy)
+            self.assertEqual(x.grad, xx.grad)
+
+        run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
+        run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
     def test_log_softmax_big(self, device, dtype):
