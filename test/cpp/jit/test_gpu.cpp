@@ -2351,6 +2351,11 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer1_CUDA) {
     tv->axis(-1)->parallelize(ParallelType::TIDx);
   }
 
+  // Transform tv5 to make it look like the rest
+  tv5->split(0, 128);
+  tv5->axis(1)->parallelize(ParallelType::TIDx);
+  tv5->axis(0)->parallelize(ParallelType::BIDx);
+
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
   at::Tensor aten_input = at::randn({1000}, options);
@@ -2578,10 +2583,10 @@ TEST(NVFuserTest, FusionComputeAtNoCommonConsumer_CUDA) {
   computeAtTarget->split(0, 128);
   tv1->computeAt(computeAtTarget, 1);
 
-  TensorView* affected_tensors[] = {tv1, tv2, tv3, tv4, tv6};
+  TensorView* affected_tensors[] = {tv1, tv2, tv3, tv4, tv5, tv6};
   for (auto tv : affected_tensors) {
     TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
-    if (tv == tv6) {
+    if (tv == tv6 || tv == tv5) {
       TORCH_CHECK(tv->getComputeAtPosition() == 0);
     } else {
       TORCH_CHECK(tv->getComputeAtPosition() == 1);
@@ -13220,6 +13225,116 @@ TEST(NVFuserTest, FusionSizeOneLoop_CUDA) {
   auto t6 = (t0.unsqueeze(-1) + t1).unsqueeze(0) + t2;
 
   testValidate(&fusion, cg_outputs, aten_inputs, {t6}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionValidateParallelize1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDy);
+
+  // Invalid as tv1 and tv2 do have the same ParallelType
+  FusionExecutor fe;
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
+TEST(NVFuserTest, FusionValidateParallelize2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDy);
+  tv1->setMemoryType(MemoryType::Shared);
+
+  // tv1 and tv2 do have the same ParallelType, but tv1 is on shared
+  // memory, so it is valid
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+}
+
+TEST(NVFuserTest, FusionValidateParallelize3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  tv1->split(-1, 4);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->split(-1, 4);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv1->setMemoryType(MemoryType::Global);
+
+  // tv1 and tv2 have the same shape and ParallelType
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+}
+
+TEST(NVFuserTest, FusionValidateParallelize4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  tv1->split(-1, 4);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->split(-1, 8);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv1->setMemoryType(MemoryType::Global);
+
+  // tv1 and tv2 do not have the same shape
+  FusionExecutor fe;
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
+TEST(NVFuserTest, FusionValidateParallelize5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  tv1->split(-1, 4);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv2->split(-1, 8);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // tv1 and tv2 do not have the same shape, but tv1 is on shared
+  // memory, so it is valid
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
 }
 
 } // namespace jit

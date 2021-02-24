@@ -260,6 +260,102 @@ void validateVectorize(Fusion* fusion) {
   }
 }
 
+void validateParallelize(Fusion* fusion) {
+  FUSER_PERF_SCOPE("validateParallelize");
+  FusionGuard fg(fusion);
+
+  const auto& par_map = GpuLower::current()->caParallelMap();
+  const auto& loop_map = GpuLower::current()->caLoopMap();
+
+  auto exprs = ExprSort::getExprs(fusion);
+
+  for (auto expr : exprs) {
+    if (!ir_utils::isTVOp(expr)) {
+      continue;
+    }
+    for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
+      for (size_t i = 0; i < producer->nDims(); ++i) {
+        // If a producer axis is threaded, either with threadIdx or
+        // blockIdx, there must be a mapped consumer axis with the
+        // same ParallelType. An exception is when the producer is
+        // allocated on shared memory and its parallelized with
+        // threadIdx. In that case, there is no parallelization
+        // constraint on the consumer as syncthreads will be inserted
+        // when necessary.
+        auto producer_axis = producer->axis(i);
+        auto producer_ptype =
+            par_map.getConcreteMappedID(producer_axis)->getParallelType();
+        if (!isParallelTypeThread(producer_ptype)) {
+          continue;
+        }
+        // No constraint on the consumer tensor when the producer
+        // axis is parallelized with threadIdx and allocates on
+        // shared memory
+        if (isParallelTypeThreadDim(producer_ptype) &&
+            producer->getMemoryType() == MemoryType::Shared) {
+          continue;
+        }
+        // There should be also nothing to validate when the producer
+        // axis is reduction.
+        if (producer_axis->isReduction()) {
+          continue;
+        }
+        // There must be a mappable consumer axis that has the same
+        // parallel type.
+        for (auto consumer :
+             ir_utils::filterByType<TensorView>(expr->outputs())) {
+          auto it = std::find_if(
+              consumer->domain()->domain().begin(),
+              consumer->domain()->domain().end(),
+              [&](IterDomain* consumer_axis) {
+                return loop_map.areMapped(producer_axis, consumer_axis);
+              });
+          TORCH_INTERNAL_ASSERT(
+              it != consumer->domain()->domain().end(),
+              "Inconsistent parallelization found between TV",
+              producer->name(),
+              " (",
+              producer,
+              ") and TV",
+              consumer->name(),
+              "(",
+              consumer,
+              "). ",
+              "TV",
+              consumer->name(),
+              " does not have a matching axis for parallelized producer axis, ",
+              producer_axis,
+              ". CA Map: ",
+              loop_map.toString());
+          auto consumer_axis = *it;
+          auto consumer_ptype =
+              par_map.getConcreteMappedID(consumer_axis)->getParallelType();
+          TORCH_INTERNAL_ASSERT(
+              producer_ptype == consumer_ptype,
+              "Inconsistent parallelization found between TV",
+              producer->name(),
+              " (",
+              producer,
+              ") and TV",
+              consumer->name(),
+              "(",
+              consumer,
+              "). "
+              "Producer axis, ",
+              producer_axis,
+              " is parallelized with ",
+              stringifyThread(producer_ptype),
+              ", but the parallel type of its matching consumer axis, ",
+              consumer_axis,
+              " is ",
+              stringifyThread(consumer_ptype),
+              ".");
+        }
+      }
+    }
+  }
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

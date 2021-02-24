@@ -128,6 +128,8 @@ void GpuLower::lower() {
   ca_loop_map_ = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
   ca_loop_map_.build();
 
+  validateParallelize(fusion_);
+
   // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
 

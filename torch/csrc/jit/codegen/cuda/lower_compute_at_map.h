@@ -68,7 +68,7 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   IterDomain* toFusion(kir::IterDomain* kir) const;
 
   // Prints mapping information via Fusion IR
-  std::string toString();
+  std::string toString() const;
 
  private:
   void mapIds(IterDomain* id0, IterDomain* id1);

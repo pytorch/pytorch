@@ -466,7 +466,7 @@ IterDomain* ComputeAtMap::toFusion(kir::IterDomain* kir) const {
   return kir_2_fusion_it->second;
 }
 
-std::string ComputeAtMap::toString() {
+std::string ComputeAtMap::toString() const {
   std::stringstream ss;
 
   // We may not have cleaned up non active sets as this is intended for debug,
