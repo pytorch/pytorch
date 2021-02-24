@@ -4117,9 +4117,8 @@ for shape in [(1,), ()]:
                 return x
 
         a = MyFunction.apply(torch.tensor(6.0, requires_grad=True))
-        b = Reentrant.apply(torch.tensor(9.0, requires_grad=True))
-        # First operand is executed before the second if they have the same sequence_nr
-        v = b * a
+        b = Reentrant.apply(torch.tensor(9.0, requires_grad=True).clone())
+        v = a * b
         v.backward()
         # The tasks for the Reentrant and MyFunction backward() will be added
         # to the queue in the autograd engine at the same time. The backward
