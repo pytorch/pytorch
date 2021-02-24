@@ -199,7 +199,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         .. warning: This needs to be called on all replicas"""
 
         # Sync lr and other attributes in case its been updated
-        self._update_param_groups()
+        self._sync_param_groups(self.param_groups, self.optim.param_groups)
 
         empty_messenger = torch.tensor([0], dtype=torch.uint8, device=self._device)
 
@@ -334,7 +334,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         .. note: Any extra parameter is passed to the base optimizer as-is"""
 
         # Sync oss param_groups attributes in case they've been updated by a scheduler.
-        self._update_param_groups()
+        self._sync_param_groups(self.param_groups, self.optim.param_groups)
 
         # Run the optimizer step on this shard only:
         if closure is not None:
@@ -346,7 +346,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         self._broadcast_params()
 
         # Sync hypothethical new results from the wrapped optimizer to the exposed param_groups
-        self._update_param_groups(local_to_global=True)
+        self._sync_param_groups(self.optim.param_groups, self.param_groups)
 
         return loss
 
@@ -482,22 +482,6 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         # Wait for all the calls
         _ = list(map(lambda x: x.wait(), handles))
-
-    def _update_param_groups(self, local_to_global: bool = False) -> None:
-        """Sync learning rate and other optimizer attributes (needed to support schedulers).
-
-        If the global param groups have been altered, and we want to make sure
-        that the wrapped optimizer uses the up to date version. Conversely if the wrapped
-        optimizer has new keys, we expose them through the global param groups
-        """
-
-        for global_group, local_group in zip(self.param_groups, self.optim.param_groups):
-            # Sync everything but the parameters
-            for k in filter(lambda x: x != "params", local_group.keys()):
-                if local_to_global:
-                    global_group[k] = local_group[k]
-                elif k in global_group.keys():
-                    local_group[k] = global_group[k]
 
     def _setup_bucket_strategy(self) -> None:
         """Tag parameters to either bucket them or broadcast/reduce them directly.
