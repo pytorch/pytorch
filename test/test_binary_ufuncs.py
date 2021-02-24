@@ -943,6 +943,8 @@ class TestBinaryUfuncs(TestCase):
                     with self.assertRaises(RuntimeError):
                         scripted_rfloordiv_scalar(a_t)
                 else:
+                    # This should emit a UserWarning, why doesn't it?
+                    # See issue gh-52387
                     self.assertEqual(5 // a, scripted_rfloordiv_scalar(a_t))
 
     # NOTE: torch.floor_divide currently truncates instead of flooring
