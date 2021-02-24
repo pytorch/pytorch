@@ -781,7 +781,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   } else if (at::hasMKL() && ((
             self_or_result.scalar_type() != kHalf &&
             self_or_result.scalar_type() != kBFloat16 &&
-            at::native::is_floating_point(self_or_result)) ||
+            at::is_floating_point(self_or_result)) ||
             at::native::is_complex(self_or_result))
             && batch_items_contiguous_or_transposed(batch1)
             && batch_items_contiguous_or_transposed(batch2)

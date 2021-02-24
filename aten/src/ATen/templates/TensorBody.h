@@ -367,6 +367,9 @@ class TORCH_API Tensor {
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;
 
+/// Returns if a `Tensor` is floating point tensor.
+  bool is_floating_point() const;
+
   /// Returns if a `Tensor` is metal tensor.
   bool is_metal() const;
 

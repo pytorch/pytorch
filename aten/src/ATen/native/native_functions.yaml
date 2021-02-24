@@ -227,7 +227,7 @@
 #     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 7) Add aliases argument to existing OpInfo/UnaryUfuncInfo or create new OpInfo/UnaryUfuncInfo entry 
+# 7) Add aliases argument to existing OpInfo/UnaryUfuncInfo or create new OpInfo/UnaryUfuncInfo entry
 # in op_db list in torch/testing/_internal/common_methods_invocations.py
 #
 # See torch.absolute, an alias for torch.abs, as an example.
@@ -2076,10 +2076,6 @@
     SparseCPU, SparseCUDA: isnan_sparse
 
 - func: is_distributed(Tensor self) -> bool
-  variants: function, method
-  device_guard: False
-
-- func: is_floating_point(Tensor self) -> bool
   variants: function, method
   device_guard: False
 
