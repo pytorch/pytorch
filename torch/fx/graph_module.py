@@ -2,14 +2,15 @@ import torch
 import torch.nn as nn
 import torch.overrides
 from torch.nn.modules.module import _addindent
+from torch.package import PackageImporter, PackageExporter
 import linecache
-from typing import Type, Dict, List, Any, Union, Optional
-from .graph import Graph
+from typing import Type, Dict, List, Any, Union, Optional, Set
+from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
+from torch.package import Importer, sys_importer
 import copy
 import itertools
 import sys
 import traceback
-import math
 from pathlib import Path
 import os
 import warnings
@@ -36,14 +37,46 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def _forward_from_src(src: str):
-    # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
-    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
-    exec_with_source(src, gbls)
-    return gbls['forward']
+def _forward_from_src(src: str, globals: Dict[str, Any]):
+    # avoid mutating the passed in dict
+    globals = globals.copy()
+    exec_with_source(src, globals)
+    return globals['forward']
 
 
-def deserialize_graphmodule(body: Dict[Any, Any]) -> torch.nn.Module:
+def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
+    if name in _custom_builtins:
+        return _custom_builtins[name].import_str
+    if _is_from_torch(name):
+        return 'import torch'
+
+    module_name, attr_name = importer.get_name(obj)
+    return f'from {module_name} import {attr_name} as {name}'
+
+
+def _format_import_block(globals: Dict[str, Any], importer: Importer):
+    import_strs: Set[str] = set()
+    for name, obj in globals.items():
+        import_strs.add(_format_import_statement(name, obj, importer))
+    return '\n'.join(import_strs)
+
+
+def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
+    # BC: attribute name was changed from `code` to `_code` to facilitate
+    # making `code` into a property and adding a docstring to it
+    fn_src = body.get('_code') or body['code']
+    forward = _forward_from_src(import_block + fn_src, {})
+    return _deserialize_graph_module(forward, body, None)
+
+
+def reduce_package_graph_module(importer: PackageImporter,
+                                body: Dict[Any, Any],
+                                generated_module_name: str) -> torch.nn.Module:
+    forward = importer.import_module(generated_module_name).forward
+    return _deserialize_graph_module(forward, body, importer)
+
+
+def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[PackageImporter]) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -57,12 +90,8 @@ def deserialize_graphmodule(body: Dict[Any, Any]) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
-    try:
-        CodeOnlyModule.forward = _forward_from_src(body['_code'])
-    except KeyError:
-        # BC: attribute name was changed from `code` to `_code` to facilitate
-        # making `code` into a property and adding a docstring to it
-        CodeOnlyModule.forward = _forward_from_src(body['code'])
+    # Try to retrieve the forward source in a backward-compatible way
+    CodeOnlyModule.forward = forward
 
     from .symbolic_trace import Tracer
 
@@ -140,7 +169,10 @@ class GraphModule(torch.nn.Module):
             pass
         return super().__new__(GraphModuleImpl)
 
-    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, class_name: str = 'GraphModule'):
+    def __init__(self,
+                 root: Union[torch.nn.Module, Dict[str, Any]],
+                 graph: Graph,
+                 class_name: str = 'GraphModule'):
         """
         Construct a GraphModule.
 
@@ -157,7 +189,7 @@ class GraphModule(torch.nn.Module):
 
             graph (Graph): ``graph`` contains the nodes this GraphModule should use for code generation
 
-            name (str): ``name`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
+            class_name (str): ``name`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
                 error messages will report as originating from ``GraphModule``. It may be helpful to set this
                 to ``root``'s original name or a name that makes sense within the context of your transform.
 
@@ -338,15 +370,17 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
-    def recompile(self) -> None:
+    def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
-        self._code = self._graph.python_code(root_module='self')
+        python_code = self._graph.python_code(root_module='self')
+        self._code = python_code.src
+
         cls = type(self)
-        cls.forward = _forward_from_src(self._code)
+        cls.forward = _forward_from_src(self._code, python_code.globals)
 
         cls_call = cls.__call__
 
@@ -391,6 +425,19 @@ class {module_name}(torch.nn.Module):
 
         cls.__call__ = wrapped_call
 
+        return python_code
+
+    def __reduce_package__(self, exporter: PackageExporter):
+        generated_module_name = f'fx-generated._{exporter.get_unique_id()}'
+        python_code = self.recompile()
+        import_block = _format_import_block(python_code.globals, exporter.importer)
+        module_code = import_block + self.code
+        exporter.save_source_string(generated_module_name, module_code)
+
+        dict_without_graph = self.__dict__.copy()
+        del dict_without_graph['_graph']
+        return (reduce_package_graph_module, (dict_without_graph, generated_module_name))
+
     def __reduce__(self):
         """
         Serialization of GraphModule. We serialize only the generated code, not
@@ -400,8 +447,10 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
+        python_code = self.recompile()
+        import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph['_graph']
-        return (deserialize_graphmodule, (dict_without_graph,))
+        return (reduce_graph_module, (dict_without_graph, import_block))
 
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__

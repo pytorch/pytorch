@@ -9,6 +9,8 @@ import tempfile
 import threading
 import time
 import unittest
+import logging
+import traceback
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce
@@ -20,6 +22,7 @@ import torch.distributed as c10d
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+import torch.multiprocessing as mp
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
@@ -47,7 +50,7 @@ from torch.testing._internal.common_utils import (
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
     TEST_WITH_TSAN,
-    slowTest,
+    IS_WINDOWS,
 )
 
 
@@ -65,6 +68,7 @@ if platform == "darwin":
 else:
     LOOPBACK = "lo"
 
+DEFAULT_HOSTNAME = "localhost"
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
@@ -80,7 +84,6 @@ def gpus_for_rank(world_size):
             visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
         )
     return gpus_for_rank
-
 
 def simple_reduce_tests(rank, world_size):
     tests = [
@@ -335,8 +338,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(b"value1", fs.get("key1"))
         self.assertEqual(b"value2", fs.get("key4"))
 
-    # https://github.com/pytorch/pytorch/issues/46064 <- takes 5+ min to finish
-    @slowTest
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
@@ -348,11 +349,60 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store.set("key0", "value0")
         self.assertEqual(b"value0", store.get("key0"))
         old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"wrong_old_value", old_value_result)
+        self.assertEqual(b"value0", old_value_result)
         self.assertEqual(b"value0", store.get("key0"))
         new_value_result = store.compare_set("key0", "value0", "new_value0")
         self.assertEqual(b"new_value0", new_value_result)
         self.assertEqual(b"new_value0", store.get("key0"))
+
+    def _create_client(self, addr, port, world_size):
+        try:
+            client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
+            self.assertEqual(b"value", client_store.get("key"))
+            client_store.set("new_key", "new_value0")
+            client_store.compare_set("new_key", "new_value1", "new_value0")
+        except Exception:
+            logging.error('Caught exception: \n{}exiting process with exit code: {}'
+                          .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
+            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+
+    @unittest.skipIf(IS_WINDOWS, "Skip test for windows because it cannot serialize logger instance")
+    def test_multi_worker_with_fixed_world_size(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+        world_size = 5
+        processes = []
+        for _ in range(world_size):
+            p = mp.Process(target=self._create_client, args=(addr, port, world_size))
+            processes.append(p)
+            p.start()
+        server_store = dist.TCPStore(addr, port, world_size, True, timedelta(seconds=30))
+        server_store.set("key", "value")
+        for (i, p) in enumerate(processes):
+            # This is the exit code processes exit with if they encountered an exception.
+            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
+                                "Process {} terminated with exit code {}. Check logs for exception stacktrace."
+                                .format(i, p.exitcode))
+            p.join()
+
+    @unittest.skipIf(IS_WINDOWS, "Skip test for windows because it cannot serialize logger instance")
+    def test_multi_worker_with_nonfixed_world_size(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+        server_store = dist.TCPStore(addr, port, is_master=True, timeout=timedelta(seconds=30))
+        server_store.set("key", "value")
+
+        processes = []
+        for _ in range(random.randint(3, 5)):
+            p = mp.Process(target=self._create_client, args=(addr, port, -1))
+            processes.append(p)
+            p.start()
+        for (i, p) in enumerate(processes):
+            # This is the exit code processes exit with if they encountered an exception.
+            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
+                                "Process {} terminated with exit code {}. Check logs for exception stacktrace."
+                                .format(i, p.exitcode))
+            p.join()
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
