@@ -144,6 +144,11 @@ test_aten() {
   fi
 }
 
+test_numpy_uninstall() {
+  conda uninstall numpy
+  python -c "from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase.assertRaises(None, RuntimeError, lambda: x.numpy())"
+}
+
 # pytorch extensions require including torch/extension.h which includes all.h
 # which includes utils.h which includes Parallel.h.
 # So you can call for instance parallel_for() from your extension,
@@ -386,10 +391,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   fi
   install_torchvision
   test_python_shard1
+  test_aten
+  test_numpy_uninstall
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
   test_python_shard2
-  test_aten
   test_libtorch
   test_custom_script_ops
   test_custom_backend
