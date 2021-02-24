@@ -1,10 +1,13 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
-from typing import Callable, Any, List, Dict, Optional, Tuple, Set
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, Optional, Tuple, Set
 import torch
 import keyword
 import re
 import builtins
 import warnings
+
+if TYPE_CHECKING:
+    from .graph_module import GraphModule
 
 def _shadows_builtin_name(name: str) -> bool:
     return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan', 'NoneType'}
@@ -121,7 +124,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self, owning_module: Optional["GraphModule"] = None):     # type: ignore[name-defined]
+    def __init__(self, owning_module: Optional["GraphModule"] = None):
         """
         Construct an empty Graph.
         """
@@ -137,7 +140,7 @@ class Graph:
         return self._owning_module
 
     @owning_module.setter
-    def owning_module(self, mod: "GraphModule"):    # type: ignore[name-defined]
+    def owning_module(self, mod: "GraphModule"):
         self._owning_module = mod if not self._owners else None
         self._owners += 1
 
@@ -357,7 +360,7 @@ class Graph:
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
                           "GraphModule! Call "
-                          "GraphModule.insert_submodule to add the "
+                          "GraphModule.add_submodule to add the "
                           "necessary submodule")
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
@@ -400,7 +403,7 @@ class Graph:
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
                           "GraphModule! Call "
-                          "GraphModule.insert_submodule to add the "
+                          "GraphModule.add_submodule to add the "
                           "necessary submodule")
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 

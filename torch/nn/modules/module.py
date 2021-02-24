@@ -382,6 +382,141 @@ class Module:
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
+    def has_submodule(self, target: str) -> bool:
+        """
+        Returns whether or not this Module contains the submodule
+        given by ``target``.
+
+        For example, let's say you have an ``nn.Module`` ``A`` that
+        looks like this:
+
+        .. code-block::text
+
+            A(
+                (net_b): Module(
+                    (net_c): Module(
+                        (conv): Conv2d(16, 33, kernel_size=(3, 3), stride=(2, 2))
+                    )
+                    (linear): Linear(in_features=100, out_features=200, bias=True)
+                )
+            )
+
+        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested 
+        submodule ``net_b``, which itself has two submodules ``net_c`` 
+        and ``linear``. ``net_c`` then has a submodule ``conv``.)
+
+        To check whether or not we have the ``linear`` submodule, we
+        would call ``has_submodule("net_b.linear")``. To check whether
+        we have the ``conv`` submodule, we would call
+        ``has_submodule("net_b.net_c.conv")``.
+
+        Args:
+            target: The fully-qualified string name of the submodule
+                to look for. (See above example for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            bool: Whether or not the target string referenced an
+                existing submodule. Returns False if the target string
+                resolves to something that is not an ``nn.Module``.
+        """
+        atoms: List[str] = target.split(".")
+
+        for item in atoms:
+
+            if not hasattr(self, item):
+                return False
+
+            self = getattr(self, item)
+
+            if not isinstance(self, torch.nn.Module):
+                return False
+
+        return True
+
+    def add_submodule(self, target: str, m: 'Module') -> bool:
+        """
+        Adds the given submodule to ``self``.
+
+        This installs empty Modules where none exist yet if they are 
+        subpaths of ``target``.
+
+        Args:
+            target: The fully-qualified string name of the new submodule
+                (See example in ``has_submodule`` for how to specify a
+                fully-qualified string.)
+            m: The submodule itself; the actual object we want to
+                install in the current Module
+
+        Return:
+            bool: Whether or not the submodule could be inserted. For
+                this method to return True, each object in the chain
+                denoted by ``target`` must either a) not exist yet,
+                or b) reference an ``nn.Module`` (not a parameter or
+                other attribute)
+
+        """
+        *prefix, field = target.split('.')
+        mod: torch.nn.Module = self
+
+        for item in prefix:
+
+            submod = getattr(mod, item, None)
+
+            if submod is None:
+                submod = torch.nn.Module()
+                setattr(mod, item, submod)
+
+            if not isinstance(submod, torch.nn.Module):
+                return False
+
+            mod = submod
+
+        mod.add_module(field, m)
+        return True
+
+    def delete_submodule(self, target: str) -> bool:
+        """
+        Deletes the given submodule from ``self``.
+
+        The module will not be deleted if ``target`` is not a valid
+        target.
+
+        Args:
+            target: The fully-qualified string name of the new submodule
+                (See example in ``has_submodule`` for how to denote a
+                fully-qualified string.)
+
+        Returns:
+            bool: Whether or not the target string referenced a
+                submodule we want to delete. A return value of ``False``
+                means that the ``target`` was not a valid reference to
+                a submodule.
+        """
+        atoms = target.split(".")
+        path, target_submod = atoms[:-1], atoms[-1]
+        mod: torch.nn.Module = self
+
+        # Get the parent module
+        for item in path:
+
+            if not hasattr(mod, item):
+                return False
+
+            mod = getattr(mod, item)
+
+            if not isinstance(mod, torch.nn.Module):
+                return False
+
+        if not hasattr(mod, target_submod):
+            return False
+
+        if not isinstance(getattr(mod, target_submod), torch.nn.Module):
+            return False
+
+        delattr(mod, target_submod)
+        return True
+
     def _apply(self, fn):
         for module in self.children():
             module._apply(fn)
@@ -776,7 +911,7 @@ class Module:
             inputs = (inputs,)
 
         # At this point we are sure that inputs and result are tuple of Tensors
-        out_grad_fn = set([r.grad_fn for r in result if r.grad_fn is not None])
+        out_grad_fn = {r.grad_fn for r in result if r.grad_fn is not None}
         if len(out_grad_fn) == 0 or (len(out_grad_fn) == 1 and grad_fn not in out_grad_fn):
             warnings.warn("Using a non-full backward hook when outputs are nested in python data structure "
                           "is deprecated and will be removed in future versions. This hook will be missing "
@@ -787,9 +922,9 @@ class Module:
                           "some grad_output. Please use register_full_backward_hook to get the documented behavior.")
         else:
             # At this point the grad_ouput part of the hook will most likely be correct
-            inputs_grad_fn = set([i.grad_fn for i in inputs if i.grad_fn is not None])
+            inputs_grad_fn = {i.grad_fn for i in inputs if i.grad_fn is not None}
 
-            next_functions = set([n[0] for n in grad_fn.next_functions])
+            next_functions = {n[0] for n in grad_fn.next_functions}
 
             if inputs_grad_fn != next_functions:
                 warnings.warn("Using a non-full backward hook when the forward contains multiple autograd Nodes "

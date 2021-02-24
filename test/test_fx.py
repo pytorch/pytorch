@@ -1799,7 +1799,7 @@ class TestFX(JitTestCase):
 
         a = symbolic_trace(A())
 
-        a.insert_submodule("net_b.net_c.dropout", torch.nn.Dropout(p=0.2))
+        a.add_submodule("net_b.net_c.dropout", torch.nn.Dropout(p=0.2))
 
         conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"][-1]
         with a.graph.inserting_before(conv):
@@ -1852,10 +1852,10 @@ class TestFX(JitTestCase):
         a.graph.lint()
 
         # Insert some unused submodules
-        a.insert_submodule("net_b.embedding", torch.nn.Embedding(10, 3))
-        a.insert_submodule("net_b.net_c.embedding", torch.nn.Embedding(10, 3))
-        a.insert_submodule("net_b.net_c.rnn", torch.nn.RNN(10, 20, 2))
-        a.insert_submodule("batch_norm_2d", torch.nn.BatchNorm2d(100))
+        a.add_submodule("net_b.embedding", torch.nn.Embedding(10, 3))
+        a.add_submodule("net_b.net_c.embedding", torch.nn.Embedding(10, 3))
+        a.add_submodule("net_b.net_c.rnn", torch.nn.RNN(10, 20, 2))
+        a.add_submodule("batch_norm_2d", torch.nn.BatchNorm2d(100))
 
         # Garbage collection
         a.delete_all_unused_submodules()
