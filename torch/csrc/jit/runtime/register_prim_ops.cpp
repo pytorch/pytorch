@@ -539,6 +539,8 @@ RegisterOperators reg(
            pack(stack, result);
          },
          aliasAnalysisFromSchema()),
+     // these ops are generic over the list element type.
+     // CREATING GENERIC_LIST_OPS
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::select.t(t[](a) list, int idx) -> t(*)"),
          listSelect,

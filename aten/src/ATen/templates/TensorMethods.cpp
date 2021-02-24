@@ -159,14 +159,21 @@ bool Tensor::is_vulkan() const {
   return impl_->is_vulkan();
 }
 
+bool Tensor::is_floating_point() const {
+  return impl_->is_floating_point();
+}
+
 bool Tensor::is_metal() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_metal();
 }
 
-
 bool is_vulkan(Tensor self) {
   return self.is_vulkan();
+}
+
+bool is_floating_point(const Tensor& self) {
+  return self.isFloatingType(self.scalar_type());
 }
 
 bool is_metal(Tensor self) {
