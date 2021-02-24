@@ -549,7 +549,6 @@
   - name: aten::copy_
   - name: aten::cudnn_convolution
   - name: aten::cudnn_convolution_transpose
-  - name: aten::cudnn_convolution_bias_relu
   - name: aten::eq
   - name: aten::is_floating_point
   - name: aten::is_leaf

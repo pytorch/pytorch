@@ -521,7 +521,6 @@ Tensor cudnn_convolution_bias_relu(
     return output_t;
   }
 
-  // Avoid ambiguity of "output" when this is being used as backwards
   TensorArg output{output_t, "result", 0};
   convolution_shape_check(
       c, input, weight, output, padding, stride, dilation, groups);

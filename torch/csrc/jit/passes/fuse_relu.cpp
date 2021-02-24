@@ -11,8 +11,6 @@ namespace {
 void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
 
-  rewriter.RegisterDefaultPatterns();
-
   std::string add_relu_0 = R"(
     graph(%a, %b, %alpha):
         %add_res = aten::add(%a, %b, %alpha)
