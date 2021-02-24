@@ -103,6 +103,7 @@ void tupleUnpack(Stack& stack) {
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
 
+// TODO: Support "{{" -> "{"
 void format(Stack& stack, size_t num_inputs) {
   // static const std::regex unsupported_options("\\{(.*?)\\}");
   auto format = peek(stack, 0, num_inputs).toStringRef();
@@ -114,19 +115,46 @@ void format(Stack& stack, size_t num_inputs) {
   // }
 
   auto args = last(stack, num_inputs - 1);
+  auto has_auto_index = false;
+  auto has_manual_index = false;
   std::stringstream ss;
-  for (size_t begin = 0, used_args = 0; true; ++used_args) {
-    size_t loc = format.find("{}", begin);
-    if (loc == std::string::npos) {
+
+  for (size_t begin = 0, arg_idx = -1; true;) {
+    size_t loc_open = format.find('{', begin);
+    if (loc_open == std::string::npos) {
       ss << format.substr(begin);
       break;
     }
-    ss << format.substr(begin, loc - begin);
-    if (used_args >= args.size()) {
+    size_t loc_close = format.find('}', loc_open + 1);
+    if (loc_close == std::string::npos) {
+      AT_ERROR("Expected '}' before end of string: ", format);
+    }
+
+    auto arg = format.substr(loc_open + 1, loc_close - loc_open - 1);
+    if (arg.empty()) {
+      if (has_manual_index) {
+        AT_ERROR(
+            "Cannot switch from manual field spec to auto field numbering");
+      }
+      arg_idx += 1;
+      has_auto_index = true;
+    } else if (std::all_of(arg.begin(), arg.end(), isdigit)) {
+      if (has_auto_index) {
+        AT_ERROR(
+            "Cannot switch from auto field numbering to manual field spec");
+      }
+      arg_idx = stoi(arg);
+      has_manual_index = true;
+    } else {
+      // TODO: support key indexed format
+      AT_ERROR("Key indexed format currently not supported: ", format);
+    }
+
+    if (arg_idx >= args.size()) {
       AT_ERROR("Too few arguments for format string: ", format);
     }
-    ss << args[used_args];
-    begin = loc + 2;
+    ss << format.substr(begin, loc_open - begin) << args[arg_idx];
+    begin = loc_close + 1;
   }
 
   drop(stack, num_inputs);
