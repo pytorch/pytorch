@@ -1,14 +1,16 @@
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/TensorFactories.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/TensorFactories.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/accumulate.h>
+
 #include <cmath>
 #include <typeinfo>
 
@@ -106,7 +108,7 @@ inline Tensor new_qtensor(
 
   at::DispatchKey tensorDispatchKey = options.computeDispatchKey();
   native::check_size_nonnegative(sizes);
-  int64_t nelements = at::prod_intlist(sizes);
+  int64_t nelements = c10::multiply_integers(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),

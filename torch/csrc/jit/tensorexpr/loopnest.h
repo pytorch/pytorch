@@ -26,9 +26,21 @@ class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
   LoopNest(const std::vector<Tensor*>& output_tensors);
+  LoopNest(
+      const std::vector<Tensor*>& output_tensors,
+      const std::vector<Tensor*>& tensors_to_compute);
 
   // A constructor for building a LoopNest from a pre-baked Stmt and meta-info
   // TODO: Nuke intermediate_bufs_ from here if they can be deduced.
+  LoopNest(
+      Stmt* stmt,
+      const std::unordered_set<const Buf*>& output_bufs,
+      const std::unordered_set<const Buf*>& input_bufs,
+      const std::unordered_set<const Buf*>& intermediate_bufs)
+      : root_stmt_(stmt),
+        input_bufs_(input_bufs),
+        output_bufs_(output_bufs),
+        intermediate_bufs_(intermediate_bufs) {}
   LoopNest(
       Stmt* stmt,
       const std::unordered_set<const Buf*>& output_bufs,
@@ -122,8 +134,9 @@ class TORCH_API LoopNest {
   }
 
  private:
-  std::vector<Tensor*> findAllNeededTensors(
-      const std::vector<Tensor*>& tensors);
+  void initialize(
+      const std::vector<Tensor*>& output_tensors,
+      const std::vector<Tensor*>& tensors_to_compute);
   Stmt* insertAllocFree(Stmt* stmt);
 
   Stmt* root_stmt_;
