@@ -1,4 +1,5 @@
 import copy
+import logging
 import math
 import operator
 import os
@@ -51,7 +52,6 @@ from torch.testing._internal.common_utils import (
     CONNECT_TIMEOUT,
     TEST_WITH_TSAN,
     IS_WINDOWS,
-    slowTest,
 )
 
 
@@ -339,8 +339,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(b"value1", fs.get("key1"))
         self.assertEqual(b"value2", fs.get("key4"))
 
-    # https://github.com/pytorch/pytorch/issues/46064 <- takes 5+ min to finish
-    @slowTest
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
@@ -383,7 +381,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         server_store.set("key", "value")
         for (i, p) in enumerate(processes):
             # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
+            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
                                 "Process {} terminated with exit code {}. Check logs for exception stacktrace."
                                 .format(i, p.exitcode))
             p.join()
@@ -402,7 +400,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             p.start()
         for (i, p) in enumerate(processes):
             # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
+            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
                                 "Process {} terminated with exit code {}. Check logs for exception stacktrace."
                                 .format(i, p.exitcode))
             p.join()
@@ -580,6 +578,19 @@ class RendezvousEnvTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_connect_failures
+    def test_logging_init(self):
+        os.environ.update({"WORLD_SIZE": "1"})
+        os.environ.update({"MASTER_ADDR": "127.0.0.1"})
+        os.environ.update({"MASTER_PORT": str(common.find_free_port())})
+        os.environ.update({"RANK": "0"})
+
+        handlers_before = logging.root.handlers
+        c10d.init_process_group(backend="gloo", init_method="env://")
+        handlers_after = logging.root.handlers
+        self.assertEqual(handlers_before, handlers_after)
+        c10d.destroy_process_group()
 
 
 class RendezvousFileTest(TestCase):

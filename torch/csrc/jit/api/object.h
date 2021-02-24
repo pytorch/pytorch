@@ -8,12 +8,6 @@
 namespace torch {
 namespace jit {
 
-struct ObjectProperty {
-  std::string name;
-  Method getter_func;
-  c10::optional<Method> setter_func;
-};
-
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
 
@@ -40,6 +34,12 @@ struct TORCH_API Object {
   c10::ClassTypePtr type() const {
     return _ivalue()->type();
   }
+
+  struct ObjectProperty {
+    std::string name;
+    Method getter_func;
+    c10::optional<Method> setter_func;
+  };
 
   void setattr(const std::string& name, c10::IValue v) {
     if (_ivalue()->type()->hasConstant(name)) {

@@ -115,6 +115,17 @@ def get_profiling_event(postfix, profiler):
         event for event in profiler.function_events if event.name.endswith(postfix)
     ]
 
+# Base error message substring on unfinished reductions.
+ddp_prev_reduction_unfinished_str = "Expected to have finished reduction in the prior iteration"
+# Error message substring when find_unused_parameters=True has not been passed
+ddp_recommend_find_unused_params_str = "passing the keyword argument `find_unused_parameters=True`"
+# Error message substring when find_unused_parameters=True is enabled
+ddp_find_unused_params_enabled_str = "Since `find_unused_parameters=True` is enabled"
+# Error message substring for possibility of not all model outputs being used
+# in loss computation
+ddp_outputs_not_used_in_loss_str = "`forward` function outputs participate in calculating loss"
+
+
 
 class _FC2(nn.Module):
     def __init__(self):
@@ -338,7 +349,7 @@ class TestDistBackend(MultiProcessTestCase):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name):
+    def _run(cls, rank, test_name, file_name, pipe):
         if BACKEND == 'nccl' and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
@@ -367,9 +378,7 @@ class TestDistBackend(MultiProcessTestCase):
         # immediately exiting due to a skip doesn't cause flakiness.
         self._barrier()
 
-        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
-        # We're retreiving a corresponding test and executing it.
-        getattr(self, test_name)()
+        self.run_test(test_name, pipe)
         self._barrier()
         dist.destroy_process_group()
         sys.exit(0)
@@ -4407,11 +4416,23 @@ class DistributedTest:
                     # On 2nd iteration, this will fail during rebuild_buckets,
                     # but we should report an error regarding unused parameters
                     # since that is the underlying root cause.
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "Expected to have finished reduction in the prior iteration",
-                    ):
+                    try:
                         ddp(inp).sum().backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP unused parameters error not raised.")
                 else:
                     ddp(inp).sum().backward()
 
@@ -4649,12 +4670,28 @@ class DistributedTest:
                 find_unused_parameters=False,
             )
             for i in range(2):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Expected to have finished reduction in the prior iteration before starting a new one",
-                ) if i == 1 else suppress():
+                if i == 0:
                     loss = model(random_input).sum()
                     loss.backward()
+                else:
+                    try:
+                        loss = model(random_input).sum()
+                        loss.backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP error not raised")
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4723,12 +4760,28 @@ class DistributedTest:
                 find_unused_parameters=False,
             )
             for i in range(2):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Expected to have finished reduction in the prior iteration before starting a new one",
-                ) if i == 1 else suppress():
+                if i == 0:
                     loss = model(random_input).sum()
                     loss.backward()
+                else:
+                    try:
+                        loss = model(random_input).sum()
+                        loss.backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP error not raised")
 
         @require_backend({"gloo"})
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support scatter")
@@ -4778,15 +4831,44 @@ class DistributedTest:
 
             for ddp in [net, net_with_find_unused]:
                 for i in range(2):
-                    ctx = (
-                        suppress()
-                        if i == 0
-                        else self.assertRaisesRegex(
-                            RuntimeError,
-                            "Expected to have finished reduction in the prior iteration",
-                        )
-                    )
-                    with ctx:
+                    if i == 0:
                         a, b = ddp(inp)
                         loss = b.sum()
                         loss.backward()
+                    else:
+                        try:
+                            a, b = ddp(inp)
+                            loss = b.sum()
+                            loss.backward()
+                        except RuntimeError as e:
+                            msg = str(e)
+                            if ddp == net:
+                                expected_strs = [
+                                    ddp_prev_reduction_unfinished_str,
+                                    ddp_recommend_find_unused_params_str,
+                                    ddp_outputs_not_used_in_loss_str,
+                                ]
+                                unexpected_strs = [
+                                    ddp_find_unused_params_enabled_str,
+                                ]
+                            elif ddp == net_with_find_unused:
+                                expected_strs = [
+                                    ddp_prev_reduction_unfinished_str,
+                                    ddp_outputs_not_used_in_loss_str,
+                                    ddp_find_unused_params_enabled_str,
+                                ]
+                                unexpected_strs = [
+                                    ddp_recommend_find_unused_params_str,
+                                ]
+                            for s in expected_strs:
+                                self.assertTrue(
+                                    s in msg,
+                                    f"Expected {s} to be in {msg}"
+                                )
+                            for s in unexpected_strs:
+                                self.assertFalse(
+                                    s in msg,
+                                    f"Expected {s} not to be in {msg}"
+                                )
+                        else:
+                            self.assertFalse(True, "DDP error not raised")

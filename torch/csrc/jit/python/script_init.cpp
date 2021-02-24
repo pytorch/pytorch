@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/python/script_init.h>
 
-#include <python3.8/descrobject.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -18,7 +17,6 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -34,7 +32,6 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
 
-#include <Exceptions.h>
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -43,7 +40,6 @@
 #include <cstddef>
 #include <memory>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -790,7 +786,6 @@ void initJitScriptBindings(PyObject* module) {
                   if (self.has_property(name)) {
                     auto prop = self.get_property(name);
                     auto getter_func = py::cast(prop.getter_func);
-                    auto setter_func = py::cast(prop.setter_func);
                     return getter_func();
                   }
                   return toPyObject(self.attr(name));
@@ -804,13 +799,8 @@ void initJitScriptBindings(PyObject* module) {
                 try {
                   if (self.has_property(name)) {
                     auto prop = self.get_property(name);
-                    auto getter_func = py::cast(prop.getter_func);
                     if (!prop.setter_func.has_value()) {
-                      TORCH_CHECK(
-                          false,
-                          "Can't set value to '",
-                          name,
-                          "' because setter function is not given.");
+                      TORCH_CHECK(false, "can't set attribute");
                     }
                     auto setter_func = py::cast(prop.setter_func);
                     setter_func(value);
@@ -828,6 +818,7 @@ void initJitScriptBindings(PyObject* module) {
                   TypePtr type = self.type()->getAttribute(name);
                   auto ivalue = toIValue(std::move(value), type);
                   self.setattr(name, ivalue);
+
                 } catch (const ObjectAttributeError& err) {
                   throw AttributeError("%s", err.what());
                 }
@@ -1384,6 +1375,11 @@ void initJitScriptBindings(PyObject* module) {
             PythonPrint pp(constants, deps);
             pp.printMethod(self.function());
             return pp.str();
+          })
+      .def(
+          "_debug_flush_compilation_cache",
+          [](Method& self) {
+            return self.get_executor().debugFlushCompilationCache();
           })
       .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::IValue> constants;
