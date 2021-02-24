@@ -4282,6 +4282,76 @@ for shape in [(1,), ()]:
         loss.backward()
         self.assertEqual(param.grad, 6 * param)
 
+    def test_grad_fn_attr_bindings(self):
+        # Check that the getter of each type returns what we want
+        # See `gen_autograd_functions.py` for how getters are generated
+        a = torch.ones(1, requires_grad=True)
+        b = torch.ones(1, requires_grad=True)
+        out = torch.stack([a, b], dim=0)
+        self.assertEqual(out.grad_fn._tensors, (a, b))              # TensorList -> Tuple[Tensor]
+        self.assertIsInstance(out.grad_fn._tensors, tuple)
+        self.assertIsInstance(out.grad_fn._tensors[0], torch.Tensor)
+        self.assertEqual(out.grad_fn._dim, 0)                       # int64_t -> int
+        self.assertIsInstance(out.grad_fn._dim, int)
+
+        a = torch.ones(2, 2, requires_grad=True)
+        indices = torch.tensor([0, 1])
+        out = a[:, indices]
+        self.assertEqual(out.grad_fn._indices, (None, indices))     # c10::List<c10::optional<Tensor>> -> Tuple[Tensor?]
+        self.assertIsInstance(out.grad_fn._indices, tuple)
+        self.assertIsInstance(out.grad_fn._indices[1], torch.Tensor)
+        self.assertEqual(out.grad_fn._self_sizes, a.shape)          # IntArrayRef -> Tuple[int]
+        self.assertIsInstance(out.grad_fn._self_sizes, tuple)
+        self.assertIsInstance(out.grad_fn._self_sizes[0], int)
+
+        a = torch.ones(1, 1, 2, requires_grad=True)
+        out = torch.nn.functional.interpolate(a, 4, mode="linear")
+        self.assertEqual(out.grad_fn._output_size, (4,))            # c10::optional<IntArrayRef> -> int[]?
+        self.assertIsInstance(out.grad_fn._output_size, tuple)
+        self.assertIsInstance(out.grad_fn._output_size[0], int)
+        self.assertEqual(out.grad_fn._align_corners, False)         # bool -> bool
+        self.assertIsInstance(out.grad_fn._align_corners, bool)
+        self.assertIsNone(out.grad_fn._scale_factors)               # c10::optional<ArrayRef<double>> -> float[]?
+
+        out = torch.nn.functional.interpolate(a, scale_factor=0.5, mode="linear")
+        self.assertIsNone(out.grad_fn._output_size)
+        self.assertEqual(out.grad_fn._scale_factors, (0.5,))
+        self.assertIsInstance(out.grad_fn._scale_factors, tuple)
+        self.assertIsInstance(out.grad_fn._scale_factors[0], float)
+
+        a = torch.ones(2, 2, requires_grad=True)
+        out = torch.pdist(a, p=1)
+        self.assertEqual(out.grad_fn._p, 1.)                        # double -> float
+        self.assertIsInstance(out.grad_fn._p, float)
+
+        a = torch.ones(1, 1, 2, requires_grad=True)
+        out = torch.logit(a, 1.)
+        self.assertEqual(out.grad_fn._eps, 1.)                      # c10:optional<double> -> float?
+        self.assertIsInstance(out.grad_fn._eps, float)
+        out = torch.logit(a)
+        self.assertIsNone(out.grad_fn._eps)
+
+        a = torch.tensor([1.], requires_grad=True)
+        out = torch.div(a, 2., rounding_mode="trunc")
+        self.assertEqual(out.grad_fn._rounding_mode, "trunc")       # std::string -> str
+
+        x = torch.zeros(5, requires_grad=True)
+        out = torch.threshold(x, threshold=(1 + 0j), value=(1 + 0j))
+        self.assertIsInstance(out.grad_fn._threshold, complex)      # Scalar(complex) -> complex
+        out = torch.threshold(x, threshold=1., value=1.)
+        self.assertIsInstance(out.grad_fn._threshold, float)        # Scalar(floating point) -> float
+        out = torch.threshold(x, threshold=1, value=1)
+        self.assertIsInstance(out.grad_fn._threshold, int)          # Scalar(integral) -> int
+        out = torch.threshold(x, threshold=False, value=False)
+        self.assertIsInstance(out.grad_fn._threshold, bool)         # Scalar(bool) -> bool
+
+        a = torch.ones(2, 2, requires_grad=True)
+        out = a.as_strided((3,), (1,), 1)
+        self.assertEqual(out.grad_fn._storage_offset, 1)            # c10:optional<int64_t> -> int?
+        self.assertIsInstance(out.grad_fn._storage_offset, int)
+        out = a.as_strided((3,), (1,))
+        self.assertIsNone(out.grad_fn._storage_offset)
+
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected

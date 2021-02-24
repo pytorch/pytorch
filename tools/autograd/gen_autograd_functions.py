@@ -82,8 +82,8 @@ if (should_compute_output({ ${idx_ranges} })) {
 # This generates the definitions for:
 #   (1) The PyTypeObject for each backward grad_fn subclassing Node
 #   (2) The entry for PyTypeObject's tp_getset slot (an array of PyGetSetDef structs)
-#     We generate one PyGetSetDef struct for each of grad_fn's saved inputs and outputs
-#     Each PyGetSetDef has a function ptr to a getter, also defined here (3).
+#       We generate one PyGetSetDef struct for each of grad_fn's saved inputs and outputs
+#       Each PyGetSetDef has a function ptr to a getter, also defined here (3).
 #   (3) Getters for each of grad_fn's saved inputs and outputs.
 #
 PY_FUNCTION_DEFINITION = CodeTemplate("""\
@@ -103,64 +103,133 @@ static struct PyGetSetDef ${op}_properties[] = {
 """)
 
 PY_GETSETDEF_STRUCT = CodeTemplate("""\
-{(char*)"${name}", (getter)THP${op}_${name}_getter, nullptr, nullptr, nullptr}""")
+{(char*)"_${name}", (getter)THP${op}_${name}_getter, nullptr, nullptr, nullptr}""")
+
+# Getter templates
+GETTER_DEFINITION = CodeTemplate("""\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  auto prop = static_cast<${op}*>(self->cdata.get())->${name};
+  ${body}
+}
+""")
 
 GETTER_DEFINITION_SAVEDVAR = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
-  return THPVariable_Wrap(prop.unpack());
+  ${body}
 }
 """)
 
-GETTER_DEFINITION_VEC_SAVEDVAR = CodeTemplate("""\
+GETTER_DEFINITION_OPT = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
-  const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
-  PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-  for (int i = 0; i < prop.size(); i++) {
-    PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack()));
+  auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
+  if (!opt_prop.has_value()) {
+    Py_RETURN_NONE;
   }
-  return tup;
+  auto prop = opt_prop.value();
+  ${body}
 }
 """)
 
-GETTER_DEFINITION_ARRAYREF = CodeTemplate("""\
+GETTER_DEFINITION_OPT_ARRAYREF = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
-  ${get_prop}
-  PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-  for (int i = 0; i < prop.size(); i++) {
-    ${tuple_setitem}
+  auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
+  if (!opt_prop.list.has_value()) {
+    Py_RETURN_NONE;
   }
-  return tup;
+  auto prop = opt_prop.list.value();
+  ${body}
 }
 """)
 
-TUPLE_SETITEM_LONG = """\
-PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong((uint64_t) prop[i]));
+# Getter body
+GETTER_BODY_SAVEDVAR = """\
+return THPVariable_Wrap(prop.unpack());
 """
 
-TUPLE_SETITEM_DOUBLE = """\
-PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble((double) prop[i]));
+GETTER_BODY_VEC_SAVEDVAR = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (int i = 0; i < prop.size(); i++) {
+  PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack()));
+}
+return tup;
 """
 
-GET_PROP_OPTIONAL_ARRAY = CodeTemplate("""\
-auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
-if (!opt_prop.list.has_value()) {
-  Py_RETURN_NONE;
+GETTER_BODY_ARRAYREF_LONG = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (int i = 0; i < prop.size(); i++) {
+  PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong((uint64_t) prop[i]));
 }
-auto prop = opt_prop.list.value();
-""")
+return tup;
+"""
 
-GET_PROP = CodeTemplate("""\
-auto prop = static_cast<${op}*>(self->cdata.get())->${name};
-""")
-
-GETTER_DEFINITION_INT = CodeTemplate("""\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
-  auto prop = static_cast<${op}*>(self->cdata.get())->${name};
-  PyObject* ret = PyLong_FromUnsignedLong((uint64_t) prop);
-  return ret;
+GETTER_BODY_ARRAYREF_DOUBLE = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (int i = 0; i < prop.size(); i++) {
+  PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble((double) prop[i]));
 }
-""")
+return tup;
+"""
+
+GETTER_BODY_INT64_T = """\
+return PyLong_FromUnsignedLong((int64_t) prop);
+"""
+
+GETTER_BODY_DOUBLE = """\
+return PyFloat_FromDouble((double) prop);
+"""
+
+GETTER_BODY_BOOL = """\
+if (prop) {
+  Py_RETURN_TRUE;
+} else {
+  Py_RETURN_FALSE;
+}
+"""
+
+GETTER_BODY_STRING = """\
+return PyUnicode_FromString(prop.c_str());
+"""
+
+GETTER_BODY_SCALAR = """\
+if (prop.isComplex()) {
+  auto cprop = prop.to<c10::complex<double>>();
+  return PyComplex_FromDoubles(cprop.real(), cprop.imag());
+} else if (prop.isFloatingPoint()) {
+  return PyFloat_FromDouble(prop.to<double>());
+} else if (prop.isIntegral(/*includeBool=*/false)) {
+  return PyLong_FromLong(prop.to<int64_t>());
+} else if (prop.isBoolean()) {
+  if (prop.to<bool>()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+} else {
+  PyErr_SetString(PyExc_RuntimeError, "Unknown scalar type");
+  return nullptr;
+}
+"""
+
+MISC_GETTER_DEFS = {
+    'c10::optional<int64_t>': GETTER_DEFINITION_OPT,
+    'double': GETTER_DEFINITION,
+    'c10::optional<double>': GETTER_DEFINITION_OPT,
+    'bool': GETTER_DEFINITION,
+    'std::string': GETTER_DEFINITION,
+    'Scalar': GETTER_DEFINITION,
+    'c10::optional<Scalar>': GETTER_DEFINITION_OPT,
+}
+
+MISC_GETTER_BODY = {
+    'c10::optional<int64_t>': GETTER_BODY_INT64_T,
+    'double': GETTER_BODY_DOUBLE,
+    'c10::optional<double>': GETTER_BODY_DOUBLE,
+    'bool': GETTER_BODY_BOOL,
+    'std::string': GETTER_BODY_STRING,
+    'Scalar': GETTER_BODY_SCALAR,
+    'c10::optional<Scalar>': GETTER_BODY_SCALAR,
+}
 
 # These functions have backwards which cannot be traced, and so must have
 # their backward functions traced opaquely.
@@ -236,8 +305,6 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         name = var.name
         should_append_getsetdef = True
 
-        get_prop = GET_PROP.substitute(op=info.op, name=name)
-        get_prop_optionalarray = GET_PROP_OPTIONAL_ARRAY.substitute(op=info.op, name=name)
         if var.type == 'Tensor' or var.type == 'c10::optional<Tensor>' or var.type == 'c10::optional<Tensor>&' or \
                 (var.type == 'Scalar' and is_output):
             saved_variables.append(f'SavedVariable {name}_;')
@@ -245,7 +312,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_.reset_grad_function();')
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
-            getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(op=info.op, name=name))
+            getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_SAVEDVAR))
         elif var.type == 'TensorList':
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
@@ -255,7 +323,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_released_ = true;')
             unpack.append(f'auto {name} = unpack_list({name}_);')
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
-            getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(op=info.op, name=name))
+            getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
         elif var.type == 'c10::List<c10::optional<Tensor>>':
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
@@ -265,26 +334,35 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_released_ = true;')
             unpack.append(f'auto {name} = unpack_opt_list({name}_);')
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
-            getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(op=info.op, name=name))
+            getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
         elif var.type == 'IntArrayRef':
             saved_variables.append(f'std::vector<int64_t> {name};')
-            getter_definitions.append(GETTER_DEFINITION_ARRAYREF.substitute(
-                op=info.op, name=name, get_prop=get_prop, tuple_setitem=TUPLE_SETITEM_LONG))
+            getter_definitions.append(GETTER_DEFINITION.substitute(
+                op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
         elif var.type == 'c10::optional<IntArrayRef>':
             saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
-            getter_definitions.append(GETTER_DEFINITION_ARRAYREF.substitute(
-                op=info.op, name=name, get_prop=get_prop_optionalarray, tuple_setitem=TUPLE_SETITEM_LONG))
+            getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
         elif var.type == 'c10::optional<ArrayRef<double>>':
             saved_variables.append(f'c10::OptionalArray<double> {name};')
-            getter_definitions.append(GETTER_DEFINITION_ARRAYREF.substitute(
-                op=info.op, name=name, get_prop=get_prop_optionalarray, tuple_setitem=TUPLE_SETITEM_DOUBLE))
+            getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                op=info.op, name=name, body=GETTER_BODY_ARRAYREF_DOUBLE))
         elif var.type == 'int64_t':
             saved_variables.append(f'{var.type} {name} = 0;')
-            getter_definitions.append(GETTER_DEFINITION_INT.substitute(op=info.op, name=name))
+            getter_definitions.append(GETTER_DEFINITION.substitute(
+                op=info.op, name=name, body=GETTER_BODY_INT64_T))
         else:
             saved_variables.append(f'{var.type} {name};')
-            # We don't know how to wrap this into a PyObject
-            should_append_getsetdef = False
+
+            if var.type in MISC_GETTER_DEFS:
+                body = MISC_GETTER_BODY[var.type]
+                getter_definitions.append(MISC_GETTER_DEFS[var.type].substitute(op=info.op, name=name, body=body))
+            else:
+                # Types we don't expose python bindings to yet:
+                #   TypeAndSize, ScalarType, TensorOptions, TensorGeometry,
+                #   std::vector<std::vector<int64_t>>, std::vector<ScalarType>
+                should_append_getsetdef = False
 
         if should_append_getsetdef:
             py_getsetdef_structs.append(PY_GETSETDEF_STRUCT.substitute(op=info.op, name=name))
