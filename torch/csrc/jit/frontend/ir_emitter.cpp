@@ -33,6 +33,7 @@
 #include <climits>
 #include <set>
 #include <stack>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -3893,6 +3894,13 @@ struct to_ir {
           return dim;
         }
       } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
+        if(index->type() == TensorType::get()) {
+          if (is_reverse) {
+            return dim - 1;
+          } else {
+            return dim;
+          }
+        }
         if (is_reverse) {
           throw ErrorReport(loc)
               << "Ellipses followed by tensor indexing is currently not supported";
@@ -3964,8 +3972,15 @@ struct to_ir {
         sliceable =
             emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
       } else if (expr->type()->isSubtypeOf(OptionalType::ofTensor())) {
-        tensor_indices.resize(dims[i] + 1);
-        tensor_indices[dims[i]] = expr;
+        auto tensor_type = expr->type()->cast<TensorType>();
+        if (!tensor_type->get()->sizes().size().has_value()){
+          auto implicit = graph->insert(aten::IntImplicit, {expr});
+          sliceable =
+            emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), implicit);
+        } else {
+          tensor_indices.resize(dims[i] + 1);
+          tensor_indices[dims[i]] = expr;
+        }
       } else {
         TORCH_INTERNAL_ASSERT(
             false, "Trying to process index type that we don't support.");

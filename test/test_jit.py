@@ -12949,6 +12949,17 @@ dedent """
                                     "Dict expansion "):
             torch.jit.script(fn)
 
+    def test_slice_index_transpose(self):
+        def f(gt_batch_idx):
+            tgt_boxes = torch.zeros((1, 4, 64))
+            advanced_index = gt_batch_idx[0]
+            mask = torch.arange(10)
+            return tgt_boxes[advanced_index, :, mask]
+        inp = (torch.tensor([0, 0], dtype=torch.long),)
+        s = torch.jit.script(f)
+        print(s.code)
+        self.checkScript(f, inp)
+
     def test_module_parameters_and_buffers(self):
         weights = torch.randn(10, 10)
         bias = torch.randn(10)
