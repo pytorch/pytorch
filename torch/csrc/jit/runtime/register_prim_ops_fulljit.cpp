@@ -45,16 +45,6 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::profile_optional,
-         [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOptionalOp>()->getCallback();
-           return [](Stack* stack) {
-             AT_ERROR(
-                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
@@ -72,8 +62,8 @@ RegisterOperators reg(
                  // if an rg property changes we assume a tensor does require
                  // gradients which is set in `guardDifferentiableGraph`
                  TORCH_INTERNAL_ASSERT(
-                     t->cast<TensorType>()->requiresGrad().has_value());
-                 return *t->cast<TensorType>()->requiresGrad();
+                     t->castRaw<TensorType>()->requiresGrad().has_value());
+                 return *t->castRaw<TensorType>()->requiresGrad();
                });
            return [rg_props](Stack* stack) {
              auto num_inputs = rg_props.size();
@@ -556,6 +546,7 @@ RegisterOperators reg(
      Operator(
          "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
          [](Stack* stack) {
+           RECORD_FUNCTION("_grad_sum_to_size", std::vector<c10::IValue>());
            IValue self, size;
            pop(stack, self, size);
            if (size.isNone()) {
@@ -633,14 +624,6 @@ RegisterOperators reg(
            IValue ind = pop(stack);
            IValue module_dict = pop(stack);
            push(stack, module_dict.toModule().attr(ind.toStringRef()));
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::dict() -> Dict(str, Tensor)",
-         [](Stack* stack) {
-           auto dict =
-               c10::impl::GenericDict(StringType::get(), TensorType::get());
-           push(stack, dict);
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -1023,6 +1006,58 @@ RegisterOperators reg2({
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.str(str[] self) -> bool",
+        [](Stack* stack) {
+          auto l = pop(stack).toList();
+          for (const auto& elem : l) {
+            if (elem != "") {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.int(int[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.float(float[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.bool(bool[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
         },
         aliasAnalysisFromSchema()),
     Operator(

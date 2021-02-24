@@ -3,16 +3,16 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 
-from collections import OrderedDict, deque
+import collections
+from collections import OrderedDict
 import copy
 from itertools import chain
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Deque
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 import torch
 import torch.distributed as dist
 from torch.nn import Parameter
-from torch._six import container_abcs
 from torch.optim import Optimizer
 import io
 
@@ -37,7 +37,7 @@ def _recursive_copy_to_device(value: Any, non_blocking: bool, device: torch.devi
         values = [_recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for val in value]
         return values if isinstance(value, list) else tuple(values)
 
-    if isinstance(value, container_abcs.Mapping):
+    if isinstance(value, collections.abc.Mapping):
         return {
             key: _recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for key, val in value.items()
         }
@@ -125,9 +125,9 @@ class ZeroRedundancyOptimizer(Optimizer):
         super().__init__(params, default)
 
         # Partition information. lazy evaluation, computed if requested
-        self._per_device_params: OrderedDict[
-            torch.device, List[List[Parameter]]
-        ] = OrderedDict()  # device, rank, params
+        self._per_device_params: "OrderedDict[torch.device, List[List[Parameter]]]" = (
+            OrderedDict()
+        )  # device, rank, params
         self._param_rank: Dict[torch.Tensor, int] = {}
         self._partition_parameters: List[List[Dict]] = []
 
@@ -154,7 +154,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         self.bucket_max_size = bucket_cap_kb
 
         self.should_bucket_param: List[bool] = []
-        self.work_handles: Deque[Any] = deque()
         self._setup_bucket_strategy()
         self.initialized = True
 
@@ -444,6 +443,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         """Helper function to broadcast all the parameters from a given device"""
 
         i_param = 0
+        handles: List[Any] = []
 
         for (
             device,
@@ -457,20 +457,18 @@ class ZeroRedundancyOptimizer(Optimizer):
                 # Direct broadcasts only
                 for param in params:
                     if not self.should_bucket_param[i_param]:
-                        self.work_handles.append(
+                        handles.append(
                             dist.broadcast(tensor=param.data, src=global_src_rank, group=self.group, async_op=True)
                         )
+
                     i_param += 1
 
                 # Bucket broadcasts
-                self.work_handles.append(
-                    dist.broadcast(tensor=bucket, src=global_src_rank, group=self.group, async_op=True)
-                )
+                if bucket.numel() > 0:
+                    handles.append(dist.broadcast(tensor=bucket, src=global_src_rank, group=self.group, async_op=True))
 
-        # Consume all async calls
-        while len(self.work_handles) > 0:
-            work_handle = self.work_handles.popleft()
-            work_handle.wait()
+        # Wait for all the calls
+        _ = list(map(lambda x: x.wait(), handles))
 
     def _update_param_groups(self, local_to_global: bool = False) -> None:
         """Sync learning rate and other optimizer attributes (needed to support schedulers).

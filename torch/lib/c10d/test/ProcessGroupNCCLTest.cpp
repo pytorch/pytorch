@@ -116,8 +116,8 @@ class NCCLTest : public NCCLTestBase {
   std::vector<std::vector<at::Tensor>> getTensorLists(
       std::vector<std::vector<at::Tensor>>& tensor_lists) {
     std::vector<std::vector<at::Tensor>> outputs(numDevices_);
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      outputs[i] = std::vector<at::Tensor>(worldSize_ * numDevices_);
+    for (auto & output : outputs) {
+      output = std::vector<at::Tensor>(worldSize_ * numDevices_);
     }
 
     // For the duration of this function, make THC use our streams
@@ -273,8 +273,7 @@ void testAllreduce(const std::string& path, int rank, int size) {
   const int totalNumGPUs = test.numDevices() * size;
   const auto expected = (totalNumGPUs * (totalNumGPUs - 1)) / 2;
   auto tensors = test.getTensors();
-  for (size_t j = 0; j < tensors.size(); j++) {
-    auto& tensor = tensors[j];
+  for (auto & tensor : tensors) {
     auto data = tensor.data_ptr<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
       EXPECT_EQ(data[k], expected)
@@ -299,8 +298,7 @@ void testBroadcast(const std::string& path, int rank, int size) {
       // Check results
       const auto expected = (rootRank * numDevices + rootTensor);
       auto tensors = test.getTensors();
-      for (size_t j = 0; j < tensors.size(); j++) {
-        auto& tensor = tensors[j];
+      for (auto & tensor : tensors) {
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
           EXPECT_EQ(data[k], expected)
@@ -350,11 +348,11 @@ void testAllgather(const std::string& path, int rank, int size) {
   // Validation
   auto tensors = test.getOutputTensors();
   // device index
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (auto & i : tensors) {
     // rank index
-    for (size_t j = 0; j < tensors[i].size(); ++j) {
+    for (size_t j = 0; j < i.size(); ++j) {
       const auto expected = j;
-      auto& tensor = tensors[i][j];
+      auto& tensor = i[j];
       auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
         EXPECT_EQ(data[k], expected)
@@ -468,5 +466,18 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
   {
     TemporaryFile file;
     testReduceScatter(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testBackendName) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    auto test = NCCLTestBase(file.path);
+    test.initialize(rank_, size_);
+    EXPECT_EQ(
+      test.getProcessGroup().getBackendName(), std::string(c10d::NCCL_BACKEND_NAME));
   }
 }

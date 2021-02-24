@@ -22,7 +22,7 @@ static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
-static bool te_must_use_llvm_on_cpu = false;
+static bool te_must_use_llvm_on_cpu = true;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -119,7 +119,7 @@ size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
 }
 
 static at::ScalarType tensorType(Tensor* t) {
-  return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
+  return static_cast<at::ScalarType>(t->buf()->dtype().scalar_type());
 }
 
 static std::vector<ExprHandle> computeIndicesToBroadcast(
@@ -276,6 +276,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::sinh:
     case aten::atan:
     case aten::tanh:
+    case aten::hardtanh:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -524,7 +525,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     return e;
   }
 
-  auto tt = *v->type()->cast<TensorType>()->scalarType();
+  auto tt = *v->type()->castRaw<TensorType>()->scalarType();
 
   if (tt == static_cast<at::ScalarType>(e.dtype().scalar_type())) {
     return e;
@@ -608,7 +609,7 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
   if (it == tensors_.end()) {
     return {};
   }
-  return ExprVectorToExprHandleVector(it->second->dims());
+  return ExprVectorToExprHandleVector(it->second->buf()->dims());
 }
 
 Tensor* TensorExprKernel::computeOneOperand(
@@ -1125,7 +1126,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::type_as: {
       auto const& n = v->node();
       Tensor* rhs = tensors_.at(n->inputs()[1]->unique());
-      auto dtype = rhs->body()->dtype();
+      auto dtype = rhs->buf()->dtype();
       return computeOneOperand(
           "aten_type_as", v, [dtype](const ExprHandle& lhs) {
             return Cast::make(dtype, lhs);
@@ -1276,6 +1277,18 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       });
     } break;
 
+    case aten::hardtanh: {
+      return computeThreeOperand(
+          "aten_hardtanh",
+          v,
+          [](const ExprHandle& a,
+             const ExprHandle& min_val,
+             const ExprHandle& max_val) {
+            auto mm = CompareSelect::make(a, min_val, min_val, a, kLT);
+            return CompareSelect::make(mm, max_val, max_val, mm, kGT);
+          });
+    } break;
+
     case aten::sqrt: {
       return computeOneOperand("aten_sqrt", v, [](const ExprHandle& a) {
         return tensorexpr::sqrt(promoteIntegerToDefaultType(a));
@@ -1350,8 +1363,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::lgamma: {
-      return computeOneOperand(
-          "aten_lgamma", v, [](const ExprHandle& a) { return lgamma(a); });
+      return computeOneOperand("aten_lgamma", v, [](const ExprHandle& a) {
+        return lgamma(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case prim::ConstantChunk: {
@@ -1518,7 +1532,12 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
-  torch::jit::tensorexpr::LoopNest l(tensorOutputs_);
+  // Find all tensors we need to compute (including dependencies) and put them
+  // in a topological order
+  std::vector<Tensor*> tensors_to_compute =
+      findAllNeededTensors(tensorOutputs_);
+
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs_, tensors_to_compute);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
@@ -1832,7 +1851,7 @@ Tensor* TensorExprKernel::computeSoftmax(
   // be deprecated.
   TORCH_INTERNAL_ASSERT(v->node()->input(1)->node()->kind() == prim::Constant);
   int64_t rank =
-      *v->node()->input(0)->type()->cast<TensorType>()->sizes().size();
+      *v->node()->input(0)->type()->castRaw<TensorType>()->sizes().size();
   size_t softmax_dim =
       normalizeAndCheckIndex(v->node()->input(1)->node()->i(attr::value), rank);
   std::vector<DimArg> non_softmax_dims;
@@ -2193,8 +2212,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   std::vector<CodeGen::CallArg> runArgs;
   runArgs.reserve(inputs.size() + tensorOutputs_.size());
 
-  for (size_t i = 0, e = inputs.size(); i < e; i++) {
-    auto const& input = inputs[i];
+  for (const auto& input : inputs) {
     if (input.isInt()) {
       runArgs.emplace_back(input.toInt());
     } else if (input.isDouble()) {

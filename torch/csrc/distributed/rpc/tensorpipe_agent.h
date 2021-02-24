@@ -21,10 +21,10 @@
 
 namespace tensorpipe {
 
-class CpuBuffer;
+struct CpuBuffer;
 
 #ifdef USE_CUDA_NOT_ROCM
-class CudaBuffer;
+struct CudaBuffer;
 #endif
 
 class Context;
@@ -35,9 +35,6 @@ class Pipe;
 
 namespace transport {
 class Context;
-namespace uv {
-class Context;
-} // namespace uv
 } // namespace transport
 
 namespace channel {
@@ -185,11 +182,13 @@ class TensorPipeAgent : public RpcAgent {
   std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
+          {}) override;
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
-  void join() override;
+  void join(bool shutdown = false) override;
   void sync() override;
   void startImpl() override;
   void shutdownImpl() override;
@@ -209,6 +208,8 @@ class TensorPipeAgent : public RpcAgent {
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
+  tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) override;
+
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
 
@@ -217,19 +218,17 @@ class TensorPipeAgent : public RpcAgent {
   // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
-  static std::string guessUvAddress(
-      tensorpipe::transport::uv::Context& uvContext);
+  static const std::string& guessAddress();
 
   // For testing purposes.
   size_t timeoutMapSize();
   size_t numPendingResponses();
+  size_t messageIdToTimeoutMapSize();
 
  private:
   // Removes the given messageId with the given expirationTime from the
   // timeoutMap_.
-  void removeFromTimeoutMap(
-      uint64_t messageId,
-      steady_clock_time_point expirationTime);
+  void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
@@ -252,7 +251,8 @@ class TensorPipeAgent : public RpcAgent {
       Message&& message,
       std::vector<c10::DeviceIndex>&& devices,
       std::shared_ptr<LazyStreamContext> ctx,
-      std::function<void(const tensorpipe::Error&)>) noexcept;
+      std::function<void(const tensorpipe::Error&)>,
+      const tensorpipe::DeviceMap& deviceMap = {}) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(
@@ -279,7 +279,7 @@ class TensorPipeAgent : public RpcAgent {
       uint64_t requestSize,
       const std::string& destWorkerName);
 
-  inline std::vector<c10::DeviceIndex> getDevicesForTensors(
+  inline std::vector<c10::DeviceIndex> getDevicesForRemote(
       const std::string& remoteName,
       const Message& message) const;
 
@@ -385,6 +385,9 @@ class TensorPipeAgent : public RpcAgent {
   std::map<steady_clock_time_point, std::vector<TimeoutMessageMetadata>>
       timeoutMap_;
 
+  // Map to store the messageId to expiry time.
+  std::unordered_map<uint64_t, steady_clock_time_point> messageIdToTimeout_;
+
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
   // with an error accordingly
   std::thread timeoutThread_;
@@ -447,6 +450,10 @@ class TensorPipeAgent : public RpcAgent {
   int32_t serverActiveCalls_{0};
   // Running total of RPC requests that will be completed asynchronously
   int32_t serverActiveAsyncCalls_{0};
+
+  // Whether a global graceful shutdown has begun, in which case we'll silence
+  // error messages due to remote workers closing their pipes.
+  std::atomic<bool> shuttingDown_{false};
 
   // Helpers to modify the counts while correctly dealing with the mutex and cv.
   void increaseCallCount(int32_t& count);

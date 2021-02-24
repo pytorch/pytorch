@@ -1217,12 +1217,12 @@ if(USE_ROCM)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
-    set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
+    set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
-    list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
+    list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
     foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_HCC_FLAGS --amdgpu-target=${pytorch_rocm_arch})
+      list(APPEND HIP_CLANG_FLAGS --amdgpu-target=${pytorch_rocm_arch})
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
@@ -1347,7 +1347,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    set(TP_ENABLE_SHM OFF CACHE BOOL "" FORCE)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
@@ -1565,9 +1564,14 @@ if(NOT INTERN_BUILD_MOBILE)
   set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
   find_package(MAGMA)
-  if(USE_CUDA AND MAGMA_FOUND)
+  if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
     include_directories(SYSTEM ${MAGMA_INCLUDE_DIR})
-    set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
+    if(USE_CUDA)
+      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
+    endif()
+    if(USE_ROCM)
+      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR}")
+    endif()
     include(CheckPrototypeDefinition)
     check_prototype_definition(magma_get_sgeqrf_nb
      "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
@@ -1851,4 +1855,3 @@ if(USE_KINETO)
     set(USE_KINETO OFF)
   endif()
 endif()
-

@@ -162,7 +162,7 @@ std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
   return allWorkerInfo_;
 }
 
-void ProcessGroupAgent::join() {
+void ProcessGroupAgent::join(bool /* unused */) {
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
@@ -290,7 +290,8 @@ void ProcessGroupAgent::shutdownImpl() {
 std::shared_ptr<JitFuture> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);

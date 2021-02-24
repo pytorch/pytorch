@@ -8,12 +8,6 @@ TORCH_CUDA_CU_API void THCTensor_(indexCopy)(
     int dim,
     THCudaLongTensor* indices,
     THCTensor* src);
-TORCH_CUDA_CU_API void THCTensor_(indexFill)(
-    THCState* state,
-    THCTensor* tensor,
-    int dim,
-    THCudaLongTensor* index,
-    scalar_t val);
 TORCH_CUDA_CU_API void THCTensor_(indexSelect)(
     THCState* state,
     THCTensor* tensor,

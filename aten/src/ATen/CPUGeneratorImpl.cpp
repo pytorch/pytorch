@@ -2,6 +2,7 @@
 #include <ATen/Utils.h>
 #include <ATen/core/MT19937RNGEngine.h>
 #include <c10/util/C++17.h>
+#include <c10/util/MathConstants.h>
 #include <algorithm>
 
 namespace at {
@@ -153,7 +154,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     // intermediate values.
     if (legacy_pod->normal_is_valid) {
       auto r = legacy_pod->normal_rho;
-      auto theta = 2.0 * M_PI * legacy_pod->normal_x;
+      auto theta = 2.0 * c10::pi<double> * legacy_pod->normal_x;
       // we return the sin version of the normal sample when in caching mode
       double_normal_sample = c10::optional<double>(r * ::sin(theta));
     }

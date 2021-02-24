@@ -21,14 +21,14 @@
 // Note that this allocator does not split larger allocations into smaller
 // blocks, unlike the caching device allocator.
 //
-TORCH_CUDA_CU_API c10::Allocator* getTHCCachingHostAllocator(void);
+TORCH_CUDA_CPP_API c10::Allocator* getTHCCachingHostAllocator(void);
 
 // Records an event in the specified stream. The allocation 'ptr' will not be
 // re-used until the event has occurred.
-TORCH_CUDA_CU_API cudaError_t
+TORCH_CUDA_CPP_API cudaError_t
 THCCachingHostAllocator_recordEvent(void* ptr, at::cuda::CUDAStream stream);
 
 // Releases cached pinned memory allocations via cudaHostFree
-TORCH_CUDA_CU_API void THCCachingHostAllocator_emptyCache(void);
+TORCH_CUDA_CPP_API void THCCachingHostAllocator_emptyCache(void);
 
 #endif

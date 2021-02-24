@@ -239,7 +239,14 @@ static inline std::tuple<std::vector<int64_t>,
 }
 
 // Function to generate empty tensors of required size, strides and dtype for the SVD operation
-static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv) {
+static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv,
+    const bool svd_use_cusolver=false) {
+
+  // U, S, VT are initialized as empty tensors.
+  // For CPU LAPACK and GPU MAGMA backend, the tensors are initialized on CPU.
+  // For GPU cuSOLVER backend, the tensors are initialized on GPU.
+  const auto usvt_device = svd_use_cusolver ? at::kCUDA : at::kCPU;
+
   auto sizes = input.sizes().vec();
   int64_t m = input.size(-2), n = input.size(-1);
 
@@ -251,47 +258,21 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   strides[input.dim() - 1] = m;
   strides[input.dim() - 2] = 1;
 
-  Tensor U_empty;
-  if (!input.is_cuda()) {
-    U_empty = at::empty_strided(sizes, strides, input.options());
-  } else {
-    // NB: U_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation)
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally.
-    U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
-  }
+  Tensor U_empty = at::empty_strided(sizes, strides, input.options().device(usvt_device));
+  U_empty.zero_();
 
   // VT should be a column-major or a batch of column-major matrices
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
-  strides = at::detail::defaultStrides(sizes);
-  strides[input.dim() - 1] = n;
-  strides[input.dim() - 2] = 1;
-  Tensor VT_empty;
-  if (!input.is_cuda()) {
-    VT_empty = at::empty_strided(sizes, strides, input.options());
-  } else {
-    // NB: VT_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation)
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally.
-    VT_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
-  }
+  // VT should be a column-major or a batch of column-major matrices
+  Tensor VT_empty = at::zeros(sizes, input.options().device(usvt_device));
+  VT_empty.transpose_(-2, -1);
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
-  Tensor S_empty;
   ScalarType dtype = toValueType(typeMetaToScalarType(input.dtype()));
-  if (!input.is_cuda()) {
-    S_empty = at::empty(sizes, input.options().dtype(dtype));
-  } else {
-    // NB: S_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation)
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
-    S_empty = at::empty(sizes, input.options().dtype(dtype).device(at::kCPU));
-  }
+  Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
+
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
 }
 
@@ -364,6 +345,38 @@ static inline void checkUplo(const std::string& uplo) {
   char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
   TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
     "Expected UPLO argument to be 'L' or 'U', but got ", uplo);
+}
+
+static inline void checkSameDevice(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
+  TORCH_CHECK(
+      result.device() == input.device(),
+      fn_name,
+      ": Expected ", result_name, " and input tensors to be on the same device, but got ",
+      result_name, " on ", result.device(), " and input on ", input.device());
+}
+
+// Check the dtype of result and input tensors (for _out variants).
+// Most linear algebra functions have the same dtype for input and output
+// (either floating or complex type input), so we can check whether both result and input are compatible.
+// According to https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
+// if input is complex result can only be complex, if input is float result can be both float and complex
+static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
+  bool can_cast = c10::canCast(input.scalar_type(), result.scalar_type());
+  TORCH_CHECK(
+      can_cast,
+      fn_name,
+      ": Expected ", result_name, " to be compatible with ", input.scalar_type(), " dtype, but got ",
+      result_name, " with dtype ", result.scalar_type());
+}
+
+// Alternatively, we can check whether out tensor dtype (out_type) is compatible with the specific expected type (result_type)
+static inline void checkLinalgCompatibleDtype(const std::string& fn_name, ScalarType out_type, ScalarType result_type, const std::string& out_name = "result") {
+  bool can_cast = c10::canCast(result_type, out_type);
+  TORCH_CHECK(
+      can_cast,
+      fn_name,
+      ": Expected ", out_name, " to be compatible with ", result_type, " dtype, but got ",
+      out_name, " with dtype ", result_type);
 }
 
 }}  // namespace at::native
