@@ -98,8 +98,6 @@ class ZeroRedundancyOptimizer(Optimizer):
     Keyword Args:
         optim (torch.nn.Optimizer): optimizer to shard
         group (group): torch.distributed group (default: group.WORLD)
-        bucket_cap (int): the size of the buffer used to batch the small parameter tensors,
-            in number of elements (default 16M)
         **default: all trailing arguments will be forwarded to the requested optimizer
 
     .. warning: ZeroRedundancyOptimizer is experimental and subject to change.
@@ -113,7 +111,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         params,
         optim: Type[Optimizer],
         group: Optional[Any] = None,
-        bucket_cap_kb: int = 2 ** 24,
         **default: Any,
     ):
         # Hold all the model params in the root .param_groups
@@ -138,13 +135,9 @@ class ZeroRedundancyOptimizer(Optimizer):
         self.rank = dist.get_rank(self.group)
         self.global_rank = _get_global_rank(self.group, self.rank)
 
-        self.optim = optim(self.partition_parameters()[self.rank], **default)
-
-        # - Sync local and global param_groups keys
-        for global_group, local_group in zip(self.param_groups, self.optim.param_groups):
-            for k, v in local_group.items():
-                if k != "params":
-                    global_group[k] = v
+        # Default empty values + immutables
+        self._optim_defaults = default
+        self._optim_constructor = optim
 
         #  Optional consolidated optimizer state
         self._all_states: List[Dict[str, Any]] = []
@@ -152,10 +145,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         # Current default device is set by the parameters allocated to this rank
         self._device = list(self.per_device_params.keys())[0]
         self.buckets: Dict[torch.device, List[torch.Tensor]] = {}
-        self.bucket_max_size = bucket_cap_kb
 
-        self.should_bucket_param: List[bool] = []
-        self._setup_bucket_strategy()
+        self.refresh_trainable()
         self.initialized = True
 
     def _clear_cache(self) -> None:
@@ -164,7 +155,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         self._param_rank.clear()
         self._index_to_param.clear()
         self._param_to_index.clear()
-        self._local_params = None
 
     def add_param_group(self, param_group: dict) -> None:
         """Add a param group to the :class:`Optimizer` s `param_groups`.
@@ -191,7 +181,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                 self.optim.add_param_group(param_groups[-1])
 
             # Update the bucketing strategy accordingly
-            self._setup_bucket_strategy()
+            self._setup_flat_buffers()
 
     def consolidate_state_dict(self, recipient_rank: int = 0) -> None:
         """Update the consolidated state_dict list, one per rank.
@@ -272,6 +262,20 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         return self._partition_parameters
 
+    def refresh_trainable(self) -> None:
+        """Updates the partitioning and communication patterns if the trainability (`requires_grad`)
+        of some parameters changed.
+        """
+
+        # Create the optim which will work on the param shard
+        if not hasattr(self, "optim"):
+            self._clear_cache()
+            self._default_device = list(self.per_device_params.keys())[0]
+            self.optim = self._optim_constructor(self.partition_parameters()[self.rank], **self._optim_defaults)
+            self._sync_param_groups(self.optim.param_groups, self.param_groups)
+
+        self._setup_flat_buffers()
+
     @property
     def per_device_params(self) -> Dict[torch.device, List[List[Parameter]]]:
         """Sorted list of all the params, first per device then per rank.
@@ -343,7 +347,13 @@ class ZeroRedundancyOptimizer(Optimizer):
             loss = self.optim.step(**kwargs)
 
         # Sync all the updated shards in between the ranks
-        self._broadcast_params()
+        handles = []
+        for device in self.buckets.keys():
+            for src_rank, bucket in enumerate(self.buckets[device]):
+                global_src_rank = _get_global_rank(self.group, src_rank)
+                handles.append(dist.broadcast(tensor=bucket, src=global_src_rank, group=self.group, async_op=True))
+
+        _ = list(map(lambda x: x.wait(), handles))
 
         # Sync hypothethical new results from the wrapped optimizer to the exposed param_groups
         self._sync_param_groups(self.optim.param_groups, self.param_groups)
@@ -374,8 +384,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         super().load_state_dict(state_dict)
 
         # Sync with the optimizer param groups
-        ZeroRedundancyOptimizer._sync_param_groups(state_dict["param_groups"], self.param_groups)
-        ZeroRedundancyOptimizer._sync_param_groups(self.param_groups, self.optim.param_groups)
+        self._sync_param_groups(state_dict["param_groups"], self.param_groups)
+        self._sync_param_groups(self.param_groups, self.optim.param_groups)
 
     def local_state_dict(self) -> Dict:
         """Gets this rank's ``state_dict``.
@@ -452,73 +462,42 @@ class ZeroRedundancyOptimizer(Optimizer):
             for k in filter(lambda x: x != "params", source_group.keys()):
                 destination_group[k] = source_group[k]
 
-    def _broadcast_params(self) -> None:
-        """Helper function to broadcast all the parameters from a given device"""
-
-        i_param = 0
-        handles: List[Any] = []
-
-        for (
-            device,
-            device_params,
-        ) in self.per_device_params.items():  # all the params on this device (inc all ranks)
-            buckets = self.buckets[device]
-            # Bucket and issue all the async calls
-            for (src_rank, params), bucket in zip(enumerate(device_params), buckets):
-                global_src_rank = _get_global_rank(self.group, src_rank)
-
-                # Direct broadcasts only
-                for param in params:
-                    if not self.should_bucket_param[i_param]:
-                        handles.append(
-                            dist.broadcast(tensor=param.data, src=global_src_rank, group=self.group, async_op=True)
-                        )
-
-                    i_param += 1
-
-                # Bucket broadcasts
-                if bucket.numel() > 0:
-                    handles.append(dist.broadcast(tensor=bucket, src=global_src_rank, group=self.group, async_op=True))
-
-        # Wait for all the calls
-        _ = list(map(lambda x: x.wait(), handles))
-
-    def _setup_bucket_strategy(self) -> None:
-        """Tag parameters to either bucket them or broadcast/reduce them directly.
-
-        The parameters are ordered (smallest first), the bucket will hold the smallest elements,
-        the remaining ones will be directly sent.
-
-        Generating the partition once and for all allows us to save some time at runtime, and to know when all the
-        network requests have been issued. The parameters which are part of a bucket become tensor views.
+    def _setup_flat_buffers(self) -> None:
+        """Make all params which are on the same device and tied to the same rank views of a single buffer.
+        This is used at construction time, and anytime parameter trainability is changed (frozen or unfrozen) and
+        `refresh_trainable` is called.
         """
 
-        # Allocate one buffer per rank and per device to group the small parameters
-        for device, per_device in self.per_device_params.items():
-            self.buckets[device] = [
-                torch.zeros(self.bucket_max_size, dtype=per_device[0][0].dtype, device=device)
-                for _ in range(len(per_device))
-            ]
-
-        # Pack the smallest elements in a bucket, depending on their owner shard-wise
         for device, per_rank_params in self.per_device_params.items():
+            # Only wipe the existing buckets if there are none
+            # (could be that this is called twice, when trainability changes)
+            if device not in self.buckets.keys():
+                self.buckets[device] = []
+
+            # Make parameters a view of the bucket
             for dst_rank, params in enumerate(per_rank_params):
-                offset = 0
+                if len(params) > 0:
 
-                for param in params:
-                    # Criteria to decide whether this parameter is to be bucketed or not:
-                    # - enough room in the bucket
-                    if param.requires_grad and (offset + param.numel()) < self.bucket_max_size:
-                        self.should_bucket_param.append(True)
+                    # Clone the non-trainable params, if in a bucket it will get destroyed
+                    for param in filter(lambda x: not x.requires_grad, params):
+                        param.data = param.data.detach().clone()
 
-                        # This parameter becomes a view of the bucket
+                    # Merge all the trainable params in a single bucket
+                    trainable_params = list(filter(lambda x: x.requires_grad, params))
+                    buffer_size = sum(map(lambda x: x.numel(), trainable_params))
+                    bucket = torch.empty(buffer_size, dtype=params[0].dtype, device=device)
+                    offset = 0
+
+                    for param in trainable_params:
                         offset_next = offset + param.numel()
-
-                        self.buckets[device][dst_rank][offset:offset_next] = param.data.flatten()
-                        param.data = self.buckets[device][dst_rank][offset:offset_next].view_as(param.data)
+                        bucket[offset:offset_next].copy_(param.data.flatten())
+                        param.data = bucket[offset:offset_next].view_as(param.data)
                         offset = offset_next
-                    else:
-                        self.should_bucket_param.append(False)
 
-                # Resize the bucket to remove lost space in the end
-                self.buckets[device][dst_rank].resize_(offset)
+                    # Either replace the existing bucket, or create it
+                    if len(self.buckets[device]) == dst_rank:
+                        self.buckets[device].append(bucket)
+                    else:
+                        self.buckets[device][dst_rank] = bucket
+                else:
+                    self.buckets[device].append(torch.zeros(1, device=device))
