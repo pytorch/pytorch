@@ -183,7 +183,7 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     del _dl_flags
 
 else:
-    # Easy way.  You want this most of the time, because it will prevent
+    # Easy way.  You want this most of the time, because it prevents
     # C++ symbols from libtorch clobbering C++ symbols from other
     # libraries, leading to mysterious segfaults.
     #
@@ -201,8 +201,8 @@ else:
 if TYPE_CHECKING:
     import torch._C as _C
 
-# Check to see if we can load C extensions, and if not provide some guidance
-# on what the problem might be.
+# Check to see if we can load C extensions, and if not then provide some guidance
+# on what might be the problem.
 try:
     # _initExtension is chosen (arbitrarily) as a sentinel.
     from torch._C import _initExtension
