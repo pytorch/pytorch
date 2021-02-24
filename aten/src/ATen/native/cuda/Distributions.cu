@@ -54,9 +54,9 @@ void poisson_cuda_kernel(
           scalar_t & ret_val, const scalar_t& lambda) {
         auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
-        curand_init(seeds.seed(),
+        curand_init(std::get<0>(seeds),
                     blockIdx.x * blockDim.x + threadIdx.x,
-                    seeds.offset(),
+                    std::get<1>(seeds),
                     &state);
         ret_val = static_cast<scalar_t>(curand_poisson(&state, lambda));
       };
@@ -114,9 +114,9 @@ void gamma_cuda_kernel(
           scalar_t & ret_val, const scalar_t& alpha) {
         auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
-        curand_init(seeds.seed(),
+        curand_init(std::get<0>(seeds),
                     blockIdx.x * blockDim.x + threadIdx.x,
-                    seeds.offset(),
+                    std::get<1>(seeds),
                     &state);
 
         auto uniform_lambda = [&state] __device__ () {

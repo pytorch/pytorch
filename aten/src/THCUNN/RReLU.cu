@@ -46,9 +46,9 @@ __global__ void rreluUpdateOutputTrain(int n, at::PhiloxCudaState philox_args,
   auto seeds = at::cuda::philox::unpack(philox_args);
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.seed(),
+  curand_init(std::get<0>(seeds),
               idx,
-              seeds.offset(),
+              std::get<1>(seeds),
               &state);
 
   CUDA_KERNEL_LOOP(i, n)

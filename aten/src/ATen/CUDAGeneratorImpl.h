@@ -69,9 +69,9 @@ namespace at {
  *   auto seeds = at::cuda::philox::unpack(philox_args);
  *   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
  *   curandStatePhilox4_32_10_t state;
- *   curand_init(seeds.seed(),   // seed
- *               idx,            // per-thread subsequence
- *               seeds.offset(), // offset in subsequence
+ *   curand_init(std::get<0>(seeds), // seed
+ *               idx,                // per-thread subsequence
+ *               std::get<1>(seeds), // offset in subsequence
  *               &state);
  *   ...
  * }

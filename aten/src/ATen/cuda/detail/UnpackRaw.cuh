@@ -2,39 +2,28 @@
 // Eager mode clients should not include this file directly, instead,
 // they should #include <ATen/cuda/CUDAGraphsUtils.cuh>, which has a #pragma once.
 
-// In-kernel call to retrieve philox seed and offset from a  PhiloxCudaState instance whether
+namespace at {
+namespace cuda {
+namespace philox {
+
+// In-kernel call to retrieve philox seed and offset from a PhiloxCudaState instance whether
 // that instance was created with graph capture underway or not.
 // See Note [CUDA Graph-safe RNG states].
 //
 // We can't write a __device__ function in CUDAGeneratorImpl.h, because it's in ATen.
 // Also, whatever call unpacks PhiloxCudaState in consumer kernels must be inlineable.
-// Easiest thing that comes to mind is, define __device__ helpers here, in ATen/cuda.
+// Easiest thing that comes to mind is, define a __device__ unpack helper here, in ATen/cuda.
 //
 // The raw definition lives in its own file so jit codegen can easily copy it.
-namespace at {
-namespace cuda {
-namespace philox {
-
-struct SeedOffset {
-  __device__ __forceinline__ SeedOffset(uint64_t _seed, uint64_t _offset) : seed_(_seed), offset_(_offset) {}
-  __device__ __forceinline__ uint64_t seed() const {
-    return seed_;
-  }
-  __device__ __forceinline__ uint64_t offset() const {
-    return offset_;
-  }
-  private:
-  uint64_t seed_;
-  uint64_t offset_;
-};
-
-__device__ __forceinline__ SeedOffset
+__device__ __forceinline__ std::tuple<uint64_t, uint64_t>
 unpack(at::PhiloxCudaState arg) {
   if (arg.captured_) {
     // static_cast avoids "warning: invalid narrowing conversion from "long" to "unsigned long".
-    return {arg.seed_, static_cast<uint64_t>(*(arg.offset_.ptr)) + arg.offset_intragraph_};
+    // *(arg.offset_.ptr) is a broadcast load of a single int64_t to the entire kernel.
+    // For most threads' reads it will hit in cache, so it shouldn't hurt performance.
+    return std::make_tuple(arg.seed_, static_cast<uint64_t>(*(arg.offset_.ptr) + arg.offset_intragraph_));
   } else {
-    return {arg.seed_, arg.offset_.val};
+    return std::make_tuple(arg.seed_, arg.offset_.val);
   }
 }
 

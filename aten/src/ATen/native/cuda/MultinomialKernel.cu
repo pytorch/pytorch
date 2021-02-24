@@ -132,9 +132,9 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
   int idx = blockIdx.y * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.seed(),
+  curand_init(std::get<0>(seeds),
               idx,
-              seeds.offset(),
+              std::get<1>(seeds),
               &state);
 
   // The block determines the distribution for which we generate a point
