@@ -1042,5 +1042,28 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
+TEST_F(Kernel, SanitizeNames_CUDA) {
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cuda:0),
+            %1 : Float(5, 3, strides=[3, 1], device=cuda:0)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %4 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
+        return (%4))IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  graph->inputs().at(0)->setDebugName("aten::add:");
+  graph->inputs().at(1)->setDebugName("aten::add_");
+  TensorExprKernel k(graph);
+  auto a = at::rand({5, 3}, TensorOptions(kCUDA).dtype(at::kFloat));
+  auto b = at::rand({5, 3}, TensorOptions(kCUDA).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 } // namespace jit
 } // namespace torch
