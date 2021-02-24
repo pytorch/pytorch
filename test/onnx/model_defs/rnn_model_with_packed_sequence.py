@@ -15,7 +15,7 @@ class RnnModelWithPackedSequence(nn.Module):
         ret, rets = rets[0], rets[1:]
         ret, _ = rnn_utils.pad_packed_sequence(ret, self.batch_first)
         return tuple([ret] + list(rets))
-    
+
 class RnnModelWithPackedSequenceWithoutState(nn.Module):
     def __init__(self, model, batch_first):
         super(RnnModelWithPackedSequenceWithoutState, self).__init__()
@@ -28,7 +28,7 @@ class RnnModelWithPackedSequenceWithoutState(nn.Module):
         ret, rets = rets[0], rets[1:]
         ret, _ = rnn_utils.pad_packed_sequence(ret, self.batch_first)
         return list([ret] + list(rets))
-    
+
 class RnnModelWithPackedSequenceWithState(nn.Module):
     def __init__(self, model, batch_first):
         super(RnnModelWithPackedSequenceWithState, self).__init__()
