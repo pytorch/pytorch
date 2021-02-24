@@ -189,7 +189,7 @@ static void formatImm(std::ostream& os, T v) {
   if (std::isnan(v)) {
     os << "NAN";
   } else if (std::isinf(v)) {
-    os << (v > 0 ? "INFINITY" : "-INFINITY");
+    os << (v > 0 ? "POS_INFINITY" : "NEG_INFINITY");
   } else {
     os << std::setprecision(precision) << v;
     formatFPSuffix(os, v);

@@ -19,9 +19,14 @@ class TORCH_API CppPrinter : public IRPrinter {
 
   void printPrologue() {
     os() << "#include <cassert>" << std::endl;
+    os() << "#include <cmath>" << std::endl;
     os() << "#include <vector>" << std::endl;
     os() << "#include <array>" << std::endl;
     os() << "#include <algorithm>" << std::endl;
+    os() << std::endl;
+
+    os() << "#define POS_INFINITY INFINITY" << std::endl;
+    os() << "#define NEG_INFINITY -INFINITY" << std::endl;
     os() << std::endl;
 
     os() << cpp_vector_definition << std::endl;
