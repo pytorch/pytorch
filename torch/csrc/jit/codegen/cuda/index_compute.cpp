@@ -241,8 +241,10 @@ void IndexCompute::handle(Split* split) {
   const bool outer_bcast = outer_id->isBroadcast();
   const bool inner_bcast = inner_id->isBroadcast();
 
-  const bool outer_vect = outer_id->parallelType() == ParallelType::Vectorize;
-  const bool inner_vect = inner_id->parallelType() == ParallelType::Vectorize;
+  const bool outer_vect =
+      split->outer()->getParallelType() == ParallelType::Vectorize;
+  const bool inner_vect =
+      split->inner()->getParallelType() == ParallelType::Vectorize;
 
   // We want to mark as zero merged in if we're working with shared or local
   // memory, and the dimension we're working with is not part of the allocation,

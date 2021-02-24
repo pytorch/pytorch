@@ -250,9 +250,10 @@ void validateVectorize(Fusion* fusion) {
     }
     if (has_vectorize_dim) {
       TORCH_INTERNAL_ASSERT(
-          tv->definition()->isA<UnaryOp>() &&
-              tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
-                  UnaryOpType::Set,
+          tv->definition() == nullptr ||
+              (tv->definition()->isA<UnaryOp>() &&
+               tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
+                   UnaryOpType::Set),
           "Vectorized accesses cannot be inline with computation, they are only supported with a Set operation.");
       VectorizeValidator::validate(tv);
     }
