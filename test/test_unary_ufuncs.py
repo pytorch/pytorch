@@ -355,7 +355,10 @@ class TestUnaryUfuncs(TestCase):
 
         tensors = generate_numeric_tensors_extremal(device, dtype,
                                                     domain=op.domain)
+
+        # https://github.com/pytorch/pytorch/issues/50749
         equal_nan = "relaxed" if device.startswith('cuda') else True
+
         self._test_reference_numerics(dtype, op, tensors, equal_nan)
 
     # Tests for testing (dis)contiguity consistency

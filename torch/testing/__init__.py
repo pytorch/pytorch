@@ -114,20 +114,15 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
-        a = a.clone()
-        b = b.clone()
-        a_real = a.real
-        b_real = b.real
-        a_imag = a.imag
-        b_imag = b.imag
-
         if equal_nan == "relaxed":
-            a_real[a_imag.isnan()] = math.nan
-            a_imag[a_real.isnan()] = math.nan
-            b_real[b_imag.isnan()] = math.nan
-            b_imag[b_real.isnan()] = math.nan
+            a = a.clone()
+            b = b.clone()
+            a.real[a.imag.isnan()] = math.nan
+            a.imag[a.real.isnan()] = math.nan
+            b.real[b.imag.isnan()] = math.nan
+            b.imag[b.real.isnan()] = math.nan
 
-        real_result, debug_msg = _compare_tensors_internal(a_real, b_real,
+        real_result, debug_msg = _compare_tensors_internal(a.real, b.real,
                                                            rtol=rtol, atol=atol,
                                                            equal_nan=equal_nan)
 
@@ -135,7 +130,7 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
             debug_msg = "Real parts failed to compare as equal! " + cast(str, debug_msg)
             return (real_result, debug_msg)
 
-        imag_result, debug_msg = _compare_tensors_internal(a_imag, b_imag,
+        imag_result, debug_msg = _compare_tensors_internal(a.imag, b.imag,
                                                            rtol=rtol, atol=atol,
                                                            equal_nan=equal_nan)
 
@@ -146,7 +141,7 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
         return (True, None)
 
     # All other comparisons use torch.allclose directly
-    if torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=bool(equal_nan)):
+    if torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=(equal_nan in {"relaxed", True})):
         return (True, None)
 
     # Gathers debug info for failed float tensor comparison
@@ -157,7 +152,7 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
 
     # Masks close values
     # NOTE: this avoids (inf - inf) oddities when computing the difference
-    close = torch.isclose(a_flat, b_flat, rtol, atol, bool(equal_nan))
+    close = torch.isclose(a_flat, b_flat, rtol, atol, (equal_nan in {"relaxed", True}))
     diff[close] = 0
     nans = torch.isnan(diff)
     num_nans = nans.sum()
@@ -183,11 +178,11 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
 def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Union[str, bool]) -> _compare_return_type:
     def _helper(a, b, s) -> _compare_return_type:
         # Short-circuits on identity
-        if a == b or (bool(equal_nan) and a != a and b != b):
+        if a == b or ((equal_nan in {"relaxed", True}) and a != a and b != b):
             return (True, None)
 
         # Special-case for NaN comparisions when equal_nan=False
-        if not bool(equal_nan) and (a != a or b != b):
+        if not (equal_nan in {"relaxed", True}) and (a != a or b != b):
             msg = ("Found {0} and {1} while comparing" + s + "and either one "
                    "is nan and the other isn't, or both are nan and "
                    "equal_nan is False").format(a, b)
@@ -217,10 +212,8 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
         b = complex(b)
 
         if equal_nan == "relaxed":
-            if cmath.isnan(a):
-                a = complex(math.nan, math.nan)
-            if cmath.isnan(b):
-                b = complex(math.nan, math.nan)
+            if cmath.isnan(a) and cmath.isnan(b):
+                return (True, None)
 
         result, msg = _helper(a.real, b.real, " the real part ")
 
