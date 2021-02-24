@@ -200,6 +200,7 @@ def display_history(
     suite_name: Optional[str],
     test_name: str,
     delta: int,
+    sha_length: int,
     mode: str,
     digits: int,
 ) -> None:
@@ -239,7 +240,7 @@ def display_history(
                 test_name=test_name,
             )
         for line in lines:
-            print(f"{time} {sha} {line}".rstrip())
+            print(f"{time} {sha[:sha_length]} {line}".rstrip())
 
 
 class HelpFormatter(
@@ -264,45 +265,48 @@ In multiline mode, each line next includes the name of a CircleCI job,
 followed by the time of the specified test in that job at that commit.
 Example:
 
-    $ tools/test_history.py multiline --ref=594a66 --delta=0 test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
-    2021-02-10 03:13:34 594a66d778a660faed0b0fbbe1dd8c2c318707ff pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
-    2021-02-10 03:13:34 594a66d778a660faed0b0fbbe1dd8c2c318707ff pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
-    2021-02-10 02:13:25 9c0caf0384690cb67dcccb7066ece5184f72ca78 pytorch_linux_xenial_py3_6_gcc5_4_test 0.819s
-    2021-02-10 02:13:25 9c0caf0384690cb67dcccb7066ece5184f72ca78 pytorch_linux_xenial_py3_6_gcc7_test 0.449s
-    2021-02-10 02:09:14 602434bcbebb82c6f3741b2a3d5ebac7ee482268 pytorch_linux_xenial_py3_6_gcc5_4_test 0.361s
-    2021-02-10 02:09:14 602434bcbebb82c6f3741b2a3d5ebac7ee482268 pytorch_linux_xenial_py3_6_gcc7_test 0.454s
-    2021-02-10 02:09:10 2e35fe953553247d8a22fc38b039374e426f13b8 (no reports in S3)
-    2021-02-10 02:09:07 ff73be7e45616fe106b9e5040bc091ca5cdbfc7f (no reports in S3)
-    2021-02-10 02:05:39 74082f0d6f8dfd60f28c0de0fe43bcb97b95ee5a (no reports in S3)
-    2021-02-09 23:42:29 0620c96fd6a140e68c49d68ed14721b1ee108ecc pytorch_linux_xenial_py3_6_gcc5_4_test 0.414s (1 S3 reports omitted)
-    2021-02-09 23:42:29 0620c96fd6a140e68c49d68ed14721b1ee108ecc pytorch_linux_xenial_py3_6_gcc7_test 0.377s (1 S3 reports omitted)
+    $ tools/test_history.py multiline --ref=594a66 --delta=0 --sha-length=8 \
+      test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
+    2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
+    2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
+    2021-02-10 02:13:25 9c0caf03 pytorch_linux_xenial_py3_6_gcc5_4_test 0.819s
+    2021-02-10 02:13:25 9c0caf03 pytorch_linux_xenial_py3_6_gcc7_test 0.449s
+    2021-02-10 02:09:14 602434bc pytorch_linux_xenial_py3_6_gcc5_4_test 0.361s
+    2021-02-10 02:09:14 602434bc pytorch_linux_xenial_py3_6_gcc7_test 0.454s
+    2021-02-10 02:09:10 2e35fe95 (no reports in S3)
+    2021-02-10 02:09:07 ff73be7e (no reports in S3)
+    2021-02-10 02:05:39 74082f0d (no reports in S3)
+    2021-02-09 23:42:29 0620c96f pytorch_linux_xenial_py3_6_gcc5_4_test 0.414s (1 S3 reports omitted)
+    2021-02-09 23:42:29 0620c96f pytorch_linux_xenial_py3_6_gcc7_test 0.377s (1 S3 reports omitted)
 
 Another multiline example, this time with the --all flag:
 
-    $ tools/test_history.py multiline --all --ref=321b9 test_qr_square_many_batched_complex_cuda
-    2021-01-07 02:04:56 321b98830e17e9e1a366ababeb5475f9f202c815 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
-    2021-01-07 02:04:56 321b98830e17e9e1a366ababeb5475f9f202c815 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
-    2021-01-07 02:04:56 321b98830e17e9e1a366ababeb5475f9f202c815 pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 402.572s
-    2021-01-07 02:04:56 321b98830e17e9e1a366ababeb5475f9f202c815 pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test 287.164s
-    2021-01-06 12:58:28 fcb69d2ebaede960e7708706436d372b68807921 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 436.732s
-    2021-01-06 12:58:28 fcb69d2ebaede960e7708706436d372b68807921 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
-    2021-01-06 12:58:28 fcb69d2ebaede960e7708706436d372b68807921 pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 407.616s
-    2021-01-06 12:58:28 fcb69d2ebaede960e7708706436d372b68807921 pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test 287.044s
+    $ tools/test_history.py multiline --all --ref=321b9 --sha-length=8 \
+      test_qr_square_many_batched_complex_cuda
+    2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
+    2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
+    2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 402.572s
+    2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test 287.164s
+    2021-01-06 12:58:28 fcb69d2e pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 436.732s
+    2021-01-06 12:58:28 fcb69d2e pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
+    2021-01-06 12:58:28 fcb69d2e pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 407.616s
+    2021-01-06 12:58:28 fcb69d2e pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test 287.044s
 
 In columns mode, the name of the job isn't printed, but the order of the
 columns is guaranteed to match the order of the jobs passed on the
 command line. Example:
 
-    $ tools/test_history.py columns --ref=3cf783 --delta=0 test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
-    2021-02-10 04:18:50 3cf78395cbc32fa9c83b585c9ec63f960b32d17f    0.644s    0.312s
-    2021-02-10 03:13:34 594a66d778a660faed0b0fbbe1dd8c2c318707ff    0.360s  errored
-    2021-02-10 02:13:25 9c0caf0384690cb67dcccb7066ece5184f72ca78    0.819s    0.449s
-    2021-02-10 02:09:14 602434bcbebb82c6f3741b2a3d5ebac7ee482268    0.361s    0.454s
-    2021-02-10 02:09:10 2e35fe953553247d8a22fc38b039374e426f13b8
-    2021-02-10 02:09:07 ff73be7e45616fe106b9e5040bc091ca5cdbfc7f
-    2021-02-10 02:05:39 74082f0d6f8dfd60f28c0de0fe43bcb97b95ee5a
-    2021-02-09 23:42:29 0620c96fd6a140e68c49d68ed14721b1ee108ecc    0.414s    0.377s (2 S3 reports omitted)
-    2021-02-09 23:27:53 33afb5f19f4e427f099653139ae45b661b8bc596    0.381s    0.294s
+    $ tools/test_history.py columns --ref=3cf783 --delta=0 --sha-length=8 \
+      test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
+    2021-02-10 04:18:50 3cf78395    0.644s    0.312s
+    2021-02-10 03:13:34 594a66d7    0.360s  errored
+    2021-02-10 02:13:25 9c0caf03    0.819s    0.449s
+    2021-02-10 02:09:14 602434bc    0.361s    0.454s
+    2021-02-10 02:09:10 2e35fe95
+    2021-02-10 02:09:07 ff73be7e
+    2021-02-10 02:05:39 74082f0d
+    2021-02-09 23:42:29 0620c96f    0.414s    0.377s (2 S3 reports omitted)
+    2021-02-09 23:27:53 33afb5f1    0.381s    0.294s
 
 Minor note: in columns mode, a blank cell means that no report was found
 in S3, while the word "absent" means that a report was found but the
@@ -330,6 +334,12 @@ indicated test was not found in that report.
         type=int,
         help='minimum number of hours between commits',
         default=12,
+    )
+    parser.add_argument(
+        '--sha-length',
+        type=int,
+        help='length of the prefix of the SHA1 hash to show',
+        default=40,
     )
     parser.add_argument(
         '--digits',
@@ -375,6 +385,7 @@ indicated test was not found in that report.
         test_name=args.test,
         delta=args.delta,
         mode=args.mode,
+        sha_length=args.sha_length,
         digits=args.digits,
     )
 
