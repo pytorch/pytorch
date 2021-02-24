@@ -4,26 +4,27 @@ namespace torch {
 namespace jit {
 
 // Implementation of a PyTorch Backend that can process, compile and execute
-// TorchScript Modules composed of 'add' and 'sub' operators. The methods of
-// the models expect 2 inputs of type Tensor. This backend is used to
-// demonstrate the flow of compilation and execution with minimum amount of
-// work. It's not intended to a practical backend that can be used for actual
-// inference.
+// TorchScript Modules composed of 'add' and 'sub' operators. It just supports
+// for Modules that implement a sum or subtraction of 2 inputs (i.e. in1 + in2
+// or in1 - in2). Hence the methods of the models expect exactly 2 inputs of
+// type Tensor. This backend is used to demonstrate the flow of compilation and
+// execution with minimum amount of work. It's not intended to a practical
+// backend that can be used for actual inference.
 
-// Impletation details:
+// Implementation details:
 //
 // Compilation
 // 1. A backend with minimum compilation features, "backend_with_compiler_demo"
 // is added.
-// 2. The compilation happens AOT in the pre_process function registered to this
+// 2. The compilation happens AOT in the preprocess function registered to this
 // backend.
 // 3. Compiled results are stored in a string blob for each method. They are
-// serialized to the lowered module with __get_state__ function.
+// serialized to the lowered module with __getstate__ function.
 // 4. Error message with model source code is thrown, for features not handled
 // by the backend compiler.
 //
 // Runtime
-// 1. The compiled blob is loaded in __set_state__ method.
+// 1. The compiled blob is loaded in __setstate__ method.
 // 2. The compile function of the backend: parse the preprocessed blob to the
 // format (a list of tokens) that the backend can understand.
 // 3. The execute function of the backend executes the specified method
@@ -52,7 +53,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
-    //    return processed.toGenericDict();
     auto dict = processed.toGenericDict();
     auto handles = c10::Dict<std::string, std::vector<std::string>>();
     for (const auto& kv : dict) {
@@ -65,7 +65,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   c10::impl::GenericList execute(
       c10::IValue handle,
       c10::impl::GenericList inputs) override {
-    //    TORCH_INTERNAL_ASSERT(handle.isString());
     TORCH_INTERNAL_ASSERT(inputs.size() == 2);
     c10::IValue val0 = inputs[0];
     at::Tensor x = val0.toTensor();
@@ -102,7 +101,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   }
 };
 
-// For this backend, the actual compilation happens in preprocess functoin AOT.
+// For this backend, the actual compilation happens in preprocess function AOT.
 // Put here for demonstration of backend
 // as a whole piece. It's used when compilation is required. A dummy function
 // can be passed when there's no usage of compilation in runtime backend lib.
@@ -114,7 +113,7 @@ c10::IValue preprocess(
   // Val: compiled blob (represented by a string).
   c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
   for (const auto& method : mod.get_methods()) {
-    auto graph = method.function().graph()->copy();
+    const auto graph = method.function().graph()->copy();
     auto key = method.name();
     std::stringstream ss;
     for (const auto& node : graph->nodes()) {
