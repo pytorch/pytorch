@@ -393,12 +393,12 @@ std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
 }
 
 // Helper to check whether t1 and t2 share the same storage
-inline bool shareSameStorage(const at::Tensor& t1, const at::Tensor& t2) {
+inline bool viewSameMemory(const at::Tensor& t1, const at::Tensor& t2) {
   return (t1.data_ptr() == t2.data_ptr()
     && t1.options().type_equal(t2.options())
     && t1.device() == t2.device()
-    && t1.numel() == t2.numel())
-    && t1.strides() == t2.strides();
+    && t1.strides() == t2.strides()
+    && t1.sizes() == t2.sizes());
 }
 
 // For alltoall split size sanity check

@@ -18,7 +18,6 @@ class FilterIterDataPipe(MapIterDataPipe[T_co]):
     """
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
-                 *,
                  filter_fn: Callable[..., bool],
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
