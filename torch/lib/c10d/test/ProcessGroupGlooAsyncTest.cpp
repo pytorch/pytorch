@@ -243,8 +243,7 @@ void runAsyncBroadcastTest(
       const auto expected = (rootRank * numTensors + rootTensor);
       for (size_t i = 0; i < numProcesses; i++) {
         auto tensors = tests[i].getTensors();
-        for (size_t j = 0; j < tensors.size(); j++) {
-          auto& tensor = tensors[j];
+        for (auto & tensor : tensors) {
           auto data = tensor.data_ptr<float>();
           for (auto k = 0; k < tensor.numel(); k++) {
             EXPECT_EQ(data[k], expected);

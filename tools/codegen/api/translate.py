@@ -148,6 +148,10 @@ Check this module for more information.
             memory_format = direct_solve(
                 OptionalCType(BaseCType("MemoryFormat", SpecialArgName.possibly_redundant_memory_format))
             )
+            # No need to join "memory_format" and "options" if the target API takes "options" directly.
+            # Otherwise it will cause the redundant memory_format error.
+            if options_ctype in goal_ctypes:
+                return memory_format
             try:
                 options = direct_solve(options_ctype)
                 return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"
