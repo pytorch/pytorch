@@ -96,23 +96,31 @@ void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 namespace{
-  
-template<typename T>
-T copysign(T a, T b) {
-  return std::copysign(a, b);
+
+  template<typename scalar_t>
+scalar_t fp16_from_bits(uint16_t w) {
+    union {
+      uint32_t as_bits;
+      scalar_t as_value;
+    } fp16 = {w};
+    return fp16.as_value;
 }
 
-// Implement copysign for half precision floats using bit ops
-// Sign is the most significant bit for both half and bfloat16 types
-template<>
-c10::Half copysign(c10::Half a, c10::Half b) {
-  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+template<typename scalar_t>
+uint32_t fp16_to_bits(scalar_t f) {
+    union {
+      scalar_t as_value;
+      uint16_t as_bits;
+    } fp16 = {f};
+    return fp16.as_bits;
 }
 
-template<>
-c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
-}
+template<typename scalar_t>
+scalar_t copysignfp16(scalar_t x, scalar_t y){
+  return return fp16_from_bits(
+    (fp16_to_bits(x) & 0x7fffu) | (fp16_to_bits(y) & 0x8000u));
+} 
+
 }// namespace
 
 void div_floor_kernel_cuda(TensorIteratorBase& iter) {
@@ -164,7 +172,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 #if defined(__CUDA_ARCH__)
           floordiv = std::copysign(scalar_t(0), a * inv_b);
 #else
-          floordiv = copysign(scalar_t(0), a * inv_b);
+          floordiv = copysignfp16(scalar_t(0), a * inv_b);
 #endif
         }
         return floordiv;
@@ -189,7 +197,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 #if defined(__CUDA_ARCH__)
           floordiv = std::copysign(scalar_t(0), a / b);
 #else
-          floordiv = copysign(scalar_t(0), a / b);
+          floordiv = copysignfp16(scalar_t(0), a / b);
 #endif
         }
         return floordiv;
