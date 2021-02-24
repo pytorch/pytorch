@@ -1788,7 +1788,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, qlinear_fun,
                 is_reference=is_reference,
-                custom_qconfig=float16_dynamic_qconfig,
+                custom_qconfig_dict={"": float16_dynamic_qconfig},
                 prepare_expected_node_occurrence=prepare_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
 
@@ -1839,7 +1839,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, linear_fun,
                 is_reference=is_reference,
-                custom_qconfig=float16_static_qconfig,
+                custom_qconfig_dict={"": float16_static_qconfig},
                 prepare_expected_node_occurrence=prepare_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
 
@@ -2050,11 +2050,40 @@ class TestQuantizeFxOps(QuantizationTestCase):
         quantized_node = ns.call_function(quantized_op)
         options = itertools.product([True, False], [True, False])
         quant_type = QuantType.STATIC
+        # testing for default int8 static quant
         for is_inplace, is_scalar in options:
             self.checkGraphModeFxOp(
                 Op(is_inplace, is_scalar), data, quant_type, quantized_node)
             self.checkGraphModeFxOp(
-                NonQuantizedInput(is_inplace, is_scalar), data, quant_type, quantized_node, print_debug_info=True)
+                NonQuantizedInput(is_inplace, is_scalar), data, quant_type, quantized_node)
+
+        # testing for fp16 static quant
+        # we are producing fp16 patterns
+        options = itertools.product([True, False], [True, False])
+        custom_qconfig_dict = {
+            "object_type": [(binary_op, float16_static_qconfig)]
+        }
+        for is_inplace, is_scalar in options:
+            node_occurrence = {
+                # output_conv1, output_add1, output_add2 for scalar
+                # output_conv1, output_conv2, output_add1, output_add2 for non-scalar
+                ns.call_method("to"): 3 if is_scalar else 4
+            }
+            self.checkGraphModeFxOp(
+                Op(is_inplace, is_scalar), data, quant_type,
+                expected_node_occurrence=node_occurrence,
+                custom_qconfig_dict=custom_qconfig_dict)
+
+            node_occurrence = {
+                # input_add, output_add for scalar
+                # input_add1, input_add2, output_add for non-scalar
+                ns.call_method("to"): 2 if is_scalar else 3
+            }
+            self.checkGraphModeFxOp(
+                NonQuantizedInput(is_inplace, is_scalar), data, quant_type,
+                expected_node_occurrence=node_occurrence,
+                custom_qconfig_dict=custom_qconfig_dict)
+
 
     def _test_quantized_binary_op_relu_impl(self, binary_op, ibinary_op, quantized_op):
         class OpRelu(torch.nn.Module):
@@ -2088,6 +2117,23 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 OpRelu(is_inplace_op, is_functional_relu, is_scalar),
                 data, quant_type, quantized_node)
+
+        options = itertools.product(
+            [True, False], [True, False], [True, False])
+        custom_qconfig_dict = {
+            "": float16_static_qconfig,
+            "object_type": [(torch.nn.Conv2d, None)]
+        }
+        for is_inplace_op, is_functional_relu, is_scalar in options:
+            node_occurrence = {
+                ns.call_method("to"): 3 if is_scalar else 4
+            }
+            self.checkGraphModeFxOp(
+                OpRelu(is_inplace_op, is_functional_relu, is_scalar),
+                data, quant_type, custom_qconfig_dict=custom_qconfig_dict,
+                expected_node_occurrence=node_occurrence,
+                print_debug_info=True)
+
 
     @skipIfNoFBGEMM
     def test_add(self):
@@ -2875,7 +2921,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 inputs,
                 QuantType.DYNAMIC,
                 quantized_node,
-                custom_qconfig=float_qparams_qconfig
+                custom_qconfig_dict={"": float_qparams_qconfig}
             )
 
         # check it works in None and static qconfig

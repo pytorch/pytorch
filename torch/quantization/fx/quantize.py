@@ -220,6 +220,14 @@ def insert_observer_for_output_of_the_node(
             if (input_is_observed(input_node.args[0]) or
                     input_is_observed(input_node.args[1])):
                 observed_node_names_set.add(node.name)
+
+            if activation_dtype(qconfig) == torch.float16:
+                # observer for outputs
+                new_observer = qconfig.activation()
+                insert_observer(
+                    node, new_observer, model,
+                    activation_post_process_map, env, observed_graph,
+                    load_arg, observed_node_names_set)
         elif isinstance(quantize_handler,
                         StandaloneModuleQuantizeHandler):
             assert node.op == "call_module"
@@ -422,6 +430,7 @@ class Quantizer:
         self.patterns = get_combined_dict(
             get_default_quant_patterns(), additional_quant_patterns)
 
+        convert_dict_to_ordered_dict(qconfig_dict)
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
@@ -432,7 +441,6 @@ class Quantizer:
 
         self.modules = dict(model.named_modules())
 
-        convert_dict_to_ordered_dict(qconfig_dict)
         # map from node name to qconfig, used in _find_matches
         self._generate_qconfig_map(model, model.graph, qconfig_dict, node_name_to_scope)
 
