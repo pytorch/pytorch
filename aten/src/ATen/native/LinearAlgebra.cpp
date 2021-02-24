@@ -206,16 +206,18 @@ Tensor& linalg_matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
 Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
   squareCheckInputs(self);
 
-  if (n == 0) {
-    return at::native::eye(self.size(-2), self.options()).expand_as(self);
-  } else if (n == 1) {
-    return self.clone(at::MemoryFormat::Contiguous);
-  }
+  TORCH_CHECK(
+      at::isFloatingType(self.scalar_type()) ||
+          at::isComplexType(self.scalar_type()),
+      "matrix_power: expected input tensor of floating or complex type but got ",
+      self.scalar_type());
 
-  auto a = n < 0 ? self.inverse() : self;
+  auto a = n < 0 ? self.inverse() : self.clone(at::MemoryFormat::Contiguous);
   n = std::abs(n);
 
-  if (n == 1) {
+  if (n == 0) {
+    return a.copy_(at::native::eye(self.size(-2), self.options()));
+  } else if (n == 1) {
     return a;
   } else if (n == 2) {
     return at::native::matmul(a, a);
@@ -242,8 +244,8 @@ Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
   return result;
 }
 
-Tensor matrix_power(const Tensor& a, int64_t n) {
-  return at::native::linalg_matrix_power(a, n);
+Tensor matrix_power(const Tensor& self, int64_t n) {
+  return at::native::linalg_matrix_power(self, n);
 }
 
 Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
