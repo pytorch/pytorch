@@ -3,12 +3,12 @@ import torch.nn as nn
 import torch.overrides
 from torch.nn.modules.module import _addindent
 import linecache
-from typing import Type, Dict, List, Any, Union, Optional
-from .graph import Graph
+from typing import Type, Dict, List, Any, Union, Optional, Set
+from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
+from torch.package import Importer, sys_importer
 import copy
 import sys
 import traceback
-import math
 from pathlib import Path
 import os
 import warnings
@@ -35,14 +35,31 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def _forward_from_src(src : str):
-    # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
-    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
-    exec_with_source(src, gbls)
-    return gbls['forward']
+def _forward_from_src(src: str, globals: Dict[str, Any]):
+    # avoid mutating the passed in dict
+    globals = globals.copy()
+    exec_with_source(src, globals)
+    return globals['forward']
 
 
-def deserialize_graphmodule(body : dict) -> torch.nn.Module:
+def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
+    if name in _custom_builtins:
+        return _custom_builtins[name].import_str
+    if _is_from_torch(name):
+        return 'import torch'
+
+    module_name, attr_name = importer.get_name(obj)
+    return f'from {module_name} import {attr_name} as {name}'
+
+
+def _format_import_block(globals: Dict[str, Any], importer: Importer):
+    import_strs: Set[str] = set()
+    for name, obj in globals.items():
+        import_strs.add(_format_import_statement(name, obj, importer))
+    return '\n'.join(import_strs)
+
+
+def deserialize_graphmodule(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -56,12 +73,9 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
-    try:
-        CodeOnlyModule.forward = _forward_from_src(body['_code'])
-    except KeyError:
-        # BC: attribute name was changed from `code` to `_code` to facilitate
-        # making `code` into a property and adding a docstring to it
-        CodeOnlyModule.forward = _forward_from_src(body['code'])
+    # Try to retrieve the forward source in a backward-compatible way
+    fn_src = body.get('_code') or body['code']
+    CodeOnlyModule.forward = _forward_from_src(import_block + fn_src, {})
 
     from .symbolic_trace import Tracer
 
@@ -191,6 +205,7 @@ class GraphModule(torch.nn.Module):
                 _assign_attr(root[target_to_copy], self, target_to_copy)
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
+
         self.graph = graph
 
     # TorchScript breaks trying to compile the graph setter because of the
@@ -286,29 +301,62 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
-    def recompile(self) -> None:
+    def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
-        self._code = self._graph.python_code(root_module='self')
+        python_code = self._graph.python_code(root_module='self')
+        self._code = python_code.src
+
         cls = type(self)
-        cls.forward = _forward_from_src(self._code)
+        cls.forward = _forward_from_src(self._code, python_code.globals)
 
         cls_call = cls.__call__
 
-        def print_full_traceback(exctype, value, tb):
-            traceback.print_exception(exctype, value, tb)
+        # Previously, if an error occurred when valid
+        # symbolically-traced code was run with an invalid input, the
+        # user would see the source of the error as coming from
+        # `File "<eval_with_key_N">`, where N is some number. We use
+        # this function to generate a more informative error message. We
+        # return the traceback itself, a message explaining that the
+        # error occurred in a traced Module's generated forward
+        # function, and five lines of context surrounding the faulty
+        # line
+        def generate_error_message(frame_summary: traceback.FrameSummary) -> str:
+            # auxiliary variables (for readability)
+            err_lineno = frame_summary.lineno
+            err_line_len = len(frame_summary.line)
+            all_src_lines = _eval_cache[frame_summary.filename]
+
+            # constiuent substrings of the error message
+            tb_repr = traceback.format_exc()
+            custom_msg = ("Call using an FX-traced Module, "
+                          f"line {err_lineno} of the traced Module’s "
+                          "generated forward function:")
+            before_err = "".join(all_src_lines[err_lineno - 2 : err_lineno])
+            marker = "~" * err_line_len + "~~~ <--- HERE"
+            err_and_after_err = "\n".join(all_src_lines[err_lineno : err_lineno + 2])
+
+            # joined message
+            return "\n".join([tb_repr, custom_msg, before_err, marker, err_and_after_err])
 
         def wrapped_call(self, *args, **kwargs):
-            old_excepthook = sys.excepthook
             try:
-                sys.excepthook = print_full_traceback
                 return cls_call(self, *args, **kwargs)
-            finally:
-                sys.excepthook = old_excepthook
+            except Exception as e:
+                assert e.__traceback__
+                topmost_framesummary: traceback.FrameSummary = \
+                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
+                if "eval_with_key" in topmost_framesummary.filename:
+                    print(generate_error_message(topmost_framesummary),
+                          file=sys.stderr)
+                raise e.with_traceback(None)
+
         cls.__call__ = wrapped_call
+
+        return python_code
 
     def __reduce__(self):
         """
@@ -319,8 +367,10 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
+        python_code = self.recompile()
+        import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph['_graph']
-        return (deserialize_graphmodule, (dict_without_graph,))
+        return (deserialize_graphmodule, (dict_without_graph, import_block))
 
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__

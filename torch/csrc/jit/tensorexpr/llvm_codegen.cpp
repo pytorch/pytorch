@@ -1076,7 +1076,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(loadType, 0));
+#if LLVM_VERSION_MAJOR >= 13
+      value_ = irb_.CreateAlignedLoad(vaddr, llvm::MaybeAlign(4));
+#else
       value_ = irb_.CreateAlignedLoad(vaddr, 4);
+#endif
       return;
     }
   }
@@ -1255,8 +1259,12 @@ void LLVMCodeGenImpl::visit(const Store* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(val->getType(), 0));
-      irb_.CreateAlignedStore(val, vaddr, 4);
 
+#if LLVM_VERSION_MAJOR >= 13
+      irb_.CreateAlignedStore(val, vaddr, llvm::MaybeAlign(4));
+#else
+      irb_.CreateAlignedStore(val, vaddr, 4);
+#endif
       value_ = llvm::ConstantInt::get(IntTy_, 0);
       return;
     }
