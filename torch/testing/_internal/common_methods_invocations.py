@@ -2010,7 +2010,6 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     UnaryUfuncInfo('neg',
-                   aliases=('negative', ),
                    ref=np.negative,
                    aliases=('negative', ),
                    skip_bfloat16_grad=True,
