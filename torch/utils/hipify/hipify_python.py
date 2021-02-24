@@ -834,8 +834,8 @@ def preprocessor(
                 fout.write(output_source)
             return {"hipified_path": fout_path, "status": "ok"}
         except PermissionError as e:
-            print(f"{bcolors.WARNING}Failed to save {fout_path} with \"{e.strerror}\", skipping it.{bcolors.ENDC}", file=sys.stderr)
-            return {"hipified_path": fout_path, "status": "skipped"}
+            print(f"{bcolors.WARNING}Failed to save {fout_path} with \"{e.strerror}\", leaving {fin_path} unchanged.{bcolors.ENDC}", file=sys.stderr)
+            return {"hipified_path": fin_path, "status": "skipped"}
     else:
         return {"hipified_path": fout_path, "status": "skipped"}
 
