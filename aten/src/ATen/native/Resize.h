@@ -36,7 +36,7 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) 
     }
     int64_t new_size_bytes =
         (new_size + self->storage_offset()) * self->dtype().itemsize();
-    if (new_size_bytes > self->storage().nbytes()) {
+    if (new_size_bytes > static_cast<int64_t>(self->storage().nbytes())) {
       THStorage_resizeBytes(THTensor_getStoragePtr(self), new_size_bytes);
     }
   }
