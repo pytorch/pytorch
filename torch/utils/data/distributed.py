@@ -115,7 +115,8 @@ class DistributedSampler(Sampler[T_co]):
         assert len(indices) == self.total_size
 
         # subsample
-        indices = indices[self.rank:self.total_size:self.num_replicas]
+        start_idx = self.rank * self.num_samples
+        indices = list(filter(lambda x: start_idx <= x < start_idx + self.num_samples, indices))
         assert len(indices) == self.num_samples
 
         return iter(indices)
