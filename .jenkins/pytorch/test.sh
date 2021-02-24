@@ -22,7 +22,7 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda11.1* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
@@ -359,7 +359,8 @@ test_vec256() {
 }
 
 test_torch_deploy() {
-  SIMPLE_MODEL_PATH=torch/csrc/deploy/example/simple.pt LIBINTERPRETER_PATH=build/lib/libinterpreter.so build/bin/interpreter_test
+  python torch/csrc/deploy/example/generate_examples.py
+  build/bin/test_deploy
   assert_git_not_dirty
 }
 

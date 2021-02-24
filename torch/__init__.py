@@ -41,7 +41,8 @@ __all__ = [
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
-    'are_deterministic_algorithms_enabled', 'is_deterministic'
+    'are_deterministic_algorithms_enabled', 'is_deterministic',
+    'set_warn_always', 'is_warn_always_enabled',
 ]
 
 ################################################################################
@@ -353,6 +354,10 @@ def use_deterministic_algorithms(d):
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.__getitem__` backward when `self` is a CPU tensor and
+          ``indices`` is a list of tensors
+        * :func:`torch.index_put` with ``accumulate=True`` when called on a CPU
+          tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when `d=True`:
@@ -435,6 +440,24 @@ def is_deterministic():
         "release. Please use torch.are_deterministic_algorithms_enabled instead"))
     return are_deterministic_algorithms_enabled()
 
+
+def set_warn_always(b):
+    r"""When this flag is False (default) then some PyTorch warnings may only
+    appear once per process. This helps avoid excessive warning information.
+    Setting it to True causes these warnings to always appear, which may be
+    helpful when debugging.
+
+    Args:
+        b (:class:`bool`): If True, force warnings to always be emitted
+                           If False, set to the default behaviour
+    """
+    _C._set_warnAlways(b)
+
+def is_warn_always_enabled():
+    r"""Returns True if the global warn_always flag is turned on. Refer to
+    :func:`torch.set_warn_always` documentation for more details.
+    """
+    return _C._get_warnAlways()
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -662,6 +685,6 @@ from ._vmap_internals import vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
-# class usage. We add these lines here to preserve backward compatbility.
+# class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru

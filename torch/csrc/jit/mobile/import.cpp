@@ -294,8 +294,20 @@ void BytecodeDeserializer::parseMethods(
       function->append_constant(constant);
     }
 
+    static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
     for (const auto& t : types_list) {
-      function->append_type(c10::parseType(t.toStringRef()));
+      c10::QualifiedName qn(t.toStringRef());
+      if (classPrefix.isPrefixOf(qn)) {
+        auto classType = getCustomClass(qn.qualifiedName());
+        TORCH_CHECK(
+            classType,
+            "The implementation of class ",
+            qn.qualifiedName(),
+            " cannot be found.");
+        function->append_type(classType);
+      } else {
+        function->append_type(c10::parseType(t.toStringRef()));
+      }
     }
 
     function->set_register_size(register_size);
@@ -407,9 +419,9 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
     return res;
   }
   auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
-  for (auto it = ivalue_dict.begin(); it != ivalue_dict.end(); ++it) {
-    auto key = it->key().toString()->string();
-    auto value = it->value().toString()->string();
+  for (const auto& it : ivalue_dict) {
+    const auto key = it.key().toString()->string();
+    const auto value = it.value().toString()->string();
     res[key] = value;
   }
   return res;

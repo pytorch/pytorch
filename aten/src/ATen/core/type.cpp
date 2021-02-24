@@ -145,8 +145,8 @@ FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
-ComplexDoubleTypePtr ComplexDoubleType::get() {
-  static auto value = ComplexDoubleType::create();
+ComplexTypePtr ComplexType::get() {
+  static auto value = ComplexType::create();
   return value;
 }
 BoolTypePtr BoolType::get() {
@@ -214,7 +214,7 @@ ListTypePtr ListType::ofInts() {
   return value;
 }
 ListTypePtr ListType::ofComplexDoubles() {
-  static auto value = ListType::create(ComplexDoubleType::get());
+  static auto value = ListType::create(ComplexType::get());
   return value;
 }
 ListTypePtr ListType::ofFloats() {
@@ -1407,6 +1407,25 @@ torch::jit::Function& ClassType::getHook(const std::string& name) const {
 
 bool ClassType::hasMethod(const std::string& name) const {
   return findMethod(name) != nullptr;
+}
+
+void ClassType::addStaticMethod(torch::jit::Function* method) {
+  TORCH_CHECK(
+      findStaticMethod(method->name()) == nullptr &&
+          findMethod(method->name()) == nullptr, "Can't redefine method: ",
+      method->name(),
+      " on class: ",
+      repr_str());
+  staticmethods_.emplace_back(method);
+}
+
+torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const {
+  for (auto method : staticmethods_) {
+    if (name == method->name()) {
+      return method;
+    }
+  }
+  return nullptr;
 }
 
 void ClassType::unsafeRemoveMethod(const std::string& name) {

@@ -212,7 +212,7 @@ auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::v
   extract_vars(node->is_variable_input_, input_vars, args...);
 
   bool is_executable =  GradMode::is_enabled() && any_variable_requires_grad(input_vars);
-  auto next_edges = collect_next_edges(input_vars);
+  auto next_edges = (is_executable ? collect_next_edges(input_vars) : edge_list());
   node->set_ctx_grad_fn(node);
   node->set_next_edges(std::move(next_edges));
   node->clear_input_metadata();
