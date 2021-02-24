@@ -179,6 +179,7 @@ class IterableDataset(Dataset[T_co]):
     def register_datapipe_as_function(cls, function_name, cls_to_register):
         if function_name in IterableDataset.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
+
         def class_function(cls, source_dp, *args, **kwargs):
             return cls(source_dp, *args, **kwargs)
         function = functools.partial(class_function, cls_to_register)
