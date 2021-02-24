@@ -48,7 +48,7 @@ inline std::ostream& operator<<(
     case MemoryFormat::ChannelsLast3d:
       return stream << "ChannelsLast3d";
     default:
-      TORCH_CHECK(false,"Unknown memory format");
+      TORCH_CHECK(false, "Unknown memory format");
   }
 }
 

@@ -201,7 +201,7 @@ static inline size_t elementSize(ScalarType t) {
   switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE_ELEMENTSIZE_CASE)
     default:
-      TORCH_CHECK(false,"Unknown ScalarType");
+      TORCH_CHECK(false, "Unknown ScalarType");
   }
 #undef CASE_ELEMENTSIZE_CASE
 }
