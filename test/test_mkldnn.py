@@ -328,9 +328,16 @@ class TestMkldnn(TestCase):
                     padding=1,
                     ceil_mode=ceil_mode)
 
-                self.assertEqual(
-                    max_pool(input),
-                    max_pool(input.to_mkldnn()).to_dense())
+                x1 = input.clone().requires_grad_()
+                x2 = input.clone().to_mkldnn().requires_grad_()
+                y1 = max_pool(x1)
+                y2 = max_pool(x2).to_dense()
+                loss1 = y1.sum()
+                loss2 = y2.sum()
+                loss1.backward()
+                loss2.backward()
+                self.assertEqual(y1, y2)
+                self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_max_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -442,9 +449,16 @@ class TestMkldnn(TestCase):
                 padding=1,
                 count_include_pad=count_include_pad)
 
-            self.assertEqual(
-                avg_pool(input),
-                avg_pool(input.to_mkldnn()).to_dense())
+            x1 = input.clone().requires_grad_()
+            x2 = input.clone().to_mkldnn().requires_grad_()
+            y1 = avg_pool(x1)
+            y2 = avg_pool(x2).to_dense()
+            loss1 = y1.sum()
+            loss2 = y2.sum()
+            loss1.backward()
+            loss2.backward()
+            self.assertEqual(y1, y2)
+            self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -468,8 +482,6 @@ class TestMkldnn(TestCase):
                 stride=2,
                 padding=1,
                 count_include_pad=count_include_pad)
-
-
             if has_bf16_support():
                 y = avg_pool(input.to_mkldnn()).to_dense()
                 y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
@@ -519,10 +531,18 @@ class TestMkldnn(TestCase):
         x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
 
         adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d(7)
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = adaptive_avg_pool2d(x1)
+        y2 = adaptive_avg_pool2d(x2).to_dense()
 
-        self.assertEqual(
-            adaptive_avg_pool2d(x),
-            adaptive_avg_pool2d(x.to_mkldnn()).to_dense())
+        loss1 = y1.sum()
+        loss2 = y2.sum()
+        loss1.backward()
+        loss2.backward()
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_adaptive_avg_pool2d_bf16(self):

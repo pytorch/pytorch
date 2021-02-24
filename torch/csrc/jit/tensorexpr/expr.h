@@ -231,6 +231,7 @@ class TORCH_API BufHandle : public ExprHandle {
       const std::vector<ExprHandle>& dims,
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+
   explicit BufHandle(const Buf* node) : ExprHandle(node) {}
   const Buf* node() const {
     return static_cast<const Buf*>(ExprHandle::node());

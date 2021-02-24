@@ -1516,6 +1516,7 @@ class Module:
                     p.grad.zero_()
 
     def share_memory(self: T) -> T:
+        r"""See :meth:`torch.Tensor.share_memory_`"""
         return self._apply(lambda t: t.share_memory_())
 
     def _get_name(self):
