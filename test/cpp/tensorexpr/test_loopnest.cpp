@@ -3727,5 +3727,33 @@ TEST(LoopNest, CompoundTensorUsed) {
   assertAllEqual(b_data, b_ref);
 }
 
+TEST(LoopNest, InlineFromLoad) {
+  KernelScope kernel_scope;
+
+  constexpr int N = 1024;
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto store_a = For::make(i, 0, N, Store::make(a, {i}, i, mask));
+  auto store_b =
+      For::make(j, 0, N, Store::make(b, {j}, Load::make(a, {j}, mask), mask));
+  LoopNest l(Block::make({store_a, store_b}), {b.node()}, {}, {a.node()});
+
+  l.computeInline(a.node());
+
+  // Check that A[j] is replaced with j after inlining
+  std::ostringstream oss;
+  oss << *l.root_stmt();
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: for (int j
+# CHECK-NOT: B[j] = A[j]
+# CHECK-NEXT: B[j] = j
+)IR",
+      oss.str());
+}
+
 } // namespace jit
 } // namespace torch
