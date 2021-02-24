@@ -11985,7 +11985,7 @@ class TestNNDeviceType(NNTestCase):
             y.backward(y)
             with torch.no_grad():
                 xx = x.cpu().requires_grad_()
-            yy = F.log_softmax(xx.float(), dim=-1, dtype=dtype)
+            yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
             yy.backward(yy)
             self.assertEqual(y, yy)
             self.assertEqual(x.grad, xx.grad)
