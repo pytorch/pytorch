@@ -1,6 +1,7 @@
 import warnings
+import torch.nn as nn
 from torch.utils.data import IterDataPipe, _utils
-from typing import TypeVar, Callable, Iterator, Sized, Optional, Tuple, Dict
+from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -29,7 +30,6 @@ class MapIterDataPipe(IterDataPipe[T_co]):
 
     def __init__(self,
                  datapipe: IterDataPipe,
-                 *,
                  fn: Callable = default_fn,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
@@ -93,9 +93,38 @@ class CollateIterDataPipe(MapIterDataPipe):
     """
     def __init__(self,
                  datapipe: IterDataPipe,
-                 *,
                  collate_fn: Callable = _utils.collate.default_collate,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
                  ) -> None:
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
+
+
+class TransformsIterDataPipe(MapIterDataPipe):
+    r""" :class:`TransformsIterDataPipe`.
+
+    Iterable DataPipe to use transform(s) from torchvision or torchaudio to transform
+    data from datapipe.
+    args:
+        datapipe: Iterable DataPipe being transformed
+        transforms: A transform or a sequence of transforms from torchvision or torchaudio.
+    """
+    def __init__(self,
+                 datapipe: IterDataPipe,
+                 transforms: Callable,
+                 ) -> None:
+        # Type checking for transforms
+        transforms_types: Tuple = (nn.Module, )
+        try:
+            # Specific types of transforms other than `nn.Module` from torchvision
+            import torchvision.transforms as tsfm
+            transforms_types += (tsfm.Compose, tsfm.RandomChoice, tsfm.RandomOrder,
+                                 tsfm.ToPILImage, tsfm.ToTensor, tsfm.Lambda)
+        except ImportError:
+            pass
+
+        if not isinstance(transforms, transforms_types):
+            raise TypeError("`transforms` are required to be a callable from "
+                            "torchvision.transforms or torchaudio.transforms")
+
+        super().__init__(datapipe, fn=transforms)

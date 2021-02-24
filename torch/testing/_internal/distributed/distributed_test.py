@@ -115,6 +115,17 @@ def get_profiling_event(postfix, profiler):
         event for event in profiler.function_events if event.name.endswith(postfix)
     ]
 
+# Base error message substring on unfinished reductions.
+ddp_prev_reduction_unfinished_str = "Expected to have finished reduction in the prior iteration"
+# Error message substring when find_unused_parameters=True has not been passed
+ddp_recommend_find_unused_params_str = "passing the keyword argument `find_unused_parameters=True`"
+# Error message substring when find_unused_parameters=True is enabled
+ddp_find_unused_params_enabled_str = "Since `find_unused_parameters=True` is enabled"
+# Error message substring for possibility of not all model outputs being used
+# in loss computation
+ddp_outputs_not_used_in_loss_str = "`forward` function outputs participate in calculating loss"
+
+
 
 class _FC2(nn.Module):
     def __init__(self):
@@ -177,6 +188,18 @@ class BatchNormNet(nn.Module):
         x = torch.reshape(x, (-1, 40))
         x = self.fc2(x)
         return F.softmax(x, dim=1)
+
+class TwoLinLayerNet(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Linear(10, 10, bias=False)
+        self.b = nn.Linear(10, 10, bias=False)
+
+    def forward(self, x):
+        a = self.a(x)
+        b = self.b(x)
+        return (a, b)
 
 
 DDP_NET = Net()
@@ -326,7 +349,7 @@ class TestDistBackend(MultiProcessTestCase):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name):
+    def _run(cls, rank, test_name, file_name, pipe):
         if BACKEND == 'nccl' and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
@@ -355,9 +378,7 @@ class TestDistBackend(MultiProcessTestCase):
         # immediately exiting due to a skip doesn't cause flakiness.
         self._barrier()
 
-        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
-        # We're retreiving a corresponding test and executing it.
-        getattr(self, test_name)()
+        self.run_test(test_name, pipe)
         self._barrier()
         dist.destroy_process_group()
         sys.exit(0)
@@ -2959,6 +2980,8 @@ class DistributedTest:
             )
             self._barrier()
 
+            return model_DDP
+
         @unittest.skipIf(
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
@@ -3382,8 +3405,8 @@ class DistributedTest:
                 return os.environ[var] if var in os.environ else "N/A"
 
             group, group_id, rank = self._init_global_test()
-            model_DDP = copy.deepcopy(DDP_NET)
-            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, bucket_cap_mb=0.001)
+            model_DDP = self._test_DistributedDataParallelCPU()
+
             ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
@@ -3393,11 +3416,11 @@ class DistributedTest:
             # output_device of CPU training is -1.
             self.assertEqual(ddp_logging_data.output_device, -1)
             self.assertEqual(ddp_logging_data.broadcast_buffers, True)
-            self.assertEqual(ddp_logging_data.bucket_cap_mb, 0.001)
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
             self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
-            self.assertEqual(ddp_logging_data.iteration, 0)
+            self.assertEqual(ddp_logging_data.iteration, 4)
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
@@ -3419,11 +3442,26 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
             self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
             self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
+            # test runtime logging fields
+            self.assertEqual(ddp_logging_data.unused_parameter_size, 0)
+            self.assertEqual(ddp_logging_data.has_rebuilt_buckets, True)
+            self.assertEqual(ddp_logging_data.rebuilt_bucket_sizes, [param_size])
+            # It is hard to test accurate latency, but it can test whether the latency is
+            # a valid value and in the expected range.
+            self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 1)
+            self.assertGreaterEqual(
+                ddp_logging_data.avg_backward_compute_time,
+                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+            self.assertGreaterEqual(
+                ddp_logging_data.avg_backward_comm_time,
+                ddp_logging_data.avg_backward_compute_comm_overlap_time)
             # test larger net and verify multiple bucket sizes
             model = LargeNet()
-            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1)
+            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1.5)
             ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             params = list(model_DDP.parameters())
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 1.5)
             self.assertEqual(
                 ddp_logging_data.bucket_sizes,
                 [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()])
@@ -3845,6 +3883,51 @@ class DistributedTest:
                     # Avoid accumulating grad so that it's the same every iteration.
                     net.zero_grad()
                     torch.cuda.synchronize(device=self.rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_profiling(self):
+            batch = 3
+            dim = 10
+            num_iters = 6
+            torch.cuda.set_device(self.rank)
+            model = nn.Linear(dim, dim, bias=False)
+            inp = torch.rand(batch, dim, device=self.rank)
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank), device_ids=[self.rank]
+            )
+            with torch.autograd.profiler.profile() as prof:
+                for i in range(num_iters):
+                    # Enable profiling on even iterations
+                    loss = net(inp).sum()
+                    loss.backward()
+
+            all_reduce_event_name = f"{dist.get_backend()}:all_reduce"
+            events = get_profiling_event(all_reduce_event_name, prof)
+            event_count = sum(e.count for e in events)
+            self.assertEqual(event_count, num_iters)
+            for event in events:
+                self.assertEqual(event.name, all_reduce_event_name)
+
+            # Run DDP with profiling for a few iterations, then enable profiling
+            # for a single pass, and ensure it is recorded. This tests that the
+            # thread local state is correctly updated.
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank), device_ids=[self.rank]
+            )
+            for i in range(3):
+                loss = net(inp).sum()
+                loss.backward()
+            # Now enable the profiler.
+            with torch.autograd.profiler.profile() as prof:
+                loss = net(inp).sum()
+                loss.backward()
+
+            events = get_profiling_event(all_reduce_event_name, prof)
+            self.assertEqual(1, len(events))
+            self.assertEqual(1, events[0].count)
+            self.assertEqual(events[0].name, all_reduce_event_name)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4333,11 +4416,23 @@ class DistributedTest:
                     # On 2nd iteration, this will fail during rebuild_buckets,
                     # but we should report an error regarding unused parameters
                     # since that is the underlying root cause.
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "Expected to have finished reduction in the prior iteration",
-                    ):
+                    try:
                         ddp(inp).sum().backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP unused parameters error not raised.")
                 else:
                     ddp(inp).sum().backward()
 
@@ -4575,12 +4670,28 @@ class DistributedTest:
                 find_unused_parameters=False,
             )
             for i in range(2):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Expected to have finished reduction in the prior iteration before starting a new one",
-                ) if i == 1 else suppress():
+                if i == 0:
                     loss = model(random_input).sum()
                     loss.backward()
+                else:
+                    try:
+                        loss = model(random_input).sum()
+                        loss.backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP error not raised")
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4649,12 +4760,28 @@ class DistributedTest:
                 find_unused_parameters=False,
             )
             for i in range(2):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Expected to have finished reduction in the prior iteration before starting a new one",
-                ) if i == 1 else suppress():
+                if i == 0:
                     loss = model(random_input).sum()
                     loss.backward()
+                else:
+                    try:
+                        loss = model(random_input).sum()
+                        loss.backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP error not raised")
 
         @require_backend({"gloo"})
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support scatter")
@@ -4684,3 +4811,64 @@ class DistributedTest:
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_output_unused_in_loss(self):
+            model = TwoLinLayerNet()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            net_with_find_unused = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+            )
+
+            inp = torch.randn(10, 10)
+
+            for ddp in [net, net_with_find_unused]:
+                for i in range(2):
+                    if i == 0:
+                        a, b = ddp(inp)
+                        loss = b.sum()
+                        loss.backward()
+                    else:
+                        try:
+                            a, b = ddp(inp)
+                            loss = b.sum()
+                            loss.backward()
+                        except RuntimeError as e:
+                            msg = str(e)
+                            if ddp == net:
+                                expected_strs = [
+                                    ddp_prev_reduction_unfinished_str,
+                                    ddp_recommend_find_unused_params_str,
+                                    ddp_outputs_not_used_in_loss_str,
+                                ]
+                                unexpected_strs = [
+                                    ddp_find_unused_params_enabled_str,
+                                ]
+                            elif ddp == net_with_find_unused:
+                                expected_strs = [
+                                    ddp_prev_reduction_unfinished_str,
+                                    ddp_outputs_not_used_in_loss_str,
+                                    ddp_find_unused_params_enabled_str,
+                                ]
+                                unexpected_strs = [
+                                    ddp_recommend_find_unused_params_str,
+                                ]
+                            for s in expected_strs:
+                                self.assertTrue(
+                                    s in msg,
+                                    f"Expected {s} to be in {msg}"
+                                )
+                            for s in unexpected_strs:
+                                self.assertFalse(
+                                    s in msg,
+                                    f"Expected {s} not to be in {msg}"
+                                )
+                        else:
+                            self.assertFalse(True, "DDP error not raised")
