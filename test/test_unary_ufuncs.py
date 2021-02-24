@@ -58,25 +58,28 @@ _large_float_vals = (-501, 501,
                      -4988429.2, 4988429.2,
                      -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
-medium_length = 812
-large_size = (1029, 917)
+_medium_length = 812
+_large_size = (1029, 917)
 
 
+# Returns generator of tensors of different sizes filled with values in domain
+# and with intested region filled with `vals`. This will help test different code
+# paths for the given vals
 def generate_tensors_from_vals(vals, device, dtype, domain):
     offset = 63
 
-    assert large_size[1] > (medium_length + offset)
-    assert medium_length % 4 == 0
-    assert len(vals) < medium_length
+    assert _large_size[1] > (_medium_length + offset)
+    assert _medium_length % 4 == 0
+    assert len(vals) < _medium_length
 
     # Constructs the large tensor containing vals
-    large_tensor = make_tensor(large_size, device=device, dtype=dtype, low=domain[0], high=domain[1])
+    large_tensor = make_tensor(_large_size, device=device, dtype=dtype, low=domain[0], high=domain[1])
 
     # Inserts the vals at an odd place
     large_tensor[57][offset:offset + len(vals)] = torch.tensor(vals, device=device, dtype=dtype)
 
     # Takes a medium sized copy of the large tensor containing vals
-    medium_tensor = large_tensor[57][offset:offset + medium_length]
+    medium_tensor = large_tensor[57][offset:offset + _medium_length]
 
     # Constructs small tensors (4 elements)
     small_tensors = (t for t in torch.split(medium_tensor, 4))
@@ -119,8 +122,8 @@ def generate_numeric_tensors(device, dtype, *,
                    torch.tensor(True, device=device),
                    torch.tensor(False, device=device),
                    torch.tensor((True, False), device=device),
-                   make_tensor((medium_length,), device=device, dtype=dtype, low=None, high=None),
-                   make_tensor(large_size, device=device, dtype=dtype, low=None, high=None))
+                   make_tensor((_medium_length,), device=device, dtype=dtype, low=None, high=None),
+                   make_tensor(_large_size, device=device, dtype=dtype, low=None, high=None))
         return tensors
 
     # Acquires dtype-specific vals
