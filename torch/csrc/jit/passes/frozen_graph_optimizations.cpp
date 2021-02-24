@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_conv_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>

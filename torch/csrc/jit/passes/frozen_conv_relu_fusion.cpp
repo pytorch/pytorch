@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/frozen_conv_relu_fusion.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -34,7 +34,7 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
         return (%res))";
 
   auto is_cuda = [](const Match& match,
-                          const std::unordered_map<std::string, Value*>& vmap) {
+                    const std::unordered_map<std::string, Value*>& vmap) {
     auto weight = toIValue(match.values_map.at(vmap.at("weight"))).value();
     return weight.toTensor().storage().data_ptr().device().is_cuda();
   };
@@ -46,7 +46,7 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, is_cuda);
 #endif
 }
-}
+} // namespace
 
 void FuseFrozenConvRelu(std::shared_ptr<Graph>& graph) {
   fuseFrozenConvReluImpl(graph);

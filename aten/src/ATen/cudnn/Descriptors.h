@@ -307,9 +307,10 @@ struct TORCH_CUDA_CPP_API ActivationDescriptor
           &cudnnCreateActivationDescriptor,
           &cudnnDestroyActivationDescriptor> {
   void set(cudnnActivationMode_t mode) {
-    AT_ASSERT(mode == CUDNN_ACTIVATION_RELU, "TODO: support more cuDNN activation modes");
-    AT_CUDNN_CHECK(
-      cudnnSetActivationDescriptor(
+    AT_ASSERT(
+        mode == CUDNN_ACTIVATION_RELU,
+        "TODO: support more cuDNN activation modes");
+    AT_CUDNN_CHECK(cudnnSetActivationDescriptor(
         mut_desc(),
         mode,
         cudnnNanPropagation_t::CUDNN_NOT_PROPAGATE_NAN,
