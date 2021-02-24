@@ -1699,6 +1699,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = M2().eval()
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
+        m.load_state_dict(state_dict)
         with TemporaryFileName() as fname:
             torch.save(m.state_dict(), fname)
             m.load_state_dict(torch.load(fname))
