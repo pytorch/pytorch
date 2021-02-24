@@ -539,6 +539,16 @@ RegisterOperators reg(
            pack(stack, result);
          },
          aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::is_floating_point(Tensor self) -> bool"),
+         [](Stack* stack) {
+           RECORD_FUNCTION("is_floating", std::vector<c10::IValue>());
+           auto result =
+               ((std::move(peek(stack, 0, 1))).toTensor()).is_floating_point();
+           drop(stack, 1);
+           pack(stack, result);
+         },
+         aliasAnalysisFromSchema()),
      // these ops are generic over the list element type.
      // CREATING GENERIC_LIST_OPS
      OperatorGenerator(
