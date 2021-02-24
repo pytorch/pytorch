@@ -558,6 +558,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::BroadcastMKLDNNTensors: {
       makePointerTo(node->outputs().at(0), node->inputs().at(0));
       makePointerTo(node->outputs().at(1), node->inputs().at(1));
+      return;
     }
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:

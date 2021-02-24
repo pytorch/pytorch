@@ -1702,13 +1702,48 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
   return backendType;
 }
 
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
+}
+
+// replaces all invalid characters with underscore
+std::string sanitizeName(const std::string& input_name) {
+  std::stringstream sanitized_name;
+  for (size_t i = 0; i < input_name.size(); ++i) {
+    if (isValidIdentifierChar(input_name[i], i)) {
+      sanitized_name << input_name[i];
+    } else {
+      sanitized_name << "_";
+    }
+  }
+  return sanitized_name.str();
+}
+
+// we use the debug names in printing cuda code, they need to be removed
+// of characters that can't be used in a variable identifier
+void TensorExprKernel::genInputDebugNames() {
+  std::unordered_map<std::string, const torch::jit::Value*> name_to_value;
+  std::unordered_set<std::string> name_set;
+  std::unordered_map<const torch::jit::Value*, std::string> value_to_name;
+  for (const torch::jit::Value* input : graph_->inputs()) {
+    std::string sanitized_name = sanitizeName(input->debugName());
+    // we could get fancier here, but name conflict is extremely unlikely
+    while (name_set.count(sanitized_name)) {
+      sanitized_name = sanitized_name + "_";
+    }
+    value_to_name[input] = sanitized_name;
+    name_set.insert(sanitized_name);
+  }
+  input_name_map_ = std::move(value_to_name);
+}
+
 void TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
       Placeholder inBuffer(
-          "t" + input->debugName(),
+          "t" + input_name_map_[input],
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),
           {0});
       std::vector<DimArg> inputTensorDims;
@@ -1735,19 +1770,19 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     case TypeKind::FloatType: {
-      VarHandle v("v" + input->debugName(), kDouble);
+      VarHandle v("v" + input_name_map_[input], kDouble);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
     }
     case TypeKind::BoolType: {
-      VarHandle v("v" + input->debugName(), kBool);
+      VarHandle v("v" + input_name_map_[input], kBool);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
     }
     case TypeKind::IntType: {
-      VarHandle v("v" + input->debugName(), kLong);
+      VarHandle v("v" + input_name_map_[input], kLong);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
@@ -2104,6 +2139,7 @@ void TensorExprKernel::compile() {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
+  genInputDebugNames();
   for (auto const& input : graph_->inputs()) {
     bindInput(input);
     inputTypes_.push_back(input->type());
@@ -2212,8 +2248,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   std::vector<CodeGen::CallArg> runArgs;
   runArgs.reserve(inputs.size() + tensorOutputs_.size());
 
-  for (size_t i = 0, e = inputs.size(); i < e; i++) {
-    auto const& input = inputs[i];
+  for (const auto& input : inputs) {
     if (input.isInt()) {
       runArgs.emplace_back(input.toInt());
     } else if (input.isDouble()) {
