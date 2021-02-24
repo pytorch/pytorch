@@ -3557,7 +3557,7 @@ TEST(LoopNest, DeadStoreElimination) {
   Stmt* stmt = Block::make({stmt1});
 
   // Will eliminate if not used by an output.
-  LoopNest loop(stmt, {f.node()}, {});
+  LoopNest loop(stmt, {f.node()});
   loop.eliminateDeadStores();
 
   std::ostringstream oss;
@@ -3571,7 +3571,7 @@ TEST(LoopNest, DeadStoreElimination) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   // But won't eliminate if used by different outputs.
-  LoopNest loop2(stmt, {f.node(), g.node()}, {});
+  LoopNest loop2(stmt, {f.node(), g.node()});
   loop2.eliminateDeadStores();
 
   oss.clear();
@@ -3612,7 +3612,7 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
 
   // Will eliminate the write to g, but not f since it used by the producer of
   // h.
-  LoopNest loop(stmt, {h.node()}, {});
+  LoopNest loop(stmt, {h.node()});
   loop.eliminateDeadStores();
 
   std::ostringstream oss;
@@ -3627,7 +3627,7 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   // Sanity check won't eliminate if g is an output.
-  LoopNest loop2(stmt, {h.node(), g.node()}, {});
+  LoopNest loop2(stmt, {h.node(), g.node()});
   loop2.eliminateDeadStores();
 
   oss.clear();
@@ -3739,7 +3739,7 @@ TEST(LoopNest, InlineFromLoad) {
   auto store_a = For::make(i, 0, N, Store::make(a, {i}, i, mask));
   auto store_b =
       For::make(j, 0, N, Store::make(b, {j}, Load::make(a, {j}, mask), mask));
-  LoopNest l(Block::make({store_a, store_b}), {b.node()}, {}, {a.node()});
+  LoopNest l(Block::make({store_a, store_b}), {b.node()});
 
   l.computeInline(a.node());
 
