@@ -2089,6 +2089,7 @@ class TestONNXRuntime(unittest.TestCase):
                         self._interpolate(xi, mode_i, False, is_upsample, True)
                     self._interpolate(xi, mode_i, False, is_upsample)
 
+    # ONNX export failed on interpolate because dynamic size not supported for opsets below 9.
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
