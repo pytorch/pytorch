@@ -1529,7 +1529,7 @@ class TestFrozenOptimizations(JitTestCase):
 
         mod = torch.jit.script(Net())
         # inspect mod
-        torch._C._jit_pass_inline(mod.graph)
+        torch._C._jit.pass_inline(mod.graph)
         FileCheck().check("aten::dropout").run(mod.graph)
         frozen_mod = torch.jit.freeze(mod.eval())
         FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
@@ -1550,7 +1550,7 @@ class TestFrozenOptimizations(JitTestCase):
 
         mod = torch.jit.script(Net().eval())
         # inspect mod
-        torch._C._jit_pass_inline(mod.graph)
+        torch._C._jit.pass_inline(mod.graph)
         FileCheck().check("aten::feature_dropout").run(mod.graph)
         frozen_mod = torch.jit.freeze(mod)
         FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)

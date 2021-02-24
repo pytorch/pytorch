@@ -146,10 +146,10 @@ def optimize_frozen_module(mod, optimize_numerics: bool = True):
     """
     # xxx: keep in sync with frozen_graph_optimization.cpp
     # intentionally duplicated to make to make it easier to create custom optimization sequence
-    torch._C._jit_pass_remove_dropout(mod._c)
+    torch._C._jit.pass_remove_dropout(mod._c)
     if optimize_numerics:
         # run a couple times to capture Conv -> Mul -> Add etc
         for _ in range(2):
-            torch._C._jit_pass_fold_frozen_conv_bn(mod.graph)
-            torch._C._jit_pass_fold_frozen_conv_add_or_sub(mod.graph)
-            torch._C._jit_pass_fold_frozen_conv_mul_or_div(mod.graph)
+            torch._C._jit.pass_fold_frozen_conv_bn(mod.graph)
+            torch._C._jit.pass_fold_frozen_conv_add_or_sub(mod.graph)
+            torch._C._jit.pass_fold_frozen_conv_mul_or_div(mod.graph)

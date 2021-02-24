@@ -6,6 +6,7 @@ from . import tensor_engine
 
 from . import attention      # noqa: F401
 from . import broadcast      # noqa: F401
+from . import concat         # noqa: F401
 # from . import conv           # noqa: F401
 from . import elementwise    # noqa: F401
 from . import matmul         # noqa: F401

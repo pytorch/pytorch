@@ -424,21 +424,21 @@ Example::
               "compare_set",
               [](::c10d::Store& store,
                  const std::string& key,
-                 const std::string& new_value,
-                 const std::string& old_value) -> py::bytes {
+                 const std::string& current_value,
+                 const std::string& new_value) -> py::bytes {
+                std::vector<uint8_t> currentValue_(
+                    current_value.begin(), current_value.end());
                 std::vector<uint8_t> newValue_(
                     new_value.begin(), new_value.end());
-                std::vector<uint8_t> oldValue_(
-                    old_value.begin(), old_value.end());
-                auto value = store.compareSet(key, newValue_, oldValue_);
+                auto value = store.compareSet(key, currentValue_, newValue_);
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value``
-will only be placed if ``old_value`` for the ``key`` already exists in the store.
+performs comparison between ``new_value`` and ``current_value`` before inserting. ``new_value``
+will only be placed if ``current_value`` for the ``key`` already exists in the store.
 
 .. warning::
     The ``compare_set`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
@@ -446,8 +446,8 @@ will only be placed if ``old_value`` for the ``key`` already exists in the store
 
 Arguments:
     key (str): The key to be checked in the store.
+    current_value (str): The value associated with ``key`` to be checked before insertion.
     new_value (str): The value associated with ``key`` to be added to the store.
-    old_value (str): The value associated with ``key`` to be checked before insertion.
 
 Example::
     >>> import torch.distributed as dist

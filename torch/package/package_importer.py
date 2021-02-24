@@ -41,7 +41,7 @@ class PackageImporter(Importer):
     """
     modules : Dict[str, Optional[types.ModuleType]]
 
-    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
+    def __init__(self, file_or_buffer: Union[str, torch._C._jit.PyTorchFileReader, Path, BinaryIO],
                  module_allowed: Callable[[str], bool] = lambda module_name: True):
         """Open `file_or_buffer` for importing. This checks that the imported package only requires modules
         allowed by `module_allowed`
@@ -57,18 +57,18 @@ class PackageImporter(Importer):
             ImportError: If the package will use a disallowed module.
         """
         self.zip_reader : Any
-        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
+        if isinstance(file_or_buffer, torch._C._jit.PyTorchFileReader):
             self.filename = '<pytorch_file_reader>'
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (Path, str)):
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                self.zip_reader = torch._C.PyTorchFileReader(self.filename)
+                self.zip_reader = torch._C._jit.PyTorchFileReader(self.filename)
             else:
                 self.zip_reader = MockZipReader(self.filename)
         else:
             self.filename = '<binary>'
-            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
+            self.zip_reader = torch._C._jit.PyTorchFileReader(file_or_buffer)
 
         self.root = _PackageNode(None)
         self.modules = {}
@@ -164,13 +164,17 @@ class PackageImporter(Importer):
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
 
-            assert typename == 'storage', \
+            if typename == 'storage':
+                data_type, key, location, size = data
+                if key not in loaded_storages:
+                    load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+                storage = loaded_storages[key]
+                return storage
+            elif typename == 'reduce_package':
+                func, args = data
+                return func(self, *args)
+            else:
                 f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
-            data_type, key, location, size = data
-            if key not in loaded_storages:
-                load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
-            storage = loaded_storages[key]
-            return storage
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
@@ -195,11 +199,11 @@ class PackageImporter(Importer):
         return self._mangler.parent_name()
 
     def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
-        """Returns a file structure representation of package's zipfile. 
+        """Returns a file structure representation of package's zipfile.
 
         Args:
             include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be 
+                for the names of the files to be inluded in the zipfile representation. This can also be
                 a glob-style pattern, as described in exporter's :meth:`mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
