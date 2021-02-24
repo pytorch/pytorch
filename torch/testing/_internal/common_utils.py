@@ -1725,6 +1725,8 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     is specified but higher than min(rows, columns)/(rows * columns)
     for non-singular matrices.
     """
+    # TODO: we should also add tests to test_testing to ensure that random_sparse_matrix() 
+    # (and make_tensor()) work as expected
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     singular = kwargs.get("singular", False)
@@ -1740,39 +1742,28 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     column_indices = [i % columns for i in range(nonzero_elements)]
     random.shuffle(column_indices)
     indices = [row_indices, column_indices]
-    if dtype in integral_types():
-        requires_grad = False
-        if values_domain is None:
-            low, high = (-100, 100)
-        else:
-            low, high = values_domain
 
-        low = round(max(low, torch.iinfo(dtype).min))
-        high = round(min(high, min(torch.iinfo(dtype).max, 100)))  # clamp large values to 100
-
-        values = torch.randint(low, high, size=(nonzero_elements, ), dtype=dtype, device=device)
-    elif dtype == torch.bool:
+    if dtype in integral_types() + (torch.bool, ):
         requires_grad = False
-        values = torch.randint(0, 2, size=(nonzero_elements, ), dtype=dtype, device=device)
+
+    if values_domain is None:
+        low, high = None, None
     else:
-        if values_domain is None:
-            values = torch.randn(nonzero_elements, dtype=dtype, device=device)
-            # ensure that the diagonal dominates
-            if diag_dominates:
-                # this wont work for all dtypes
-                # e.g. "exp" "_vml_cpu" not implemented for 'Half'
-                values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
-        else:
-            low, high = values_domain
-            high = min(high, 100)  # if high=inf, clamp to 100
-            values = (high - low) * torch.rand(nonzero_elements, dtype=dtype, device=device) + low
+        low, high = values_domain
+    values = make_tensor([nonzero_elements, ], device=device, dtype=dtype, low=low, high=high)
+
+    if diag_dominates:
+        # this wont work for all dtypes
+        # e.g. "exp" "_vml_cpu" not implemented for 'Half'
+        values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
+
 
     indices_tensor = torch.tensor(indices)
     A = torch.sparse_coo_tensor(
         indices_tensor, values, (rows, columns), device=device, requires_grad=requires_grad
     )
     if not uncoalesced:
-        A = A.coalesce() 
+        A = A.coalesce()
     return A
 
 

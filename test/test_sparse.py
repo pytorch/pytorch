@@ -3029,20 +3029,27 @@ class TestSparseOneOff(TestCase):
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
-    def _skip_helper(self, dtype):
-        unsupportedTypes = [torch.bfloat16, torch.float16, torch.bool, torch.complex64, torch.complex128]
-        if dtype in unsupportedTypes:
-            self.skipTest(f'Skipped! "coalesce" not implemented for {dtype}')
+    def _skip_helper(self, device, dtype):
+        unsupportedDevicesTypes = [
+            ("cpu", torch.bool), ("cpu", torch.bfloat16), ("cpu", torch.float16),
+            ("cpu", torch.complex64), ("cpu", torch.complex128),
+            ("cuda", torch.bool), ("cuda", torch.complex64), ("cuda", torch.complex128),
+        ]
+        if (torch.device(device).type, dtype) in unsupportedDevicesTypes:
+            self.skipTest(f'Skipped! "coalesce" not implemented for {dtype} and {device}')
 
     def _get_dense_and_sparse_samples(self, device, dtype, op):
-        test_backward = op.test_complex_grad or not dtype.is_complex
+        test_backward = op.supports_autograd and op.test_complex_grad or not dtype.is_complex
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         sparse_samples = op.sparse_sample_inputs(device, dtype, requires_grad=test_backward)
         if sparse_samples is not None:
             samples += sparse_samples
         return samples
 
-    def _test_forward(self, sample, op):
+    def _test_forward(self, sample, op, inplace_op=None):
+        # In this method we assume that input args and kwargs should not 
+        # need to be modified between dense and sparse
+        # This assumption holds for unary ops for which args/kwargs wont be tensors.
         dense_sample_input = tuple(
             (i.to_dense() if i.layout != torch.strided else i) for i in sample.input
         )
@@ -3051,12 +3058,44 @@ class TestSparseUnaryUfuncs(TestCase):
         )
 
         expected_forward = op(*dense_sample_input, *sample.args, **sample.kwargs)
-        sparse_forward = op(*sparse_sample_input, *sample.args, **sample.kwargs)
-        self.assertEqual(sparse_forward.to_dense(), expected_forward)
+        if inplace_op is None:
+            # Simple consistency check for non-inplace op
+            sparse_forward = op(*sparse_sample_input, *sample.args, **sample.kwargs)
+            self.assertEqual(sparse_forward.to_dense(), expected_forward)
+        else:
+            assert len(sparse_sample_input) == 1, "Unary op should have single input"
+            expected_forward_dtype = expected_forward.dtype
+            dtype = sparse_sample_input[0].dtype
+            # Test inplace op either on coalesced input
+            # or on uncoalesced input for the ops that supports inplace computation on uncoalesced
+            # (e.g. neg: neg(x + y) = neg(x) + neg(y))
+            if op.supports_inplace_on_uncoalesced or sparse_sample_input[0].is_coalesced():
+                # Check if resulting dtype can be cast to the input dtype
+                if torch.can_cast(expected_forward_dtype, dtype):
+                    sparse_forward = inplace_op(*(clone_input_helper(input) for input in sparse_sample_input),
+                                                *sample.args,
+                                                **sample.kwargs)
+                    self.assertEqual(sparse_forward.to_dense(), expected_forward)
+                else:
+                    # otherwise assert op raises an exception
+                    with self.assertRaisesRegex(RuntimeError, "result type cannot be"):
+                        sparse_forward = inplace_op(*(clone_input_helper(input) for input in sparse_sample_input),
+                                                    *sample.args,
+                                                    **sample.kwargs)
+            else:
+                # Here input is uncoalesced and op does not support inplace
+                if torch.can_cast(expected_forward.dtype, dtype):
+                    err_msg = "in-place on uncoalesced tensors is not supported"
+                else:
+                    err_msg = "result type cannot be"
+                with self.assertRaisesRegex(RuntimeError, err_msg):
+                    sparse_forward = inplace_op(*(clone_input_helper(input) for input in sparse_sample_input),
+                                                *sample.args,
+                                                **sample.kwargs)
 
     @ops(sparse_unary_ufuncs)
     def test_function_consistency(self, device, dtype, op):
-        self._skip_helper(dtype)
+        self._skip_helper(device, dtype)
         # Checks sparse/dense consistency for funtion only
         samples = self._get_dense_and_sparse_samples(device, dtype, op)
 
@@ -3069,7 +3108,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @ops(sparse_unary_ufuncs)
     def test_method_variant_consistency(self, device, dtype, op):
-        self._skip_helper(dtype)
+        self._skip_helper(device, dtype)
         # Checks sparse/dense consistency for method variant only
         samples = self._get_dense_and_sparse_samples(device, dtype, op)
 
@@ -3087,7 +3126,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @ops(sparse_unary_ufuncs)
     def test_operator_variant_consistency(self, device, dtype, op):
-        self._skip_helper(dtype)
+        self._skip_helper(device, dtype)
         # Checks sparse/dense consistency for method variant only
         samples = self._get_dense_and_sparse_samples(device, dtype, op)
 
@@ -3105,7 +3144,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @ops(sparse_unary_ufuncs)
     def test_alias_variant_consistency(self, device, dtype, op):
-        self._skip_helper(dtype)
+        self._skip_helper(device, dtype)
         # Checks sparse/dense consistency for method variant only
         samples = self._get_dense_and_sparse_samples(device, dtype, op)
 
@@ -3121,7 +3160,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @ops(sparse_unary_ufuncs)
     def test_inplace_variant_consistency(self, device, dtype, op):
-        self._skip_helper(dtype)
+        self._skip_helper(device, dtype)
         # Checks sparse/dense consistency for inplace method variant only
         samples = self._get_dense_and_sparse_samples(device, dtype, op)
 
@@ -3132,36 +3171,10 @@ class TestSparseUnaryUfuncs(TestCase):
         if inplace is None:
             self.skipTest("Skipped! No inplace variant op")
 
-        for sample in samples:
-            dense_sample_input = tuple(
-                (i.to_dense() if i.layout != torch.strided else i) for i in sample.input
-            )
-            sparse_sample_input = tuple(
-                (i.to_sparse() if i.layout == torch.strided else i) for i in sample.input
-            )
-            assert len(sparse_sample_input) == 1, "Unary op should have single input"
-
-            expected_forward = op(*dense_sample_input, *sample.args, **sample.kwargs)
-
-            if op.supports_inplace_on_uncoalesced or sparse_sample_input[0].is_coalesced():
-                if torch.can_cast(expected_forward.dtype, dtype):
-                    sparse_forward = inplace(*(clone_input_helper(input) for input in sparse_sample_input),
-                                             *sample.args,
-                                             **sample.kwargs)
-                    self.assertEqual(sparse_forward.to_dense(), expected_forward)
-                else:
-                    with self.assertRaisesRegex(RuntimeError, "result type cannot be"):
-                        sparse_forward = inplace(*(clone_input_helper(input) for input in sparse_sample_input),
-                                                 *sample.args,
-                                                 **sample.kwargs)
-            else:
-                if torch.can_cast(expected_forward.dtype, dtype):
-                    with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-                        inplace(*(clone_input_helper(input) for input in sparse_sample_input),
-                                *sample.args,
-                                **sample.kwargs)
-
-            # We can not check grads for sparse yet            
+        # Below we test unary inplace op on a single input
+        for sample in samples:            
+            self._test_forward(sample, op, inplace)
+            # We can not check grads for sparse yet
 
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
 

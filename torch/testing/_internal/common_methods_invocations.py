@@ -158,7 +158,10 @@ class OpInfo(object):
                  decorators=None,  # decorators to apply to generated tests
                  safe_casts_outputs=False,  # whether op allows safe casting when writing to out arguments
                  sample_inputs_func=None,  # function to generate sample inputs
-                 sparse_sample_inputs_func=None,  # function to generate sparse sample inputs
+                 sparse_sample_inputs_func=None,  # function to generate sparse sample inputs, if provided then the op
+                                                  # is supporting sparse inputs and op.supports_sparse == True
+                                                  # Generated sparse sample inputs are used in addition to the 
+                                                  # regular sample inputs from op.sample_inputs_func
                  supports_inplace_on_uncoalesced=False,  # whether op supports inplace on uncoalesced sparse input
                  aten_name=None,  # name of the corresponding aten:: operator
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
@@ -209,6 +212,9 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
 
         self.supports_sparse = self.sparse_sample_inputs_func is not None
+        if not self.supports_sparse:
+            assert not supports_inplace_on_uncoalesced, \
+                "Inconsistent configuration, supports_inplace_on_uncoalesced should be False"
         self.supports_inplace_on_uncoalesced = supports_inplace_on_uncoalesced
 
         self.supports_autograd = supports_autograd
@@ -314,7 +320,10 @@ def sparse_sample_inputs_unary(op_info, device, dtype, requires_grad):
         raise RuntimeError("This op does not support sparse input")
 
     # generate 2D random coalesced/uncoalesced sparse matrix with density of 20%
-    rh, rw = torch.randint(100, 200, size=(2, )).tolist()
+    rh, rw = 23, 34
+    # TODO: In the future should we consider updating the sparse matrix ctor to be 
+    # make_sparse_tensor() for consistency with make_tensor(), and look at giving 
+    # them similar interfaces and logic
     low, high = op_info.domain
     domain = None if (low is None and high is None) else (low + op_info._domain_eps, high - op_info._domain_eps)
     t1 = random_sparse_matrix(
