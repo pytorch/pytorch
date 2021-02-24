@@ -67,7 +67,7 @@ __MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
   return ::copysignf(x, y);
 #else
   return fp32_from_bits(
-      (fp32_to_bits(x) & 0x7fffffffu) | (fp32_to_bits(y) & 0x80000000u))
+      (fp32_to_bits(x) & 0x7fffffffu) | (fp32_to_bits(y) & 0x80000000u));
 #endif
 }
 
