@@ -622,11 +622,16 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
         msg = "has no attribute \'non_exist\'"
+
         with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_sync().non_exist()
 
+        # Note: re-creating rref for each test to remove effect of cached type
+        rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
         with self.assertRaisesRegex(AttributeError, msg):
-            rref.rpc_async().non_exist()
+            rref.rpc_async().non_exist().wait()
+
+        rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
 
         with self.assertRaisesRegex(AttributeError, msg):
             rref.remote().non_exist()
@@ -5398,9 +5403,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         if not expect_raise_inline:
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 result.wait()
-        if rref_proxy_api in ["rpc_sync", "remote"]:
-            with self.assertRaisesRegex(RuntimeError, expected_error):
-                result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
         else:
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2)).wait()
