@@ -865,41 +865,44 @@ class Module:
 
     def _call_impl(self, *input, **kwargs):
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        # If we don't have any hooks, we want to skip the rest of the logic in
+        # this function, and just call forward.
         if not (self._backward_hooks or self._forward_hooks or self._forward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*input, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
-        if len(self._backward_hooks) > 0 or len(_global_backward_hooks) > 0:
+        if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
-
-        for hook in itertools.chain(
-                _global_forward_pre_hooks.values(),
-                self._forward_pre_hooks.values()):
-            result = hook(self, input)
-            if result is not None:
-                if not isinstance(result, tuple):
-                    result = (result,)
-                input = result
+        if _global_forward_pre_hooks or self._forward_pre_hooks:
+            for hook in itertools.chain(
+                    _global_forward_pre_hooks.values(),
+                    self._forward_pre_hooks.values()):
+                result = hook(self, input)
+                if result is not None:
+                    if not isinstance(result, tuple):
+                        result = (result,)
+                    input = result
 
         bw_hook = None
-        if len(full_backward_hooks) > 0:
+        if full_backward_hooks:
             bw_hook = hooks.BackwardHook(self, full_backward_hooks)
             input = bw_hook.setup_input_hook(input)
 
         result = forward_call(*input, **kwargs)
-        for hook in itertools.chain(
-                _global_forward_hooks.values(),
-                self._forward_hooks.values()):
-            hook_result = hook(self, input, result)
-            if hook_result is not None:
-                result = hook_result
+        if _global_forward_hooks or self._forward_hooks:
+            for hook in itertools.chain(
+                    _global_forward_hooks.values(),
+                    self._forward_hooks.values()):
+                hook_result = hook(self, input, result)
+                if hook_result is not None:
+                    result = hook_result
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
 
         # Handle the non-full backward hooks
-        if len(non_full_backward_hooks) > 0:
+        if non_full_backward_hooks:
             var = result
             while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
