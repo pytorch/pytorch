@@ -1697,6 +1697,13 @@ class TestDict(JitTestCase):
 
 
 class TestScriptDict(JitTestCase):
+    def _script_dict_add(self, d, k, v):
+        @torch.jit.script
+        def dict_add(d: Dict[int, int], k: int, v: int):
+            d[k] = v
+
+        dict_add(d, k, v)
+
     def test_repr(self):
         t = torch.jit.dict({1: 2})
         exp = "{1: 2}"
@@ -1759,13 +1766,21 @@ class TestScriptDict(JitTestCase):
         self.assertEqual(len(one), 1)
         self.assertEqual(len(zero), 0)
 
-    def test_reference_semantics(self):
-        @torch.jit.script
-        def dict_add(d: Dict[int, int], k: int, v: int):
-            d[k] = v
+    def test_nested(self):
+        nested = torch.jit.dict({1: {1: 2}, 2: {3: 4}}, Dict[int, Dict[int, int]])
 
+        one = nested[1]
+        two = nested[2]
+
+        self._script_dict_add(one, 9, 10)
+        self._script_dict_add(two, 11, 12)
+
+        self.assertEqual(len(nested[1]), 2)
+        self.assertEqual(len(nested[2]), 2)
+
+    def test_reference_semantics(self):
         data = torch.jit.dict({1: 2})
-        dict_add(data, 3, 4)
+        self._script_dict_add(data, 3, 4)
 
         self.assertEqual(len(data), 2)
         self.assertEqual(3 in data, True)

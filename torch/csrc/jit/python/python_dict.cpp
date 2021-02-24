@@ -1,14 +1,35 @@
 #include <pybind11/detail/common.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
 #include <stdexcept>
 #include "ATen/core/ivalue.h"
-#include "jit/python/pybind_utils.h"
 
 namespace torch {
 namespace jit {
 
 struct CustomMethodProxy;
 struct CustomObjectProxy;
+
+IValue ScriptDictIterator::next() {
+  if (iter_ == end_) {
+    throw py::stop_iteration();
+  }
+
+  IValue result = ivalue::Tuple::create({iter_->key(), iter_->value()});
+  ;
+  iter_++;
+  return result;
+}
+
+IValue ScriptDictKeyIterator::next() {
+  if (iter_ == end_) {
+    throw py::stop_iteration();
+  }
+
+  IValue result = iter_->key();
+  iter_++;
+  return result;
+}
 
 void initScriptDictBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();

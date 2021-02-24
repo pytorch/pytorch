@@ -1,11 +1,10 @@
 #pragma once
 
+#include <ATen/core/Dict.h>
+#include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <pybind11/detail/common.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
-#include "ATen/core/Dict.h"
-#include "ATen/core/ivalue.h"
-#include "ATen/core/jit_type.h"
 #include "c10/util/Exception.h"
 #include "c10/util/intrusive_ptr.h"
 
@@ -20,15 +19,7 @@ class ScriptDictKeyIterator final {
       c10::impl::GenericDict::iterator iter,
       c10::impl::GenericDict::iterator end)
       : iter_(std::move(iter)), end_(std::move(end)) {}
-  IValue next() {
-    if (iter_ == end_) {
-      throw py::stop_iteration();
-    }
-
-    IValue result = iter_->key();
-    iter_++;
-    return result;
-  }
+  IValue next();
 
  private:
   c10::impl::GenericDict::iterator iter_;
@@ -41,16 +32,7 @@ class ScriptDictIterator final {
       c10::impl::GenericDict::iterator iter,
       c10::impl::GenericDict::iterator end)
       : iter_(std::move(iter)), end_(std::move(end)) {}
-  IValue next() {
-    if (iter_ == end_) {
-      throw py::stop_iteration();
-    }
-
-    IValue result = ivalue::Tuple::create({iter_->key(), iter_->value()});
-    ;
-    iter_++;
-    return result;
-  }
+  IValue next();
 
  private:
   c10::impl::GenericDict::iterator iter_;

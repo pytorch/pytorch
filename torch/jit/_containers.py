@@ -3,7 +3,7 @@ from typing import Dict, Optional, TypeVar
 
 from .annotations import ann_to_type
 
-from torch._C import ScriptDict, Type
+from torch._C import ScriptDict, Type  # type: ignore
 
 K = TypeVar('K')
 V = TypeVar('V')

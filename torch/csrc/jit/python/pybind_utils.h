@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
+#include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -694,13 +695,14 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
   } else if (ivalue.isGenericDict()) {
-    auto dict = std::move(ivalue).toGenericDict();
-    py::dict py_dict;
-    for (auto& pair : dict) {
-      py_dict[toPyObject(IValue{pair.key()})] =
-          toPyObject(IValue{pair.value()});
-    }
-    return std::move(py_dict);
+    return py::cast(ScriptDict(ivalue));
+    // auto dict = std::move(ivalue).toGenericDict();
+    // py::dict py_dict;
+    // for (auto& pair : dict) {
+    //   py_dict[toPyObject(IValue{pair.key()})] =
+    //       toPyObject(IValue{pair.value()});
+    // }
+    // return std::move(py_dict);
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     auto RRefPtr =
