@@ -8,6 +8,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
+    get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
 )
 
@@ -33,7 +34,9 @@ def add_weight_info_to_dict(
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
     results: Dict[str, Dict[str, torch.Tensor]],
 ) -> None:
-    type_a_related_to_b = get_type_a_related_to_b()
+    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    type_a_related_to_b = \
+        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
     for node, ref_node_name in nodes_and_names_to_instrument:
 
@@ -75,7 +78,9 @@ def compare_weights(
     model_name_b: str,
     gm_b: GraphModule,
 ) -> Dict[str, Dict[str, torch.Tensor]]:
-    type_a_related_to_b = get_type_a_related_to_b()
+    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    type_a_related_to_b = \
+        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
 
     # split the subgraph pairs into one data structure for each model
