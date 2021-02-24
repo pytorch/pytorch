@@ -68,6 +68,14 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
 }
 
+inline Tensor multi_dot(TensorList tensors) {
+  return torch::linalg_multi_dot(tensors);
+}
+
+inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
+  return torch::linalg_multi_dot_out(result, tensors);
+}
+
 inline Tensor pinv(const Tensor& input, double rcond, bool hermitian) {
   return torch::linalg_pinv(input, rcond, hermitian);
 }
@@ -191,6 +199,15 @@ inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermiti
 
 inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
   return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot
+inline Tensor multi_dot(TensorList tensors) {
+  return torch::linalg_multi_dot(tensors);
+}
+
+inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
+  return torch::linalg_multi_dot_out(result, tensors);
 }
 
 /// Computes pseudo-inverse
