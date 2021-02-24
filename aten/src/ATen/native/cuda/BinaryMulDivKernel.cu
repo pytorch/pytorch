@@ -117,7 +117,7 @@ uint32_t fp16_to_bits(scalar_t f) {
 
 template<typename scalar_t>
 scalar_t copysignfp16(scalar_t x, scalar_t y){
-  return fp16_from_bits(
+  return fp16_from_bits<scalar_t>(
     (fp16_to_bits(x) & 0x7fffu) | (fp16_to_bits(y) & 0x8000u));
 } 
 
