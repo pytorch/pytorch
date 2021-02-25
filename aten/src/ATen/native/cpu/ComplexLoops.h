@@ -29,8 +29,7 @@ dereference_vec_complex(char* C10_RESTRICT data[], const typename traits::templa
   return dereference_vec_complex_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
 
-template <typename func_t,
-    typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+template <typename func_t>
 static inline void
 execute_op_complex(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
@@ -44,20 +43,7 @@ execute_op_complex(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
   }
 }
 
-template <typename func_t,
-    typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
-static inline void
-execute_op_complex(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
-  using traits = function_traits<func_t>;
-  for (; i < n; i++) {
-    c10::guts::apply(std::forward<func_t>(op), dereference<traits>(
-        &data[0],
-        &strides[0],
-        i));
-  }
-}
-
-// Basic loop operation (one output, N inputs). May be auto-vectorized
+// Basic loop operation (two outputs, N inputs). May be auto-vectorized
 // by the compiler. Supports inputs and outputs of different types.
 template <typename func_t>
 static inline void

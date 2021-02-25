@@ -76,8 +76,7 @@ dereference_vec_impl(char* C10_RESTRICT data[],
 
 template <typename traits>
 typename traits::ArgsTuple
-dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar,
-                size_t S, int64_t i) {
+dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
@@ -163,6 +162,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
     basic_loop(data, strides, i, n, std::forward<func_t>(op));
   }
 }
+
 
 template <typename traits, typename cb_t>
 static inline void unroll_contiguous_scalar_checks(
