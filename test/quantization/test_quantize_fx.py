@@ -2608,6 +2608,29 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
 
+    def test_silu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.silu = torch.nn.SiLU()
+
+            def forward(self, x):
+                x = self.silu(x)
+                x = torch.nn.functional.silu(x)
+                return x
+
+        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        quant_type = QuantType.STATIC
+        qconfig_dict = {
+            "": float16_static_qconfig
+        }
+        node_occurrence = {
+            ns.call_method("to"): 3
+        }
+        m = self.checkGraphModeFxOp(
+            M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
+            expected_node_occurrence=node_occurrence)
+
     @skipIfNoFBGEMM
     def test_clamp(self):
         class M(torch.nn.Module):

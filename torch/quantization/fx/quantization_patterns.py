@@ -708,10 +708,12 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.InstanceNorm2d)
 @register_quant_pattern(torch.nn.InstanceNorm3d)
 @register_quant_pattern(torch.nn.LayerNorm)
+@register_quant_pattern(torch.nn.SiLU)
 @register_quant_pattern(torch.nn.functional.hardswish)
 @register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
+@register_quant_pattern(torch.nn.functional.silu)
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
@@ -740,6 +742,9 @@ class DefaultNode(QuantizeHandler):
         int8_dtypes = [
             (torch.quint8, torch.qint8, None)
         ]
+        fp16_dtypes = [
+            (torch.float16, torch.float16, None)
+        ]
         supported_dtypes = {
             torch.nn.ConvTranspose1d: int8_dtypes,
             torch.nn.ConvTranspose2d: int8_dtypes,
@@ -750,10 +755,12 @@ class DefaultNode(QuantizeHandler):
             torch.nn.InstanceNorm2d: int8_dtypes,
             torch.nn.InstanceNorm3d: int8_dtypes,
             torch.nn.LayerNorm: all_dtypes,
+            torch.nn.SiLU: fp16_dtypes,
             torch.nn.functional.hardswish: int8_dtypes,
             torch.nn.functional.instance_norm: int8_dtypes,
             torch.nn.functional.layer_norm: all_dtypes,
             torch.nn.functional.leaky_relu: int8_dtypes,
+            torch.nn.functional.silu: fp16_dtypes,
         }
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
@@ -847,6 +854,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
         else:
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
 
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
