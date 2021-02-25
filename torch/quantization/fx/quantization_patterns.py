@@ -42,7 +42,7 @@ from abc import ABC, abstractmethod
 import operator
 import warnings
 
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Union
 
 # -------------------------
 # Pattern Registrations
@@ -96,13 +96,13 @@ class BinaryOp(QuantizeHandler):
         self.bop_node = node
         self.bop = node.target
         self.num_node_args = len([a for a in self.bop_node.args[:2] if isinstance(a, Node)])
-        qbin_op_mapping = {
+        qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
             operator.add: torch.ops.quantized.add,
             torch.add: torch.ops.quantized.add,
             operator.mul: torch.ops.quantized.mul,
             torch.mul: torch.ops.quantized.mul,
         }
-        qbin_relu_op_mapping = {
+        qbin_relu_op_mapping: Dict[Union[Callable, str], Callable] = {
             operator.add: torch.ops.quantized.add_relu,
             torch.add: torch.ops.quantized.add_relu,
             operator.mul: torch.ops.quantized.mul_relu,
@@ -111,7 +111,7 @@ class BinaryOp(QuantizeHandler):
         # corresponding quantized op
         self.qop = qbin_relu_op_mapping[self.bop] \
             if self.relu_node is not None \
-            else qbin_op_mapping[self.bop]
+            else qbin_op_mapping[self.bop]  # type: ignore
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
