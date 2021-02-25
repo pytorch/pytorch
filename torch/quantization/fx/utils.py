@@ -103,9 +103,9 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
-        scale, zero_point = activation_post_process.calculate_qparams()
-        if is_per_channel(activation_post_process.qscheme):
-            ch_axis = int(activation_post_process.ch_axis)
+        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore
+        if is_per_channel(activation_post_process.qscheme):  # type: ignore
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
         else:
