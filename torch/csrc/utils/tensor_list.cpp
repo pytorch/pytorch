@@ -30,7 +30,7 @@ static PyObject* recursive_to_list(
 
 PyObject* tensor_to_list(const Tensor& tensor) {
   Tensor data = tensor;
-  if (data.options().backend() != Backend::CPU) {
+  if (!data.device().is_cpu()) {
     pybind11::gil_scoped_release no_gil;
     data = data.toBackend(Backend::CPU);
   }

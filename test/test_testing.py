@@ -435,30 +435,90 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
+    def test_make_tensor(self, device, dtype):
+        def check(size, low, high, requires_grad, discontiguous):
+            t = make_tensor(size, device, dtype, low=low, high=high,
+                            requires_grad=requires_grad, discontiguous=discontiguous)
+
+            self.assertEqual(t.shape, size)
+            self.assertEqual(t.device, torch.device(device))
+            self.assertEqual(t.dtype, dtype)
+
+            low = -9 if low is None else low
+            high = 9 if high is None else high
+
+            if t.numel() > 0 and dtype in [torch.long, torch.float]:
+                self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
+
+            if dtype in [torch.float, torch.cfloat]:
+                self.assertEqual(t.requires_grad, requires_grad)
+            else:
+                self.assertFalse(t.requires_grad)
+
+            if t.numel() > 1:
+                self.assertEqual(t.is_contiguous(), not discontiguous)
+            else:
+                self.assertTrue(t.is_contiguous())
+
+        for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
+            check(size, None, None, False, False)
+            check(size, 2, 4, True, True)
+
     def test_assert_messages(self, device):
         self.assertIsNone(self._get_assert_msg(msg=None))
         self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
         self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
         self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
 
+    # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
+    # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
+    # These tests are slow because it spawn another process to run test suite.
+    # See: https://github.com/pytorch/pytorch/issues/49019
     @onlyCUDA
     @slowTest
-    def test_cuda_assert_should_stop_test_suite(self, device):
-        # This test is slow because it spawn another process to run another test suite.
-
-        # Test running of cuda assert test suite should early terminate.
+    def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
+        # test to ensure common_utils.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python
 
 import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 
+class TestThatContainsCUDAAssertFailure(TestCase):
+
+    @slowTest
+    def test_throw_unrecoverable_cuda_exception(self):
+        x = torch.rand(10, device='cuda')
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    @slowTest
+    def test_trivial_passing_test_case_on_cpu_cuda(self):
+        x1 = torch.tensor([0., 1.], device='cuda')
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # should capture CUDA error
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # should run only 1 test because it throws unrecoverable error.
+        self.assertIn('Ran 1 test', stderr)
+
+
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
+        # test to ensure common_device_type.py override has early termination for CUDA.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python
+
+import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
-# This test is added to ensure that test suite terminates early when
-# CUDA assert was thrown since all subsequent test will fail.
-# See: https://github.com/pytorch/pytorch/issues/49019
-# This test file should be invoked from test_testing.py
 class TestThatContainsCUDAAssertFailure(TestCase):
 
     @slowTest
@@ -486,6 +546,45 @@ if __name__ == '__main__':
         self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
         self.assertIn('Ran 1 test', stderr)
+
+
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
+        # test to ensure common_distributed.py override should not early terminate CUDA.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python
+
+import torch
+from torch.testing._internal.common_utils import (run_tests, slowTest)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcessTestCase
+
+class TestThatContainsCUDAAssertFailure(MultiProcessTestCase):
+
+    @slowTest
+    def test_throw_unrecoverable_cuda_exception(self, device):
+        x = torch.rand(10, device=device)
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    @slowTest
+    def test_trivial_passing_test_case_on_cpu_cuda(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+instantiate_device_type_tests(
+    TestThatContainsCUDAAssertFailure,
+    globals(),
+    only_for='cuda'
+)
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # we are currently disabling CUDA early termination for distributed tests.
+        self.assertIn('Ran 2 test', stderr)
 
 
 instantiate_device_type_tests(TestTesting, globals())

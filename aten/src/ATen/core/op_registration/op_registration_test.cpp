@@ -639,7 +639,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingC
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel(DispatchKey::CPU, [] (const int64_t&) {})
-      .kernel(DispatchKey::CUDA, [] (int64_t&) {}));
+      .kernel(DispatchKey::CUDA, [] (int64_t) {}));
   }, "Mismatch in kernel C++ signatures");
 }
 
