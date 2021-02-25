@@ -8,7 +8,6 @@
 import os
 
 import numpy as np
-import unittest
 import torch
 import torch.distributed as dist
 from typing import List, Any, Type, cast
@@ -558,4 +557,5 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    # ! unittest should not be used here, else the tests are not properly registered
+    torch.testing._internal.common_utils.run_tests()
