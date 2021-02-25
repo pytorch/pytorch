@@ -44,7 +44,12 @@ class Case(TypedDict):
     skipped: bool
 
 
-class Suite(TypedDict):
+# The original format of the s3 reports did not have this filename field. This maintains backwards-compatibility
+class SuiteMeta(TypedDict, total=False):
+    filename: str
+
+
+class Suite(SuiteMeta):
     total_seconds: float
     cases: List[Case]
 

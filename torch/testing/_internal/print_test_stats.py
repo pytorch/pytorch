@@ -5,6 +5,7 @@ import datetime
 import json
 import math
 import os
+import re
 import statistics
 import subprocess
 import time
@@ -13,7 +14,7 @@ from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Tuple)
-from xml.dom import minidom  # type: ignore[import]
+from xml.dom import minidom
 
 import requests
 from typing_extensions import TypedDict
@@ -41,7 +42,12 @@ class Case(TypedDict):
     skipped: bool
 
 
-class Suite(TypedDict):
+# The original format of the s3 reports did not have this filename field. This maintains backwards-compatibility
+class SuiteMeta(TypedDict, total=False):
+    filename: str
+
+
+class Suite(SuiteMeta):
     total_seconds: float
     cases: List[Case]
 
@@ -540,8 +546,9 @@ class TestCase:
 
 
 class TestSuite:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, filename: str) -> None:
         self.name = name
+        self.filename = filename
         self.test_cases: List[TestCase] = []
         self.failed_count = 0
         self.skipped_count = 0
@@ -549,7 +556,7 @@ class TestSuite:
         self.total_time = 0.0
 
     def __repr__(self) -> str:
-        rc = f'{self.name} run_time: {self.total_time:.2f} tests: {len(self.test_cases)}'
+        rc = f'{self.name} filename: {self.filename} run_time: {self.total_time:.2f} tests: {len(self.test_cases)}'
         if self.skipped_count > 0:
             rc += f' skipped: {self.skipped_count}'
         return f'TestSuite({rc})'
@@ -587,10 +594,14 @@ def parse_reports(folder: str) -> Dict[str, TestSuite]:
     reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
     tests_by_class = dict()
     for report in reports:
+        test_filename = re.sub(r'\.', '/', os.path.basename(os.path.dirname(report)))
         for test_case in parse_report(report):
             class_name = test_case.class_name
             if class_name not in tests_by_class:
-                tests_by_class[class_name] = TestSuite(class_name)
+                tests_by_class[class_name] = TestSuite(class_name, test_filename)
+            orig_filename = tests_by_class[class_name].filename
+            if test_filename != orig_filename:
+                raise RuntimeError(f'Suite belongs to different test files: {0} vs {1}', test_filename, orig_filename)
             tests_by_class[class_name].append(test_case)
     return tests_by_class
 
@@ -663,6 +674,7 @@ def assemble_s3_object(
         'suites': {
             name: {
                 'total_seconds': suite.total_time,
+                'filename': suite.filename,
                 'cases': [
                     {
                         'name': case.name,
@@ -837,7 +849,7 @@ if __name__ == '__main__':
 
     send_report_to_scribe(reports)
 
-    longest_tests = []
+    longest_tests : List[TestCase] = []
     total_time = 0.0
     for name in sorted(reports.keys()):
         test_suite = reports[name]
