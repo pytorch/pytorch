@@ -10,6 +10,8 @@
 
 #include <utility>
 
+#include <iostream>
+
 namespace at {
 namespace native {
 
@@ -214,13 +216,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-  // FIXME: This seems bogus, I only do this because it was the old behaviour.
-  //        The reductions are fine, as long as the axis being reduced along
-  //        isn't of 0 elements (and the output has elements).
-  TORCH_CHECK(
-      self.numel() > 0,
-      "cannot perform reduction function kthvalue",
-      " on tensor with no elements because the operation does not have an identity");
+  TORCH_CHECK(self.sizes()[dim] != 0, "Expected reduction dim ", dim, " to be non-zero.");
   TORCH_CHECK(
       k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");

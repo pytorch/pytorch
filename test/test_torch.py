@@ -5021,21 +5021,42 @@ class TestTorchDeviceType(TestCase):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
         test_functions = [
+            ('amax', torch.amax, None, {}),
+            ('amin', torch.amin, None, {}),
+            ('argmax', torch.argmax, None, {'dtype': torch.int64}),
+            ('argmin', torch.argmin, None, {'dtype': torch.int64}),
             ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
             ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
-            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, None, {}),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
+            ('mode', torch.mode, None, {}),
         ]
 
-        for name, fn, identity, dt in test_functions:
-            self.assertEqual(torch.empty((2, 0), device=device,**dt), fn(master_input, dim=2))
-            self.assertEqual(torch.empty((2, 0, 1), device=device,**dt), 
+        for name, fn, identity, dtype in test_functions:
+            # Check if reduction happens along the specified dim with and without keepdim.
+            print("function: ", fn)
+            self.assertEqual(torch.empty((2, 0), device=device,**dtype), fn(master_input, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device,**dtype), 
                 fn(master_input, dim=2, keepdim=True))
 
-        # Raise error when wanting to reduce on the zero dimension.
-        for fn in [torch.max]:
-            ident_err = 'Expected tensor with non-zero'
-            print("function: ", fn)
-            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(master_input, dim=1))
+            # Check if function raises error on specified zero'd dimension as reduction dim.
+            self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1))
+
+    def test_tensor_reduce_ops_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+
+        test_functions = [
+            ('prod', torch.prod, 1., {}),
+            ('sum', torch.sum, 0., {}),
+            ('norm', torch.norm, 0., {}),
+            ('mean', torch.mean, nan, {}),
+            ('var', torch.var, nan, {}),
+            ('std', torch.std, nan, {}),
+            ('logsumexp', torch.logsumexp, -inf, {}),
+        ]
+
+        for name, fn, identity, dtype in test_functions:
+            pass
 
     def _brute_pdist(self, inp, p=2):
         """Computes the same as torch.pdist using primitives"""
