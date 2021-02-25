@@ -306,7 +306,6 @@ class TestOptim(TestCase):
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
-    @skipIfRocm
     @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():

@@ -2480,8 +2480,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
-    # Excluding ROCM
-    except_for='cuda' if TEST_WITH_ROCM else None,
+    None,
 )
 
 if __name__ == '__main__':
