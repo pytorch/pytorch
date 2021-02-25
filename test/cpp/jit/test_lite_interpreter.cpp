@@ -1,4 +1,4 @@
-#include "test_utils.h"
+#include <test/cpp/jit/test_utils.h>
 
 #include <gtest/gtest.h>
 

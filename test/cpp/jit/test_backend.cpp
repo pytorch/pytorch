@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
+#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/torch.h>
-#include "test_utils.h"
 
 // Tests go in torch::jit
 namespace torch {
