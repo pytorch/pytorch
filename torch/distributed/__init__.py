@@ -34,6 +34,8 @@ if is_available():
         _register_builtin_comm_hook,
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
+        _verify_replicas_within_process,
+        _verify_replica0_across_processes,
         _test_python_store,
     )
     if sys.platform != 'win32':
