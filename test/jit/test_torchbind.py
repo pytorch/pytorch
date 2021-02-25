@@ -174,7 +174,7 @@ class TestTorchbind(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Tried to set read-only attribute: y'):
             scripted = torch.jit.script(foo_not_setter)
 
-    def test_torchbind_def_readwrite(self):
+    def test_torchbind_def_property_readwrite(self):
         def foo_readwrite():
             fooReadWrite = torch.classes._TorchScriptTesting._FooReadWrite(5, 6)
             old = fooReadWrite.x

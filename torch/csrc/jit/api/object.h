@@ -35,7 +35,7 @@ struct TORCH_API Object {
     return _ivalue()->type();
   }
 
-  struct ObjectProperty {
+  struct Property {
     std::string name;
     Method getter_func;
     c10::optional<Method> setter_func;
@@ -109,22 +109,8 @@ struct TORCH_API Object {
     });
   }
 
-  // Used as a utility function to find a property
-  const std::vector<ObjectProperty> get_properties() const {
-    return c10::fmap(
-        type()->properties(), [&](const ClassType::Property& prop) {
-          c10::optional<Method> setter = c10::nullopt;
-          if (prop.setter) {
-            setter = Method(_ivalue(), prop.setter);
-          }
-          return ObjectProperty{
-              prop.name, Method(_ivalue(), prop.getter), setter};
-        });
-  }
-
   bool has_property(const std::string& name) const {
-    auto props = get_properties();
-    for (auto prop : props) {
+    for (const auto& prop : type()->properties()) {
       if (prop.name == name) {
         return true;
       }
@@ -132,11 +118,14 @@ struct TORCH_API Object {
     return false;
   }
 
-  const ObjectProperty get_property(const std::string& name) const {
-    auto props = get_properties();
-    for (auto prop : props) {
+  const Property get_property(const std::string& name) const {
+    for (const auto& prop : type()->properties()) {
       if (prop.name == name) {
-        return prop;
+        c10::optional<Method> setter = c10::nullopt;
+        if (prop.setter) {
+          setter = Method(_ivalue(), prop.setter);
+        }
+        return Property{prop.name, Method(_ivalue(), prop.getter), setter};
       }
     }
     AT_ERROR("Property '", name, "' is not defined.");

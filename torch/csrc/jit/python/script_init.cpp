@@ -785,6 +785,7 @@ void initJitScriptBindings(PyObject* module) {
                   }
                   if (self.has_property(name)) {
                     auto prop = self.get_property(name);
+                    // wrap the Method into callable PyObject
                     auto getter_func = py::cast(prop.getter_func);
                     return getter_func();
                   }
@@ -802,6 +803,7 @@ void initJitScriptBindings(PyObject* module) {
                     if (!prop.setter_func.has_value()) {
                       TORCH_CHECK(false, "can't set attribute");
                     }
+                    // wrap the Method into callable PyObject
                     auto setter_func = py::cast(prop.setter_func);
                     setter_func(value);
                     return;
@@ -818,7 +820,6 @@ void initJitScriptBindings(PyObject* module) {
                   TypePtr type = self.type()->getAttribute(name);
                   auto ivalue = toIValue(std::move(value), type);
                   self.setattr(name, ivalue);
-
                 } catch (const ObjectAttributeError& err) {
                   throw AttributeError("%s", err.what());
                 }
