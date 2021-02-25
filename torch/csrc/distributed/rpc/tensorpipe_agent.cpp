@@ -3,6 +3,8 @@
 #ifdef USE_TENSORPIPE
 
 #include <limits>
+#include <tuple>
+#include <utility>
 
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
@@ -840,26 +842,34 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
 
   const auto& url = findWorkerURL(toWorkerInfo);
 
-  std::unique_lock<std::mutex> lock(mutex_);
+  decltype(connectedPipes_)::iterator it;
+  {
+    std::unique_lock<std::mutex> lock(connectedPipesMutex_);
 
-  // See if we already have a connection to this address or not
-  auto it = connectedPipes_.find(toWorkerInfo.id_);
-  if (it == connectedPipes_.end()) {
-    std::tie(it, std::ignore) = connectedPipes_.emplace(
-        toWorkerInfo.id_,
-        ClientPipe(context_->connect(
-            url, tensorpipe::PipeOptions().remoteName(toWorkerInfo.name_))));
+    // See if we already have a connection to this address or not
+    it = connectedPipes_.find(toWorkerInfo.id_);
+    if (it == connectedPipes_.end()) {
+      // An instance of ClientPipe cannot be copied or moved as it contains a
+      // mutex, and to force in-place construction in GCC 5 we need piecewise
+      // construction in order to work around an issue.
+      std::tie(it, std::ignore) = connectedPipes_.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(toWorkerInfo.id_),
+          std::forward_as_tuple(context_->connect(
+              url, tensorpipe::PipeOptions().remoteName(toWorkerInfo.name_))));
+    }
   }
   ClientPipe& clientPipe = it->second;
-  auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
 
   auto futureResponseMessage = std::make_shared<AtomicJitFuture>(
       reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
-  pendingResponseMessage[messageId] = futureResponseMessage;
 
-  lock.unlock();
+  {
+    std::unique_lock<std::mutex> lock(clientPipe.mutex_);
+    clientPipe.pendingResponseMessage_[messageId] = futureResponseMessage;
+  }
 
   // Get devices for tensors in the request message. This can throw if device
   // maps are not configured properly for this request.
@@ -928,11 +938,21 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                          << clientPipe.pipe_->getRemoteName() << ": "
                          << error.what();
           }
-          auto pendingFutIt =
-              clientPipe.pendingResponseMessage_.find(messageId);
-          if (pendingFutIt != clientPipe.pendingResponseMessage_.end()) {
-            markFutureWithError(pendingFutIt->second, error.what());
+          std::shared_ptr<AtomicJitFuture> futureResponseMessage;
+          {
+            std::lock_guard<std::mutex> lock(clientPipe.mutex_);
+            auto pendingFutIt =
+                clientPipe.pendingResponseMessage_.find(messageId);
+            TORCH_INTERNAL_ASSERT(
+                pendingFutIt != clientPipe.pendingResponseMessage_.end(),
+                "message ID ",
+                messageId,
+                " is not recognized");
+            futureResponseMessage = std::move(pendingFutIt->second);
+            clientPipe.pendingResponseMessage_.erase(pendingFutIt);
           }
+          markFutureWithError(futureResponseMessage, error.what());
+          removeFromTimeoutMap(messageId);
           return;
         }
 
@@ -961,7 +981,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                 // error state.
                 decltype(clientPipe.pendingResponseMessage_) pendingMsgs;
                 {
-                  std::lock_guard<std::mutex> lock(mutex_);
+                  std::lock_guard<std::mutex> lock(clientPipe.mutex_);
                   std::swap(clientPipe.pendingResponseMessage_, pendingMsgs);
                   clientPipe.readError_ = true;
                 }
@@ -985,7 +1005,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
 
               std::shared_ptr<AtomicJitFuture> futureResponseMessage;
               {
-                std::lock_guard<std::mutex> lock(mutex_);
+                std::lock_guard<std::mutex> lock(clientPipe.mutex_);
                 // A read error will lead all following callbacks to be
                 // invoked with error, and shouldn't reach here.
                 TORCH_INTERNAL_ASSERT(
@@ -1360,13 +1380,10 @@ size_t TensorPipeAgent::timeoutMapSize() {
 }
 
 size_t TensorPipeAgent::numPendingResponses() {
-  size_t totalPending = 0;
-  std::unique_lock<std::mutex> lock(mutex_);
-  for (const auto& entry : connectedPipes_) {
-    totalPending += entry.second.pendingResponseMessage_.size();
-  }
-  return totalPending;
+  std::unique_lock<std::mutex> lock(callCountMutex_);
+  return clientActiveCalls_;
 }
+
 size_t TensorPipeAgent::messageIdToTimeoutMapSize() {
   std::unique_lock<std::mutex> lock(timeoutMapMutex_);
   return messageIdToTimeout_.size();
