@@ -1,7 +1,6 @@
 import bisect
 import random
 import warnings
-import functools
 
 from torch._utils import _accumulate
 from torch import randperm
@@ -12,16 +11,6 @@ from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
-
-class functional_datapipe(object):
-    def __init__(self, name):
-        self.name = name
-
-    def __call__(self, cls):
-        if not issubclass(cls, IterableDataset):
-            raise Exception('Can only decorate IterDataPipe')
-        IterableDataset.register_datapipe_as_function(self.name, cls)
-        return cls
 
 
 class Dataset(Generic[T_co]):
@@ -153,7 +142,6 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
-    functions = {}
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -163,27 +151,6 @@ class IterableDataset(Dataset[T_co]):
 
     # No `def __len__(self)` default?
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
-
-    def __getattr__(self, attribute_name):
-        if attribute_name in IterableDataset.functions:
-            function = functools.partial(IterableDataset.functions[attribute_name], self)
-            return function
-        else:
-            raise AttributeError
-
-    @classmethod
-    def register_function(cls, function_name, function):
-        IterableDataset.functions[function_name] = function
-
-    @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register):
-        if function_name in IterableDataset.functions:
-            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
-
-        def class_function(cls, source_dp, *args, **kwargs):
-            return cls(source_dp, *args, **kwargs)
-        function = functools.partial(class_function, cls_to_register)
-        IterableDataset.functions[function_name] = function
 
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
