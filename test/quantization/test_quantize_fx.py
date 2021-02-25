@@ -104,7 +104,7 @@ class BinaryOpNonQuantizedInput(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
         super().__init__()
         self.is_scalar = is_scalar
-        self.op = ibinary_op if is_inplace else binary_op
+        self.op = ibinary_op if ibinary_op and is_inplace else binary_op
 
     def forward(self, x, y):
         y = 3 if self.is_scalar else y
@@ -2154,6 +2154,40 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_binary_op_int8_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul)
         self._test_binary_op_float16_impl(operator.mul, operator.imul)
+
+    def test_bmm(self):
+        class BMMMethod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x.bmm(y)
+
+        data = (torch.randn(1, 1, 1, dtype=torch.float),
+                torch.randn(1, 1, 1, dtype=torch.float))
+        quant_type = QuantType.STATIC
+        # testing for fp16 static quant
+        # we are producing fp16 patterns
+        custom_qconfig_dict = {
+            "object_type": [(torch.bmm, float16_static_qconfig),
+                            ("bmm", float16_static_qconfig)]
+        }
+        node_occurrence = {
+            # input_bmm1, input_bmm2, output_bmm
+            ns.call_method("to"): 3
+        }
+        self.checkGraphModeFxOp(
+            BinaryOpNonQuantizedInput(torch.bmm, None, False, False), data, quant_type,
+            expected_node_occurrence=node_occurrence,
+            custom_qconfig_dict=custom_qconfig_dict)
+
+        # TODO: support call_method("bmm")
+        # we can transform call_method("bmm") to call_function(torch.bmm)
+        # self.checkGraphModeFxOp(
+        #     BMMMethod(), data, quant_type,
+        #     expected_node_occurrence=node_occurrence,
+        #     custom_qconfig_dict=custom_qconfig_dict,
+        #     print_debug_info=True)
 
     @skipIfNoFBGEMM
     def test_add_relu(self):
