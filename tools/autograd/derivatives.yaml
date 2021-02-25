@@ -409,12 +409,12 @@
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type(), rounding_mode)
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
-  self: handle_r_to_c(self.scalar_type(), grad * tensor.conj())
-  tensor: handle_r_to_c(tensor.scalar_type(), grad * self.conj())
+  self: grad * tensor.conj()
+  tensor: grad * self.conj()
 
 - name: vdot(Tensor self, Tensor other) -> Tensor
-  self: handle_r_to_c(self.scalar_type(), grad.conj() * other)
-  other: handle_r_to_c(other.scalar_type(), grad * self)
+  self: grad.conj() * other
+  other: grad * self
 
 - name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   self: _fused_dropout_backward(grad, result1, p)
@@ -1002,6 +1002,10 @@
   other: solve_backward_self(grad, other, input)
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
+  output_differentiability: [True, False]
+
+- name: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
 
