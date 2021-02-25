@@ -27,7 +27,7 @@ from .graph_passes import (
     create_a_shadows_b,
 )
 
-from typing import Dict, Tuple, Callable, List, Optional, Any
+from typing import Dict, Tuple, Callable, List, Any
 
 class NSSingleResultValuesType(str, enum.Enum):
     WEIGHT = 'weight'
@@ -66,10 +66,10 @@ def add_weight_info_to_dict(
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
-    for node, ref_node_name in nodes_and_names_to_instrument:
+    for node, ref_name in nodes_and_names_to_instrument:
 
-        if ref_node_name not in results:
-            results[ref_node_name] = {}
+        if ref_name not in results:
+            results[ref_name] = {}
 
         if node.op == 'call_function':
 
@@ -80,7 +80,7 @@ def add_weight_info_to_dict(
 
             if related_to_linear:
                 weight = get_linear_fun_weight(node, model)
-                results[ref_node_name][model_name] = {
+                results[ref_name][model_name] = {
                     'type': NSSingleResultValuesType.WEIGHT.value,
                     'values': [weight],
                 }
@@ -98,7 +98,7 @@ def add_weight_info_to_dict(
             # TODO(future PR): other module types
             if related_to_conv2d_mod:
                 weight = get_conv_mod_weight(mod)
-                results[ref_node_name][model_name] = {
+                results[ref_name][model_name] = {
                     'type': NSSingleResultValuesType.WEIGHT.value,
                     'values': [weight],
                 }
@@ -142,7 +142,7 @@ class OutputLogger(nn.Module):
         self,
         node_name: str,
         model_name: str,
-        ref_node_name: Optional[str] = None,
+        ref_name: str,
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
@@ -150,17 +150,16 @@ class OutputLogger(nn.Module):
         self.node_name = node_name
         # name of the model from which the node originated from
         self.model_name = model_name
-        # name of the reference node with a matching Logger
-        # used to link node_a_copy -> logger_a to node_c -> logger_c
-        # in a_shadows_b
-        self.ref_node_name = ref_node_name
+        # reference name, used to match loggers from separate models
+        # to each other
+        self.ref_name = ref_name
 
     def forward(self, x: torch.Tensor):
         self.stats.append(x.detach())
         return x
 
     def __repr__(self):
-        return f"OutputLogger(node_name={self.node_name}, model_name={self.model_name}, ref_node_name={self.ref_node_name})"
+        return f"OutputLogger(ref_name={self.ref_name}, model_name={self.model_name}, node_name={self.node_name})"
 
 def prepare_single_model_output(
     model_name: str,
@@ -173,14 +172,12 @@ def prepare_single_model_output(
     #   about (both fp32, denylist, etc)
     # Note: for matching activations we always use the end nodes,
     # such as observing the output of relu in linear-relu
-    # Note: ref_node_name is set to None in model B's loggers,
-    # and set to the corresponding model B's node in model A's loggers.
-    node_to_instrument_to_ref_node_name: Dict[Node, Optional[str]] = {}
-    for (node_start, node_end), ref_node_name in subgraphs_to_instrument:
-        node_to_instrument_to_ref_node_name[node_end] = ref_node_name
+    node_to_instrument_to_ref_name: Dict[Node, str] = {}
+    for (node_start, node_end), ref_name in subgraphs_to_instrument:
+        node_to_instrument_to_ref_name[node_end] = ref_name
 
     model = remove_observers_add_loggers(
-        model, node_to_instrument_to_ref_node_name, logger_cls, model_name)
+        model, node_to_instrument_to_ref_name, logger_cls, model_name)
     return model
 
 # Note: this is not a user facing API
@@ -222,7 +219,7 @@ def add_activation_info_to_dict(
             )
         )
         if is_logger:
-            key = mod.ref_node_name + '.stats'
+            key = mod.ref_name + '.stats'
             if key not in results:
                 results[key] = {}
             results[key][model_name] = {
@@ -314,16 +311,8 @@ def get_matching_activations_a_shadows_b(
             )
         )
         if is_logger:
-            # If logger_obj.ref_node_name is populated, then this logger
-            # is from model A, and ref_node_name is the name from model B.
-            if mod.ref_node_name is None:
-                results[mod.node_name][mod.model_name] = {
-                    'type': NSSingleResultValuesType.NODE_OUTPUT.value,
-                    'values': mod.stats,
-                }
-            else:
-                results[mod.ref_node_name][mod.model_name] = {
-                    'type': NSSingleResultValuesType.NODE_OUTPUT.value,
-                    'values': mod.stats,
-                }
+            results[mod.ref_name + '.stats'][mod.model_name] = {
+                'type': NSSingleResultValuesType.NODE_OUTPUT.value,
+                'values': mod.stats,
+            }
     return dict(results)
