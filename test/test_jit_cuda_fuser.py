@@ -995,6 +995,80 @@ class TestCudaFuser(JitTestCase):
                         perm1 = range(len(x))
                         self._reduction_helper(x, axes, torch.float32, "cuda", perm0, perm1, keepdim)
 
+    def _layer_norm_autodiff_helper(self, model, grad, shapes, args):
+        jit_model = torch.jit.script(model)
+
+        eps = np.random.random() * 1e-4
+        use_cudnn = bool(np.random.randint(0, 2))
+
+        # profile/optimization runs
+        for i in range(3):
+            jit_o = jit_model(shapes, *args, eps, use_cudnn)
+            jit_o.backward(grad)
+
+        ref_args = [t.detach().clone().requires_grad_() for t in args]
+        [t.grad.zero_() for t in args]
+        jit_o = jit_model(shapes, *args, eps, use_cudnn)
+        jit_o.backward(grad)
+
+        o = model(shapes, *ref_args, eps, use_cudnn)
+        o.backward(grad)
+        self.assertEqual(jit_o, o)
+        for arg, ref_arg in zip(args, ref_args):
+            self.assertEqual(arg.grad, ref_arg.grad)
+
+        # check fusion in fw & bw
+        g = jit_model.graph_for(shapes, *args, eps, use_cudnn)
+        for node in g.nodes():
+            n = node
+        dbg_state = jit_model.get_debug_state()
+        for val in dbg_state.execution_plans.values():
+            v = val
+        state2 = v.code.grad_executor_states()
+        for val in state2[0].execution_plans.values():
+            v2 = val
+        FileCheck().check(FUSION_GUARD).run(g)
+        FileCheck().check(FUSION_GUARD).run(v2.graph)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_layer_norm_autodiff(self):
+        def t_wb(shapes: List[int], x, w, b, eps: float, cudnn: bool):
+            o = torch.layer_norm(x, shapes, w, b, eps, cudnn)
+            o = torch.relu(o)
+            return o
+
+        def t_w(shapes: List[int], x, w, eps: float, cudnn: bool):
+            o = torch.layer_norm(x, shapes, w, None, eps, cudnn)
+            o = torch.relu(o)
+            return o
+
+        def t_b(shapes: List[int], x, b, eps: float, cudnn: bool):
+            o = torch.layer_norm(x, shapes, None, b, eps, cudnn)
+            o = torch.relu(o)
+            return o
+
+        def t(shapes: List[int], x, eps: float, cudnn: bool):
+            o = torch.layer_norm(x, shapes, None, None, eps, cudnn)
+            o = torch.relu(o)
+            return o
+
+        model = {3 : t_wb, 2 : t_w, 1 : t_b, 0: t}
+
+        for w, b in itertools.product([True, False], repeat=2):
+            batch = [4]
+            shapes = [2, 3, 4]
+            m = model[w * 2 + b]
+
+            grad = torch.randn(batch + shapes, dtype=torch.float32, device="cuda")
+            args = [torch.randn(batch + shapes, dtype=torch.float32, device="cuda").requires_grad_()]
+            if w:
+                args.append(torch.randn(shapes, dtype=torch.float32, device="cuda").requires_grad_())
+            if b:
+                args.append(torch.randn(shapes, dtype=torch.float32, device="cuda").requires_grad_())
+            self._layer_norm_autodiff_helper(m, grad, shapes, args)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")

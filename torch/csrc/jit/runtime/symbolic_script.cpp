@@ -1037,7 +1037,6 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        # disable the layernorm AD temporarily because of bug in https://github.com/pytorch/pytorch/issues/19769
         def layer_norm(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
@@ -1048,20 +1047,8 @@ const std::vector<std::string> functions = {
             output, mean, rstd = torch.native_layer_norm(input, normalized_shape, weight, bias, eps)
 
             def backward(grad_output):
-                if weight is not None:
-                    x_hat = (input - mean) * rstd
-                    grad_weight = (grad_output * x_hat)._grad_sum_to_size(weight.size())
-                else:
-                    grad_weight = None
-
-                if bias is not None:
-                    grad_bias = grad_output._grad_sum_to_size(bias.size())
-                else:
-                    grad_bias = None
-
-                # TODO: grad_bias and grad_weight are disabled in NvFuser because we are missing multiple kernel support
-                output_mask = [True, False, False]
-                grad_input, jit_grad_weight, jit_grad_bias = torch.native_layer_norm_backward(grad_output, input, normalized_shape, mean, rstd, weight, bias, output_mask)
+                output_mask = [True, weight is not None, bias is not None]
+                grad_input, grad_weight, grad_bias = torch.native_layer_norm_backward(grad_output, input, normalized_shape, mean, rstd, weight, bias, output_mask)
                 return grad_input, None, grad_weight, grad_bias, None, None
             return output, backward
 

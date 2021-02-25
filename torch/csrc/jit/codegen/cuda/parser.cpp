@@ -31,6 +31,7 @@ namespace {
 
 const auto& sizeAttr = Symbol::attr("profiled_size");
 const auto& intListAttr = Symbol::attr("profiled_int_list");
+const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
 
 typedef Val* CgValue;
@@ -824,10 +825,12 @@ class IrParser {
                 bias = value_map[node->input(3)->unique()]->as<TensorView>();
               }
 
-              auto eps = constant_as<float>(node->input(4));
-              TORCH_INTERNAL_ASSERT(
-                  eps.has_value(), "The EPS parameter is required.");
-              const float kEps = eps.value();
+              Val* eps_ptr = nullptr;
+              if (auto eps = constant_as<float>(node->input(4))) {
+                eps_ptr = new Double(eps.value());
+              } else {
+                eps_ptr = value_map[node->input(4)->unique()];
+              }
 
               const size_t kNormShapeNumDims = norm_shape->vec().size();
               const size_t kOuterNumDims = input->nDims() - kNormShapeNumDims;
@@ -862,7 +865,7 @@ class IrParser {
               auto var_sum = sum(x_mean_sub_pow, inner_reduction_axes);
               auto var_sum_bcast = broadcast(var_sum, inner_broadcast_mask);
               auto var = div(var_sum_bcast, num_features);
-              auto var_eps = add(var, new Double(kEps));
+              auto var_eps = add(var, eps_ptr);
               auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
               auto output = mul(x_mean_sub, rvar);
 
@@ -989,22 +992,29 @@ class IrParser {
                 unaryOp(UnaryOpType::Reciprocal, num_features);
             auto* grad_in = mul(mul(reciprocal_size, rstd), inner);
 
-            value_map.emplace(node->output(0)->unique(), grad_in);
+            if (output_mask[0]) {
+              value_map.emplace(node->output(0)->unique(), grad_in);
+            } else {
+              value_map.emplace(
+                  node->output(0)->unique(), TensorViewBuilder().build());
+            }
 
-            // TODO: grad_bias and grad_weight are disabled because
-            // they are incompabilble with grad_in fusion
-            // Requires seperate kernels
+            if (output_mask[1] && weight != nullptr) {
+              auto grad_weight =
+                  sum(mul(grad_out, x_hat), outer_reduction_axes);
+              value_map.emplace(node->output(1)->unique(), grad_weight);
+            } else {
+              value_map.emplace(
+                  node->output(1)->unique(), TensorViewBuilder().build());
+            }
 
-            // if (output_mask[1] && weight != nullptr) {
-            //  auto grad_weight = sum(mul(grad_out, x_hat),
-            //  outer_reduction_axes);
-            //  value_map.emplace(node->output(1)->unique(), grad_weight);
-            // }
-
-            // if (output_mask[2] && bias != nullptr) {
-            //  auto grad_bias = sum(grad_out, outer_reduction_axes);
-            //  value_map.emplace(node->output(2)->unique(), grad_bias);
-            // }
+            if (output_mask[2] && bias != nullptr) {
+              auto grad_bias = sum(grad_out, outer_reduction_axes);
+              value_map.emplace(node->output(2)->unique(), grad_bias);
+            } else {
+              value_map.emplace(
+                  node->output(2)->unique(), TensorViewBuilder().build());
+            }
           },
           // TODO: #ProfileIValue List should update this
           [](const Node* node) -> bool { return true; },
@@ -1528,6 +1538,41 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
   pn->setCallback(ivalue_profiler);
 }
 
+void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isBoolList(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(boolListAttr)) {
+      auto list = value.toBoolList();
+      std::vector<int64_t> val(list.begin(), list.end());
+      pn->is_(boolListAttr, val);
+    } else {
+      auto profiled_ints = pn->is(boolListAttr);
+      auto input_bools = value.toBoolList();
+      TORCH_INTERNAL_ASSERT(
+          profiled_ints.size() == input_bools.size() &&
+              std::equal(
+                  input_bools.begin(),
+                  input_bools.end(),
+                  profiled_ints.begin()),
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
 bool anyInBlock(
     const Block* block,
     const std::function<bool(const Node*)>& fn) {
@@ -1648,6 +1693,42 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
         return false;
     }
     return true;
+  }
+
+  static auto native_layer_norm_schema =
+      getOperatorForLiteral(
+          "aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)")
+          ->schema();
+  static auto layer_norm_schema =
+      getOperatorForLiteral(
+          "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")
+          ->schema();
+  if (node->matches(native_layer_norm_schema) ||
+      node->matches(layer_norm_schema)) {
+    switch (offset) {
+      case 1:
+        profileIntList(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto native_layer_norm_backward_schema =
+      getOperatorForLiteral(
+          "aten::native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
+          ->schema();
+  if (node->matches(native_layer_norm_backward_schema)) {
+    switch (offset) {
+      case 2:
+        profileIntList(pr, node, offset);
+        return true;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      case 7:
+        profileBoolList(pr, node, offset);
+        return true;
+    }
   }
 
   return false;
