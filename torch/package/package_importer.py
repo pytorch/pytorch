@@ -18,6 +18,7 @@ from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _
 from ._file_structure_representation import _create_folder_from_file_list, Folder
 from ._glob_group import GlobPattern
 from ._mock_zipreader import MockZipReader
+from ._vinegar_check import scan_pickle_for_dependencies, mocked_objects_str
 from ._mangling import PackageMangler, demangle
 from .importer import Importer
 
@@ -180,7 +181,15 @@ class PackageImporter(Importer):
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
-        result = unpickler.load()
+        try:
+            result = unpickler.load()
+        except NotImplementedError as err: 
+            if len(err.args) == 2 and type(err.args[1]) == str:
+                mocked_module = ".".join(err.args[1].split(".")[1:])
+                pickle_bytes = self.load_binary(package, resource)
+                mocked_objects = scan_pickle_for_dependencies(pickle_bytes, [mocked_module])
+                raise NotImplementedError(mocked_objects_str(mocked_objects)).with_traceback(err.__traceback__)
+            raise
 
         # TODO from zdevito:
         #   This stateful weird function will need to be removed in our efforts
@@ -209,6 +218,11 @@ class PackageImporter(Importer):
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
         """
         return _create_folder_from_file_list(self.filename, self.zip_reader.get_all_records(), include, exclude)
+
+    def check_pickle_for_mocked(self, package: str, resource: str, search_modules: List[str], print_limit: int = 1):
+        pickle_bytes = self.load_binary(package, resource)
+        mocked_objects = scan_pickle_for_dependencies(pickle_bytes, search_modules)
+        print(mocked_objects_str(mocked_objects, print_limit))
 
     def _read_extern(self):
         return self.zip_reader.get_record('.data/extern_modules').decode('utf-8').splitlines(keepends=False)

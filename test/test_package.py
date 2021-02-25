@@ -558,6 +558,21 @@ def load():
         with self.assertRaises(NotImplementedError):
             hi.load_pickle('obj', 'obj.pkl')
 
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
+    def test_pickle_analyzer(self):
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.mock(include='package_a.subpackage')
+            pickled = he.save_pickle('obj', 'obj.pkl', obj2)
+
+        hi = PackageImporter(filename)
+        with self.assertRaisesRegex(NotImplementedError, "Type 'PackageASubpackageObject' was flagged"):
+            hi.load_pickle('obj', 'obj.pkl')
+
     def test_inspect_class(self):
         """Should be able to retrieve source for a packaged class."""
         import package_a.subpackage

@@ -6,6 +6,7 @@ import pickletools
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler
 from ._file_structure_representation import _create_folder_from_file_list, Folder
+from ._vinegar_check import scan_pickle_for_dependencies, mocked_objects_str
 from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
@@ -57,7 +58,7 @@ class PackageExporter:
     def __init__(self,
                  f: Union[str, Path, BinaryIO],
                  importer: Union[Importer, Sequence[Importer]] = sys_importer,
-                 verbose: bool = True):
+                 verbose: bool = False):
         """
         Create an exporter.
 
@@ -91,6 +92,7 @@ class PackageExporter:
             self.importer = OrderedImporter(*importer)
 
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
+        self.mocked: List[str] = []
         self.debug_deps : List[Tuple[str, str]] = []
         self._unique_id = 0
 
@@ -282,7 +284,7 @@ node [shape=box];
         source = self._get_source_of_module(module)
         self.save_source_string(module_name, source, hasattr(module, '__path__'), dependencies, module.__file__)
 
-    def save_pickle(self, package: str, resource: str, obj: Any, dependencies: bool = True):
+    def save_pickle(self, package: str, resource: str, obj: Any, dependencies: bool = True) -> bytes:
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
         If `dependencies` is true, this method will also scan the pickled objects for which modules are required
@@ -326,7 +328,16 @@ node [shape=box];
             for module_name in all_dependencies:
                 self.require_module_if_not_provided(module_name)
 
+        if self.verbose:
+            self.check_pickle_for_mocked(data_value)
+
         self._write(filename, data_value)
+
+        return data_value
+
+    def check_pickle_for_mocked(self, data_value: bytes, print_limit: int = 1):
+        mocked_objects = scan_pickle_for_dependencies(data_value, self.mocked)
+        print(mocked_objects_str(mocked_objects, print_limit))
 
     def save_text(self, package: str, resource: str, text: str):
         """Save text data to the package
@@ -406,6 +417,7 @@ node [shape=box];
             self.save_source_file('_mock', str(Path(__file__).parent / '_mock.py'), dependencies=False)
         is_package = hasattr(self._import_module(module_name), '__path__')
         self.save_source_string(module_name, _MOCK_IMPL, is_package, dependencies=False)
+        self.mocked.append(module_name)
 
     def _module_is_already_provided(self, qualified_name: str) -> bool:
         for mod in self.external:

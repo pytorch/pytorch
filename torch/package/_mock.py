@@ -32,9 +32,10 @@ class MockedObject:
         # unpickling process) should give an error.
         if not kwargs.get("_suppress_err"):
             raise NotImplementedError(f"Object '{cls._name}' was mocked out during packaging "
-                                      f"but it is being used in '__new__'. If this error is "
+                                      "but it is being used in '__new__'. If this error is "
                                       "happening during 'load_pickle', please ensure that your "
-                                      "pickled object doesn't contain any mocked objects.")
+                                      "pickled object doesn't contain any mocked objects.",
+                                      ".".join(cls._name.split(".")[:-1]))
         # Otherwise, this is just a regular object creation
         # (e.g. `x = MockedObject("foo")`), so pass it through normally.
         return super().__new__(cls)
@@ -48,7 +49,7 @@ class MockedObject:
 
 def install_method(method_name):
     def _not_implemented(self, *args, **kwargs):
-        raise NotImplementedError(f"Object '{self._name}' was mocked out during packaging but it is being used in {method_name}")
+        raise NotImplementedError(f"Object '{self._name}' was mocked out during packaging but it is being used in {method_name}", self._name)
     setattr(MockedObject, method_name, _not_implemented)
 
 for method_name in _magic_methods:
