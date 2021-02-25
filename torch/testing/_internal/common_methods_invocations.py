@@ -1803,6 +1803,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    UnaryUfuncInfo('i0',
+                   ref=np.i0,
+                   decorators=(precisionOverride({torch.bfloat16: 3e-1,
+                                                  torch.float16: 5e-1}),),
+                   dtypes=floating_types_and(torch.bfloat16),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   supports_autograd=False),
     OpInfo('floor_divide',
            dtypes=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_floor_divide,
@@ -1894,6 +1902,30 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.bfloat16]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble]),
+                   )),
+    UnaryUfuncInfo('logical_not',
+                   ref=np.logical_not,
+                   decorators=(precisionOverride({torch.bfloat16: 7e-1,
+                                                  torch.float16: 5e-1}),),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   safe_casts_outputs=True,
+                   supports_autograd=False,
+                   skips=(
+                       # The function variant always returns BoolTensor
+                       # while the inplace variant preserves the input dtype.
+                       # >>> t = torch.randn(3)
+                       # >>> torch.logical_not(t)
+                       # tensor([False, False, False])
+                       # >>> torch.logical_not(t).dtype
+                       # torch.bool
+                       # >>> t.logical_not_().dtype
+                       # torch.float32
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
+                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
