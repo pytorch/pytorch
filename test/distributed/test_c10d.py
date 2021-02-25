@@ -4718,7 +4718,7 @@ class CommTest(MultiProcessTestCase):
             c10d.barrier(device_ids=[self.rank])
 
     def test_distributed_debug_mode(self):
-        # Default should be info
+        # Default should be off
         default_debug_mode = dist._get_debug_mode()
         self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
         mapping = {
