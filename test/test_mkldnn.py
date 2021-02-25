@@ -164,8 +164,8 @@ class TestMkldnn(TestCase):
     def _test_conv_base(self, dim):
         conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
         input_shapes = {1: (224,), 2: (224, 224), 3: (55, 55, 55)}
-        options = itertools.product([True, False], [1, 2], [1, 4])
-        for bias, dilation, groups in options:
+        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        for train, bias, dilation, groups in options:
             N = torch.randint(3, 10, (1,)).item()
             M = torch.randint(1, 3, (1,)).item() * groups
             C = torch.randint(1, 3, (1,)).item() * groups
@@ -179,14 +179,37 @@ class TestMkldnn(TestCase):
                                     dilation=dilation,
                                     bias=bias,
                                     groups=groups).float()
-            mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
+            x1 = x.clone()
+            x2 = x.clone().to_mkldnn()
+            if not train:
+                mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
+            elif train and dim != 1:
+                # TODO: enable conv1d training.
+                x1.requires_grad_()
+                x2.requires_grad_()
+                mkldnn_conv = copy.deepcopy(conv)
             with torch.backends.mkldnn.flags(enabled=False):
-                y_aten = conv(x)
-            y_mkldnn = mkldnn_conv(x.to_mkldnn()).to_dense()
-            self.assertEqual(y_aten, y_mkldnn)
-
-            self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
-            self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
+                y_aten = conv(x1)
+                if train and dim != 1:
+                    loss1 = y_aten.sum()
+                    loss1.backward()
+            if not train or (train and dim != 1):
+                y_mkldnn = mkldnn_conv(x2).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
+            if not train:
+                self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
+            elif dim != 1:
+                loss2 = y_mkldnn.sum()
+                loss2.backward()
+                self.assertTrue(x2.grad.is_mkldnn)
+                self.assertEqual(x1.grad, x2.grad.to_dense())
+                self.assertEqual(conv.weight.grad,
+                                 mkldnn_conv.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv.bias.grad, mkldnn_conv.bias.grad)
 
     def test_conv1d(self):
         self._test_conv_base(dim=1)
@@ -305,9 +328,16 @@ class TestMkldnn(TestCase):
                     padding=1,
                     ceil_mode=ceil_mode)
 
-                self.assertEqual(
-                    max_pool(input),
-                    max_pool(input.to_mkldnn()).to_dense())
+                x1 = input.clone().requires_grad_()
+                x2 = input.clone().to_mkldnn().requires_grad_()
+                y1 = max_pool(x1)
+                y2 = max_pool(x2).to_dense()
+                loss1 = y1.sum()
+                loss2 = y2.sum()
+                loss1.backward()
+                loss2.backward()
+                self.assertEqual(y1, y2)
+                self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_max_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -419,9 +449,16 @@ class TestMkldnn(TestCase):
                 padding=1,
                 count_include_pad=count_include_pad)
 
-            self.assertEqual(
-                avg_pool(input),
-                avg_pool(input.to_mkldnn()).to_dense())
+            x1 = input.clone().requires_grad_()
+            x2 = input.clone().to_mkldnn().requires_grad_()
+            y1 = avg_pool(x1)
+            y2 = avg_pool(x2).to_dense()
+            loss1 = y1.sum()
+            loss2 = y2.sum()
+            loss1.backward()
+            loss2.backward()
+            self.assertEqual(y1, y2)
+            self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -445,8 +482,6 @@ class TestMkldnn(TestCase):
                 stride=2,
                 padding=1,
                 count_include_pad=count_include_pad)
-
-
             if has_bf16_support():
                 y = avg_pool(input.to_mkldnn()).to_dense()
                 y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
@@ -496,10 +531,18 @@ class TestMkldnn(TestCase):
         x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
 
         adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d(7)
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = adaptive_avg_pool2d(x1)
+        y2 = adaptive_avg_pool2d(x2).to_dense()
 
-        self.assertEqual(
-            adaptive_avg_pool2d(x),
-            adaptive_avg_pool2d(x.to_mkldnn()).to_dense())
+        loss1 = y1.sum()
+        loss2 = y2.sum()
+        loss1.backward()
+        loss2.backward()
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_adaptive_avg_pool2d_bf16(self):
