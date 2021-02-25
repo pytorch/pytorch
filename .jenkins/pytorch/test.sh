@@ -145,7 +145,7 @@ test_aten() {
 }
 
 test_without_numpy() {
-  pushd $(dirname "${BASH_SOURCE[0]}")
+  pushd "$(dirname "${BASH_SOURCE[0]}")"
   python -c "import sys;sys.path.insert(0, 'fake_numpy');from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase().assertRaises(RuntimeError, lambda: x.numpy())"
   popd
 }
