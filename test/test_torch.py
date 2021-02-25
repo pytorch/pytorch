@@ -5021,17 +5021,18 @@ class TestTorchDeviceType(TestCase):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
         test_functions = [
-            ('amax', torch.amax, None, {}),
-            ('amin', torch.amin, None, {}),
-            ('argmax', torch.argmax, None, {'dtype': torch.int64}),
-            ('argmin', torch.argmin, None, {'dtype': torch.int64}),
-            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
-            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
-            ('mode', torch.mode, None, {}),
+            ('amax', torch.amax, {}),
+            ('amin', torch.amin, {}),
+            ('argmax', torch.argmax, {'dtype': torch.int64}),
+            ('argmin', torch.argmin, {'dtype': torch.int64}),
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, {}),
+            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, {}),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,{}),
+            #('mode', torch.mode, {}),
+            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, {}),
         ]
 
-        for name, fn, identity, dtype in test_functions:
+        for name, fn, dtype in test_functions:
             # Check if reduction happens along the specified dim with and without keepdim.
             print("function: ", fn)
             self.assertEqual(torch.empty((2, 0), device=device,**dtype), fn(master_input, dim=2))
@@ -5046,17 +5047,25 @@ class TestTorchDeviceType(TestCase):
         master_input = torch.randn(shape, device=device)
 
         test_functions = [
-            ('prod', torch.prod, 1., {}),
-            ('sum', torch.sum, 0., {}),
-            ('norm', torch.norm, 0., {}),
-            ('mean', torch.mean, nan, {}),
-            ('var', torch.var, nan, {}),
-            ('std', torch.std, nan, {}),
-            ('logsumexp', torch.logsumexp, -inf, {}),
+            ('prod', torch.prod, 1.),
+            ('sum', torch.sum, 0.),
+            ('norm', torch.norm, 0.),
+            ('mean', torch.mean, nan),
+            ('var', torch.var, nan),
+            ('std', torch.std, nan),
+            ('logsumexp', torch.logsumexp, -inf),
         ]
 
-        for name, fn, identity, dtype in test_functions:
-            pass
+        for name, fn, return_value in test_functions:
+            # Check if reduction happens along the specified dimension.
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True))
+
+            # Check if returned data is correct.
+            check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else
+                         self.assertEqual)
+            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1))
+            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True))
 
     def _brute_pdist(self, inp, p=2):
         """Computes the same as torch.pdist using primitives"""

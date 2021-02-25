@@ -278,6 +278,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   dim = at::maybe_wrap_dim(dim, self.dim());
 
   int64_t size = self.dim() > 0 ? self.size(dim) : 1;
+  TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero");
   TORCH_CHECK(
       size > 0,
       "median() cannot compute median for a dimension of size 0 because ",
