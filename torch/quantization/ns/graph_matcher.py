@@ -1,3 +1,4 @@
+import enum
 import operator
 
 import torch
@@ -54,6 +55,11 @@ def get_type_a_related_to_b() -> Set[Tuple[Callable, Callable]]:
         set([
             torch.cat,
             toq.cat,
+        ]),
+        # mul
+        set([
+            torch.mul,
+            toq.mul,
         ]),
     ]
 
@@ -218,24 +224,37 @@ class GraphMatchingException(Exception):
     """
     pass
 
-def _node_a_related_to_b(
+class NodeTypeRelationship(enum.Enum):
+    # same type
+    # example: F.linear and toq.linear, or nn.Conv2d and nn.Conv2d
+    EQUAL = enum.auto()
+    # same node_relationship set, but not the same type
+    # example: F.linear and toq.linear
+    RELATED_BUT_NOT_EQUAL = enum.auto()
+    # not related
+    NOT_RELATED = enum.auto()
+
+def _get_node_relationship_type(
     node_a: Node,
     node_b: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
     type_a_related_to_b: Set[Tuple[Callable, Callable]],
-) -> bool:
+) -> NodeTypeRelationship:
     if node_a.op != node_b.op:
         # for now, comparing call_module to call_function is not supported
         # this can be added later if needed
-        return False
+        return NodeTypeRelationship.NOT_RELATED
 
     if node_a.op == 'call_function':
         if node_a.target == node_b.target:
             # nodes with equivalent targets always match (i.e. F.linear and F.linear)
-            return True
+            return NodeTypeRelationship.EQUAL
         key = (node_a.target, node_b.target)
-        return key in type_a_related_to_b
+        if key in type_a_related_to_b:
+            return NodeTypeRelationship.RELATED_BUT_NOT_EQUAL
+        else:
+            return NodeTypeRelationship.NOT_RELATED
     elif node_a.op == 'call_module':
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node_a.target, str)
@@ -244,10 +263,13 @@ def _node_a_related_to_b(
         mod_b = getattr_from_fqn(gm_b, node_b.target)
         # modules with equivalent types always match (i.e. nn.Conv2d and nn.Conv2d)
         if type(mod_a) == type(mod_b):
-            return True
+            return NodeTypeRelationship.EQUAL
         key = (type(mod_a), type(mod_b))
-        return key in type_a_related_to_b
-    return False
+        if key in type_a_related_to_b:
+            return NodeTypeRelationship.RELATED_BUT_NOT_EQUAL
+        else:
+            return NodeTypeRelationship.NOT_RELATED
+    return NodeTypeRelationship.NOT_RELATED
 
 def _get_name_for_subgraph_pair(
     start_node_a: Node,
@@ -371,14 +393,20 @@ def get_matching_subgraph_pairs(
         if cur_end_node_a is not None and cur_end_node_b is not None:
             assert isinstance(cur_start_node_a, Node)
             assert isinstance(cur_start_node_b, Node)
-            # both nodes were fetched, check for relatedness
-            # note: relatedness is checked on the start node, i.e.
-            # if a linear-relu pattern is checked, we would check for relatedness
+            # both nodes were fetched, check for node_relationship
+            # note: node_relationship is checked on the start node, i.e.
+            # if a linear-relu pattern is checked, we would check for node_relationship
             # of the linear
-            if not _node_a_related_to_b(cur_start_node_a, cur_start_node_b,
-                                        gm_a, gm_b, type_a_related_to_b):
+            node_relationship = _get_node_relationship_type(
+                cur_start_node_a, cur_start_node_b,
+                gm_a, gm_b, type_a_related_to_b)
+            if node_relationship == NodeTypeRelationship.NOT_RELATED:
                 msg = f"({cur_start_node_a}, {type_a}) and ({cur_start_node_b}, {type_b}) are not related"
                 raise GraphMatchingException(msg)
+            elif node_relationship == NodeTypeRelationship.EQUAL:
+                # For now, skip nodes with equal types. In the future, this can
+                # be made configurable.
+                continue
             key_name = _get_name_for_subgraph_pair(
                 cur_start_node_a, cur_end_node_a, cur_start_node_b, cur_end_node_b)
             results[key_name] = (
