@@ -112,7 +112,9 @@ void print_unsupported_ops_and_throw(
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
-  explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
+  explicit BytecodeDeserializer(
+      std::unique_ptr<PyTorchStreamReader> reader,
+      uint64_t module_load_options = 0);
   mobile::Module deserialize(c10::optional<at::Device> device);
   mobile::Module deserialize(
       c10::optional<at::Device> device,
@@ -134,16 +136,47 @@ class BytecodeDeserializer final {
       std::shared_ptr<mobile::CompilationUnit> mcu);
   std::unordered_map<std::string, std::string> readMobileMetadata(
       std::shared_ptr<mobile::CompilationUnit> mcu);
+  std::unordered_set<std::string> find_unsupported_operator_names(
+      const std::vector<IValue> &ops_list,
+      mobile::Function *function,
+      int64_t model_version) const;
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_{};
   c10::optional<at::Device> device_;
+  uint64_t module_load_options_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
-    std::unique_ptr<PyTorchStreamReader> reader)
+    std::unique_ptr<PyTorchStreamReader> reader,
+    uint64_t module_load_options)
     : compilation_unit_(std::make_shared<CompilationUnit>()),
-      reader_(std::move(reader)) {}
+      reader_(std::move(reader)),
+      module_load_options_(module_load_options) {}
+
+std::unordered_set<std::string> BytecodeDeserializer::find_unsupported_operator_names(
+    const std::vector<IValue> &ops_list,
+    mobile::Function *function,
+    int64_t model_version) const {
+  std::unordered_set<std::string> unsupported_op_names;
+  // ops_list is the list of operator names that were read in from
+  // bytecode.plk for the method that is currently being processed.
+  for (const auto& op : ops_list) {
+    auto op_item = op.toTuple()->elements();
+    TORCH_CHECK(
+        op_item.size() == 2,
+        "There should be two parts in an operator name.");
+    auto op_found = function->append_operator(
+        op_item[0].toString()->string(),
+        op_item[1].toString()->string(),
+        model_version);
+    if (!op_found) {
+      unsupported_op_names.emplace(operator_str(
+          op_item[0].toString()->string(), op_item[1].toString()->string()));
+    }
+  }
+  return unsupported_op_names;
+}
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
   static const c10::QualifiedName torchPrefix = "__torch__";
@@ -269,26 +302,11 @@ void BytecodeDeserializer::parseMethods(
       }
     }
 
-    std::unordered_set<std::string> unsupported_op_names;
-    // ops_list is the list of operator names that were read in from
-    // bytecode.plk for the method that is currently being processed.
-    for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
-      TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
-      auto op_found = function->append_operator(
-          op_item[0].toString()->string(),
-          op_item[1].toString()->string(),
-          model_version);
-      if (!op_found) {
-        unsupported_op_names.emplace(operator_str(
-            op_item[0].toString()->string(), op_item[1].toString()->string()));
-      }
-    }
-    if (!unsupported_op_names.empty()) {
+    std::unordered_set<std::string> unsupported_op_names =
+      find_unsupported_operator_names(ops_list, function.get(), model_version);
+    if ((module_load_options_ & MobileModuleLoadOptions::OPERATOR_CHECK) && !unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
-    };
+    }
 
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
@@ -514,52 +532,55 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device) {
   ExtraFilesMap extra_files;
-  return _load_for_mobile(in, device, extra_files);
+  return _load_for_mobile(in, device, extra_files, _default_mobile_module_load_options);
 }
 
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device) {
   ExtraFilesMap extra_files;
-  return _load_for_mobile(filename, device, extra_files);
+  return _load_for_mobile(filename, device, extra_files, _default_mobile_module_load_options);
 }
 
 mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
   ExtraFilesMap extra_files;
-  return _load_for_mobile(std::move(rai), device, extra_files);
+  return _load_for_mobile(std::move(rai), device, extra_files, _default_mobile_module_load_options);
 }
 
 mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
+  auto module = _load_for_mobile(std::move(rai), device, extra_files, module_load_options);
   return module;
 }
 
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
+  auto module = _load_for_mobile(std::move(rai), device, extra_files, module_load_options);
   return module;
 }
 
 mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
   auto observer = torch::observerConfig().getModuleObserver();
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
+  BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
