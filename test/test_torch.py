@@ -5041,7 +5041,13 @@ class TestTorchDeviceType(TestCase):
         master_input = torch.randn(shape, device=device)
 
         test_functions = [
-
+            ('prod', torch.prod, 1., {}),
+            ('sum', torch.sum, 0., {}),
+            ('norm', torch.norm, 0., {}),
+            ('mean', torch.mean, nan, {}),
+            ('var', torch.var, nan, {}),
+            ('std', torch.std, nan, {}),
+            ('logsumexp', torch.logsumexp, -inf, {}),
         ]
 
         for name, fn, identity, dtype in test_functions:
