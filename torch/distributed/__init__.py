@@ -41,10 +41,14 @@ def _get_debug_mode():
         return _DistributedDebugMode.OFF
     elif debug_mode_str == _DistributedDebugMode.DETAIL.value:
         return _DistributedDebugMode.DETAIL
-    else:
-        # None, unknown or INFO, which is the default
+    elif debug_mode_str is None or debug_mode_str == _DistributedDebugMode.INFO.value:
         return _DistributedDebugMode.INFO
-
+    else:
+        valid_values = [mode.value for mode in _DistributedDebugMode]
+        raise ValueError(
+            f"""Invalid value {debug_mode_str} for environment variable TORCH_DISTRIBUTED_DEBUG.
+            Valid values are {valid_values}"""
+        )
 
 if is_available():
     from torch._C._distributed_c10d import (

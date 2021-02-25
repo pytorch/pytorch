@@ -4726,9 +4726,7 @@ class CommTest(MultiProcessTestCase):
             "INFO": dist._DistributedDebugMode.INFO,
             "DETAIL": dist._DistributedDebugMode.DETAIL,
         }
-        invalid_debug_modes = [None, "foo", -1]
-        for invalid_mode in invalid_debug_modes:
-            mapping[invalid_mode] = dist._DistributedDebugMode.INFO
+        invalid_debug_modes = ["foo", 0, 1, -1]
 
         for mode in mapping.keys():
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
@@ -4738,6 +4736,11 @@ class CommTest(MultiProcessTestCase):
                 mapping[mode],
                 f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}"
             )
+
+        for mode in invalid_debug_modes:
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+                dist._get_debug_mode()
 
 
 if __name__ == '__main__':
