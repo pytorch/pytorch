@@ -32,7 +32,7 @@ void ceil_kernel_cuda(TensorIterator& iter) {
 void frac_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "frac_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-      if (std::isinf(a)) {
+      if (::isinf(a)) {
         return std::copysign(static_cast<scalar_t>(0), a);
       }
       return a - ::trunc(a);
