@@ -1965,10 +1965,9 @@ def repeat_interleave(g, self, repeats, dim):
 
     # cases where repeats is a single number
     if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)):
-        #repeats = reshape(g, repeats, g.op("Constant", value_t=torch.tensor([1])))
-        input = unsqueeze(g, input, dim+1)
+        input = unsqueeze(g, input, dim + 1)
         input_sizes_temp = input_sizes.copy()
-        input_sizes_temp.insert(dim+1, sym_help._maybe_get_scalar(repeats))
+        input_sizes_temp.insert(dim + 1, sym_help._maybe_get_scalar(repeats))
         input = expand(g, input, torch.tensor(input_sizes_temp), None)
         input_sizes[dim] *= 2
         input = reshape(g, input, g.op("Constant", value_t=torch.tensor(input_sizes)))
