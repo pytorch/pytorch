@@ -645,19 +645,16 @@ static void rsqrt_kernel(TensorIterator& iter) {
   }                                                                                              \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
-  #define IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(op)              \
-  static void op##_kernel(TensorIteratorBase& iter) {                         \
-    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {\
-      cpu_kernel_vec(iter,                                                    \
-        [=](scalar_t a) __ubsan_ignore_undefined__ -> scalar_t {              \
-          return std::op(a);                                                  \
-        },                                                                    \
-        [=](Vec256<scalar_t> a) __ubsan_ignore_undefined__ {                  \
-          return a.op();                                                      \
-        });                                                                   \
-      });                                                                     \
-  }                                                                           \
+  #define IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(op)                                                \
+  static void op##_kernel(TensorIteratorBase& iter) {                                            \
+    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
+      iter.serial_for_each(                                                                      \
+          IMPLEMENT_ITERATOR_LAMBDA(op),                                                         \
+          {0, iter.numel()});                                                                    \
+    });                                                                                          \
+    iter.cast_outputs();                                                                         \
+  }                                                                                              \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
 } // anonymous namespace
