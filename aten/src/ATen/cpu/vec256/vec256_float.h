@@ -5,6 +5,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
+#include <ATen/cpu/vec256/vec256_complex_float.h>
 #if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -120,7 +121,7 @@ public:
     const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
     const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_ps(c10::pi<float>);
-    
+
     const auto neg_mask = _mm256_cmp_ps(values, zero_vec, _CMP_LT_OQ);
     auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
     angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
@@ -387,6 +388,26 @@ Vec256<float> Vec256<float>::lt(const Vec256<float>& other) const {
 
 Vec256<float> Vec256<float>::le(const Vec256<float>& other) const {
   return (*this <= other) & Vec256<float>(1.0f);
+}
+
+std::tuple<Vec256<float>, Vec256<float>> complex_constructor(const Vec256<float>& self, const Vec256<float>& other) {
+    auto a = _mm256_permute_ps(self, 0b11011000); // a0 a2 a1 a3 a4 a6 a5 a7
+    auto b = _mm256_permute_ps(other, 0b01110010); // b2 b0 b3 b1 b6 b4 b7 b5
+
+    auto z0 = _mm256_blend_ps(a, b, 0b10101010); // a0 b0 a1 b1 a4 b4 a5 b5
+    auto z1 = _mm256_permute_ps(_mm256_blend_ps(b, a, 0b10101010), 0b10110001); // a2 b2 a3 b3 a6 b6 a7 b7
+
+    // auto z1_a = _mm256_extractf128_ps(z1, 0);
+    // auto z0_b = _mm256_extractf128_ps(z0, 1);
+
+    // auto res1 = _mm256_insertf128_ps(z0, z1_a, 1);
+    // auto res2 = _mm256_insertf128_ps(z1, z0_b, 0);
+
+    auto res1 = _mm256_permute2f128_ps(z0, z1, 0x20); // a0 b0 a1 b1 a2 b2 a3 b3
+    auto res2 = _mm256_permute2f128_ps(z0, z1, 0x31); // a4 b4 a5 b5 a6 b6 a7 b7
+
+    using vec = Vec256<float>;
+    return std::make_tuple<vec, vec>(res1, res2);
 }
 
 template <>

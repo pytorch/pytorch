@@ -5,6 +5,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
+#include <ATen/cpu/vec256/vec256_complex_double.h>
 #if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -113,7 +114,7 @@ public:
     const auto not_nan_mask = _mm256_cmp_pd(values, values, _CMP_EQ_OQ);
     const auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_pd(c10::pi<double>);
-    
+
     const auto neg_mask = _mm256_cmp_pd(values, zero_vec, _CMP_LT_OQ);
     auto angle = _mm256_blendv_pd(zero_vec, pi, neg_mask);
     angle = _mm256_blendv_pd(angle, nan_vec, nan_mask);
@@ -380,6 +381,26 @@ Vec256<double> Vec256<double>::lt(const Vec256<double>& other) const {
 
 Vec256<double> Vec256<double>::le(const Vec256<double>& other) const {
   return (*this <= other) & Vec256<double>(1.0);
+}
+
+std::tuple<Vec256<double>, Vec256<double>> complex_constructor(const Vec256<double>& self, const Vec256<double>& other) {
+  // self a0 a1 a2 a3
+  auto b = _mm256_permute_pd(other, 0x05); // b1 b0 b3 b2
+
+  auto z0 = _mm256_blend_pd(self, b, 0x0A); // a0 b0 a2 b2
+  auto z1 = _mm256_permute_pd(_mm256_blend_pd(b, self, 0x0A), 0x05); // a1 b1 a3 b3
+
+  // auto z1_a = _mm256_extractf128_ps(z1, 0);
+  // auto z0_b = _mm256_extractf128_ps(z0, 1);
+
+  // auto res1 = _mm256_insertf128_ps(z0, z1_a, 1);
+  // auto res2 = _mm256_insertf128_ps(z1, z0_b, 0);
+
+  auto res1 = _mm256_permute2f128_pd(z0, z1, 0x20);
+  auto res2 = _mm256_permute2f128_pd(z0, z1, 0x31);
+
+  using vec = Vec256<double>;
+  return std::make_tuple<vec, vec>(res1, res2);
 }
 
 template <>
