@@ -333,10 +333,10 @@ public:
   }
   Vec256<T> frac() const {
     return map([](const T& x) -> T {
-      if (::isinf(x)) {
-        return ::copysign(static_cast<T>(0), x);
+      if (std::isinf(x)) {
+        return std::copysign(static_cast<T>(0), x);
       }
-      return x - ::trunc(x);
+      return x - at::native::trunc_impl(x);
     });
   }
   template <
