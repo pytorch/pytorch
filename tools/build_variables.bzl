@@ -801,8 +801,8 @@ ATEN_NATIVE_SOURCE_LIST = [
     "aten/src/ATen/native/DilatedMaxPool2d.cpp",
     "aten/src/ATen/native/DilatedMaxPool3d.cpp",
     # Referenced by both native and ATen/Version.cpp. Does not reference to other native symbols
-    # "aten/src/ATen/native/DispatchStub.cpp",
-    # "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
+    "aten/src/ATen/native/DispatchStub.cpp",
+    "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
     "aten/src/ATen/native/Distance.cpp",
     "aten/src/ATen/native/Distributions.cpp",
     "aten/src/ATen/native/Dropout.cpp",

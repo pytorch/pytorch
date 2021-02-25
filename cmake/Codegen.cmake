@@ -99,8 +99,8 @@ if(INTERN_BUILD_ATEN_OPS)
   file(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
 
   list(APPEND cpu_kernel_cpp_in_lite "")
-  append_filelist("aten_cpu_source_list", cpu_kernel_cpp_in_lite)
-  append_filelist("aten_native_source_list", cpu_kernel_cpp_in_lite)
+  append_filelist("ATEN_CPU_SOURCE_LIST" cpu_kernel_cpp_in_lite)
+  append_filelist("ATEN_NATIVE_SOURCE_LIST" cpu_kernel_cpp_in_lite)
 
   list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
@@ -143,6 +143,12 @@ if(INTERN_BUILD_ATEN_OPS)
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
+
+  message(STATUS "native cpu_kernel_cpp_in_lite: ${cpu_kernel_cpp_in_lite}")
+  foreach(tmp ${cpu_kernel_cpp_in_lite})
+    message(STATUS "  " ${tmp})
+  endforeach()
+  message(STATUS "end native cpu_kernel_cpp_in_lite: ${cpu_kernel_cpp_in_lite}")
 
   # The sources list might get reordered later based on the capabilites.
   # See NOTE [ Linking AVX and non-AVX files ]

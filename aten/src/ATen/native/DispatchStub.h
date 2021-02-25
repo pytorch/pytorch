@@ -246,7 +246,6 @@ struct RegisterHIPDispatch {
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 
-
 }} // namespace at::native
 
 
