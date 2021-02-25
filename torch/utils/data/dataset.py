@@ -7,7 +7,11 @@ from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
+<<<<<<< HEAD
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
+=======
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Callable, Dict
+>>>>>>> Type annotations fix
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
