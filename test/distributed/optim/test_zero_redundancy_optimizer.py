@@ -24,7 +24,7 @@ BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-class TestZeroRedundancyOptimizer(MultiProcessTestCase):
+class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
         super(TestZeroRedundancyOptimizer, self).setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
