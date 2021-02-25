@@ -657,8 +657,6 @@ Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   return c;
 }
 
-// template <class T,
-//           typename std::enable_if_t<typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
 template <class T>
 std::tuple<Vec256<T>, Vec256<T>> complex_constructor(const Vec256<T>& a, const Vec256<T>& b) {
   return std::tuple<Vec256<T>, Vec256<T>>(a, b);
