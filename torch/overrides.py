@@ -711,6 +711,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.unfold: lambda input, kernel_size, dilation=1, padding=0, stride=1: -1,
         torch.nonzero: lambda input, as_tuple=False: -1,
         torch.norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
+        torch.linalg.norm: lambda input, ord=None, dim=None, keepdim=False, out=None, dtype=None: -1,
         torch.norm_except_dim: lambda v, pow=2, dim=0: -1,
         torch.nuclear_norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
         torch.numel: lambda input: -1,
@@ -802,7 +803,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.softmax: lambda input, dim, dtype=None: -1,
         torch.solve: lambda input, A, out=None: -1,
         torch.linalg.solve: lambda input, other, out=None: -1,
-        torch.sort: lambda input, dim=-1, descending=False, out=None: -1,
+        torch.sort: lambda input, dim=-1, descending=False, *, stable=False, out=None: -1,
         torch.split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.sqrt: lambda input, out=None: -1,
@@ -908,6 +909,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_xpu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
+        Tensor.is_mlc.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
         Tensor.is_sparse.__get__: lambda self: -1,
@@ -1026,7 +1028,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        torch.linalg.norm: lambda self: -1
     }
 
     ret2 = {}

@@ -13,6 +13,10 @@ List<T>::List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements)
 : impl_(std::move(elements)) {}
 
 template<class T>
+List<T>::List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements)
+: impl_(elements) {}
+
+template<class T>
 List<T>::List()
 : List(make_intrusive<c10::detail::ListImpl>(
   typename c10::detail::ListImpl::list_type(),
@@ -65,8 +69,12 @@ List<T> toTypedList(impl::GenericList list) {
 }
 
 template<class T>
-impl::GenericList toList(List<T> list) {
+impl::GenericList toList(List<T>&& list) {
   return GenericList(std::move(list.impl_));
+}
+template<class T>
+impl::GenericList toList(const List<T>& list) {
+  return GenericList(list.impl_);
 }
 }
 

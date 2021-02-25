@@ -290,6 +290,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_mlc(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mlc());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_vulkan(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -546,6 +554,7 @@ RegisterOperators reg(
      Operator(
          "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
          [](Stack* stack) {
+           RECORD_FUNCTION("_grad_sum_to_size", std::vector<c10::IValue>());
            IValue self, size;
            pop(stack, self, size);
            if (size.isNone()) {
@@ -1005,6 +1014,58 @@ RegisterOperators reg2({
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.str(str[] self) -> bool",
+        [](Stack* stack) {
+          auto l = pop(stack).toList();
+          for (const auto& elem : l) {
+            if (elem != "") {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.int(int[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.float(float[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.bool(bool[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
         },
         aliasAnalysisFromSchema()),
     Operator(
