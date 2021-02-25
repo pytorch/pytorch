@@ -4720,7 +4720,7 @@ class CommTest(MultiProcessTestCase):
     def test_distributed_debug_mode(self):
         # Default should be info
         default_debug_mode = dist._get_debug_mode()
-        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.INFO)
+        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
         mapping = {
             "OFF": dist._DistributedDebugMode.OFF,
             "INFO": dist._DistributedDebugMode.INFO,

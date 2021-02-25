@@ -34,20 +34,24 @@ def _get_debug_mode():
     Reads the environment variable ``TORCH_DISTRIBUTED_DEBUG`` and returns a
     ``_DistributedDebugMode`` corresponding to the appropriate debug level. The
     env var ``TORCH_DISTRIBUTED_DEBUG`` must be set to one of "OFF", "INFO", or
-    "DETAIL". Default setting is INFO.
+    "DETAIL". Default setting is OFF.
     """
     debug_mode_str = os.environ.get("TORCH_DISTRIBUTED_DEBUG", None)
+    default_mode = _DistributedDebugMode.OFF
+    if debug_mode_str is None:
+        return default_mode
+
     if debug_mode_str == _DistributedDebugMode.OFF.value:
         return _DistributedDebugMode.OFF
     elif debug_mode_str == _DistributedDebugMode.DETAIL.value:
         return _DistributedDebugMode.DETAIL
-    elif debug_mode_str is None or debug_mode_str == _DistributedDebugMode.INFO.value:
+    elif debug_mode_str == _DistributedDebugMode.INFO.value:
         return _DistributedDebugMode.INFO
     else:
         valid_values = [mode.value for mode in _DistributedDebugMode]
         raise ValueError(
-            f"""Invalid value {debug_mode_str} for environment variable TORCH_DISTRIBUTED_DEBUG.
-            Valid values are {valid_values}"""
+            f"""Invalid value {debug_mode_str} for environment variable
+            TORCH_DISTRIBUTED_DEBUG. Valid values are {valid_values}"""
         )
 
 if is_available():
