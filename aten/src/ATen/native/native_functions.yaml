@@ -5734,6 +5734,15 @@
     CPU: take_cpu
     CUDA: take_cuda
 
+- func: take_along_dim.out(Tensor self, Tensor index, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: take_along_dim_out
+
+- func: take_along_dim(Tensor self, Tensor index, int dim) -> Tensor
+  variants: method, function
+  dispatch:
+    CPU, CUDA: take_along_dim
+
 - func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
   variants: function
   device_guard: False

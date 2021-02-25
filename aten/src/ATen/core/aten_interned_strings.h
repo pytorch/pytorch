@@ -678,6 +678,7 @@ _(aten, svd) \
 _(aten, symeig) \
 _(aten, t) \
 _(aten, take) \
+_(aten, take_along_axis) \
 _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
