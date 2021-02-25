@@ -578,7 +578,11 @@ void TCPStore::waitHelper_(
   }
 }
 
-PortType TCPStore::getPort() {
+const std::string& TCPStore::getHost() const noexcept {
+  return tcpStoreAddr_;
+}
+
+PortType TCPStore::getPort() const noexcept {
   return tcpStorePort_;
 }
 
