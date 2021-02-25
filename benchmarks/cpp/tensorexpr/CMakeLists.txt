@@ -3,6 +3,8 @@ find_package(AVX)
 add_executable(
   tensorexpr_bench
   bench_approx.cpp
+  bench_batchnorm.cpp
+  bench_concat.cpp
   bench_compile.cpp
   bench_fuser_overhead.cpp
   bench_gemm.cpp
