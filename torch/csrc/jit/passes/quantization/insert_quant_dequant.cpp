@@ -427,15 +427,22 @@ void insertQuantizationOps(
   if (quant_type == QuantType::DYNAMIC) {
     if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);
-    } else if (!isWeight(module, observer_out)) {
-      // For activation tensors we insert choose_qparams, quant, dequant ops.
-      Value* dtype = g->insertGetAttr(self, qparam_names.back());
-      std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
-          g, observer_out, dtype, at::Symbol::aten(quantize_func));
-    } else {
-      // For weight tensors we insert quant-dequant ops.
-      dequant =
+    } else if (getObserverDtype(module, observer_out) == at::ScalarType::QUInt8 ) {
+      if (!isWeight(module, observer_out)) {
+        // For activation tensors we insert choose_qparams, quant, dequant ops.
+        Value* dtype = g->insertGetAttr(self, qparam_names.back());
+        std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
+            g, observer_out, dtype, at::Symbol::aten(quantize_func));
+      } else {
+        // For weight tensors we insert quant-dequant ops.
+        dequant =
           insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
+      }
+    } else {
+      // dtype does not require quantization, e.g. float32
+      // will just remove the observer call
+      observer_out->replaceAllUsesWith(original_val);
+      return;
     }
   } else { // Static quant
     dequant =
@@ -444,6 +451,7 @@ void insertQuantizationOps(
   observer_out->replaceAllUsesWith(original_val);
 
   original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
+  GRAPH_DUMP("insert nodes:", original_val->owningGraph());
 }
 
 void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
