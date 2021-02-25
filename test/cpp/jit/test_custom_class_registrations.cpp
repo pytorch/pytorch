@@ -231,7 +231,18 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
   std::vector<InstructionType> instructions_;
 };
 
+struct ReLUClass : public torch::CustomClassHolder {
+  at::Tensor run(const at::Tensor& t) {
+    throw 3;
+    return t.relu();
+  }
+};
+
 TORCH_LIBRARY(_TorchScriptTesting, m) {
+  m.class_<ReLUClass>("_ReLUClass")
+    .def(torch::init<>())
+    .def("run", &ReLUClass::run);
+
   m.class_<_StaticMethod>("_StaticMethod")
       .def(torch::init<>())
       .def_static("staticMethod", &_StaticMethod::staticMethod);

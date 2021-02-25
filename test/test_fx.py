@@ -1621,6 +1621,24 @@ class TestFX(JitTestCase):
         m = FooBar1234()
         self.checkGraphModule(m, ())
 
+    def test_torchbind_class_attribute_in_fx_tensor_arg(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            self.skipTest("torch.classes._TorchScriptTesting._ReLUClass is registered, skipping")
+
+        class FooBar2341(torch.nn.Module):
+            def __init__(self):
+                super(FooBar2341, self).__init__()
+                self.f = torch.classes._TorchScriptTesting._ReLUClass()
+
+            def forward(self, x):
+                return self.f.run(x)
+
+        m = FooBar2341()
+
+        traced = symbolic_trace(m)
+        print(traced.graph)
+        import pdb; pdb.set_trace()
+
     def test_namedtuple_return_trace(self):
         class NamedTupReturn(torch.nn.Module):
             def forward(self, x):
