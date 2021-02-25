@@ -5740,8 +5740,6 @@
 
 - func: take_along_dim(Tensor self, Tensor index, int dim) -> Tensor
   variants: method, function
-  dispatch:
-    CPU, CUDA: take_along_dim
 
 - func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
   variants: function

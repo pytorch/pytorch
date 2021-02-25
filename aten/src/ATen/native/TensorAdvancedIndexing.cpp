@@ -1161,7 +1161,7 @@ Tensor& take_out_cpu(Tensor& out, const Tensor& self, const Tensor& index) {
 }
 
 Tensor take_along_dim(const Tensor& self, const Tensor& index, int64_t dim) {
-    return at::gather(self, dim, index);
+    return self.gather(dim, index);
 }
 
 Tensor& take_along_dim_out(const Tensor& self, const Tensor& index, int64_t dim, Tensor& result) {

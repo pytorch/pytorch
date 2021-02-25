@@ -654,6 +654,29 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((M, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        gather_variable((S, S), 1, M, True, device=device), 0)),
+            SampleInput((make_tensor((M, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        gather_variable((M, S // 2), 0, S, True, device=device), 1)),
+            SampleInput((make_tensor((), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        torch.tensor([0], dtype=torch.int64, device=device), 0)),
+            SampleInput((make_tensor((S,), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        torch.tensor(0, dtype=torch.int64, device=device), 0)),
+            SampleInput((make_tensor((), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        torch.tensor(0, dtype=torch.int64, device=device), 0)),
+            )
+
 def sample_inputs_diff(op_info, device, dtype, requires_grad):
     test_cases = (
         ((1,), 0, None, None),
@@ -2451,6 +2474,11 @@ op_db: List[OpInfo] = [
                                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
                   ),
                   sample_inputs_func=sample_repeat_tile),
+    OpInfo('take_along_dim',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_take_along_dim),                  
     ShapeFuncInfo('tile',
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
