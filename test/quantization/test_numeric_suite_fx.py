@@ -651,22 +651,25 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(4, 1))
+                self.w = nn.Parameter(torch.Tensor(4, 4))
                 self.b = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
-                return F.linear(x, self.w, self.b)
+                x = F.linear(x, self.w, self.b)
+                x = F.relu(x)
+                x = F.linear(x, self.w, self.b)
+                return x
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(1, 1))
+        mp(torch.randn(1, 4))
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = compare_weights('fp32_prepared', mp, 'int8', mq)
-        self.assertTrue(len(results) == 1)
+        self.assertTrue(len(results) == 2)
         self.assert_ns_weight_compare_dict_valid(results)
 
     @override_qengines
