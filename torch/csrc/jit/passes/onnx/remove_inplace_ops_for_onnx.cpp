@@ -595,6 +595,44 @@ Value* registerSetAttrInBlocks(
   return output;
 }
 
+
+// The trackAndRegisterAttributesInBlocks function tracks any instances
+// of getAttr and setAttr in a sub-block and capture these nodes as inpalce
+// read/write ops. This pass captures the output of setAttr in sub-block outputs
+// so that it gets reflected into the outer block.
+// Also, the pass matched the number of If sub-block outputs
+// if a value is updated in one branch, but no updated on the other branch.
+// For example:
+//= prim::If(%12)
+//    block0():
+//      %13 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %b.1 : Tensor? = prim::GetAttr[name="bias"](%13)
+//      ...
+//      %18 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %19 : Tensor = aten::add(%anchors.1, %b, %6)
+//       = prim::SetAttr[name="bias"](%18, %19)
+//      -> ()
+//    block1():
+//      %20 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %21 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %22 : Tensor = prim::GetAttr[name="weight"](%21)
+//      %23 : Tensor = aten::slice(%22, %7, %7, %8, %6)
+//       = prim::SetAttr[name="bias"](%20, %23)
+//      -> ()
+// After the pass
+//%_output_conv.bias.3 : Tensor = prim::If(%12) # test/onnx/test_pytorch_onnx_onnxruntime.py:6641:16
+//    block0():
+//     ...
+//      %18 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %19 : Tensor = aten::add(%anchors.1, %b, %6)
+//      %_output_conv.bias.2 : Tensor = aten::clone(%19, %26)
+//      -> (%_output_conv.bias.2)
+//    block1():
+//      %20 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %23 : Tensor = aten::slice(%conv.weight, %7, %7, %8, %6)
+//      %31 : None = prim::Constant()
+//      %_output_conv.bias.4 : Tensor = aten::clone(%23, %31)
+//      -> (%_output_conv.bias.4)
 void trackAndRegisterAttributesInBlocks(
     Node* n,
     const std::shared_ptr<Graph>& graph,
@@ -686,6 +724,38 @@ void trackAndRegisterAttributesInBlocks(
   }
 }
 
+
+// The registerInplaceOpAsBlockOutputs function tracks inplace op
+// (like aten::copy_ or aten::append) outputs as sub-block output.
+// Also, match the number of If sub-block outputs
+// if a value is updated in one branch, but no updated on the other branch.
+// For example:
+// = prim::If(%30)
+//    block0():
+//      ...
+//      %35 : Tensor = aten::copy_(%state_copy.1, %33, %12)
+//      -> ()
+//    block1():
+//      ...
+//      %40 : Tensor = aten::copy_(%state.1, %38, %12)
+//      -> ()
+//
+// After the pass
+//%_output_state_copy.1 : Tensor, %_output_state.1 : Tensor = prim::If(%30)
+//    block0():
+//      %_output_state.2 : Tensor = aten::clone(%state.1, %59)
+//      ...
+//      %_output_state_copy.3 : Tensor = onnx::Placeholder[name="index_put_"](%state_copy.1)
+//        block0():
+//        ...
+//      -> (%_output_state_copy.3, %_output_state.2)
+//    block1():
+//      %50 : None = prim::Constant()
+//      %_output_state_copy.2 : Tensor = aten::clone(%state_copy.1, %50)
+//      ...
+//      %_output_state.3 : Tensor = onnx::Placeholder[name="index_put_"](%state.1)
+//        ...
+//      -> (%_output_state_copy.2, %_output_state.3)
 std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
     Block* block,
     const std::shared_ptr<Graph>& graph,
@@ -738,6 +808,14 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
   return nextSetAttrValues;
 }
 
+
+// Register Inplace Ops As Block Outputs
+// Inplace operations like aten::copy_ or aten::append that are inside
+// sub-blocks would require the output of the operation to be captured
+// as sub-block output, so that the inplace operation would be visible
+// to the outer block.
+// We also consider setAttr node an inplace op, and handle those
+// similarly by tracking the output as sub-block outputs.
 void RegisterInplaceOpAsBlockOutputs(
     Module* module,
     const std::shared_ptr<Graph>& graph,
