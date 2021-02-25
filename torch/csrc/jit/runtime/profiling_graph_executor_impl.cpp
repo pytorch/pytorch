@@ -462,6 +462,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
+      RemoveProfileNodesAndSpecializeTypes(gradient.f);
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
       // just like inside autograd.Functions, the forward of a differentiable
