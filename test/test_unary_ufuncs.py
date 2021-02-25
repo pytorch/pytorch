@@ -1306,36 +1306,6 @@ class TestUnaryUfuncs(TestCase):
             with self.assertRaises(RuntimeError):
                 a.bitwise_not_()
 
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_logical_not(self, device, dtype):
-        data = [10, 1, 0.3, 0, -0.3, -1, -10]
-        a = torch.tensor(data, dtype=dtype, device=device)
-        if dtype == torch.bfloat16:  # numpy doesn't support these dtypes
-            result = [False, False, False, True, False, False, False]
-            self.assertEqual(torch.logical_not(a), torch.tensor(result, dtype=torch.bool, device=device))
-        else:
-            a_np = np.array(data, dtype=torch_to_numpy_dtype_dict[dtype])
-            self.assertEqual(np.logical_not(a_np), torch.logical_not(a).to('cpu'))
-            self.assertEqual(np.logical_not(a_np, out=a_np), a.logical_not_().to('cpu'))
-
-    @dtypes(*product(torch.testing.get_all_dtypes(),
-                     torch.testing.get_all_dtypes()))
-    def test_logical_not_out(self, device, dtypes):
-        dtype = dtypes[0]
-        out_dtype = dtypes[1]
-        data = [10, 1, 0.3, 0, -0.3, -1, -10]
-        a = torch.tensor(data, dtype=dtype, device=device)
-        out = torch.empty_like(a, dtype=out_dtype, device=device)
-        if torch.bfloat16 in dtypes:  # numpy doesn't support these dtypes
-            result = [not i for i in a]
-            self.assertEqual(torch.logical_not(a, out=out), torch.tensor(result, dtype=out_dtype, device=device))
-        else:
-            out_np = np.empty(a.shape, dtype=torch_to_numpy_dtype_dict[out_dtype])
-            self.assertEqual(a, a.cpu().numpy())
-            torch.logical_not(a, out=out)
-            np.logical_not(a.cpu().numpy(), out=out_np)
-            self.assertEqual(out_np, out.to('cpu'))
-
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
             self.assertEqual(dim, len(tup))
