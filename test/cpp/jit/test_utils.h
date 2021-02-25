@@ -1,9 +1,9 @@
 #pragma once
 
 #include <torch/csrc/jit/testing/file_check.h>
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #define ASSERT_THROWS_WITH_MESSAGE(statement, substring)                 \
   try {                                                                  \
