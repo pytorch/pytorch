@@ -101,6 +101,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   }
 };
 
+namespace {
 // For this backend, the actual compilation happens in preprocess function AOT.
 // Put here for demonstration of backend
 // as a whole piece. It's used when compilation is required. A dummy function
@@ -148,7 +149,6 @@ c10::IValue preprocess(
   return compiled;
 }
 
-namespace {
 static auto cls = torch::jit::backend<BackendWithCompiler>(
     "backend_with_compiler_demo",
     preprocess);
