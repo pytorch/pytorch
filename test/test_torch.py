@@ -5016,17 +5016,18 @@ class TestTorchDeviceType(TestCase):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
         test_functions = [
-            ('amax', torch.amax, None, {}),
-            ('amin', torch.amin, None, {}),
-            ('argmax', torch.argmax, None, {'dtype': torch.int64}),
-            ('argmin', torch.argmin, None, {'dtype': torch.int64}),
-            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
-            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
-            ('mode', torch.mode, None, {}),
+            ('amax', torch.amax, {}),
+            ('amin', torch.amin, {}),
+            ('argmax', torch.argmax, {'dtype': torch.int64}),
+            ('argmin', torch.argmin, {'dtype': torch.int64}),
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, {}),
+            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, {}),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,{}),
+            #('mode', torch.mode, {}),
+            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, {}),
         ]
 
-        for name, fn, identity, dtype in test_functions:
+        for name, fn, dtype in test_functions:
             # Check if reduction happens along the specified dim with and without keepdim.
             print("function: ", fn)
             self.assertEqual(torch.empty((2, 0), device=device,**dtype), fn(master_input, dim=2))
@@ -5051,7 +5052,8 @@ class TestTorchDeviceType(TestCase):
         ]
 
         for name, fn, identity, dtype in test_functions:
-            pass
+            self.assertEqual(torch.empty((2, 0), device=device,**dt), fn(x, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device,**dt), fn(x, dim=2, keepdim=True))
 
     def _brute_pdist(self, inp, p=2):
         """Computes the same as torch.pdist using primitives"""
