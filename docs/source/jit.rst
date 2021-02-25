@@ -42,6 +42,7 @@ Creating TorchScript Code
 
 .. autosummary::
     :toctree: generated
+    :nosignatures:
 
     script
     trace
