@@ -194,6 +194,7 @@ std::string show_config() {
 
   // TODO: do HIP
   // TODO: do XLA
+  // TODO: do MLC
 
   return ss.str();
 }

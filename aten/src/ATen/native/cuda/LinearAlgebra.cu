@@ -78,7 +78,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes = self_.sizes();
-  TORCH_CHECK(mat1_sizes[1] == mat2_sizes[0], "mat1 dim 1 must match mat2 dim 0");
+  TORCH_CHECK(
+      mat1_sizes[1] == mat2_sizes[0],
+      "mat1 dim 1 must match mat2 dim 0",
+      " mat1 dim1:",
+      mat1_sizes[1],
+      " mat2 dim0: ",
+      mat2_sizes[0]);
   TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
   TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
 
