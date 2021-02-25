@@ -358,6 +358,25 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         args=(torch.tensor([1, 2, 3]),),
                         kwargs=dict(dim=1)),)
 
+def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
+    test_cases: Tuple[Tuple[Tuple[int, ...], ...], ...] = (
+        ((S,), (S,)),
+        ((1, S), (S, 1)),
+        ((2, S), (S, 2), (2, S)),
+    )
+
+    result = []
+    test_case: Tuple[Tuple[int, ...], ...]
+    for test_case in test_cases:
+        tensors = []
+        size: Tuple[int, ...]
+        for size in test_case:
+            t = make_tensor(size, device, dtype, requires_grad=requires_grad)
+            tensors.append(t)
+        result.append(SampleInput(tuple(tensors)))
+
+    return tuple(result)
+
 def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
     test_sizes = [
         (S,),
@@ -1309,32 +1328,17 @@ def sample_inputs_floor_divide(op_info, device, dtype, requires_grad):
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad):
     samples = (
-        SampleInput(make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn(S, S, device=device) > 0,
-                          make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                    args=(torch.randn(M, M, device=device) > 0,
+                          make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
 
-        SampleInput(make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn((S,), device=device) > 0,
-                          make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                    args=(torch.randn((M,), device=device) > 0,
+                          make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
 
-        SampleInput(make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
                     args=(bernoulli_scalar().to(device),
-                          make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad))),
-    )
-
-    return samples
-
-def sample_inputs_masked_fill(op_info, device, dtype, requires_grad):
-    def _make_tensor_helper(shape):
-        return make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
-
-    samples = (
-        SampleInput(_make_tensor_helper((M, M)), args=(torch.randn(M, M, device=device) > 0, 10)),
-        SampleInput(_make_tensor_helper((M, M)), args=(torch.randn(M, M, device=device) > 0, _make_tensor_helper(()))),
-        SampleInput(_make_tensor_helper((M, M)), args=(torch.randn(M, device=device) > 0, 10)),
-        SampleInput(_make_tensor_helper(()), args=(torch.randn((), device=device) > 0, 10)),
-        SampleInput(_make_tensor_helper(()), args=(torch.randn((), device=device) > 0, _make_tensor_helper(()))),
-        SampleInput(_make_tensor_helper((M, M)), args=(torch.randn((), device=device) > 0, 10)),
+                          make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
     )
 
     return samples
@@ -1812,12 +1816,37 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    UnaryUfuncInfo('i0',
+                   ref=np.i0,
+                   decorators=(precisionOverride({torch.bfloat16: 3e-1,
+                                                  torch.float16: 5e-1}),),
+                   dtypes=floating_types_and(torch.bfloat16),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   supports_autograd=False),
     OpInfo('floor_divide',
            dtypes=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_floor_divide,
            decorators=[_wrap_maybe_warns("floor_divide is deprecated, and will be removed")],
            supports_autograd=False,
            ),
+    OpInfo('linalg.multi_dot',
+           # gradcheck expects the input arguments as a flat list (see https://github.com/pytorch/pytorch/issues/51996)
+           op=lambda *args, out=None: torch.linalg.multi_dot(args, out=out),
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+           test_inplace_grad=False,
+           supports_tensor_out=True,
+           sample_inputs_func=sample_inputs_linalg_multi_dot,
+           aten_name='linalg_multi_dot',
+           skips=(
+               # These call into check_alias_annotation which does not support TensorList inputs
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', 
+                        dtypes=[torch.float32, torch.int32]),
+               # TODO: this is failing with AssertionError: False is not true
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.float16]),
+           )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -1904,23 +1933,48 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble]),
                    )),
-    OpInfo('masked_fill',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_masked_fill,
-           supports_tensor_out=False,
-           test_inplace_grad=False,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/52437
-               SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                        device_type='cuda', dtypes=[torch.complex128]),
-           )),
+    UnaryUfuncInfo('logical_not',
+                   ref=np.logical_not,
+                   decorators=(precisionOverride({torch.bfloat16: 7e-1,
+                                                  torch.float16: 5e-1}),),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   safe_casts_outputs=True,
+                   supports_autograd=False,
+                   skips=(
+                       # The function variant always returns BoolTensor
+                       # while the inplace variant preserves the input dtype.
+                       # >>> t = torch.randn(3)
+                       # >>> torch.logical_not(t)
+                       # tensor([False, False, False])
+                       # >>> torch.logical_not(t).dtype
+                       # torch.bool
+                       # >>> t.logical_not_().dtype
+                       # torch.float32
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
+                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
+                   )),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_scatter,
+           skips=(
+               # _th_masked_fill_bool_ not supported for Complex Types.
+               SkipInfo('TestGradients', 'test_fn_grad',
+                        device_type='cuda', dtypes=[torch.complex128]),
+               SkipInfo('TestGradients', 'test_fn_gradgrad',
+                        device_type='cuda', dtypes=[torch.complex128]),
+               SkipInfo('TestGradients', 'test_inplace_grad',
+                        device_type='cuda', dtypes=[torch.complex128]),
+               SkipInfo('TestGradients', 'test_inplace_gradgrad',
+                        device_type='cuda', dtypes=[torch.complex128]),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+           ),
            supports_tensor_out=False),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -2332,7 +2386,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_sort),
     OpInfo('stack',
-           # gradcheck expects the input arguments as a flat list
+           # gradcheck expects the input arguments as a flat list (see https://github.com/pytorch/pytorch/issues/51996)
            op=lambda *args, idx: torch.stack([*args], idx),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
@@ -2343,7 +2397,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_stack),
     OpInfo('hstack',
-           # gradcheck expects the input arguments as a flat list
+           # gradcheck expects the input arguments as a flat list (see https://github.com/pytorch/pytorch/issues/51996)
            op=lambda *args: torch.hstack([*args]),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
@@ -2354,7 +2408,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('vstack',
-           # gradcheck expects the input arguments as a flat list
+           # gradcheck expects the input arguments as a flat list (see https://github.com/pytorch/pytorch/issues/51996)
            op=lambda *args: torch.vstack([*args]),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
@@ -2365,7 +2419,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('dstack',
-           # gradcheck expects the input arguments as a flat list
+           # gradcheck expects the input arguments as a flat list (see https://github.com/pytorch/pytorch/issues/51996)
            op=lambda *args: torch.dstack([*args]),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
@@ -3397,7 +3451,15 @@ def method_tests():
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'alert_nondeterministic', (), [0],
             [expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')]),
+        ('masked_fill', (M, M), (torch.BoolTensor(M, M).bernoulli_(), 10)),
+        ('masked_fill', (M, M), (torch.BoolTensor(M, M).bernoulli_(), ()), 'tensor'),
         ('masked_fill', (M,), (torch.BoolTensor(M, M).bernoulli_(), 10), 'broadcast_lhs'),
+        ('masked_fill', (M, M), (torch.BoolTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
+        ('masked_fill', (), (torch.tensor(0, dtype=torch.bool).bernoulli_(), 10), 'scalar'),
+        ('masked_fill', (), (torch.tensor(0, dtype=torch.bool).bernoulli_(), ()),
+         'scalar_variable'),
+        ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.bool).bernoulli_(), 10),
+         'scalar_broadcast_rhs'),
         ('masked_scatter', (M,), (torch.BoolTensor(M, M).bernoulli_(), (M, M)),
          'broadcast_lhs'),
         ('maximum', (S, S), ((S, S),)),
