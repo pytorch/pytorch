@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <limits>
 
 namespace torch {
 namespace jit {
@@ -1796,6 +1797,121 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
   return new Polynomial(hasher, poly->scalar(), others);
 }
 
+// Identify div-mod-mul terms and split the term into (base, divisor, mod_divisor, multiplier).
+// Example:  ((t/7)%9)*7 -> (t, 7, 9, 7)
+std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> divModMulTerm(const Term* e){
+  const Div* div{nullptr};
+  const Mod* mod{nullptr};
+  const Expr* base{nullptr};
+  const Expr* divisor{nullptr};
+  const Expr* mod_divisor{nullptr};
+  const Expr* multiplier(nullptr);
+  const Expr* other(nullptr);
+
+  if (e->variables().size()==1) {
+      multiplier = e->scalar();
+      other = e->variables()[0];
+
+      // roundoff
+      if (const RoundOff* roundoff = dynamic_cast<const RoundOff*>(other)) {
+        base = roundoff->lhs();
+        divisor = roundoff->rhs();
+        mod_divisor = new IntImm(std::numeric_limits<int>::max());
+        multiplier = roundoff->rhs();
+        return std::make_tuple(base, divisor, mod_divisor, multiplier);
+      }
+
+      // identify multiplier and mod_divisor
+      if ((mod = dynamic_cast<const Mod*>(other))){
+          mod_divisor = mod->rhs();
+          other = mod->lhs();
+      }else{
+          return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+      }
+
+      // identify divisor
+      if ((div = dynamic_cast<const Div*>(other))){
+          divisor = div->rhs();
+          other = div->lhs();
+      }else{
+          divisor = new IntImm(1);
+      }
+
+      // base
+      base = other;
+      return std::make_tuple(base, divisor, mod_divisor, multiplier);
+  }
+
+  return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+}
+
+// Searches int polynomials that can be simplified to the form of 1-d index access from the form of N-d indices access for flattened buf.
+// Pattern: dims: (k1, k2, ..., kn), t is in (0, k1*k2*...*kn),
+// t/(kx*k2*...*kn-1)*(kx*k2*...*kn-1) +
+// t/(kx*k2*...*kn-2) % kn-1 * (kx*k2*...*kn-2) +
+// ... +
+// t/(k1*k2) % k3 * (k1*k2) +
+// t/k1 % k2 * k1 +
+// t%k1
+// => t.
+const Expr* simplifyNdIndicesPattern(const Polynomial* poly) {
+  std::vector<std::tuple<int, int>> pattern;
+
+  HashProvider& hasher = poly->hasher();
+  // Expr for 't' in the pattern
+  const Expr* base = nullptr;
+  for (auto* c : poly->variables()) {
+    if (c->variables().size() >= 1) {
+      auto [ _base, _div, _mod, _mul ] = divModMulTerm(c);
+      // If one Term in the input polynomial is not a div-mod-mul then return.
+      if (! _base) {
+        return nullptr;
+      }
+      if(! base) {
+        base = _base;
+      // Check: the base of all div-mod-mul terms have to be equal.
+      }else if(hasher.hash(base) != hasher.hash(_base)){
+        return nullptr;
+      }
+      // Check: the divisor and multiplier in the div-mod-mul term has to be equal.
+      if(hasher.hash(_div) != hasher.hash(_mul)){
+        return nullptr;
+      }
+      // Extract the values of the divisor and mod_divisor.
+      int div=0, mod=0;
+      if(const IntImm* n = dynamic_cast<const IntImm*>(_div)){
+          div=n->value();
+      }
+      if(const IntImm* m = dynamic_cast<const IntImm*>(_mod)){
+          mod=m->value();
+      }
+      pattern.push_back(std::make_tuple(div, mod));
+    }
+  }
+
+  // Sort the (divisor, mod_divisor) tuples based on the value of the divisor.
+  std::sort(pattern.begin(), pattern.end(), [](std::tuple<int, int> a, std::tuple<int, int> b) {return std::get<0>(a) < std::get<0>(b);});
+
+  // Check: the sorted tuples have to satify the pattern listed in the comments before this function.
+  int k=1, kn=1;
+  for (std::tuple<int, int> c : pattern){
+    k *= kn;
+    int d=std::get<0>(c), m=std::get<1>(c);
+    if (k!=d){
+        return nullptr;
+    }
+    kn = m;
+  }
+
+  if(kn != std::numeric_limits<int>::max()){
+      return nullptr;
+  }
+
+  // All checks pass. Simplify the polynominal into one term: 'base'.
+  const Term* t = new Term(hasher, new IntImm(1), {base});
+  return new Polynomial(hasher, poly->scalar(), t);
+}
+
 // Trivially factorize terms by GCD of scalar components.
 const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
   const Expr* scalar = poly->scalar();
@@ -1826,6 +1942,13 @@ const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
 const Expr* TermExpander::mutate(const Polynomial* v) {
   if (v->variables().empty()) {
     return v->scalar();
+  }
+
+  // If this Polynomial is in the form of N-d indices access for flattend buf:
+  // simplifiy it to the form of 1-d index access.
+  // This currently only works for constant indices.
+  if (const Expr* simplified = simplifyNdIndicesPattern(v)) {
+    return simplified->accept_mutator(this);
   }
 
   // If this Polynomial can be factorized: do it, then expand the result.
