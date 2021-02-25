@@ -573,104 +573,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
         with self.assertRaises(GraphMatchingException) as ex:
             results = get_matching_subgraph_pairs(mp1, mp2)
 
-    @override_qengines
-    def test_nodes_before_cat(self):
-        # verify that nodes before cat get matched
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x0):
-                x1 = torch.add(x0, 1.0)
-                y1 = torch.add(x0, 1.0)
-                x2 = torch.cat([x1, y1])
-                return x2
-
-        m = M().eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-        results = get_matching_subgraph_pairs(mp, mq)
-
-        expected_types = {
-            'cat': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
-            'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add': ((torch.add, torch.add), (toq.add, toq.add)),
-        }
-        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
-
-    @override_qengines
-    def test_dict_return_type(self):
-        # verify that we can traverse up nodes which return dictionaries
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x0):
-                x1 = torch.add(x0, 1.0)
-                y1 = torch.add(x0, 1.0)
-                z1 = torch.add(x0, 1.0)
-                a1 = {'x1': x1, 'y1': (y1,), 'z1': [{'key': (z1,)}]}
-                return a1
-
-        m = M().eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-        results = get_matching_subgraph_pairs(mp, mq)
-
-        expected_types = {
-            'add': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add_2': ((torch.add, torch.add), (toq.add, toq.add)),
-        }
-        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
-
-    @override_qengines
-    def test_nodes_with_equal_types_do_not_get_matched(self):
-        # verifies that by default, nodes with equivalent types do not get matched.
-        # This is important for user defined types, for which we do not know
-        # the weight extraction functions or input type. In the future, this can
-        # be made configurable.
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.conv2 = nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.conv2(x)
-                x = torch.mul(x, x)
-                x = torch.sigmoid(x)
-                x = F.relu(x)
-                return x
-
-        m = M().eval()
-        # prevent conv2 from getting quantized, so we can test
-        # modules with equal types
-        qconfig_dict = {
-            '': torch.quantization.default_qconfig,
-            'module_name': [('conv2', None)],
-        }
-        mp = prepare_fx(m, qconfig_dict)
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-        results = get_matching_subgraph_pairs(mp, mq)
-
-        # Conv2 should not be matched because we disabled quantization for it,
-        # so its type is the same in mp and mq. sigmoid and relu should not be
-        # matched because they use the same function in mp and mq.
-        expected_types = {
-            'conv1': ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
-            'mul': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
-        }
-        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
-
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
 
@@ -721,25 +623,22 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(4, 4))
+                self.w = nn.Parameter(torch.Tensor(4, 1))
                 self.b = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
             def forward(self, x):
-                x = F.linear(x, self.w, self.b)
-                x = F.relu(x)
-                x = F.linear(x, self.w, self.b)
-                return x
+                return F.linear(x, self.w, self.b)
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(1, 4))
+        mp(torch.randn(1, 1))
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = compare_weights('fp32_prepared', mp, 'int8', mq)
-        self.assertTrue(len(results) == 2)
+        self.assertTrue(len(results) == 1)
         self.assert_ns_weight_compare_dict_valid(results)
 
     @override_qengines
@@ -939,7 +838,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         # inspect results
         act_compare_dict = get_matching_activations(
             'fp32_prepared', sparse_nn, 'int8', sparse_nn_q, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 4)
+        self.assertTrue(len(act_compare_dict) == 3)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
 
     @override_qengines
@@ -973,5 +872,5 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         # check activation result correctness
         act_compare_dict = get_matching_activations_a_shadows_b(
             sparse_nn_q, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 4)
+        self.assertTrue(len(act_compare_dict) == 3)
         self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)

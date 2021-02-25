@@ -248,10 +248,6 @@ def get_test_names(test_cases):
 def chunk_list(lst, nchunks):
     return [lst[i::nchunks] for i in range(nchunks)]
 
-# sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
-def sanitize_test_filename(filename):
-    strip_py = re.sub(r'.py$', '', filename)
-    return re.sub('/', r'.', strip_py)
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_DISCOVER:
@@ -286,9 +282,7 @@ def run_tests(argv=UNITTEST_ARGS):
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
-        test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
-        test_report_path = os.path.join(test_report_path, test_filename)
         os.makedirs(test_report_path, exist_ok=True)
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:

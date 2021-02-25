@@ -290,14 +290,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::is_mlc(Tensor a) -> bool",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_mlc());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::is_vulkan(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;

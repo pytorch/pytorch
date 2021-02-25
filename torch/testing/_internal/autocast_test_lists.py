@@ -195,14 +195,6 @@ class AutocastTestLists(object):
             ("stack", (pointwise0_fp16 + pointwise1_fp32,)),
             ("tensordot", (torch.randn((2, 2, 2), dtype=torch.float32, device=dev),
                            torch.randn((2, 2, 2), dtype=torch.float16, device=dev))),
-            ("scatter_add", (torch.zeros(2, 2, 2, dtype=torch.float32, device=dev),
-                             0,
-                             torch.randint(0, 2, (2, 2, 2), device=dev),
-                             torch.randn((2, 2, 2), dtype=torch.float16, device=dev))),
-            ("scatter_add", (torch.zeros(2, 2, 2, dtype=torch.float16, device=dev),
-                             0,
-                             torch.randint(0, 2, (2, 2, 2), device=dev),
-                             torch.randn((2, 2, 2), dtype=torch.float32, device=dev))),
         ]
         self.nn_fp16 = [
             ("linear", mat0_fp32 + mat1_fp32 + mat2_fp32),

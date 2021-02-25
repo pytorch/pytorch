@@ -91,13 +91,13 @@ TEST(LoopNest, ExprSimple02) {
             x_inner,
             0,
             4,
-            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y)))));
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
     ExprHandle x_2 = x_tail + x_outer_end * 4;
     For* stmt2 = For::make(
         x_tail,
         0,
         (ExprHandle(26) - 0) % 4,
-        For::make(y, 0, 5, Store::make(f, {x_2, y}, func(x_2, y))));
+        For::make(y, 0, 5, Store::make(f, {x_2, y}, func(x_2, y), 1)));
     Stmt* stmt = Block::make({stmt1, stmt2});
 
     std::ostringstream oss_ref;
@@ -549,7 +549,7 @@ TEST(LoopNest, ExprSplitWithTailNone) {
             x_inner,
             0,
             4,
-            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y)))))});
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))))});
 
     std::ostringstream oss_ref;
     oss_ref << *stmt;
@@ -2125,10 +2125,13 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
 
   VarHandle i = VarHandle(loops[0]->var());
 
-  Stmt* store_1 = Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f));
-  Stmt* store_2 = Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f));
+  Stmt* store_1 =
+      Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f), 1);
+  Stmt* store_2 =
+      Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f), 1);
   // stmt 3 is the Function body.
-  Stmt* store_3 = Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f));
+  Stmt* store_3 =
+      Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f), 1);
 
   loops[0]->body()->prepend_stmt(store_1);
   loops[1]->body()->prepend_stmt(store_2);
@@ -2596,7 +2599,7 @@ TEST(LoopNest, UnrollMultipleStatements) {
       kTotalSize,
       Block::make(
           {Store::make(a_buf, {x}, x * 2),
-           Store::make(b_buf, {x}, Load::make(a_buf, {x}))}));
+           Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2691,7 +2694,7 @@ TEST(LoopNest, NormalizeStartPositive) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   auto for_body = Block::make(
-      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
        Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 50, 100, for_body);
   Block::make({for_stmt});
@@ -2724,7 +2727,7 @@ TEST(LoopNest, NormalizeStartNegative) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   auto for_body = Block::make(
-      {Store::make(a_buf, {x + 50}, Load::make(kInt, b_buf, {x + 50})),
+      {Store::make(a_buf, {x + 50}, Load::make(kInt, b_buf, {x + 50}, 1), 1),
        Store::make(b_buf, {x + 50}, x * 2)});
   auto for_stmt = For::make(x, -50, 100, for_body);
   Block::make({for_stmt});
@@ -2759,7 +2762,7 @@ TEST(LoopNest, NormalizeStartZero) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   auto for_body = Block::make(
-      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
        Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 0, 100, for_body);
   Block::make({for_stmt});
@@ -2794,7 +2797,7 @@ TEST(LoopNest, NormalizeStartVariable) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto for_body = Block::make(
-      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
        Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, y, 100, for_body);
   Block::make({for_stmt});
@@ -2829,7 +2832,10 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto inner_for_body = Store::make(
-      a_buf, {x}, Load::make(a_buf, {x}) + Load::make(b_buf, {y}) + y * 2);
+      a_buf,
+      {x},
+      Load::make(a_buf, {x}, 1) + Load::make(b_buf, {y}, 1) + y * 2,
+      1);
   auto inner_for = For::make(y, 10, 100, inner_for_body);
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
@@ -2864,7 +2870,10 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto inner_for_body = Store::make(
-      a_buf, {x}, Load::make(a_buf, {x}) + Load::make(b_buf, {y}) + y * 2);
+      a_buf,
+      {x},
+      Load::make(a_buf, {x}, 1) + Load::make(b_buf, {y}, 1) + y * 2,
+      1);
   auto inner_for = For::make(y, 10, 100, inner_for_body);
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
@@ -2945,7 +2954,7 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
   auto inner_for = For::make(j, 0, 5, for_body);
   auto outer_for = For::make(i, 0, 10, inner_for);
   Block::make({outer_for});
@@ -2991,7 +3000,7 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  auto for_body = Block::make({Store::make(a_buf, {i, j, k}, i + j * k)});
+  auto for_body = Block::make({Store::make(a_buf, {i, j, k}, i + j * k, 1)});
   auto for1 = For::make(k, 0, 7, for_body);
   auto for2 = For::make(j, 0, 5, for1);
   auto for3 = For::make(i, 0, 10, for2);
@@ -3035,7 +3044,7 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
   BufHandle a_buf("A", {8, 12}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto for_body = Block::make({Store::make(a_buf, {i - 2, j - 3}, i * j)});
+  auto for_body = Block::make({Store::make(a_buf, {i - 2, j - 3}, i * j, 1)});
   auto inner_for = For::make(j, 3, 15, for_body);
   auto outer_for = For::make(i, 2, 10, inner_for);
   Block::make({outer_for});
@@ -3081,10 +3090,10 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
   BufHandle a_buf("A", {10, 15}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
   auto inner_for = For::make(j, 0, 15, for_body);
   auto outer_for = For::make(
-      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
+      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0, 1), inner_for}));
   Block::make({outer_for});
 
   std::vector<For*> loops = {outer_for, inner_for};
@@ -3122,10 +3131,13 @@ TEST(LoopNest, FlattenReductionLoopNest) {
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto for_body = Block::make({Store::make(
-      s_buf, {i}, Load::make(s_buf, {i}) + Load::make(a_buf, {i, j}))});
+      s_buf,
+      {i},
+      Load::make(s_buf, {i}, 1) + Load::make(a_buf, {i, j}, 1),
+      1)});
   auto inner_for = For::make(j, 0, 15, for_body);
-  auto outer_for =
-      For::make(i, 0, 10, Block::make({Store::make(s_buf, {i}, 0), inner_for}));
+  auto outer_for = For::make(
+      i, 0, 10, Block::make({Store::make(s_buf, {i}, 0, 1), inner_for}));
   Block::make({outer_for});
 
   std::vector<For*> loops = {outer_for, inner_for};
@@ -3194,11 +3206,11 @@ TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
   auto inner_for1 = For::make(j, 0, 5, for_body1);
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
-      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
   auto inner_for2 = For::make(y, 0, 5, for_body2);
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block::make({outer_for1, outer_for2});
@@ -3539,8 +3551,8 @@ TEST(LoopNest, DeadStoreElimination) {
           0,
           5,
           Block::make({
-              Store::make(f, {x_2, y}, (x_2 + y)),
-              Store::make(g, {x_2, y}, (x_2 * y)),
+              Store::make(f, {x_2, y}, (x_2 + y), 1),
+              Store::make(g, {x_2, y}, (x_2 * y), 1),
           })));
   Stmt* stmt = Block::make({stmt1});
 
@@ -3594,7 +3606,7 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
           0,
           5,
           Block::make({
-              Store::make(h, {x, y}, Load::make(f, {x * y})),
+              Store::make(h, {x, y}, Load::make(f, {x * y}, 1), 1),
           })));
   Stmt* stmt = Block::make({stmt1, stmt2, stmt3});
 
@@ -3638,11 +3650,11 @@ TEST(LoopNest, CompoundTensorSimple) {
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
   auto inner_for1 = For::make(j, 0, 5, for_body1);
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
-      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
   auto inner_for2 = For::make(y, 0, 5, for_body2);
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block* body = Block::make({outer_for1, outer_for2});
@@ -3677,11 +3689,11 @@ TEST(LoopNest, CompoundTensorUsed) {
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
   auto inner_for1 = For::make(j, 0, 5, for_body1);
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
-      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
   auto inner_for2 = For::make(y, 0, 5, for_body2);
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block* body = Block::make({outer_for1, outer_for2});

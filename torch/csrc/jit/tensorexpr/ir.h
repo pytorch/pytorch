@@ -418,13 +418,6 @@ class TORCH_API Load : public ExprNode<Load> {
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& mask);
-  static ExprHandle make(
-      Dtype dtype,
-      const BufHandle& buf,
-      const std::vector<ExprHandle>& indices);
-  static ExprHandle make(
-      const BufHandle& buf,
-      const std::vector<ExprHandle>& indices);
 
   Load(
       Dtype dtype,

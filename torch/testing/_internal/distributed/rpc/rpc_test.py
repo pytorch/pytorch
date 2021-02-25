@@ -885,16 +885,6 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
 
-    @staticmethod
-    def return_callee_id():
-        return rpc.get_worker_info().id
-
-    @dist_init
-    def test_int_callee(self):
-        dst_rank = (self.rank + 1) % self.world_size
-        ret = rpc.rpc_sync(dst_rank, RpcTest.return_callee_id)
-        self.assertEqual(ret, dst_rank)
-
     @dist_init
     def test_add_with_id(self):
         n = self.rank + 1

@@ -543,10 +543,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::Metal);
   }
 
-  bool is_mlc() const {
-    return key_set_.has(DispatchKey::MLC);
-  }
-
   // TODO: remove this once we don't automatically enabled Autograd dispatch keys
   //       in TensorImpl constructor.
   // DON'T USE THIS API!! It's only created for testing purpose in

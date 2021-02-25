@@ -83,9 +83,6 @@ class Placeholder {
   const Buf* data() const {
     return data_;
   }
-  BufHandle handle() const {
-    return BufHandle(data());
-  }
   Dtype dtype() const {
     return data_->dtype();
   }

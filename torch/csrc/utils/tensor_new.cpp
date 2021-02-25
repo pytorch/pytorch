@@ -61,9 +61,6 @@ Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
       return Backend::XLA;
     case DeviceType::XPU:
       return backendToXPU(b);
-    case DeviceType::MLC:
-      TORCH_CHECK(!isSparse(b), "Sparse not implemented for MLC");
-      return Backend::MLC;
     default:
       AT_ERROR("Unknown device type");
   }
