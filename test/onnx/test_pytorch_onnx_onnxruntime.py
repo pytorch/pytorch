@@ -9,7 +9,8 @@ import copy
 import os
 
 from torch.nn.utils import rnn as rnn_utils
-from model_defs.lstm_flattening_result import LstmFlatteningResult
+from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
+                                               LstmFlatteningResultWithoutSeqLength)
 from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequence, 
                                                        RnnModelWithPackedSequenceWithState, 
                                                        RnnModelWithPackedSequenceWithoutState)
@@ -5974,13 +5975,23 @@ class TestONNXRuntime(unittest.TestCase):
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
         batch_first = True if packed_sequence == 2 else False
-        model = LstmFlatteningResult(
-            RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-            bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
-        if packed_sequence == 1:
-            model = RnnModelWithPackedSequence(model, False)
-        if packed_sequence == 2:
-            model = RnnModelWithPackedSequence(model, True)
+
+        if packed_sequence == 0:
+            model = LstmFlatteningResultWithoutSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
+                                                         bidirectional, dropout, batch_first)
+        else:
+            model = LstmFlatteningResultWithSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
+                                                      bidirectional, dropout, batch_first)
+            if initial_state:
+                if packed_sequence == 1: 
+                    model = RnnModelWithPackedSequenceWithState(model, False)
+                if packed_sequence == 2:
+                    model = RnnModelWithPackedSequenceWithState(model, True)
+            else:
+                if packed_sequence == 1: 
+                    model = RnnModelWithPackedSequenceWithoutState(model, False)
+                if packed_sequence == 2:
+                    model = RnnModelWithPackedSequenceWithoutState(model, True)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
