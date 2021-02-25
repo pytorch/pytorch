@@ -56,10 +56,14 @@ def _save_packed_weight(self, destination, prefix, keep_vars):
             destination[prefix + attr_name] = packed_weight
 
 class QuantizedGraphModule(GraphModule):
+    """ This class is created to make sure PackedParams
+    (e.g. LinearPackedParams, Conv2dPackedParams) to appear in state_dict
+    so that we can serialize and deserialize quantized graph module with
+    torch.save(m.state_dict()) and m.load_state_dict(state_dict)
+    """
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
         super().__init__(root, graph)
         self._register_state_dict_hook(_save_packed_weight)
-        # self._register_load_state_dict_pre_hook(_load_packed_weight)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
