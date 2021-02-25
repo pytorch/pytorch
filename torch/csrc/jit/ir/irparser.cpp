@@ -71,6 +71,7 @@ struct ParsedLiteral {
   int64_t i = 0;
   std::string s = "";
   double f = 0.0;
+  c10::complex<double> c = c10::complex<double>(0, 0);
   TypePtr ty;
   std::vector<int64_t> is;
   std::vector<std::string> ss;
@@ -160,7 +161,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       // Fallthrough
     case TK_NUMBER:
       str += L.cur().text();
-
+      if (str.find('j') != std::string::npos) {
+        r.k = AttributeKind::c;
+        r.c = c10::stod(str);
+      }
       if (str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
@@ -265,6 +269,9 @@ void IRParser::parseAttr(Node* n) {
         break;
       case AttributeKind::f:
         n->f_(Symbol::attr(attrname), r.f);
+        break;
+      case AttributeKind::c:
+        n->c_(Symbol::attr(attrname), r.c);
         break;
       case AttributeKind::ty:
         n->ty_(Symbol::attr(attrname), r.ty);

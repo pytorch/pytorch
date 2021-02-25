@@ -101,6 +101,7 @@ Value* tryConvertToType(
     bool value_isa_tensor = value->type()->isSubtypeOf(TensorType::get());
     bool value_equals_number = *value->type() == *NumberType::get();
     bool concrete_float = *concrete_type == *FloatType::get();
+    bool concrete_complex = *concrete_type == *ComplexType::get();
     bool concrete_int = *concrete_type == *IntType::get();
     bool concrete_number = *concrete_type == *NumberType::get();
     if (value_isa_tensor) {

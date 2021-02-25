@@ -33,6 +33,8 @@ class TestComplex(JitTestCase):
         class ComplexModule(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
+                #initialization is done in python
+                # JIT doesn't parse init
                 self.a = 3 + 5j
                 self.b = [2 + 3j, 3 + 4j, 0 - 3j, -4 + 0j]
                 self.c = {2 + 3j : 2 - 3j, -4.3 - 2j: 3j}
@@ -44,3 +46,15 @@ class TestComplex(JitTestCase):
         self.assertEqual(loaded.a, 3 + 5j)
         self.assertEqual(loaded.b, [2 + 3j, 3 + 4j, -3j, -4])
         self.assertEqual(loaded.c, {2 + 3j : 2 - 3j, -4.3 - 2j: 3j})
+
+    def test_complex_parse(self):
+        def fn(a: int):
+            # uses buildConstant
+            # we construct python AST
+            # Python AST -> JIT AST (JIT IR)
+            return a + (1 + 1j)
+
+        t = torch.tensor((1,))
+        scripted = torch.jit.script(fn)
+        print(scripted(t))
+        self.assertEqual(scripted(t), fn(t))

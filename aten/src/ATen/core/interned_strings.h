@@ -88,6 +88,7 @@ namespace c10 {
   _(aten, IntImplicit)               \
   _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
+  _(aten, Complex)                   \
   _(aten, str)                       \
   _(aten, Delete)                    \
   _(prim, device)                    \

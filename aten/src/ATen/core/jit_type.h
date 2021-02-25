@@ -1553,6 +1553,8 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
     return TensorType::createContiguous(at::kFloat, at::kCPU, {});
+  } else if (typ->isSubtypeOf(ComplexType::get())) {
+    return TensorType::createContiguous(at::kComplexFloat, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   }
@@ -1565,6 +1567,8 @@ inline TypePtr TensorType::fromBoolType() {
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
+  } else if (type == ComplexType::get()) {
+    return at::typeMetaToScalarType(c10::get_default_complex_dtype());
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {

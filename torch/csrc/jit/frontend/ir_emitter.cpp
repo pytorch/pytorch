@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/hash.h>
 
 #include <atomic>
 #include <climits>
@@ -444,6 +445,10 @@ struct Environment {
            makeMagic(
                "__float__",
                std::make_shared<CastValue>(FloatType::get(), aten::Float))},
+          {"complex",
+           makeMagic(
+               "__complex__",
+               std::make_shared<CastValue>(ComplexType::get(), aten::Complex))},
           {"int",
            makeMagic(
                "__int__",
@@ -569,12 +574,12 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T>
+template <class T, class U>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*>& map) {
+    std::unordered_map<T, Value*, U>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -661,8 +666,9 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
+  std::unordered_map<int64_t, Value*, std::hash<int>> integral_constants;
+  std::unordered_map<double, Value*, std::hash<float>> fp_constants;
+  std::unordered_map<c10::complex<double>, Value*, c10::hash<c10::complex<double>>> c_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
@@ -2293,7 +2299,8 @@ struct to_ir {
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
-        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType ||
+        kind == c10::TypeKind::ComplexType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -3674,6 +3681,9 @@ struct to_ir {
     if (c.isFloatingPoint())
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
+    else if (c.isComplex())
+      return materializeConstant(
+          c.asComplexDouble(), *graph, c.range(), c_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);

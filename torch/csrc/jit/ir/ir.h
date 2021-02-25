@@ -798,6 +798,7 @@ struct TORCH_API Node {
   }
 
   CREATE_ACCESSOR(Float, f)
+  CREATE_ACCESSOR(Complex, c)
   CREATE_ACCESSOR(Floats, fs)
   CREATE_ACCESSOR(String, s)
   CREATE_ACCESSOR(Strings, ss)

@@ -39,6 +39,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
       } break;
       case aten::Bool:
       case aten::Float:
+      case aten::Complex:
       case aten::Int:
       case aten::FloatImplicit:
       case aten::IntImplicit:

@@ -130,6 +130,7 @@ struct PeepholeOptimizeImpl {
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
+          node->kind() == aten::Complex ||
           node->kind() == aten::FloatImplicit ||
           node->kind() == aten::IntImplicit ||
           node->kind() == aten::ScalarImplicit) {

@@ -7,6 +7,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <c10/util/complex.h>
 
 namespace torch {
 namespace jit {
@@ -867,12 +868,18 @@ struct Const : public Expr {
     tree_->matchNumSubtrees(TK_CONST, 1);
   }
   bool isFloatingPoint() const {
+    // Complex values consist of a real and an imaginary floating point value
+    if (isComplex()) return false;
+
     bool is_inf = subtree(0)->stringValue() == "inf";
     return is_inf ||
         subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
   }
   bool isIntegral() const {
-    return !isFloatingPoint();
+    return !isFloatingPoint() && !isComplex();
+  }
+  bool isComplex() const {
+    return subtree(0)->stringValue().find_first_of('j') != std::string::npos;
   }
   int64_t asIntegral() const {
     try {
@@ -887,6 +894,12 @@ struct Const : public Expr {
     // Android version of strtod_c().
     char* dummy;
     return torch::jit::strtod_c(subtree(0)->stringValue().c_str(), &dummy);
+  }
+  c10::complex<double> asComplexDouble() const {
+    char* dummy;
+    auto str = subtree(0)->stringValue();
+    auto imag = torch::jit::strtod_c(str.substr(0, str.size()-1).c_str(), &dummy);
+    return c10::complex<double>(0, imag);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
