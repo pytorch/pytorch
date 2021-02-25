@@ -2650,11 +2650,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.sigmoid(x)
                 x = torch.sigmoid(x)
                 x = x.sigmoid()
+                x = self.tanh(x)
+                x = torch.tanh(x)
+                x = x.tanh()
                 return x
 
         data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
@@ -2663,7 +2667,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             "": float16_static_qconfig
         }
         node_occurrence = {
-            ns.call_method("to"): 4
+            ns.call_method("to"): 7
         }
         m = self.checkGraphModeFxOp(
             M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
