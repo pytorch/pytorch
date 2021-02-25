@@ -70,7 +70,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
     def __setstate__(self, state):
         (self.datapipe, dill_function, self.args, self.kwargs) = state
         if DILL_AVAILABLE:
-            self.fn = dill.loads(dill_function)
+            self.fn = dill.loads(dill_function)  # type: ignore
         else:
             self.fn = dill_function
 
