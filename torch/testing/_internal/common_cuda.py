@@ -109,25 +109,23 @@ def tf32_on_and_off(tf32_precision=1e-5):
             function_call()
 
     def wrapper(f):
-        nargs = len(inspect.signature(f).parameters)
-        if nargs == 2:
-            @functools.wraps(f)
-            def wrapped(self, device):
-                if self.device_type == 'cuda' and tf32_is_not_fp32():
-                    with_tf32_disabled(self, lambda: f(self, device))
-                    with_tf32_enabled(self, lambda: f(self, device))
-                else:
-                    f(self, device)
-        else:
-            assert nargs == 3, "this decorator only support function with signature (self, device) or (self, device, dtype)"
+        params = inspect.signature(f).parameters
+        arg_names = tuple(params.keys())
 
-            @functools.wraps(f)
-            def wrapped(self, device, dtype):
-                if self.device_type == 'cuda' and dtype in {torch.float32, torch.complex64} and tf32_is_not_fp32():
-                    with_tf32_disabled(self, lambda: f(self, device, dtype))
-                    with_tf32_enabled(self, lambda: f(self, device, dtype))
-                else:
-                    f(self, device, dtype)
+        @functools.wraps(f)
+        def wrapped(*args, **kwargs):
+            for k, v in zip(arg_names, args):
+                kwargs[k] = v
+            cond = tf32_is_not_fp32()
+            if 'device' in kwargs:
+                cond = cond and (torch.device(kwargs['device']).type == 'cuda')
+            if 'dtype' in kwargs:
+                cond = cond and (kwargs['dtype'] in {torch.float32, torch.complex64})
+            if cond:
+                with_tf32_disabled(kwargs['self'], lambda: f(**kwargs))
+                with_tf32_enabled(kwargs['self'], lambda: f(**kwargs))
+            else:
+                f(**kwargs)
 
         return wrapped
     return wrapper
