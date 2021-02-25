@@ -3268,6 +3268,12 @@
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
 
+- func: relu6(Tensor self) -> Tensor
+  python_module: nn
+
+- func: relu6_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
   dispatch:

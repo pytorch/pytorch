@@ -5355,6 +5355,7 @@ else:
                 ref = np.linalg.matrix_power(t.cpu().numpy(), n)
                 self.assertEqual(res.cpu(), torch.from_numpy(ref))
 
+        check(0, 0)
         check(1, 1)
         check(5, 5)
         check(5, 5, discontiguous=True)
@@ -5374,6 +5375,7 @@ else:
                 ref = np.linalg.matrix_power(t.cpu().numpy(), n)
                 self.assertEqual(res.cpu(), torch.from_numpy(ref))
 
+        check(0)
         check(5)
         check(3, 3)
         check(3, 2, 3)
