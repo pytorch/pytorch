@@ -10,6 +10,8 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
 
+#include <c10/util/irange.h>
+
 #include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
@@ -455,7 +457,7 @@ static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
   auto ipiv_data = ipiv.data_ptr<int>();
   auto infos_data = infos.data_ptr<int>();
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     int* info_working_ptr = &infos_data[i];
@@ -638,7 +640,7 @@ static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     int* info_lu_working_ptr = &infos_lu_data[i];
     lapackLu<scalar_t>(n, n, self_working_ptr, lda, ipiv_data, info_lu_working_ptr);
@@ -771,7 +773,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
   auto nrhs = b.size(-1);
 
   int info;
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
@@ -834,7 +836,7 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
   auto lda = std::max<int64_t>(1, n);
 
   int info;
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     lapackCholesky<scalar_t>(uplo, n, self_working_ptr, lda, &info);
     infos[i] = info;
@@ -993,7 +995,7 @@ static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
   auto m = self.size(-2);
   auto n = self.size(-1);
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
     int* infos_working_ptr = &infos_data[i];
@@ -1056,7 +1058,7 @@ static void apply_triangular_solve(Tensor& b, Tensor& A, Tensor& infos, bool upp
   auto lda = std::max<int64_t>(1, n);
   auto infos_data = infos.data_ptr<int>();
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     int* infos_working_ptr = &infos_data[i];
@@ -1134,7 +1136,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
   lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
@@ -1417,7 +1419,7 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, const std::string&
   }
 
   // Now call lapackSyevd for each matrix in the batched input
-  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* v_working_ptr = &v_data[i * v_matrix_stride];
     value_t* w_working_ptr = &w_data[i * w_stride];
     lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_working_ptr, lda, w_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, lrwork, iwork.data_ptr<int>(), liwork, &info);
@@ -1550,7 +1552,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
   lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     value_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
 
@@ -1707,7 +1709,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
-  for (int64_t i = 0; i < batchsize; i++) {
+  for (const auto i : c10::irange(batchsize)) {
     scalar_t* self_working_ptr = &self_data[i * self_stride];
     value_t* S_working_ptr = &S_data[i * S_stride];
     scalar_t* U_working_ptr = &U_data[i * U_stride];
@@ -1863,7 +1865,7 @@ static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, st
   auto nrhs = b.size(-1);
 
   int info;
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* b_working_ptr = &b_data[i * b_stride];
     scalar_t* lu_working_ptr = &lu_data[i * lu_stride];
     int* pivots_working_ptr = &pivots_data[i * pivots_stride];
