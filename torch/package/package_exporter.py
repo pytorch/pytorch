@@ -1,19 +1,22 @@
 import torch
 from torch.serialization import normalize_storage_type, location_tag
+import collections
 import io
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
-from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
+from ._custom_import_pickler import create_custom_import_pickler
+from ._file_structure_representation import _create_folder_from_file_list, Folder
+from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
+from .importer import Importer, OrderedImporter, sys_importer
 import types
-import importlib
-from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, Optional
+from typing import List, Any, Callable, Dict, Sequence, Tuple, Union, BinaryIO, Optional
 from pathlib import Path
 import linecache
 from urllib.parse import quote
-import re
+
 
 
 class PackageExporter:
@@ -44,26 +47,25 @@ class PackageExporter:
     for further code dependencies (`dependencies=True`). It looks for import statements,
     resolves relative references to qualified module names, and calls :method:`require_module`
     on each it finds, recursively resolving dependencies.
-
     """
 
-    importers: List[Callable[[str], Any]]
-    """ A list of functions that will be called in order to find the module assocated
-    with module names referenced by other modules or by pickled objects. Initialized to
-    `[importlib.import_module]` by default. When pickling code or objects that was loaded
-    from an imported packaged, that `importer.import_module` should be put into the importer list.
-    When a name conflict occurs between importers, the first importer in the list takes precedence,
-    and only objects that refer to this first importers class can be saved
+    """A importer that will be searched in order to find the modules referenced by other modules or by
+    pickled objects. The default module environment just uses sys_importer, which searches the Python environment.
     """
+    importer: Importer
 
-
-    def __init__(self, f: Union[str, Path, BinaryIO], verbose: bool = True):
+    def __init__(self,
+                 f: Union[str, Path, BinaryIO],
+                 importer: Union[Importer, Sequence[Importer]] = sys_importer,
+                 verbose: bool = True):
         """
         Create an exporter.
 
         Args:
             f: The location to export to. Can be a  string/Path object containing a filename,
                 or a Binary I/O object.
+            importer: If a single Importer is passed, use that to search for modules.
+                If a sequence of importers are passsed, an Orderedporter will be constructed out of them.
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
         """
@@ -79,9 +81,18 @@ class PackageExporter:
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
-        self.importers = [importlib.import_module]
+
+        if isinstance(importer, Importer):
+            self.importer = importer
+        else:
+            if not isinstance(importer, collections.abc.Sequence):
+                raise TypeError("importer arg should be an Importer or a sequence of Importers, "
+                                f"got {type(importer)} instead.")
+            self.importer = OrderedImporter(*importer)
+
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
+        self._unique_id = 0
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -124,6 +135,25 @@ class PackageExporter:
         else:
             is_package = path.name == '__init__.py'
             self.save_source_string(module_name, _read_file(file_or_directory), is_package, dependencies, file_or_directory)
+
+    def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
+        """Returns a file structure representation of package's zipfile.
+
+        Args:
+            include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
+                for the names of the files to be inluded in the zipfile representation. This can also be
+                a glob-style pattern, as described in :meth:`mock`
+
+            exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+        """
+        return _create_folder_from_file_list(self.zip_file.archive_name(), self.zip_file.get_all_written_records(),
+                                             include, exclude)
+
+    def get_unique_id(self) -> str:
+        """Get an id. This id is guaranteed to only be handed out once for this package."""
+        ret = str(self._unique_id)
+        self._unique_id += 1
+        return ret
 
     def save_source_string(self, module_name: str, src: str, is_package: bool = False,
                            dependencies: bool = True, orig_file_name: str = None):
@@ -173,7 +203,7 @@ class PackageExporter:
 
     def _import_module(self, module_name: str):
         try:
-            return import_module_from_importers(module_name, self.importers)
+            return self.importer.import_module(module_name)
         except ModuleNotFoundError as e:
             if not is_mangled(module_name):
                 raise
@@ -272,7 +302,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_custom_import_pickler(data_buf, self.importers)
+        pickler = create_custom_import_pickler(data_buf, self.importer)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
@@ -384,11 +414,6 @@ node [shape=box];
         return qualified_name in self.provided
 
     def _persistent_id(self, obj):
-        # FIXME: the docs say that persistent_id should only return a string
-        # but torch store returns tuples. This works only in the binary protocol
-        # see
-        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
-        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
             obj_key = str(obj._cdata)
@@ -400,6 +425,9 @@ node [shape=box];
                     obj_key,
                     location,
                     obj.size())
+        if hasattr(obj, '__reduce_package__'):
+            return ('reduce_package', *obj.__reduce_package__(self))
+
         return None
 
     def __enter__(self):
@@ -465,42 +493,3 @@ def _read_file(filename: str) -> str:
     with open(filename, 'rb') as f:
         b = f.read()
         return b.decode('utf-8')
-
-GlobPattern = Union[str, Iterable[str]]
-
-
-class _GlobGroup:
-    def __init__(self, include: 'GlobPattern', exclude: 'GlobPattern'):
-        self._dbg = f'_GlobGroup(include={include}, exclude={exclude})'
-        self.include = _GlobGroup._glob_list(include)
-        self.exclude = _GlobGroup._glob_list(exclude)
-
-    def __str__(self):
-        return self._dbg
-
-    def matches(self, candidate: str) -> bool:
-        candidate = '.' + candidate
-        return any(p.fullmatch(candidate) for p in self.include) and all(not p.fullmatch(candidate) for p in self.exclude)
-
-    @staticmethod
-    def _glob_list(elems: 'GlobPattern'):
-        if isinstance(elems, str):
-            return [_GlobGroup._glob_to_re(elems)]
-        else:
-            return [_GlobGroup._glob_to_re(e) for e in elems]
-
-    @staticmethod
-    def _glob_to_re(pattern: str):
-        # to avoid corner cases for the first component, we prefix the candidate string
-        # with '.' so `import torch` will regex against `.torch`
-        def component_to_re(component):
-            if '**' in component:
-                if component == '**':
-                    return '(\\.[^.]+)*'
-                else:
-                    raise ValueError('** can only appear as an entire path segment')
-            else:
-                return '\\.' + '[^.]*'.join(re.escape(x) for x in component.split('*'))
-
-        result = ''.join(component_to_re(c) for c in pattern.split('.'))
-        return re.compile(result)
