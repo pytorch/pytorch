@@ -1,5 +1,4 @@
 import torch
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 class AutocastTestLists(object):
@@ -46,8 +45,6 @@ class AutocastTestLists(object):
         # The lists below organize ops that autocast needs to test.
         # self.list_name corresponds to test_autocast_list_name in test/test_cuda.py.
         # Each op is associated with a tuple of valid arguments.
-        # In addition, cudnn conv ops are not supported on ROCm and hence will
-        # be skipped by passing TEST_WITH_ROCM flag to those ops in self.torch_fp16 list.
 
         # Some ops implement built-in type promotion.  These don't need autocasting,
         # but autocasting relies on their promotion, so we include tests to double-check.
@@ -88,20 +85,20 @@ class AutocastTestLists(object):
             ("conv3d", conv_args_fp32[2]),
             ("conv_tbc", conv_args_fp32[0] + bias_fp32),
             ("conv_transpose1d", conv_args_fp32[0]),
-            ("conv_transpose2d", conv_args_fp32[1], TEST_WITH_ROCM),
-            ("conv_transpose3d", conv_args_fp32[2], TEST_WITH_ROCM),
+            ("conv_transpose2d", conv_args_fp32[1]),
+            ("conv_transpose3d", conv_args_fp32[2]),
             ("convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
             # deprecated cudnn_convolutions with bias
-            ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
+            ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, True)),
             ("cudnn_convolution_transpose", conv_args_fp32[1] + bias_fp32 + ((0, 0), (0, 0), (1, 1),
-                                                                             (1, 1), 1, False, True), TEST_WITH_ROCM),
+                                                                             (1, 1), 1, False, True)),
             # deprecated cudnn_convolutions with no allow_tf32 flag
-            ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
-            ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
+            ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True)),
+            ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, True)),
             # the current cudnn_convolutions
-            ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True, True), TEST_WITH_ROCM),
+            ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True, True)),
             ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1),
-                                                                 (1, 1), 1, False, True, True), TEST_WITH_ROCM),
+                                                                 (1, 1), 1, False, True, True)),
             ("prelu", pointwise0_fp32 + element0_fp32),
             ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
             ("addmv", pointwise0_fp32 + mat2_fp32 + pointwise1_fp32),
