@@ -869,7 +869,6 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         # check activation result correctness
         act_compare_dict = get_matching_activations_a_shadows_b(
             mp_shadows_mq, OutputLogger)
-        print(act_compare_dict)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
