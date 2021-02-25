@@ -5902,14 +5902,47 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
                         initial_state, packed_sequence, dropout):
-        batch_first = True if packed_sequence == 2 else False
-        model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
-                             bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
 
-        if packed_sequence == 1:
-            model = RnnModelWithPackedSequence(model, False)
-        if packed_sequence == 2:
-            model = RnnModelWithPackedSequence(model, True)
+        class ElmanWithStateModel(torch.nn.Module):
+            def __init__(self, layers, nonlinearity, bidirect, dropout, batch_first):
+                super(ElmanWithStateModel, self).__init__()
+
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
+                                                bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
+
+            def forward(self, input: PackedSequence, hx=None):
+                return self.inner_model(input, hx)
+
+        class ElmanWithoutStateModel(torch.nn.Module):
+            def __init__(self, layers, nonlinearity, bidirect, dropout, batch_first):
+                super(ElmanWithoutStateModel, self).__init__()
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
+                                                bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
+
+            def forward(self, input: PackedSequence):
+                return self.inner_model(input)
+
+        batch_first = True if packed_sequence == 2 else False
+
+        if initial_state:
+            model = ElmanWithStateModel(layers=layers, bidirect=bidirectional, nonlinearity=nonlinearity,
+                                        dropout=dropout, batch_first=batch_first)
+
+            if packed_sequence == 1:
+                model = RnnModelWithPackedSequenceWithState(model, False)
+            if packed_sequence == 2:
+                model = RnnModelWithPackedSequenceWithState(model, True)
+        else:
+            model = ElmanWithStateModel(layers=layers, bidirect=bidirectional, 
+                                        nonlinearity=nonlinearity, dropout=dropout,
+                                        batch_first=batch_first)
+
+            if packed_sequence == 1:
+                model = RnnModelWithPackedSequenceWithoutState(model, False)
+            if packed_sequence == 2:
+                model = RnnModelWithPackedSequenceWithoutState(model, True)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
