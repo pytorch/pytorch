@@ -13,7 +13,6 @@
     - [Autocast argument must be a compile-time constant](#autocast-argument-must-be-a-compile-time-constant)
     - [Uncommon autocast usage patterns may not be supported](#uncommon-autocast-usage-patterns-may-not-be-supported)
     - [Limited support for promote autocast policy](#limited-support-for-promote-autocast-policy)
-    - [Support for Tensor with int or double types](#support-for-tensor-with-int-or-double-types)
     - [Missing autocast policies](#missing-autocast-policies)
     - [Mixing eager mode and scripting autocast](#mixing-eager-mode-and-scripting-autocast)
     - [Mixing tracing and scripting autocast (script calling traced)](#mixing-tracing-and-scripting-autocast-script-calling-traced)
@@ -31,7 +30,7 @@ float32.
 
 The JIT support for autocast is subject to different constraints compared to the
 eager mode implementation (mostly related to the fact that TorchScript is 
-statically typed) and 
+statically typed) and this document attempts to list the known limitations.
 
 ## Usage
 
@@ -123,14 +122,7 @@ def fn(a, b, c, d):
 
 For some operations, autocast needs to [promote to the widest argument type][3].
 When the concrete types are not available, the current implementation will
-conservatively inject a promotion even when it may not be needed. It may also
-incorrectly cast float64 (double) types to float32.
-
-#### Support for Tensor with int or double types
-
-Currently, we don't handle Tensor instances with a dtype which is not 
-`torch.float16` or `torch.float32` (when the concrete Tensor type is not
-available we assume `dtype=torch.float32`). No diagnostic is issued.
+conservatively inject a promotion even when it may not be needed.
 
 #### Missing autocast policies
 

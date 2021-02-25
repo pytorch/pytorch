@@ -78,17 +78,12 @@ c10::optional<AutocastScope> parseAutocast(Value* value) {
   return c10::nullopt;
 }
 
-void castTensorInputs(Node* node, at::ScalarType dtype) {
+void castTensorInputs(Node* node, Symbol cast_op) {
   const auto graph = node->owningGraph();
 
   WithInsertPoint insert_point(node);
 
-  const auto dtype_value = graph->insertConstant(dtype);
-  const auto false_value = graph->insertConstant(false);
-  const auto none_value = graph->insertConstant(IValue());
-
   std::unordered_set<Value*> casted_inputs;
-
   for (auto input : node->inputs()) {
     if (input->type()->kind() == TensorType::Kind) {
       casted_inputs.insert(input);
@@ -96,8 +91,7 @@ void castTensorInputs(Node* node, at::ScalarType dtype) {
   }
 
   for (auto input : casted_inputs) {
-    const auto new_input = graph->insert(
-        aten::to, {input, dtype_value, false_value, false_value, none_value});
+    const auto new_input = graph->insert(cast_op, {input});
     node->replaceInputWith(input, new_input);
   }
 }
@@ -112,7 +106,7 @@ void castInputsToWidestType(Node* node) {
     if (auto tensor_type = input->type()->cast<TensorType>()) {
       const auto dtype = tensor_type->scalarType();
       if (!dtype.has_value() || *dtype != at::ScalarType::Half) {
-        castTensorInputs(node, at::ScalarType::Float);
+        castTensorInputs(node, aten::autocast_to_fp32);
         return;
       }
     }
@@ -196,7 +190,7 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::rnn_tanh_cell:
       case aten::rnn_relu_cell:
         if (current_state() && !node->schema().is_mutable()) {
-          castTensorInputs(node, at::ScalarType::Half);
+          castTensorInputs(node, aten::autocast_to_fp16);
         }
         break;
 
@@ -243,7 +237,7 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::cdist:
       case aten::renorm:
         if (current_state() && !node->schema().is_mutable()) {
-          castTensorInputs(node, at::ScalarType::Float);
+          castTensorInputs(node, aten::autocast_to_fp32);
         }
         break;
 

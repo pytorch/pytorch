@@ -52,6 +52,24 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
   return r;
 }
 
+Tensor autocast_to_fp16(const Tensor& self) {
+  if (self.dtype() == at::ScalarType::Float) {
+    return to_impl(
+        self, self.options().dtype(at::ScalarType::Half), false, false);
+  } else {
+    return self;
+  }
+}
+
+Tensor autocast_to_fp32(const Tensor& self) {
+  if (self.dtype() == at::ScalarType::Half) {
+    return to_impl(
+        self, self.options().dtype(at::ScalarType::Float), false, false);
+  } else {
+    return self;
+  }
+}
+
 Tensor to(
   const Tensor& self,
   const TensorOptions& options_,

@@ -98,8 +98,6 @@ class TestAutocast(JitTestCase):
         result = fn(self.a_fp16)
         self.assertEqual(result.dtype, torch.float32)
 
-    # TODO: fix and enable this test
-    @unittest.skipIf(True, "fp32 policy is partially broken")
     def test_fp32_policy_with_fp64(self):
         @torch.jit.script
         def fn(a):
@@ -120,8 +118,6 @@ class TestAutocast(JitTestCase):
         self.assertEqual(e.dtype, torch.float16)
         self.assertEqual(f.dtype, torch.float32)
 
-    # TODO: fix and enable this test
-    @unittest.skipIf(True, "promote policy is currently broken")
     def test_promote_policy_fp64(self):
         @torch.jit.script
         def fn(a, b):
