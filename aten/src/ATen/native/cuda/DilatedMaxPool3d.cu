@@ -53,7 +53,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
       wStart += dilationW;
 
     int maxIndex =  tStart * iheight * iwidth + hStart * iwidth + wStart;
-    inputData += slice * itime * iheight * iwidth;
+    inputData += static_cast<int64_t>(slice) * itime * iheight * iwidth;
 
     scalar_t max = at::numeric_limits<scalar_t>::lower_bound(); // -Infinity
 
