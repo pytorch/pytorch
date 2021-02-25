@@ -794,53 +794,30 @@ inline bool canCreateStackFromSchema(
     const FunctionSchema& schema,
     const tuple_slice& args,
     const py::kwargs& kwargs,
-    c10::optional<IValue> self) {
+    const c10::optional<IValue>& self) {
 
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
+  size_t arguments_without_kwargs = (self ? 1 : 0) + args.size();
   if (all_arguments > schema.arguments().size()) {
     return false;
   }
 
-  Stack stack;
-  stack.reserve(schema.arguments().size());
-
-  if (self) {
-    push(stack, std::move(*self));
-  }
-  // First push all positional args.
-  for (const auto& arg : args) {
-    // Use the type information from the schema to convert the PyObject.
-    push(stack, argumentToIValue(schema, stack.size(), arg));
-  }
-
-  // Now for every remaining non-positional argument in the schema, look for it
-  // in the kwargs dict and push it if found, or use its default value if it
-  // has one.
   size_t consumed_kwargs = 0;
-  for (size_t i = stack.size(); i < schema.arguments().size(); ++i) {
+  for (size_t i = arguments_without_kwargs; i < schema.arguments().size(); ++i) {
     const auto& arg = schema.arguments()[i];
     if (kwargs.contains(arg.name().c_str())) {
-      push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
       consumed_kwargs += 1;
     } else if (arg.default_value()) {
-      push(stack, *arg.default_value());
+      continue;
     } else {
       return false;
     }
   }
 
   if (consumed_kwargs != kwargs.size()) {
-    std::vector<std::string> names;
-    for (const auto& kwarg : kwargs) {
-      names.emplace_back(py::cast<std::string>(kwarg.first));
-    }
     return false;
   }
-
   return true;
-
-
-
 };
 
 inline Stack createStackForSchema(

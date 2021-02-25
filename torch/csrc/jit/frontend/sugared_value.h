@@ -456,12 +456,13 @@ struct MethodValue : public SugaredValue {
     std::vector<NamedValue> argsWithSelf = {self_};
     argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
     std::vector<const FunctionSchema*> schemas;
-    std::vector<std::string> names;
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
         Function& method = class_type->getMethod(method_name);
         auto overloaded_methods = class_type->findOverloadedMethod(method_name);
         if (class_type->findOverloadedMethod(method_name).size() > 1 ) {
+          std::vector<std::string> names;
+          std::vector<const FunctionSchema*> overloaded_schemas;
           auto overloaded_methods = class_type->findOverloadedMethod(method_name);
           for (auto overloaded_method : overloaded_methods) {
             try {
@@ -471,11 +472,11 @@ struct MethodValue : public SugaredValue {
                     << " method '" << method.name() << "' is called recursively. "
                     << "Recursive calls are not supported";
             }
-            schemas.push_back(&(overloaded_method->getSchema()));
+            overloaded_schemas.push_back(&(overloaded_method->getSchema()));
             names.push_back(method_name);
 
           }
-          auto match = matchSchemas(schemas, loc, *f.graph(), argsWithSelf, kwargs);
+          auto match = matchSchemas(overloaded_schemas, loc, *f.graph(), argsWithSelf, kwargs);
           Value* output =
               f.graph()->insertMethodCall(method_name, match.second);
           output->node()->setSourceRange(loc);
@@ -490,7 +491,6 @@ struct MethodValue : public SugaredValue {
                 << "Recursive calls are not supported";
           }
           schemas.push_back(&method.getSchema());
-          names.push_back(method_name);
         }
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
         schemas.push_back(interface_type->getMethod(method_name));
@@ -501,7 +501,7 @@ struct MethodValue : public SugaredValue {
     }
     auto match = matchSchemas(schemas, loc, *f.graph(), argsWithSelf, kwargs);
     Value* output =
-        f.graph()->insertMethodCall(names[match.first], match.second);
+        f.graph()->insertMethodCall(method_names_[match.first], match.second);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
   }
