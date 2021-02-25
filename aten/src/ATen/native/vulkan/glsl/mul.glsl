@@ -12,7 +12,6 @@ layout(set = 0, binding = 3) uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 isize0;
   ivec4 isize1;
-  float alpha;
 } uBlock;
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
@@ -26,6 +25,6 @@ void main() {
     imageStore(
         uOutput,
         pos,
-        texelFetch(uInput0, input0_pos, 0) + uBlock.alpha * texelFetch(uInput1, input1_pos, 0));
+        texelFetch(uInput0, input0_pos, 0) * texelFetch(uInput1, input1_pos, 0));
   }
 }

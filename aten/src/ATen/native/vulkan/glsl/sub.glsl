@@ -26,6 +26,6 @@ void main() {
     imageStore(
         uOutput,
         pos,
-        texelFetch(uInput0, input0_pos, 0) + uBlock.alpha * texelFetch(uInput1, input1_pos, 0));
+        texelFetch(uInput0, input0_pos, 0) - uBlock.alpha * texelFetch(uInput1, input1_pos, 0));
   }
 }

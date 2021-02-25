@@ -9,7 +9,7 @@ namespace {
 
 using namespace api::utils;
 
-Tensor add_scalar(
+Tensor sub_scalar(
     const Tensor& self_arg,
     const Scalar other,
     const Scalar alpha) {
@@ -43,7 +43,7 @@ Tensor add_scalar(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(add_scalar),
+          VK_KERNEL(sub_scalar),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -70,7 +70,7 @@ Tensor add_scalar(
   return convert(v_output);
 }
 
-Tensor& add_scalar_(
+Tensor& sub_scalar_(
     Tensor& self,
     const Scalar other,
     const Scalar alpha) {
@@ -78,7 +78,7 @@ Tensor& add_scalar_(
 
   TORCH_CHECK(
       self.is_vulkan(),
-      "Vulkan: In-place add is only supported on Vulkan tensors.");
+      "Vulkan: In-place sub is only supported on Vulkan tensors.");
 
   vTensor& v_self = convert(self);
 
@@ -100,7 +100,7 @@ Tensor& add_scalar_(
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(add_scalar_),
+          VK_KERNEL(sub_scalar_),
           v_self.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
@@ -122,7 +122,7 @@ Tensor& add_scalar_(
   return self;
 }
 
-Tensor add_tensor(
+Tensor sub_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar alpha) {
@@ -170,7 +170,7 @@ Tensor add_tensor(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(add),
+          VK_KERNEL(sub),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -202,7 +202,7 @@ Tensor add_tensor(
   return convert(v_output);
 }
 
-Tensor& add_tensor_(
+Tensor& sub_tensor_(
     Tensor& self,
     const Tensor& other_arg,
     const Scalar alpha) {
@@ -210,7 +210,7 @@ Tensor& add_tensor_(
 
   TORCH_CHECK(
       self.is_vulkan(),
-      "Vulkan: In-place add is only supported on Vulkan tensors.");
+      "Vulkan: In-place sub is only supported on Vulkan tensors.");
 
   vTensor& v_self = convert(self);
 
@@ -242,7 +242,7 @@ Tensor& add_tensor_(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(add_),
+          VK_KERNEL(sub_),
           v_self.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
@@ -272,10 +272,10 @@ Tensor& add_tensor_(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("add.Scalar", TORCH_FN(add_scalar));
-  m.impl("add_.Scalar", TORCH_FN(add_scalar_));
-  m.impl("add.Tensor", TORCH_FN(add_tensor));
-  m.impl("add_.Tensor", TORCH_FN(add_tensor_));
+  m.impl("sub.Scalar", TORCH_FN(sub_scalar));
+  m.impl("sub_.Scalar", TORCH_FN(sub_scalar_));
+  m.impl("sub.Tensor", TORCH_FN(sub_tensor));
+  m.impl("sub_.Tensor", TORCH_FN(sub_tensor_));
 }
 
 #endif /* USE_VULKAN_API */

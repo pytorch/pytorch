@@ -35,6 +35,8 @@ struct Layout final {
   };
 };
 
+bool broadcast_first_input(const vTensor& input1, const vTensor& input2);
+
 } // namespace ops
 } // namespace vulkan
 } // namespace native
