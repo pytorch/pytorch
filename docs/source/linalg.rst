@@ -23,6 +23,7 @@ Functions
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
 .. autofunction:: matrix_rank
+.. autofunction:: multi_dot
 .. autofunction:: norm
 .. autofunction:: pinv
 .. autofunction:: svd
