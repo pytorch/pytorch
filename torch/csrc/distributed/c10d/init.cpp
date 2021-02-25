@@ -424,21 +424,21 @@ Example::
               "compare_set",
               [](::c10d::Store& store,
                  const std::string& key,
-                 const std::string& new_value,
-                 const std::string& old_value) -> py::bytes {
+                 const std::string& current_value,
+                 const std::string& new_value) -> py::bytes {
+                std::vector<uint8_t> currentValue_(
+                    current_value.begin(), current_value.end());
                 std::vector<uint8_t> newValue_(
                     new_value.begin(), new_value.end());
-                std::vector<uint8_t> oldValue_(
-                    old_value.begin(), old_value.end());
-                auto value = store.compareSet(key, newValue_, oldValue_);
+                auto value = store.compareSet(key, currentValue_, newValue_);
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value``
-will only be placed if ``old_value`` for the ``key`` already exists in the store.
+performs comparison between ``new_value`` and ``current_value`` before inserting. ``new_value``
+will only be placed if ``current_value`` for the ``key`` already exists in the store.
 
 .. warning::
     The ``compare_set`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
@@ -446,8 +446,8 @@ will only be placed if ``old_value`` for the ``key`` already exists in the store
 
 Arguments:
     key (str): The key to be checked in the store.
+    current_value (str): The value associated with ``key`` to be checked before insertion.
     new_value (str): The value associated with ``key`` to be added to the store.
-    old_value (str): The value associated with ``key`` to be checked before insertion.
 
 Example::
     >>> import torch.distributed as dist
@@ -632,7 +632,11 @@ Example::
     >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"], timedelta(seconds=10))
-)");
+)")
+      .def_property_readonly(
+            "timeout",
+            &::c10d::Store::getTimeout,
+            R"(Gets the timeout of the store.)");
 
   intrusive_ptr_class_<::c10d::FileStore>(
       module,
@@ -683,14 +687,16 @@ Example::
 A TCP-based distributed key-value store implementation. The server store holds
 the data, while the client stores can connect to the server store over TCP and
 perform actions such as :meth:`~torch.distributed.store.set` to insert a key-value
-pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc.
+pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There 
+should always be one server store initialized because the client store(s) will wait for 
+the server to establish a connection.
 
 Arguments:
     host_name (str): The hostname or IP Address the server store should run on.
     port (int): The port on which the server store should listen for incoming requests.
-    world_size (int): The total number of store users (number of clients + 1 for the server).
-    is_master (bool): True when initializing the server store, False for client stores.
-    timeout (timedelta): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`.
+    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
+    is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
+    timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
 
 Example::
     >>> import torch.distributed as dist
@@ -712,12 +718,22 @@ Example::
               std::chrono::milliseconds>(),
           py::arg("host_name"),
           py::arg("port"),
-          py::arg("world_size"),
+          py::arg("world_size") = -1,
           // using noconvert() requires this argument to be True or False
           // prevents accidental implicit conversion to bool
-          py::arg("is_master").noconvert(),
+          py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
-              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
+              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout))
+
+      .def_property_readonly(
+            "host",
+            &::c10d::TCPStore::getHost,
+            R"(Gets the hostname on which the store listens for requests.)")
+
+      .def_property_readonly(
+            "port",
+            &::c10d::TCPStore::getPort,
+            R"(Gets the port number on which the store listens for requests.)");
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,

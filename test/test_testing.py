@@ -435,6 +435,36 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
+    def test_make_tensor(self, device, dtype):
+        def check(size, low, high, requires_grad, discontiguous):
+            t = make_tensor(size, device, dtype, low=low, high=high,
+                            requires_grad=requires_grad, discontiguous=discontiguous)
+
+            self.assertEqual(t.shape, size)
+            self.assertEqual(t.device, torch.device(device))
+            self.assertEqual(t.dtype, dtype)
+
+            low = -9 if low is None else low
+            high = 9 if high is None else high
+
+            if t.numel() > 0 and dtype in [torch.long, torch.float]:
+                self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
+
+            if dtype in [torch.float, torch.cfloat]:
+                self.assertEqual(t.requires_grad, requires_grad)
+            else:
+                self.assertFalse(t.requires_grad)
+
+            if t.numel() > 1:
+                self.assertEqual(t.is_contiguous(), not discontiguous)
+            else:
+                self.assertTrue(t.is_contiguous())
+
+        for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
+            check(size, None, None, False, False)
+            check(size, 2, 4, True, True)
+
     def test_assert_messages(self, device):
         self.assertIsNone(self._get_assert_msg(msg=None))
         self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
