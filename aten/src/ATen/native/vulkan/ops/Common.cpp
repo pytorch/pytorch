@@ -5,13 +5,36 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-bool broadcast_first_input(const vTensor& input1, const vTensor& input2) {
-  if ((input2.extents().data[1u] > 1 && input1.extents().data[1u] == 1)||
-      (input2.extents().data[2u] > 1 && input1.extents().data[2u] == 1)||
-       input2.extents().data[0u] > input1.extents().data[0u]) {
-    return true;
+uint32_t batch_size(const Tensor& tensor) {
+  uint32_t dims = tensor.sizes().size();
+  if (dims < 4) {
+    return 1;
   }
-  return false;
+  return tensor.sizes()[dims - 4];
+}
+
+uint32_t channels_size(const Tensor& tensor) {
+  uint32_t dims = tensor.sizes().size();
+  if (dims < 3) {
+    return 1;
+  }
+  return tensor.sizes()[dims - 3];
+}
+
+uint32_t height_size(const Tensor& tensor) {
+  uint32_t dims = tensor.sizes().size();
+  if (dims < 2) {
+    return 1;
+  }
+  return tensor.sizes()[dims - 2];
+}
+
+uint32_t width_size(const Tensor& tensor) {
+  uint32_t dims = tensor.sizes().size();
+  if (dims < 1) {
+    return 1;
+  }
+  return tensor.sizes()[dims - 1];
 }
 
 } // namespace ops

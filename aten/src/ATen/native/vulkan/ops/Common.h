@@ -35,7 +35,10 @@ struct Layout final {
   };
 };
 
-bool broadcast_first_input(const vTensor& input1, const vTensor& input2);
+uint32_t batch_size(const Tensor& tensor);
+uint32_t channels_size(const Tensor& tensor);
+uint32_t height_size(const Tensor& tensor);
+uint32_t width_size(const Tensor& tensor);
 
 } // namespace ops
 } // namespace vulkan
