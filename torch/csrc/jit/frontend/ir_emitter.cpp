@@ -668,7 +668,11 @@ struct to_ir {
   ResolverPtr resolver;
   std::unordered_map<int64_t, Value*, std::hash<int>> integral_constants;
   std::unordered_map<double, Value*, std::hash<float>> fp_constants;
-  std::unordered_map<c10::complex<double>, Value*, c10::hash<c10::complex<double>>> c_constants;
+  std::unordered_map<
+      c10::complex<double>,
+      Value*,
+      c10::hash<c10::complex<double>>>
+      c_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;

@@ -19,7 +19,22 @@ using ::c10::Symbol;
 
 constexpr int max_tensor_display_size = 10;
 
-enum class AttributeKind { f, fs, c, i, is, s, ss, t, ts, g, gs, ty, tys, ival };
+enum class AttributeKind {
+  f,
+  fs,
+  c,
+  i,
+  is,
+  s,
+  ss,
+  t,
+  ts,
+  g,
+  gs,
+  ty,
+  tys,
+  ival
+};
 static inline const char* toString(AttributeKind kind) {
   static const char* names[] = {
       "f",
@@ -90,7 +105,8 @@ struct VectorAttributeValue : public AttributeValue {
   ValueType value_;
 };
 
-using ComplexAttr = ScalarAttributeValue<c10::complex<double>,AttributeKind::c>;
+using ComplexAttr =
+    ScalarAttributeValue<c10::complex<double>, AttributeKind::c>;
 using FloatAttr = ScalarAttributeValue<double, AttributeKind::f>;
 using FloatsAttr = VectorAttributeValue<double, AttributeKind::fs>;
 using IntAttr = ScalarAttributeValue<int64_t, AttributeKind::i>;

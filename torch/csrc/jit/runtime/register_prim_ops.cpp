@@ -390,7 +390,7 @@ RegisterOperators reg(
            pop(stack, scalar);
            if (scalar.isComplexDouble()) {
              push(stack, std::move(scalar));
-           } else if (scalar.isDouble()){
+           } else if (scalar.isDouble()) {
              push(stack, c10::complex<double>(scalar.toDouble(), 0));
            } else {
              push(stack, c10::complex<double>(scalar.toInt(), 0));
@@ -418,7 +418,8 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto s = pop(stack).toString();
            std::string::size_type sz;
-           double d = c10::stod(s->string().substr(0, s->string().size() - 1), &sz);
+           double d =
+               c10::stod(s->string().substr(0, s->string().size() - 1), &sz);
            c10::complex<double> b = c10::complex<double>(0, d);
            if (sz == s->string().size()) {
              push(stack, b);
@@ -785,9 +786,9 @@ RegisterOperators reg(
      DEFINE_COMPARISON_OP(aten::gt, a > b),
      DEFINE_COMPARISON_OP(aten::le, a <= b),
      DEFINE_COMPARISON_OP(aten::ge, a >= b),
-    //  DEFINE_BINARY_OP(aten::add, a + b),
+     //  DEFINE_BINARY_OP(aten::add, a + b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::add, a + b),
-    //  DEFINE_BINARY_OP(aten::sub, a - b),
+     //  DEFINE_BINARY_OP(aten::sub, a - b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::add, a + b),
      DEFINE_BINARY_OP(aten::mul, a* b),
      DEFINE_BOOL_OP(aten::__and__, a&& b),

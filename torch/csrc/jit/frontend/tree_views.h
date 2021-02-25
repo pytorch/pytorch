@@ -4,10 +4,10 @@
 #include <torch/csrc/jit/frontend/strtod.h>
 #include <torch/csrc/jit/frontend/tree.h>
 
+#include <c10/util/complex.h>
 #include <functional>
 #include <iostream>
 #include <string>
-#include <c10/util/complex.h>
 
 namespace torch {
 namespace jit {
@@ -869,7 +869,8 @@ struct Const : public Expr {
   }
   bool isFloatingPoint() const {
     // Complex values consist of a real and an imaginary floating point value
-    if (isComplex()) return false;
+    if (isComplex())
+      return false;
 
     bool is_inf = subtree(0)->stringValue() == "inf";
     return is_inf ||
@@ -898,7 +899,8 @@ struct Const : public Expr {
   c10::complex<double> asComplexDouble() const {
     char* dummy;
     auto str = subtree(0)->stringValue();
-    auto imag = torch::jit::strtod_c(str.substr(0, str.size()-1).c_str(), &dummy);
+    auto imag =
+        torch::jit::strtod_c(str.substr(0, str.size() - 1).c_str(), &dummy);
     return c10::complex<double>(0, imag);
   }
   const std::string& text() const {

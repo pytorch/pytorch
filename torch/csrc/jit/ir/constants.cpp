@@ -15,9 +15,8 @@ bool insertableTensor(const at::Tensor& ten) {
 
 bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
-      ivalue.isDouble() || ivalue.isComplexDouble() ||
-      ivalue.isString() || ivalue.isDevice() ||
-      ivalue.isEnum()) {
+      ivalue.isDouble() || ivalue.isComplexDouble() || ivalue.isString() ||
+      ivalue.isDevice() || ivalue.isEnum()) {
     return true;
   }
   if (ivalue.isTensor()) {

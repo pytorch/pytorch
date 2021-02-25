@@ -33,7 +33,7 @@ class TestComplex(JitTestCase):
         class ComplexModule(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                #initialization is done in python
+                # initialization is done in python
                 # JIT doesn't parse init
                 self.a = 3 + 5j
                 self.b = [2 + 3j, 3 + 4j, 0 - 3j, -4 + 0j]
