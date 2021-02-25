@@ -202,8 +202,7 @@ bool InterpreterState::run(Stack& stack) {
       } break;
       case ISINSTANCE: {
         at::ArrayRef<TypePtr> types(
-            &(code_->types_[inst.X]),
-            &(code_->types_[inst.X + inst.N]));
+            &(code_->types_[inst.X]), &(code_->types_[inst.X + inst.N]));
         isinstance(stack, types);
         ++pc;
       } break;

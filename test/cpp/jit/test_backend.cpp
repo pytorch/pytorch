@@ -1,9 +1,8 @@
 #include <gtest/gtest.h>
+#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/torch.h>
-#include <torch/csrc/jit/mobile/import.h>
-#include "test_utils.h"
 
 // Tests go in torch::jit
 namespace torch {
@@ -101,12 +100,6 @@ TEST(BackendTest, TestCompiler) {
       "backend_with_compiler_demo", m, compile_spec, any_dict_ty);
   auto res = lm.forward(inputs);
   AT_ASSERT(res.toTensor().equal(ref.toTensor()));
-
-//  lm.save("/Users/myuan/temp/test.pt");
-  lm._save_for_mobile("/Users/myuan/temp/test.ptl");
-  std::stringstream ss;
-  lm._save_for_mobile(ss);
-  auto mlm = _load_for_mobile(ss);
 }
 
 TEST(BackendTest, TestCompilerNotSupport) {
