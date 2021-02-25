@@ -1706,6 +1706,29 @@ class TestQuantizeFx(QuantizationTestCase):
 
         checkModel(m, data, ref_weight, ref_bias, ref_res)
 
+    def test_adhoc(self):
+        # save a quantized conv's packed params using torch.jit.save
+        m = nn.Conv2d(1, 1, 1).eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(torch.randn(4, 1, 4, 4))
+        mq = convert_fx(mp)
+        with TemporaryFileName() as fname:
+            ms = torch.jit.script(mq)
+            torch.jit.save(ms, fname)
+            # patch of deserialization code which unbreaks loading the state dict,
+            # but breaks loading the torch.jit.save'ed model: P174965459
+
+            # works on master
+            # does not work on patched deserialization code (fails with P174964938)
+            ms = torch.jit.load(fname)
+
+        # save the same conv's state dict
+        with TemporaryFileName() as fname2:
+            torch.save(mq.state_dict(), fname2)
+            # works on patched deserialization code
+            # does not work on master (fails with P174965221)
+            mq.load_state_dict(torch.load(fname2))
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
