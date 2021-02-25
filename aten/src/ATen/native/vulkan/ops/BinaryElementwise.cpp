@@ -9,10 +9,11 @@ namespace {
 
 using namespace api::utils;
 
-Tensor sub_scalar(
+Tensor binary_elementwise_scalar(
     const Tensor& self_arg,
     const Scalar other,
-    const Scalar alpha) {
+    const c10::optional<Scalar> alpha_arg,
+    const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -28,12 +29,13 @@ Tensor sub_scalar(
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
     if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+      const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>() : other.to<float>();
       const struct Block final {
         uvec3 extents;
         float other;
       } block {
         v_self.extents(),
-        other.to<float>() * alpha.to<float>(),
+        other_val,
       };
 
       context->dispatch(
@@ -43,7 +45,7 @@ Tensor sub_scalar(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(sub_scalar),
+          shader_descriptor,
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -70,15 +72,16 @@ Tensor sub_scalar(
   return convert(v_output);
 }
 
-Tensor& sub_scalar_(
+Tensor& binary_elementwise_scalar_(
     Tensor& self,
     const Scalar other,
-    const Scalar alpha) {
+    const c10::optional<Scalar> alpha_arg,
+    const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
       self.is_vulkan(),
-      "Vulkan: In-place sub is only supported on Vulkan tensors.");
+      "Vulkan: In-place add is only supported on Vulkan tensors.");
 
   vTensor& v_self = convert(self);
 
@@ -86,12 +89,13 @@ Tensor& sub_scalar_(
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
     if C10_LIKELY(v_self.has_image()) {
+      const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>() : other.to<float>();
       const struct Block final {
         uvec3 extents;
         float other;
       } block {
         v_self.extents(),
-        other.to<float>() * alpha.to<float>(),
+        other_val,
       };
 
       context->dispatch(
@@ -100,7 +104,7 @@ Tensor& sub_scalar_(
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(sub_scalar_),
+          shader_descriptor,
           v_self.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
@@ -122,10 +126,11 @@ Tensor& sub_scalar_(
   return self;
 }
 
-Tensor sub_tensor(
+Tensor binary_elementwise_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
-    const Scalar alpha) {
+    const c10::optional<Scalar> alpha_arg,
+    const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -144,6 +149,7 @@ Tensor sub_tensor(
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
     if C10_LIKELY(v_self.has_image() && v_other.has_image()) {
+      const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
       const struct Block final {
         uvec3 extents;
         uint32_t fill_0;
@@ -159,7 +165,7 @@ Tensor sub_tensor(
         0u,
         v_other.extents(),
         0u,
-        alpha.to<float>(),
+        alpha,
       };
 
       context->dispatch(
@@ -170,7 +176,7 @@ Tensor sub_tensor(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(sub),
+          shader_descriptor,
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -202,15 +208,16 @@ Tensor sub_tensor(
   return convert(v_output);
 }
 
-Tensor& sub_tensor_(
+Tensor& binary_elementwise_tensor_(
     Tensor& self,
     const Tensor& other_arg,
-    const Scalar alpha) {
+    const c10::optional<Scalar> alpha_arg,
+    const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
       self.is_vulkan(),
-      "Vulkan: In-place sub is only supported on Vulkan tensors.");
+      "Vulkan: In-place add is only supported on Vulkan tensors.");
 
   vTensor& v_self = convert(self);
 
@@ -221,6 +228,7 @@ Tensor& sub_tensor_(
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
     if C10_LIKELY(v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
+      const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
       const struct Block final {
         uvec3 extents;
         uint32_t fill_0;
@@ -232,7 +240,7 @@ Tensor& sub_tensor_(
         0u,
         v_other.extents(),
         0u,
-        alpha.to<float>(),
+        alpha,
       };
 
       context->dispatch(
@@ -242,7 +250,7 @@ Tensor& sub_tensor_(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(sub_),
+          shader_descriptor,
           v_self.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
@@ -269,13 +277,129 @@ Tensor& sub_tensor_(
   return self;
 }
 
+Tensor add_scalar(
+    const Tensor& self_arg,
+    const Scalar other,
+    const Scalar alpha) {
+  return binary_elementwise_scalar(self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
+}
+
+Tensor& add_scalar_(
+    Tensor& self,
+    const Scalar other,
+    const Scalar alpha) {
+  return binary_elementwise_scalar_(self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
+}
+
+Tensor add_tensor(
+    const Tensor& self_arg,
+    const Tensor& other_arg,
+    const Scalar alpha) {
+  return binary_elementwise_tensor(self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
+}
+
+Tensor& add_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar alpha) {
+  return binary_elementwise_tensor_(self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
+}
+
+Tensor sub_scalar(
+    const Tensor& self_arg,
+    const Scalar other,
+    const Scalar alpha) {
+  return binary_elementwise_scalar(self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(sub_scalar));
+}
+
+Tensor& sub_scalar_(
+    Tensor& self,
+    const Scalar other,
+    const Scalar alpha) {
+  return binary_elementwise_scalar_(self, other, c10::optional<Scalar>(alpha), VK_KERNEL(sub_scalar_));
+}
+
+Tensor sub_tensor(
+    const Tensor& self_arg,
+    const Tensor& other_arg,
+    const Scalar alpha) {
+  return binary_elementwise_tensor(self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
+}
+
+Tensor& sub_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar alpha) {
+  return binary_elementwise_tensor_(self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
+}
+
+Tensor mul_scalar(
+    const Tensor& self_arg,
+    const Scalar other) {
+  return binary_elementwise_scalar(self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar));
+}
+
+Tensor& mul_scalar_(
+    Tensor& self,
+    const Scalar other) {
+  return binary_elementwise_scalar_(self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
+}
+
+Tensor mul_tensor(
+    const Tensor& self_arg,
+    const Tensor& other_arg) {
+  return binary_elementwise_tensor(self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul));
+}
+
+Tensor& mul_tensor_(
+    Tensor& self,
+    const Tensor& other_arg) {
+  return binary_elementwise_tensor_(self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
+}
+
+Tensor div_scalar(
+    const Tensor& self_arg,
+    const Scalar other) {
+  return binary_elementwise_scalar(self_arg, other, c10::optional<Scalar>(), VK_KERNEL(div_scalar));
+}
+
+Tensor& div_scalar_(
+    Tensor& self,
+    const Scalar other) {
+  return binary_elementwise_scalar_(self, other, c10::optional<Scalar>(), VK_KERNEL(div_scalar_));
+}
+
+Tensor div_tensor(
+    const Tensor& self_arg,
+    const Tensor& other_arg) {
+  return binary_elementwise_tensor(self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div));
+}
+
+Tensor& div_tensor_(
+    Tensor& self,
+    const Tensor& other_arg) {
+  return binary_elementwise_tensor_(self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_));
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
+  m.impl("add.Scalar", TORCH_FN(add_scalar));
+  m.impl("add_.Scalar", TORCH_FN(add_scalar_));
+  m.impl("add.Tensor", TORCH_FN(add_tensor));
+  m.impl("add_.Tensor", TORCH_FN(add_tensor_));
   m.impl("sub.Scalar", TORCH_FN(sub_scalar));
   m.impl("sub_.Scalar", TORCH_FN(sub_scalar_));
   m.impl("sub.Tensor", TORCH_FN(sub_tensor));
   m.impl("sub_.Tensor", TORCH_FN(sub_tensor_));
+  m.impl("mul.Scalar", TORCH_FN(mul_scalar));
+  m.impl("mul_.Scalar", TORCH_FN(mul_scalar_));
+  m.impl("mul.Tensor", TORCH_FN(mul_tensor));
+  m.impl("mul_.Tensor", TORCH_FN(mul_tensor_));
+  m.impl("div.Scalar", TORCH_FN(div_scalar));
+  m.impl("div_.Scalar", TORCH_FN(div_scalar_));
+  m.impl("div.Tensor", TORCH_FN(div_tensor));
+  m.impl("div_.Tensor", TORCH_FN(div_tensor_));
 }
 
 #endif /* USE_VULKAN_API */

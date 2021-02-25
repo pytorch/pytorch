@@ -23,6 +23,6 @@ void main() {
     imageStore(
         uOutput,
         pos,
-        imageLoad(uOutput, pos) - uBlock.alpha * texelFetch(uInput0, input_pos, 0));
+        imageLoad(uOutput, pos) / texelFetch(uInput0, input_pos, 0));
   }
 }

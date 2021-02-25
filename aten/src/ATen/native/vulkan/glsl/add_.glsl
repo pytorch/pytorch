@@ -19,7 +19,7 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
-    const ivec3 input_pos = ivec3(pos.x%uBlock.isize.x, pos.y%uBlock.isize.y, pos.z%uBlock.isize.z);
+    const ivec3 input_pos = pos % uBlock.isize.xyz;
     imageStore(
         uOutput,
         pos,
