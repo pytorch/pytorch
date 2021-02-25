@@ -1160,16 +1160,16 @@ Tensor& take_out_cpu(Tensor& out, const Tensor& self, const Tensor& index) {
     return out;
 }
 
-Tensor take_along_dim(const Tensor& self, const Tensor& index, int64_t dim) {
-    return self.gather(dim, index);
-}
-
-Tensor& take_along_dim_out(const Tensor& self, const Tensor& index, int64_t dim, Tensor& result) {
-    return at::gather_out(result, self, dim, index);
-}
-
 Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& index) {
   return at::zeros_like(input).put_(index, grad, true);
+}
+
+Tensor take_along_dim(const Tensor& self, const Tensor& indices, int64_t dim) {
+    return self.gather(dim, indices);
+}
+
+Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, int64_t dim, Tensor& result) {
+    return at::gather_out(result, self, dim, indices);
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

@@ -5734,16 +5734,16 @@
     CPU: take_cpu
     CUDA: take_cuda
 
-- func: take_along_dim.out(Tensor self, Tensor index, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: take_along_dim_out
-
-- func: take_along_dim(Tensor self, Tensor index, int dim) -> Tensor
-  variants: method, function
-
 - func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
   variants: function
   device_guard: False
+
+- func: take_along_dim.out(Tensor self, Tensor indices, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: take_along_dim_out
+
+- func: take_along_dim(Tensor self, Tensor indices, int dim) -> Tensor
+  variants: method, function
 
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures

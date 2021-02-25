@@ -3852,6 +3852,13 @@ take(indices) -> Tensor
 See :func:`torch.take`
 """)
 
+add_docstr_all('take_along_dim',
+               r"""
+take_along_dim(indices, dim) -> Tensor
+
+See :func:`torch.take_along_dim`
+""")
+
 add_docstr_all('tan',
                r"""
 tan() -> Tensor

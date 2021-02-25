@@ -8810,6 +8810,30 @@ Example::
     tensor([ 4,  5,  8])
 """.format(**common_args))
 
+add_docstr(torch.take_along_dim,
+           r"""
+take_along_dim(input, indices, dim) -> Tensor
+
+Returns values from the :attr:`input` at the given 1-d indices in the given dim.
+
+.. note::
+    This function is similar to NumPy's `take_along_axis`.
+    See also :func:`torch.gather`.
+
+Args:
+    {input}
+    indices (LongTensor): the indices into tensor
+    dim (int): dim to take 1d slices along.
+
+Example::
+
+    >>> a = torch.tensor([[10, 30, 20], [60, 40, 50]])
+    >>> sorted_idx = torch.tensor([[0, 2, 1], [1, 2, 0]])
+    >>> torch.take_along_dim(a, sorted_idx, dim=1)
+    tensor([[10, 20, 30],
+            [40, 50, 60]])
+""".format(**common_args))
+
 add_docstr(torch.tan,
            r"""
 tan(input, *, out=None) -> Tensor

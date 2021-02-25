@@ -106,6 +106,7 @@ Indexing, Slicing, Joining, Mutating Ops
     swapdims
     t
     take
+    take_along_axis
     tensor_split
     tile
     transpose
