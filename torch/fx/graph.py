@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 import torch
 import keyword
-import re
 import builtins
 import math
+import io
 
 # Mapping of builtins to their `typing` equivalent.
 _origin_type_map = {
@@ -104,25 +104,35 @@ class _Namespace:
         if obj is not None and obj in self._obj_to_name:
             return self._obj_to_name[obj]
 
-        # delete all characters that are illegal in a Python identifier
-        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
+        # Normalize `candidate` to be a valid Python identifier.
+        name_buffer = io.StringIO()
+        # 1. Python identifiers can't start with a number
         if candidate[0].isdigit():
-            candidate = f'_{candidate}'
-
-        while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            match = re.match(r"(.*)_(\d+)$", candidate)
-            if match is None:
-                candidate = candidate + '_1'
+            name_buffer.write('_')
+        # 2. Replace any special characters with `_`
+        for c in candidate:
+            if not c.isalnum():
+                name_buffer.write('_')
             else:
-                base, num = match.group(1, 2)
-                candidate = f'{base}_{int(num) + 1}'
+                name_buffer.write(c)
 
-        self._used_names.setdefault(candidate)
-        if obj is None:
-            self._unassociated_names.add(candidate)
+        base_name = name_buffer.getvalue()
+        if base_name in self._used_names or self._is_illegal_name(base_name, obj):
+            # If there is a collision with an already used name, add a unique suffix.
+            last_used_suffix = self._used_names.setdefault(base_name, 0)
+            suffix = last_used_suffix + 1
+            name_buffer.write(f'_{int(suffix)}')
+            self._used_names[base_name] = suffix
         else:
-            self._obj_to_name[obj] = candidate
-        return candidate
+            # Otherwise, just add it to the used name set.
+            self._used_names[base_name] = 0
+
+        final_name = name_buffer.getvalue()
+        if obj is None:
+            self._unassociated_names.add(final_name)
+        else:
+            self._obj_to_name[obj] = final_name
+        return final_name
 
     def associate_name_with_obj(self, name: str, obj: Any):
         """Associate a unique name with an object.
