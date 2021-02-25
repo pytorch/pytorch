@@ -13,12 +13,10 @@ import torch.optim as optim
 from torch.distributed.rpc import RRef, rpc_sync, rpc_async, remote
 from torch.distributions import Categorical
 
-from torch.testing._internal.dist_utils import dist_init
+from torch.testing._internal.dist_utils import dist_init, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 
 TOTAL_EPISODE_STEP = 5000
-AGENT_NAME = "agent"
-OBSERVER_NAME = "observer{}"
 GAMMA = 0.1
 SEED = 543
 
@@ -136,7 +134,7 @@ class Agent:
         self.running_reward = 0
         self.reward_threshold = DummyEnv().reward_threshold
         for ob_rank in range(1, world_size):
-            ob_info = rpc.get_worker_info(OBSERVER_NAME.format(ob_rank))
+            ob_info = rpc.get_worker_info(worker_name(ob_rank))
             self.ob_rrefs.append(remote(ob_info, Observer))
             self.rewards[ob_info.id] = []
             self.saved_log_probs[ob_info.id] = []
@@ -237,7 +235,7 @@ class ReinforcementLearningRpcTest(RpcAgentTestFixture):
         if self.rank == 0:
             # Rank 0 is the agent.
             rpc.init_rpc(
-                name=AGENT_NAME,
+                name=worker_name(self.rank),
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
@@ -252,7 +250,7 @@ class ReinforcementLearningRpcTest(RpcAgentTestFixture):
         else:
             # Other ranks are observers that passively wait for instructions from the agent.
             rpc.init_rpc(
-                name=OBSERVER_NAME.format(self.rank),
+                name=worker_name(self.rank),
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
