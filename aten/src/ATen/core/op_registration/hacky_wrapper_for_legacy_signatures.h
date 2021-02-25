@@ -207,6 +207,50 @@ constexpr auto with_explicit_optional_tensors(KernelFunc kernel_func) {
     return kernel_func;
 }
 
+template<class TargetSignatureParams, class KernelSignature, class KernelFunc>
+struct with_scalar_by_ref_ final {};
+
+template<class Return, class... TargetSignatureParams, class... KernelSignatureParams, Return(*KernelFunc)(KernelSignatureParams...)>
+struct with_scalar_by_ref_<guts::typelist::typelist<TargetSignatureParams...>, Return(KernelSignatureParams...), TORCH_FN_TYPE(KernelFunc)> final {
+    static Return wrapper(TargetSignatureParams... args) {
+        return (*KernelFunc)(std::forward<TargetSignatureParams>(args)...);
+    }
+};
+
+template<class T>
+constexpr bool is_c10_scalar_() {
+    return std::is_same<c10::Scalar, T>::value || std::is_same<c10::optional<c10::Scalar>, T>::value;
+}
+template<class T> using is_c10_scalar = guts::bool_constant<is_c10_scalar_<T>()>;
+
+template<class T>
+struct add_scalar_ref final {
+    using type = T;
+};
+template<>
+struct add_scalar_ref<Scalar> final {
+    using type = const Scalar&;
+};
+template<>
+struct add_scalar_ref<c10::optional<Scalar>> final {
+    using type = const c10::optional<Scalar>&;
+};
+template<class T>
+using add_scalar_ref_t = typename add_scalar_ref<T>::type;
+
+template<class KernelFunc, std::enable_if_t<
+    guts::typelist::true_for_any_type<is_c10_scalar, typename guts::infer_function_traits_t<typename KernelFunc::FuncType>::parameter_types>::value, int> = 0>
+constexpr auto with_scalar_by_ref(KernelFunc kernel_func) {
+    using TargetSignatureParams = guts::typelist::map_t<add_scalar_ref_t, typename guts::infer_function_traits_t<typename KernelFunc::FuncType>::parameter_types>;
+    return TORCH_FN((&with_scalar_by_ref_<TargetSignatureParams, typename KernelFunc::FuncType, KernelFunc>::wrapper));
+}
+
+template<class KernelFunc, std::enable_if_t<
+   ! guts::typelist::true_for_any_type<is_c10_scalar, typename guts::infer_function_traits_t<typename KernelFunc::FuncType>::parameter_types>::value, int> = 0>
+constexpr auto with_scalar_by_ref(KernelFunc kernel_func) {
+    return kernel_func;
+}
+
 template<class Arg> constexpr bool is_out_argument_() {
     return std::is_same<at::Tensor&, Arg>::value;
 }
@@ -312,12 +356,19 @@ constexpr auto with_out_arguments_reordered(KernelFunc kernel_func) {
 
 }
 
+template<class Expected, class Actual>
+constexpr void assert_is_same() {
+    static_assert(std::is_same<Expected, Actual>::value, "BLA");
+}
+
 template<class TargetSignature, size_t NumOutParameters, class FuncPtr>
 constexpr auto hacky_wrapper_for_legacy_signatures(FuncPtr kernel_func) {
-    auto with_scattered_tensor_options = detail::with_scattered_tensor_options(kernel_func);
+    auto with_scalar_by_ref = detail::with_scalar_by_ref(kernel_func);
+    auto with_scattered_tensor_options = detail::with_scattered_tensor_options(with_scalar_by_ref);
     auto with_out_arguments_reordered = detail::with_out_arguments_reordered<NumOutParameters>(with_scattered_tensor_options);
     auto result = detail::with_explicit_optional_tensors<TargetSignature>(with_out_arguments_reordered);
-    static_assert(std::is_same<TargetSignature, typename decltype(result)::FuncType>::value, "Generated signature doesn't match the expected one.");
+    //static_assert(std::is_same<TargetSignature, typename decltype(result)::FuncType>::value, "Generated signature doesn't match the expected one.");
+    assert_is_same<TargetSignature, typename decltype(result)::FuncType>();
     return result;
 };
 

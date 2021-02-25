@@ -423,7 +423,7 @@ Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
-Tensor add_sparse(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor add_sparse(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   // TODO: Why?! Can't we just flip the order here...
   TORCH_CHECK(!(self.is_sparse() && !other.is_sparse()),
               "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
@@ -433,7 +433,7 @@ Tensor add_sparse(const Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(result, self, other, alpha);  // redispatch!
 }
 
-Tensor& add_sparse_(Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor& add_sparse_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!
 }
 
@@ -572,7 +572,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
 
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value);
 
-SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar value, SparseTensor& r) {
+SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src, const Scalar& value, SparseTensor& r) {
   if (!t.is_sparse()) {
     return add_out_dense_sparse_cpu(r, t, src, value);
   }
@@ -1116,7 +1116,7 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: Argument #1: Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
-  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage  
+  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage
   Tensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 

@@ -38,6 +38,16 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             return ConstRefCType(tensor_type)
     elif str(t) == 'Tensor?[]':
         return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
+    elif str(t) == 'Scalar':
+        if local.use_c10_dispatcher() is not UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+            return ConstRefCType(BaseCType('Scalar', binds))
+        else:
+            return BaseCType('Scalar', binds)
+    elif str(t) == 'Scalar?':
+        if local.use_c10_dispatcher() is not UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+            return ConstRefCType(OptionalCType(BaseCType('Scalar', binds)))
+        else:
+            return OptionalCType(BaseCType('Scalar', binds))
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
 def returns_type(rs: Sequence[Return]) -> str:

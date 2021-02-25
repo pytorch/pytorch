@@ -42,7 +42,7 @@ c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
 
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
-void add_kernel(TensorIteratorBase& iter, Scalar alpha_scalar) {
+void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
       using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();

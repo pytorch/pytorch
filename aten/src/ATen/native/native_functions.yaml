@@ -164,6 +164,7 @@
     CUDA: masked_scale_cuda
 
 - func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
 
@@ -227,7 +228,7 @@
 #     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 7) Add aliases argument to existing OpInfo/UnaryUfuncInfo or create new OpInfo/UnaryUfuncInfo entry 
+# 7) Add aliases argument to existing OpInfo/UnaryUfuncInfo or create new OpInfo/UnaryUfuncInfo entry
 # in op_db list in torch/testing/_internal/common_methods_invocations.py
 #
 # See torch.absolute, an alias for torch.abs, as an example.
@@ -353,11 +354,13 @@
     MkldnnCPU: mkldnn_add_out
 
 - func: _add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: add_relu
 
 - func: _add_relu_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: add_relu_
@@ -380,11 +383,13 @@
     DefaultBackend: add_
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: addmv
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: addmv_
@@ -395,17 +400,20 @@
     CPU, CUDA: addmv_out
 
 - func: _addmv_impl_(Tensor(a!) self, Tensor self2, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: addmv_impl_cpu
     CUDA: addmv_impl_cuda
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: addr
     Math: math_addr
 
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: addr_
@@ -664,18 +672,21 @@
   variants: function
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU: baddbmm_cpu
     CUDA: baddbmm_cuda
 
 - func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU: baddbmm__cpu
     CUDA: baddbmm__cuda
 
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -811,11 +822,13 @@
     CPU, CUDA: copysign_out
 
 - func: copysign.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: copysign
 
 - func: copysign_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: copysign_
@@ -959,12 +972,14 @@
   variants: function, method
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: clamp
     QuantizedCPU: clamp_quantized_cpu
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: clamp_
@@ -975,11 +990,13 @@
     CPU, CUDA: clamp_out
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: clamp_max
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: clamp_max_
@@ -990,11 +1007,13 @@
     CPU, CUDA: clamp_max_out
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: clamp_min
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: clamp_min_
@@ -1006,6 +1025,7 @@
 
 # clip is an alias for clamp
 - func: clip(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: clip_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
@@ -1039,6 +1059,7 @@
     CPU, CUDA: polar_out
 
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     DefaultBackend: constant_pad_nd
@@ -1364,6 +1385,7 @@
   device_guard: False
 
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: diff(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None) -> Tensor
@@ -1409,21 +1431,25 @@
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: div
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: div_
 
 - func: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: div
 
 - func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: div_
@@ -1439,9 +1465,11 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: divide.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: divide.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
@@ -1453,9 +1481,11 @@
 - func: divide.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
 
 - func: divide.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
   # true_divide, an alias for div
@@ -1469,9 +1499,11 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: true_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
@@ -1533,6 +1565,7 @@
     CUDA: _embedding_bag_forward_only_cuda
 
 - func: _rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 # row_stack is the alias of vstack
 - func: row_stack(Tensor[] tensors) -> Tensor
@@ -1763,6 +1796,7 @@
   variants: method
 
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: fill_
@@ -1806,9 +1840,11 @@
     SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: floor_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: frac(Tensor self) -> Tensor
@@ -2034,8 +2070,10 @@
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Tensor const & rhs)
   # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Scalar v)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Tensor const & rhs)
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Scalar v)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   variants: function, method
@@ -2196,8 +2234,10 @@
     MkldnnCPU: mkldnn_linear_backward
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
 
@@ -2318,11 +2358,13 @@
     CPU, CUDA: xlogy
 
 - func: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: xlogy
 
 - func: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy
@@ -2334,6 +2376,7 @@
     CPU, CUDA: xlogy_
 
 - func: xlogy_.Scalar_Other(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy_
@@ -2781,11 +2824,13 @@
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: mul
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: mul_
@@ -2801,9 +2846,11 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: multiply.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: multiply_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
@@ -3243,8 +3290,10 @@
     CUDA: round_out
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: relu(Tensor self) -> Tensor
   variants: function, method
@@ -3290,11 +3339,13 @@
   device_guard: False
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: hardshrink
 
 - func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: hardshrink_backward
@@ -3333,10 +3384,12 @@
 - func: selu_(Tensor(a!) self) -> Tensor(a!)
 
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: celu
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: celu_
 
@@ -3566,6 +3619,7 @@
   device_guard: False
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: sspaddmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -3803,6 +3857,7 @@
 
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: threshold
@@ -3810,6 +3865,7 @@
     QuantizedCPU: threshold_quantized_cpu
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: threshold_
@@ -3822,6 +3878,7 @@
     CUDA: threshold_out_cuda
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: threshold_backward
@@ -4023,12 +4080,15 @@
   variants: function, method
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: where(Tensor condition) -> Tensor[]
@@ -4110,10 +4170,12 @@
 # complicated
 
 - func: native_norm(Tensor self, Scalar p=2) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     SparseCPU, SparseCUDA: norm_sparse
 
 - func: native_norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, ScalarType? dtype) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     SparseCPU, SparseCUDA: norm_sparse
 
@@ -4121,12 +4183,14 @@
 - func: _sparse_sum(Tensor self) -> Tensor
 
 - func: _sparse_sum.dtype(Tensor self, *, ScalarType dtype) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
   dispatch:
     DefaultBackend: _sparse_sum
 
 - func: _sparse_sum.dim_dtype(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _sparse_sum_backward(Tensor grad, Tensor self, int[] dim) -> Tensor
   dispatch:
@@ -4166,6 +4230,7 @@
     SparseCUDA: log_softmax_backward_sparse_cuda
 
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: norm
@@ -4176,11 +4241,13 @@
     DefaultBackend: norm
 
 - func: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: norm
 
 - func: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: norm
@@ -4196,9 +4263,11 @@
     CPU, CUDA: norm_out
 
 - func: norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
@@ -4258,12 +4327,14 @@
     SparseCPU, SparseCUDA: sub_out_sparse
 
 - func: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: sub
     SparseCPU, SparseCUDA: sub_sparse
 
 - func: sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: sub_
@@ -4271,11 +4342,13 @@
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     DefaultBackend: sub
 
 - func: sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: sub_
@@ -4285,19 +4358,24 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: subtract.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: subtract_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: subtract.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: subtract_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: rsub
@@ -4316,6 +4394,7 @@
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     DefaultBackend: rsub
@@ -4323,6 +4402,7 @@
 # Functionally the same as addmm, but we give it a different derivative formula
 # that doesn't propagate gradients to non-present entries on sparse.
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: _sparse_addmm
 
@@ -4335,6 +4415,7 @@
     SparseCUDA: addmm_out_sparse_dense_cuda
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU: addmm_cpu
@@ -4343,6 +4424,7 @@
     SparseCUDA: addmm_sparse_dense_cuda
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU: addmm_cpu_
@@ -4874,9 +4956,11 @@
 
 # Quantized RNN layers
 # - func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 
 # - func: quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 
 # Quantized GRU layers
@@ -4889,12 +4973,16 @@
 
 # Quantized RNN cells
 - func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: quantized_gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: quantized_rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: quantized_rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
@@ -4904,6 +4992,7 @@
 - func: _pack_padded_sequence_backward(Tensor grad, int[] input_size, Tensor batch_sizes, bool batch_first) -> Tensor
 
 - func: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int total_length) -> (Tensor, Tensor)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 # wrappers for legacy TH methods
 
@@ -4940,12 +5029,14 @@
     CPU, CUDA: is_set_to
 
 - func: masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
 
 - func: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
@@ -5004,12 +5095,14 @@
   variants: function, method
 
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU: index_fill_
     CUDA: index_fill_
 
 - func: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
@@ -5021,12 +5114,14 @@
   variants: function, method
 
 - func: index_fill_.Dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: index_fill_.Dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
   variants: method
 
 - func: index_fill.Dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: index_fill.Dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
@@ -5041,17 +5136,20 @@
   variants: function, method
 
 - func: scatter_.value(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: scatter_fill_
 
 - func: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
 - func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: scatter_.reduce(Tensor(a!) self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor(a!)
@@ -5060,9 +5158,11 @@
     CPU, CUDA: scatter_reduce_
 
 - func: scatter_.value_reduce(Tensor(a!) self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: scatter_scalar_reduce_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
@@ -5076,6 +5176,7 @@
   variants: function, method
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: eq_
@@ -5098,24 +5199,28 @@
     CPU, CUDA: bitwise_and_out
 
 - func: bitwise_and.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: bitwise_and.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: bitwise_and_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: bitwise_and_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
 
 - func: __and__.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: __and__.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: __iand__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: __iand__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -5134,24 +5239,28 @@
     CPU, CUDA: bitwise_or_out
 
 - func: bitwise_or.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: bitwise_or.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: bitwise_or_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: bitwise_or_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
 
 - func: __or__.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: __or__.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: __ior__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: __ior__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -5170,30 +5279,35 @@
     CPU, CUDA: bitwise_xor_out
 
 - func: bitwise_xor.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: bitwise_xor.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: bitwise_xor_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: bitwise_xor_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
 
 - func: __xor__.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: __xor__.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: __ixor__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: __ixor__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
 
 - func: __lshift__.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: __lshift__
@@ -5204,6 +5318,7 @@
     CPU, CUDA: __lshift__
 
 - func: __ilshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: __ilshift__
@@ -5214,6 +5329,7 @@
     CPU, CUDA: __ilshift__
 
 - func: __rshift__.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: __rshift__
@@ -5224,6 +5340,7 @@
     CPU, CUDA: __rshift__
 
 - func: __irshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: __irshift__
@@ -5259,16 +5376,19 @@
   variants: method
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_renorm_
     CUDA: legacy::cuda::_th_renorm_
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU: lerp_cpu_scalar_
     CUDA: lerp_cuda_scalar_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: lerp_.Tensor(Tensor(a!) self, Tensor end, Tensor weight) -> Tensor(a!)
   variants: method
@@ -5277,6 +5397,7 @@
     CUDA: lerp_cuda_tensor_
 
 - func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: fmod_
@@ -5287,6 +5408,7 @@
     CPU, CUDA: fmod_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: remainder_
@@ -5297,6 +5419,7 @@
     CPU, CUDA: remainder_
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: addbmm_
@@ -5307,11 +5430,13 @@
     CPU, CUDA: addbmm_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: addbmm
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: addcdiv_
@@ -5432,6 +5557,7 @@
     QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: ne
@@ -5450,6 +5576,7 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: ne_
@@ -5464,6 +5591,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: not_equal.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: not_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -5473,6 +5601,7 @@
   variants: method, function
 
 - func: not_equal_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: not_equal_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -5485,6 +5614,7 @@
     QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: eq
@@ -5509,6 +5639,7 @@
     QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: ge
@@ -5527,6 +5658,7 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: ge_
@@ -5541,6 +5673,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater_equal.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: greater_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -5550,6 +5683,7 @@
   variants: method, function
 
 - func: greater_equal_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: greater_equal_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -5562,6 +5696,7 @@
     QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: le
@@ -5580,6 +5715,7 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: le_
@@ -5594,6 +5730,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: less_equal.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: less_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -5603,6 +5740,7 @@
   variants: method, function
 
 - func: less_equal_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: less_equal_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -5615,6 +5753,7 @@
     QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: gt
@@ -5633,6 +5772,7 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: gt_
@@ -5647,6 +5787,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: greater.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -5656,6 +5797,7 @@
   variants: method, function
 
 - func: greater_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: greater_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -5668,6 +5810,7 @@
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: lt
@@ -5686,6 +5829,7 @@
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: lt_
@@ -5700,6 +5844,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: less.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
 
 - func: less.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -5709,6 +5854,7 @@
   variants: method, function
 
 - func: less_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: less_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -5814,11 +5960,13 @@
     CPU, CUDA: addcmul_out
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     DefaultBackend: addcmul
 
 - func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: addcmul_
@@ -5829,6 +5977,7 @@
     CPU, CUDA: addcdiv_out
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     DefaultBackend: addcdiv
@@ -6142,6 +6291,7 @@
     CUDA: signbit_out
 
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     DefaultBackend: dist
@@ -6161,6 +6311,7 @@
   dispatch:
     CPU: lerp_cpu_scalar_out
     CUDA: lerp_cuda_scalar_out
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -6169,10 +6320,12 @@
     CUDA: lerp_cuda_tensor_out
 
 - func: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU: lerp_cpu_scalar
     CUDA: lerp_cuda_scalar
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor
   variants: method, function
@@ -6187,6 +6340,7 @@
     CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_histc
@@ -6198,6 +6352,7 @@
     CPU, CUDA: fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: fmod
@@ -6281,6 +6436,7 @@
     CPU, CUDA: remainder_out
 
 - func: remainder.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU, CUDA: remainder
@@ -6450,6 +6606,7 @@
     CUDA: legacy::cuda::_th_renorm_out
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_renorm
@@ -6490,6 +6647,7 @@
     CPU, CUDA: pow_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: pow
 
@@ -6498,14 +6656,18 @@
   dispatch:
     CPU, CUDA: pow_out
     SparseCPU, SparseCUDA: pow_out_sparse_scalar
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     CPU, CUDA: pow
     SparseCPU, SparseCUDA: pow_sparse_scalar
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: pow_
@@ -6531,6 +6693,7 @@
     Math: float_power_out
 
 - func: float_power.Scalar(Scalar self, Tensor exponent) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: float_power
 
@@ -6540,11 +6703,13 @@
     Math: float_power_out
 
 - func: float_power.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     Math: float_power
 
 - func: float_power_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     Math: float_power_
@@ -6656,72 +6821,92 @@
     QuantizedCPU: cat_out_quantized_cpu
 
 - func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow
     CUDA: foreach_tensor_add_scalar_kernel_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow_
     CUDA: foreach_tensor_add_scalar_kernel_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_sub.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalar_kernel_slow
     CUDA: foreach_tensor_sub_scalar_kernel_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_sub_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalar_kernel_slow_
     CUDA: foreach_tensor_sub_scalar_kernel_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_mul.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow
     CUDA: foreach_tensor_mul_scalar_kernel_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_mul_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow_
     CUDA: foreach_tensor_mul_scalar_kernel_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_div.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow
     CUDA: foreach_tensor_div_scalar_kernel_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_div_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow_
     CUDA: foreach_tensor_div_scalar_kernel_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow
     CUDA: foreach_tensor_add_list_kernel_cuda
 
 - func: _foreach_add_.List(Tensor(a!)[] self, Tensor[] other, *, Scalar alpha=1) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow_
     CUDA: foreach_tensor_add_list_kernel_cuda_
 
 - func: _foreach_sub.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_list_kernel_slow
     CUDA: foreach_tensor_sub_list_kernel_cuda
 
 - func: _foreach_sub_.List(Tensor(a!)[] self, Tensor[] other, *, Scalar alpha=1) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_list_kernel_slow_
@@ -6756,48 +6941,56 @@
   dispatch:
     CPU: foreach_tensor_add_scalarlist_kernel_slow
     CUDA: foreach_tensor_add_scalarlist_kernel_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_add_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalarlist_kernel_slow_
     CUDA: foreach_tensor_add_scalarlist_kernel_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_sub.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalarlist_kernel_slow
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_sub_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalarlist_kernel_slow_
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_div.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_div_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow_
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_mul.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_mul_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow_
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_exp(Tensor[] tensors) -> Tensor[]
   variants: function
@@ -7142,52 +7335,64 @@
     CUDA: foreach_tensor_trunc_cuda_
 
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow_
     CUDA: foreach_tensor_addcdiv_scalar_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_addcmul_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalar_slow_
     CUDA: foreach_tensor_addcmul_scalar_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_addcdiv_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow_
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_addcmul_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> ()
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow_
     CUDA: foreach_tensor_addcmul_scalarlist_cuda_
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_addcdiv.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow
     CUDA: foreach_tensor_addcdiv_scalar_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_addcmul.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalar_slow
     CUDA: foreach_tensor_addcmul_scalar_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_addcdiv.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_addcmul.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> Tensor[]
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow
     CUDA: foreach_tensor_addcmul_scalarlist_cuda
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _foreach_maximum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   variants: function
@@ -7224,6 +7429,7 @@
     CUDA: bucketize_out_cuda
 
 - func: bucketize.Scalar(Scalar self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: bucketize_cpu
     CUDA: bucketize_cuda
@@ -7240,6 +7446,7 @@
     CUDA: searchsorted_out_cuda
 
 - func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
@@ -7476,16 +7683,19 @@
     CPU, CUDA: elu_out
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: elu
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: elu_backward
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     DefaultBackend: elu_
@@ -7546,6 +7756,7 @@
     QuantizedCPU: hardtanh_out_quantized_cpu
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: hardtanh
@@ -7558,11 +7769,13 @@
     CPU, CUDA: hardtanh_backward_out
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: hardtanh_backward
 
 - func: hardtanh_(Tensor(a!) self, Scalar min_val=-1, Scalar max_val=1) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: hardtanh_
@@ -7597,17 +7810,20 @@
     QuantizedCPU: leaky_relu_out_quantized_cpu
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu
     QuantizedCPU: leaky_relu_quantized_cpu
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu_backward
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu_
@@ -7654,17 +7870,20 @@
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_out
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     DefaultBackend: rrelu_with_noise_backward
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu_
@@ -7677,6 +7896,7 @@
     CPU, CUDA: softplus_out
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: softplus
@@ -7688,6 +7908,7 @@
     CPU, CUDA: softplus_backward_out
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_backward
@@ -7699,6 +7920,7 @@
     CPU, CUDA: softshrink_out
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink
@@ -7710,6 +7932,7 @@
     CPU, CUDA: softshrink_backward_out
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink_backward
@@ -9065,6 +9288,7 @@
     DefaultBackend: ger_out
 
 - func: linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
 
@@ -9091,6 +9315,7 @@
   variants: function
 
 - func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
   dispatch:
@@ -9222,6 +9447,7 @@
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 # Note: this function is only for testing.
 - func: _test_optional_intlist(Tensor values, int[]? addends) -> Tensor

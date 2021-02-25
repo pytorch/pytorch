@@ -10,17 +10,17 @@ namespace native {
 Tensor& mkldnn_add_out(
     const Tensor& self,
     const Tensor& other,
-    Scalar alpha,
+    const Scalar& alpha,
     Tensor& result
     ) {
   TORCH_CHECK(false, "mkldnn_add_out: ATen not compiled with MKLDNN support");
 }
 
-Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   TORCH_CHECK(false, "mkldnn_add: ATen not compiled with MKLDNN support");
 }
 
-Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   TORCH_CHECK(false, "mkldnn_add_: ATen not compiled with MKLDNN support");
 }
 
@@ -49,7 +49,7 @@ namespace native {
 Tensor& mkldnn_add_out(
     const Tensor& self,
     const Tensor& other,
-    Scalar alpha,
+    const Scalar& alpha,
     Tensor& result
     ) {
   ideep::tensor& x = itensor_from_mkldnn(self);
@@ -62,7 +62,7 @@ Tensor& mkldnn_add_out(
   return result;
 }
 
-Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& y = itensor_from_mkldnn(other);
 
@@ -74,7 +74,7 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
                                  self.options().device_opt());
 }
 
-Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return native::mkldnn_add_out(self, other, alpha, self);
 }
 
