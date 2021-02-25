@@ -595,7 +595,6 @@ Value* registerSetAttrInBlocks(
   return output;
 }
 
-
 // The trackAndRegisterAttributesInBlocks function tracks any instances
 // of getAttr and setAttr in a sub-block and capture these nodes as inpalce
 // read/write ops. This pass captures the output of setAttr in sub-block outputs
@@ -605,32 +604,38 @@ Value* registerSetAttrInBlocks(
 // For example:
 //= prim::If(%12)
 //    block0():
-//      %13 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
-//      %b.1 : Tensor? = prim::GetAttr[name="bias"](%13)
+//      %13 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d =
+//      prim::GetAttr[name="conv"](%3) %b.1 : Tensor? =
+//      prim::GetAttr[name="bias"](%13)
 //      ...
-//      %18 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
-//      %19 : Tensor = aten::add(%anchors.1, %b, %6)
+//      %18 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d =
+//      prim::GetAttr[name="conv"](%3) %19 : Tensor = aten::add(%anchors.1, %b,
+//      %6)
 //       = prim::SetAttr[name="bias"](%18, %19)
 //      -> ()
 //    block1():
-//      %20 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
-//      %21 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
-//      %22 : Tensor = prim::GetAttr[name="weight"](%21)
-//      %23 : Tensor = aten::slice(%22, %7, %7, %8, %6)
+//      %20 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d =
+//      prim::GetAttr[name="conv"](%3) %21 :
+//      __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d =
+//      prim::GetAttr[name="conv"](%3) %22 : Tensor =
+//      prim::GetAttr[name="weight"](%21) %23 : Tensor = aten::slice(%22, %7,
+//      %7, %8, %6)
 //       = prim::SetAttr[name="bias"](%20, %23)
 //      -> ()
 // After the pass
-//%_output_conv.bias.3 : Tensor = prim::If(%12) # test/onnx/test_pytorch_onnx_onnxruntime.py:6641:16
+//%_output_conv.bias.3 : Tensor = prim::If(%12) #
+//test/onnx/test_pytorch_onnx_onnxruntime.py:6641:16
 //    block0():
 //     ...
-//      %18 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
-//      %19 : Tensor = aten::add(%anchors.1, %b, %6)
+//      %18 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d =
+//      prim::GetAttr[name="conv"](%3) %19 : Tensor = aten::add(%anchors.1, %b,
+//      %6)
 //      %_output_conv.bias.2 : Tensor = aten::clone(%19, %26)
 //      -> (%_output_conv.bias.2)
 //    block1():
-//      %20 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
-//      %23 : Tensor = aten::slice(%conv.weight, %7, %7, %8, %6)
-//      %31 : None = prim::Constant()
+//      %20 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d =
+//      prim::GetAttr[name="conv"](%3) %23 : Tensor = aten::slice(%conv.weight,
+//      %7, %7, %8, %6) %31 : None = prim::Constant()
 //      %_output_conv.bias.4 : Tensor = aten::clone(%23, %31)
 //      -> (%_output_conv.bias.4)
 void trackAndRegisterAttributesInBlocks(
@@ -724,7 +729,6 @@ void trackAndRegisterAttributesInBlocks(
   }
 }
 
-
 // The registerInplaceOpAsBlockOutputs function tracks inplace op
 // (like aten::copy_ or aten::append) outputs as sub-block output.
 // Also, match the number of If sub-block outputs
@@ -745,7 +749,8 @@ void trackAndRegisterAttributesInBlocks(
 //    block0():
 //      %_output_state.2 : Tensor = aten::clone(%state.1, %59)
 //      ...
-//      %_output_state_copy.3 : Tensor = onnx::Placeholder[name="index_put_"](%state_copy.1)
+//      %_output_state_copy.3 : Tensor =
+//      onnx::Placeholder[name="index_put_"](%state_copy.1)
 //        block0():
 //        ...
 //      -> (%_output_state_copy.3, %_output_state.2)
@@ -753,7 +758,8 @@ void trackAndRegisterAttributesInBlocks(
 //      %50 : None = prim::Constant()
 //      %_output_state_copy.2 : Tensor = aten::clone(%state_copy.1, %50)
 //      ...
-//      %_output_state.3 : Tensor = onnx::Placeholder[name="index_put_"](%state.1)
+//      %_output_state.3 : Tensor =
+//      onnx::Placeholder[name="index_put_"](%state.1)
 //        ...
 //      -> (%_output_state_copy.2, %_output_state.3)
 std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
@@ -807,7 +813,6 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
   }
   return nextSetAttrValues;
 }
-
 
 // Register Inplace Ops As Block Outputs
 // Inplace operations like aten::copy_ or aten::append that are inside
