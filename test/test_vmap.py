@@ -6,7 +6,6 @@ import functools
 import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
 import types
 
 
