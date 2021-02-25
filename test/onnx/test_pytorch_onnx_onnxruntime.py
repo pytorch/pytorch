@@ -3553,6 +3553,21 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor([4, 5, 8, 9])
         self.run_test(RepeatModel(), (x, y))
 
+    def test_repeat_interleave(self):
+        class FlattenModel(torch.nn.Module):
+            def forward(self, x):
+                return x.repeat_interleave(2)
+                
+        x = torch.tensor([1, 2, 3])
+        self.run_test(FlattenModel(), (x,))
+
+        class DimsModel(torch.nn.Module):
+            def forward(self, x):
+                return x.repeat_interleave(2, dim=1)
+                
+        x = torch.tensor([[1, 2], [3, 4]])
+        self.run_test(DimsModel(), (x,))
+
     def test_view(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):

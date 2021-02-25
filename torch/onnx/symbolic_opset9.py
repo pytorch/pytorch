@@ -1951,6 +1951,33 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
+def repeat_interleave(g, self, repeats, dim):
+    input = self
+    # if dim = 0 flatten
+    if sym_help._is_none(dim):
+        input = reshape(g, self, g.op("Constant", value_t=torch.tensor([-1])))
+        dim = 0
+    else:
+        dim = sym_help._maybe_get_scalar(dim)
+    repeats_dim = sym_help._get_tensor_rank(repeats)
+    repeats_sizes = sym_help._get_tensor_sizes(repeats)
+    input_sizes = sym_help._get_tensor_sizes(input)
+
+    # cases where repeats is a single number
+    if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)):
+        #repeats = reshape(g, repeats, g.op("Constant", value_t=torch.tensor([1])))
+        input = unsqueeze(g, input, dim+1)
+        input_sizes_temp = input_sizes.copy()
+        input_sizes_temp.insert(dim+1, sym_help._maybe_get_scalar(repeats))
+        input = expand(g, input, torch.tensor(input_sizes_temp), None)
+        input_sizes[dim] *= 2
+        input = reshape(g, input, g.op("Constant", value_t=torch.tensor(input_sizes)))
+    elif repeats_dim == 1:
+        assert repeats_sizes[0] == input_sizes[dim]
+    else:
+        raise RuntimeError("repeats must be 0-dim or 1-dim tensor")
+    return input
+
 @parse_args('v', 'i')
 def pixel_shuffle(g, self, upscale_factor):
     dims = sym_help._get_tensor_sizes(self)
