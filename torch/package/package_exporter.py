@@ -58,7 +58,7 @@ class PackageExporter:
     def __init__(self,
                  f: Union[str, Path, BinaryIO],
                  importer: Union[Importer, Sequence[Importer]] = sys_importer,
-                 verbose: bool = False):
+                 verbose: bool = True):
         """
         Create an exporter.
 
