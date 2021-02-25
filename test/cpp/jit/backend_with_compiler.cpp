@@ -152,7 +152,7 @@ c10::IValue preprocess(
 static auto cls = torch::jit::backend<BackendWithCompiler>(
     "backend_with_compiler_demo",
     preprocess);
-}
+} // namespace
 
 } // namespace jit
 } // namespace torch
