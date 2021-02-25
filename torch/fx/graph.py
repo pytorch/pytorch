@@ -130,6 +130,9 @@ class Graph:
         self._insert = self._root.prepend
         self._len = 0
 
+        self._illegal_char_regex = re.compile('[^0-9a-zA-Z_]+')
+        self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
+
     @property
     def nodes(self) -> _node_list:
         """
@@ -511,7 +514,7 @@ class Graph:
 
     def _create_unique_name(self, candidate : str) -> str:
         # delete all characters that are illegal in a Python identifier
-        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
+        candidate = self._illegal_char_regex.sub('_', candidate)
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
@@ -522,7 +525,7 @@ class Graph:
                 _shadows_builtin_name(name)
 
         while candidate in self._used_names or illegal_shadowing_name(candidate):
-            match = re.match(r"(.*)_(\d+)$", candidate)
+            match = self._name_suffix_regex.match(candidate)
             if match is None:
                 candidate = candidate + '_1'
             else:
