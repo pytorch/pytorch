@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -108,7 +109,7 @@ TEST(FuserTest, TestOne_CUDA) {
     // with different internal strides.  To do this, we generate a tensor
     // with the "wrong" dimensions, and then use transpose to get an
     // appropriately sized view.
-    for (size_t i = 0; i < graph.inputs().size(); i++) {
+    for (const auto i : c10::irange(graph.inputs().size())) {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti], dims[tj]);
       inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
@@ -165,8 +166,7 @@ TEST(FuserTest, FusedConcat_CUDA) {
 
   std::vector<std::string> graph_strings{
       graph_string0, graph_string1, graph_string2};
-  for (auto i = decltype(graph_strings.size()){0}; i < graph_strings.size();
-       ++i) {
+  for (const auto i : c10::irange(graph_strings.size())) {
     Graph g;
     torch::jit::parseIR(graph_strings[i], &g);
 
