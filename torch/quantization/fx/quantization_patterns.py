@@ -841,7 +841,12 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        if dtypes == (torch.float16, torch.float16, None):
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+        else:
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)

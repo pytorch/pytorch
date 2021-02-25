@@ -2645,6 +2645,31 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m = self.checkGraphModeFxOp(
                 M(), data, quant_type, expected_node_list=node_list)
 
+    def test_fixed_qparams_ops_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                return x
+
+        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        quant_type = QuantType.STATIC
+        qconfig_dict = {
+            "": float16_static_qconfig
+        }
+        node_occurrence = {
+            ns.call_method("to"): 4
+        }
+        m = self.checkGraphModeFxOp(
+            M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
+            expected_node_occurrence=node_occurrence)
+
+
     @skipIfNoFBGEMM
     def test_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
