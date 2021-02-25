@@ -183,7 +183,10 @@ class _NSGraphMatchableSubgraphsIterator:
             for arg in cur_start_node.args:
                 if isinstance(arg, Node):
                     self.stack.append(arg)
-                # TODO(future PR): handle other arg types such as Tuple, etc
+                elif isinstance(arg, torch.fx.immutable_collections.immutable_list):
+                    for inner_node in arg:
+                        if isinstance(inner_node, Node):
+                            self.stack.append(inner_node)
 
             # skip observers, etc
             # note: this check is done on the start_node, i.e.
