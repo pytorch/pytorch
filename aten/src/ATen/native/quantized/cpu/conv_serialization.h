@@ -131,11 +131,11 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
 
     if (elements[2].isTensorList()) {
       for (const auto& elem : elements[2].toTensorList()) {
-        optional.emplace_back(std::move(static_cast<at::Tensor>(elem)));
+        optional.emplace_back(static_cast<at::Tensor>(elem));
       }
     } else {
       for (const auto& elem : elements[2].toList()) {
-        optional.emplace_back(std::move(static_cast<c10::IValue>(elem).toOptional<at::Tensor>()));
+        optional.emplace_back(static_cast<c10::IValue>(elem).toOptional<at::Tensor>());
       }
     }
 
