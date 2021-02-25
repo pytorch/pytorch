@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
+#include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -667,12 +668,7 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isString()) {
     return py::cast(std::move(ivalue).toStringRef());
   } else if (ivalue.isList()) {
-    auto list = std::move(ivalue).toList();
-    py::list t{list.size()};
-    for (size_t i = 0; i < list.size(); ++i) {
-      t[i] = toPyObject(IValue{list.get(i)});
-    }
-    return std::move(t);
+    return py::cast(ScriptList(ivalue));
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();

@@ -562,6 +562,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/python_custom_class.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
     "torch/csrc/jit/python/python_ir.cpp",
+    "torch/csrc/jit/python/python_list.cpp",
     "torch/csrc/jit/python/python_tracer.cpp",
     "torch/csrc/jit/python/script_init.cpp",
     "torch/csrc/jit/frontend/concrete_module_type.cpp",

@@ -1694,3 +1694,145 @@ class TestDict(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
             m = torch.jit.script(annotated_fn)
+
+
+class TestScriptList(JitTestCase):
+    """
+    This class contains a suite of tests for torch.jit.list, a
+    function that returns a dictionary-like object that has reference
+    semantics across the Python/TorchScript boundary. That is,
+    it can be passed to a TorchScript function that mutates it
+    and those modifications are visible in the scope of the Python
+    caller of said TorchScript function.
+
+    The vast majority of tests are for making sure that objects returned
+    by torch.jit.list behave like lists do so that they are fungible
+    in almost all cirumstances with regular list.
+    """
+    def _script_list_add(self, l: torch._C.ScriptList, e: int):
+        """
+        This is a helper function that inserts the element e into the
+        list l in TorchScript. It is used for testing reference
+        semantics.
+        """
+        @torch.jit.script
+        def list_add(l: List[int], e: int):
+            l.append(e)
+
+        list_add(l, e)
+
+    def test_repr(self):
+        """
+        Test the __repr__ method.
+        """
+        data = [1]
+        l = torch.jit.list(data)
+        exp = repr(data)
+        self.assertEqual(repr(l), exp)
+
+    def test_bool(self):
+        """
+        Test the __bool__ method. This should return True
+        if the list is non-empty and False otherwise.
+        """
+        true = torch.jit.list([1])
+        false = torch.jit.empty_list(List[int])
+
+        self.assertEqual(bool(true), True)
+        self.assertEqual(bool(false), False)
+
+    def test_iter(self):
+        """
+        Test iteration over a list's elements.
+        """
+        l = torch.jit.list([1, 2, 3, 4])
+
+        s = 0
+        for k in l:
+            s += k
+
+        self.assertEqual(s, 10)
+
+    def test_getitem(self):
+        """
+        Test accessing list elements using the [] operator.
+        TODO: Add test for KeyError.
+        """
+        l = torch.jit.list([1, 2, 3, 4])
+
+        self.assertEqual(l[1], 2)
+        self.assertEqual(l[3], 4)
+
+    def test_contains(self):
+        """
+        Test membership checks (x in y, x not in y).
+        TODO: Add test for KeyError.
+        """
+        l = torch.jit.list([1, 2, 3, 4])
+
+        self.assertTrue(1 in l)
+        self.assertTrue(2 in l)
+        self.assertTrue(3 in l)
+        self.assertTrue(4 in l)
+        self.assertFalse(5 in l)
+
+    def test_delitem(self):
+        """
+        Test deletion.
+        TODO: Add test for KeyError.
+        """
+        l = torch.jit.list([1, 2, 3, 4])
+
+        self.assertTrue(2 in l)
+
+        del l[1]
+
+        self.assertTrue(1 in l)
+        self.assertFalse(2 in l)
+        self.assertTrue(3 in l)
+        self.assertTrue(4 in l)
+
+    def test_len(self):
+        """
+        Test len() builtin function.
+        """
+        four = torch.jit.list([1, 2, 3, 4])
+        zero = torch.jit.empty_list(List[int])
+
+        self.assertEqual(len(four), 4)
+        self.assertEqual(len(zero), 0)
+
+    def test_nested(self):
+        """
+        Test that reference semantics are honoured when the ScriptList that is
+        mutated using TorchScript is inside another.
+        """
+        nested = torch.jit.list([[1], [2]], List[List[int]])
+
+        one = nested[0]
+        two = nested[1]
+
+        self._script_list_add(one, 3)
+        self._script_list_add(two, 4)
+
+        # The mutation should be visible in the original list, nested.
+        self.assertEqual(len(one), 2)
+        self.assertEqual(len(two), 2)
+        # self.assertEqual(one[-1], 3)
+        # self.assertEqual(two[-1], 4)
+        self.assertEqual(one[len(one)-1], 3)
+        self.assertEqual(two[len(one)-1], 4)
+        self.assertEqual(len(nested[0]), 2)
+        self.assertEqual(len(nested[1]), 2)
+
+    def test_reference_semantics(self):
+        """
+        Test that reference semantics are honoured; that modifications made
+        to a ScriptList in TorchScript are visible in Python.
+        """
+        l = torch.jit.list([1, 2])
+        self._script_list_add(l, 3)
+
+        self.assertEqual(len(l), 3)
+        self.assertTrue(3 in l)
+        self.assertEqual(l[2], 3)

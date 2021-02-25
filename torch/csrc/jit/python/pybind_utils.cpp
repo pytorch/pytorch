@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
-
 #include <torch/csrc/jit/python/python_ivalue.h>
+#include <torch/csrc/jit/python/python_list.h>
 
 namespace torch {
 namespace jit {
@@ -99,6 +99,16 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return static_cast<int64_t>(stream->cdata);
     }
     case TypeKind::ListType: {
+      // If the object is a ScriptList, retrieve the c10::List
+      // instance inside it.
+      try {
+        auto script_list = py::cast<ScriptList>(obj);
+        return script_list.list_;
+      } catch (py::cast_error& e) {
+      }
+
+      // If not (i.e. it is a regular Python list), make a new
+      // c10::List.
       const auto& elem_type = type->expectRef<ListType>().getElementType();
       switch (elem_type->kind()) {
         // allows single int/float to be broadcasted to a fixed size list
