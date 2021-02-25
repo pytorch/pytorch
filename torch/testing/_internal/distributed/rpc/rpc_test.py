@@ -893,7 +893,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_int_callee(self):
         dst_rank = (self.rank + 1) % self.world_size
         ret = rpc.rpc_sync(
-            worker_name(dst_rank),
+            dst_rank,
             RpcTest.return_callee_id,
         )
         self.assertEqual(ret, dst_rank)
