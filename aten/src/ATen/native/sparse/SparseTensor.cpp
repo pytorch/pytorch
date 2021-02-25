@@ -402,7 +402,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {
-    return self;
+    return self.clone();
   }
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
