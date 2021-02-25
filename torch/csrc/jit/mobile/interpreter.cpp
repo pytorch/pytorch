@@ -26,6 +26,17 @@ void createObject(Stack& stack, const at::ClassTypePtr& type) {
       type->numAttributes());
   push(stack, std::move(userObj));
 }
+
+void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
+  at::TypePtr ty = pop(stack).type();
+  for (const at::TypePtr& candidate : types) {
+    if (ty->isSubtypeOf(candidate)) {
+      push(stack, true);
+      return;
+    }
+  }
+  push(stack, false);
+}
 } // namespace
 
 using namespace at;
@@ -187,6 +198,13 @@ bool InterpreterState::run(Stack& stack) {
       case CREATE_OBJECT: {
         auto type = code_->types_[inst.X]->expect<c10::ClassType>();
         createObject(stack, type);
+        ++pc;
+      } break;
+      case ISINSTANCE: {
+        at::ArrayRef<TypePtr> types(
+            &(code_->types_[inst.X]),
+            &(code_->types_[inst.X + inst.N]));
+        isinstance(stack, types);
         ++pc;
       } break;
       case WARN: {
