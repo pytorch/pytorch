@@ -1,6 +1,6 @@
 import warnings
 import torch.nn as nn
-from torch.utils.data import IterDataPipe, _utils
+from torch.utils.data import IterDataPipe, _utils, functional_datapipe
 from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
@@ -12,7 +12,7 @@ T_co = TypeVar('T_co', covariant=True)
 def default_fn(data):
     return data
 
-
+@functional_datapipe('map')
 class MapIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`MapIterDataPipe`.
 
