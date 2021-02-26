@@ -99,6 +99,20 @@ def tf32_on(self, tf32_precision=1e-5):
 # on a CUDA >= 11 build on an >=Ampere architecture, the matmul will be running at
 # TF32 mode and TF32 mode off, and on TF32 mode, the assertEqual will use reduced
 # precision to check values.
+#
+# This decorator can be used for function with or without device/dtype, such as
+# @tf32_on_and_off(0.005)
+# def test_my_op(self)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, device)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, device, dtype)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, dtype)
+# if neither device nor dtype is specified, it will check if the system has ampere device
+# if device is specified, it will check if device is cuda
+# if dtype is specified, it will check if dtype is float32 or complex64
+# tf32 and fp32 are different only when all the three checks pass
 def tf32_on_and_off(tf32_precision=1e-5):
     def with_tf32_disabled(self, function_call):
         with tf32_off():
