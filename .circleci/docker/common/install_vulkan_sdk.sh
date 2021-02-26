@@ -17,10 +17,10 @@ curl \
   --location \
   --fail \
   --retry 3 \
-  --output ${_tmp_vulkansdk_targz} "https://ossci-android.s3.amazonaws.com/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz"
+  --output "${_tmp_vulkansdk_targz}" "https://ossci-android.s3.amazonaws.com/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz"
 
-mkdir -p ${_vulkansdk_dir}
-tar -C ${_vulkansdk_dir} -xzf ${_tmp_vulkansdk_targz}
-rm ${_tmp_vulkansdk_targz}
+mkdir -p "${_vulkansdk_dir}"
+tar -C "${_vulkansdk_dir}" -xzf "${_tmp_vulkansdk_targz}"
+rm -rf "${_tmp_vulkansdk_targz}"
 
-source ${_vulkansdk_dir}/${VULKAN_SDK_VERSION}/setup-env.sh
+source "${_vulkansdk_dir}/${VULKAN_SDK_VERSION}/setup-env.sh"
