@@ -48,9 +48,12 @@ class AttributePropagator {
       return false;
     };
 
-    // forward is preserved by default.
-    auto method = module_.get_method("forward");
-    preservedMethods_.insert(&method.function());
+    // forward is preserved by default, but
+    // not all modules have a forward function defined
+    if (module_.find_method("forward")) {
+      auto method = module_.get_method("forward");
+      preservedMethods_.insert(&method.function());
+    }
 
     for (auto name : preservedAttrs) {
       TORCH_CHECK(checkName(name), "Unknown name: " + name);
@@ -752,12 +755,14 @@ Module freeze_module(
     std::vector<std::string> preservedAttrs,
     bool freezeInterfaces,
     bool preserveParameters) {
-  Method method = module.get_method("forward");
-  // Check that module does not return itself.
-  for (auto& output : method.graph()->outputs()) {
-    TORCH_CHECK(
-        output->type() != module.type(),
-        "attempted to freeze a module that return itself");
+  if (module.find_method("forward")) {
+    Method method = module.get_method("forward");
+    // Check that module does not return itself.
+    for (auto& output : method.graph()->outputs()) {
+      TORCH_CHECK(
+          output->type() != module.type(),
+          "attempted to freeze a module that return itself");
+    }
   }
 
   auto moduleClone = module.clone(true);
