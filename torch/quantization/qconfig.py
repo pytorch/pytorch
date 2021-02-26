@@ -3,7 +3,7 @@ from .observer import *
 from .fake_quantize import *
 import torch.nn as nn
 
-from typing import Union
+from typing import Union, Optional
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """
@@ -112,8 +112,10 @@ def get_default_qat_qconfig(backend='fbgemm'):
         qconfig = default_qat_qconfig
     return qconfig
 
-def assert_valid_qconfig(qconfig: Union[QConfig, QConfigDynamic],
+def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
                          mod: torch.nn.Module) -> None:
+    if qconfig is None:
+        return
     is_conv_transpose_mod = (
         isinstance(mod, torch.nn.ConvTranspose1d) or
         isinstance(mod, torch.nn.ConvTranspose2d) or
