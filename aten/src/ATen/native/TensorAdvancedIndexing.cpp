@@ -1164,12 +1164,44 @@ Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& inde
   return at::zeros_like(input).put_(index, grad, true);
 }
 
-Tensor take_along_dim(const Tensor& self, const Tensor& indices, int64_t dim) {
-    return self.gather(dim, indices);
+namespace {
+
+inline std::tuple<int64_t, Tensor> _take_along_dim_helper(
+    const Tensor& self,
+    const Tensor& indices,
+    int64_t dim) {
+  TORCH_CHECK(
+      self.dim() == indices.dim(),
+      "self and indices should have same number of dimensions")
+  dim = at::maybe_wrap_dim(dim, self.dim());
+  DimVector self_sizes{self.sizes()};
+  self_sizes[dim] = indices.size(dim);
+  auto indices_broadcasted = at::broadcast_to(indices, self_sizes);
+  return std::make_tuple(dim, indices_broadcasted);
 }
 
-Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, int64_t dim, Tensor& result) {
-    return at::gather_out(result, self, dim, indices);
+} // anonymous namespace
+
+Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
+  if (opt_dim.has_value()) {
+    int64_t dim;
+    Tensor indices_broadcasted;
+    std::tie(dim, indices_broadcasted) =
+        _take_along_dim_helper(self, indices, opt_dim.value());
+    return self.gather(dim, indices_broadcasted);
+  }
+  return self.take(indices);
+}
+
+Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
+  if (opt_dim.has_value()) {
+    int64_t dim;
+    Tensor indices_broadcasted;
+    std::tie(dim, indices_broadcasted) =
+        _take_along_dim_helper(self, indices, opt_dim.value());
+    return at::gather_out(result, self, dim, indices_broadcasted);
+  }
+  return at::take_out(result, self, indices);
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
