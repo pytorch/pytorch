@@ -18,6 +18,10 @@ bool is_complex(const Tensor& self) {
   return self.is_complex();
 }
 
+bool is_floating_point(const Tensor& self) {
+  return self.is_floating_point();
+}
+
 bool is_signed(const Tensor &self) {
   return at::isSignedType(self.scalar_type());
 }

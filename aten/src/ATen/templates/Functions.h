@@ -146,4 +146,7 @@ inline bool is_complex(const Tensor& tensor) {
   return tensor.is_complex();
 }
 
+inline bool is_floating_type(const Tensor& tensor) {
+  return tensor.is_floating_type();
+}
 }
