@@ -274,6 +274,7 @@ class TestCommon(JitCommonTestCase):
         test_backward = op.supports_autograd and (
             (dtype.is_complex and op.test_complex_grad) or
             (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
+
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
