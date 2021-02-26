@@ -15,8 +15,8 @@ namespace cuda {
 
 namespace {
 
-bool hasTypeAndDim(const TensorTypePtr& op) {
-  return op->sizes().size().has_value() && op->scalarType().has_value();
+bool hasTypeAndDevice(const TensorTypePtr& op) {
+  return op->device().has_value() && op->scalarType().has_value();
 }
 
 /* NaiveTypePropagator
@@ -86,16 +86,16 @@ class NaiveTypePropagator {
       case aten::gelu_backward:
       case aten::tanh: {
         TORCH_CHECK(
-            hasTypeAndDim(node->input(0)->type()->cast<TensorType>()),
-            "Type, device, and dimensionality propagation has failed, or was not provided enough information.");
+            hasTypeAndDevice(node->input(0)->type()->cast<TensorType>()),
+            "Type and device propagation has failed, or was not provided enough information.");
         node->output()->setType(node->input(0)->type()->cast<TensorType>());
         break;
       }
       // TODO: rand_like should support cast.
       case aten::rand_like: {
         TORCH_CHECK(
-            hasTypeAndDim(node->input(0)->type()->cast<TensorType>()),
-            "Type, device, and dimensionality propagation has failed, or was not provided enough information.");
+            hasTypeAndDevice(node->input(0)->type()->cast<TensorType>()),
+            "Type and device propagation has failed, or was not provided enough information.");
         node->output()->setType(node->input(0)->type()->cast<TensorType>());
         break;
       }
@@ -337,18 +337,11 @@ class NaiveTypePropagator {
       const TensorTypePtr& op,
       const std::vector<int64_t>& dims,
       bool keepdim) {
-    TORCH_CHECK(hasTypeAndDim(op), "requires complete shape on input");
-    auto input_size = op->sizes();
-    int64_t ndims = keepdim ? input_size.size().value() : 0;
-    if (!keepdim) {
-      for (size_t i = 0; i < input_size.size(); i++) {
-        if (std::find(dims.begin(), dims.end(), i) == dims.end()) {
-          ndims++;
-        }
-      }
-    }
+    TORCH_CHECK(
+        hasTypeAndDevice(op),
+        "Type and device propagation has failed, or was not provided enough information.");
     return TensorType::create(
-        *op->scalarType(), *op->device(), ndims, c10::nullopt);
+        *op->scalarType(), *op->device(), c10::nullopt, c10::nullopt);
   }
 
   // TODO: we should comply to codegen type promotion.
@@ -361,28 +354,21 @@ class NaiveTypePropagator {
         "Scalar operations on binary broadcast type, not supported yet.");
 
     if (op0 != nullptr && op1 != nullptr) {
-      TORCH_CHECK(
-          op0->sizes().size().has_value() && op1->sizes().size().has_value(),
-          "Cannot process input tensor without concrete number of dimensions.");
-      int64_t ndims = *op0->sizes().size() > *op1->sizes().size()
-          ? *op0->sizes().size()
-          : *op1->sizes().size();
-
       auto promoted_scalar_type = scalar_type.has_value()
           ? *scalar_type
           : c10::promoteTypes(*op0->scalarType(), *op1->scalarType());
 
       return TensorType::create(
-          promoted_scalar_type, *op0->device(), ndims, c10::nullopt);
+          promoted_scalar_type, *op0->device(), c10::nullopt, c10::nullopt);
     } else {
       auto ptr = (op0 != nullptr) ? op0 : op1;
       TORCH_CHECK(
-          hasTypeAndDim(ptr),
-          "Type, device, and dimensionality propagation has failed, or was not provided enough information.");
+          hasTypeAndDevice(ptr),
+          "Type and device propagation has failed, or was not provided enough information.");
       return TensorType::create(
           scalar_type.has_value() ? *scalar_type : *ptr->scalarType(),
           *ptr->device(),
-          *ptr->sizes().size(),
+          c10::nullopt,
           c10::nullopt);
     }
   }
