@@ -6,11 +6,15 @@
 # type: ignore
 
 import os
+import sys
 
 import numpy as np
 import unittest
 import torch
 import torch.distributed as dist
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
 from typing import List, Any, Type, cast
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
