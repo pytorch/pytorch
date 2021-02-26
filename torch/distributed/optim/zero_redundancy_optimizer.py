@@ -164,7 +164,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         self._param_rank.clear()
         self._index_to_param_cache.clear()
         self._param_to_index_cache.clear()
-        self._local_params = None
 
     def add_param_group(self, param_group: dict) -> None:
         """Add a param group to the :class:`Optimizer` s `param_groups`.
