@@ -42,6 +42,10 @@ class NSSingleResultValuesType(str, enum.Enum):
 #       'type': 'weight',
 #       # the values of type specified above
 #       'values': [torch.Tensor(...), ...],
+#       # name of the node
+#       'node_name': 'linear1',
+#       # type of the underlying function or module
+#       'node_target_type': torch.nn.functional.linear  # or torch.nn.Linear, etc
 #     },
 #   },
 # }
@@ -83,6 +87,8 @@ def add_weight_info_to_dict(
                 results[ref_name][model_name] = {
                     'type': NSSingleResultValuesType.WEIGHT.value,
                     'values': [weight],
+                    'node_name': node.name,
+                    'node_target_type': str(node.target),
                 }
 
         else:  # call_module
@@ -101,6 +107,8 @@ def add_weight_info_to_dict(
                 results[ref_name][model_name] = {
                     'type': NSSingleResultValuesType.WEIGHT.value,
                     'values': [weight],
+                    'node_name': node.name,
+                    'node_target_type': str(type(mod)),
                 }
 
 # Note: this is not a user facing API
@@ -143,6 +151,7 @@ class OutputLogger(nn.Module):
         node_name: str,
         model_name: str,
         ref_name: str,
+        node_target_type: str,
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
@@ -153,6 +162,8 @@ class OutputLogger(nn.Module):
         # reference name, used to match loggers from separate models
         # to each other
         self.ref_name = ref_name
+        # type of the target of the node whose output this logger is logging
+        self.node_target_type = node_target_type
 
     def forward(self, x: torch.Tensor):
         self.stats.append(x.detach())
@@ -225,6 +236,8 @@ def add_activation_info_to_dict(
             results[key][model_name] = {
                 'type': NSSingleResultValuesType.NODE_OUTPUT.value,
                 'values': mod.stats,
+                'node_name': mod.node_name,
+                'node_target_type': mod.node_target_type,
             }
 
 # Note: this is not a user facing API
@@ -314,5 +327,7 @@ def get_matching_activations_a_shadows_b(
             results[mod.ref_name + '.stats'][mod.model_name] = {
                 'type': NSSingleResultValuesType.NODE_OUTPUT.value,
                 'values': mod.stats,
+                'node_name': mod.node_name,
+                'node_target_type': mod.node_target_type,
             }
     return dict(results)
