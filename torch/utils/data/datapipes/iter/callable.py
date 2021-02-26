@@ -72,7 +72,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         if DILL_AVAILABLE:
             self.fn = dill.loads(dill_function)  # type: ignore
         else:
-            self.fn = dill_function
+            self.fn = dill_function  # type: ignore
 
 
 class CollateIterDataPipe(MapIterDataPipe):
