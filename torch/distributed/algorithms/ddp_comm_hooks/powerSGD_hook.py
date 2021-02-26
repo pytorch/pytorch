@@ -32,9 +32,13 @@ def _orthogonalize(matrix, epsilon=1e-8):
             rest -= torch.sum(col * rest, dim=0) * col
 
 
-def _should_compress(num_rows, num_cols, matrix_approximation_rank, min_compression_rate):
+def _should_compress(
+    num_rows, num_cols, matrix_approximation_rank, min_compression_rate
+):
     """Returns whether a 2D tensor described as number of rows and columns is worth compressing."""
-    return (num_rows + num_cols) * matrix_approximation_rank < num_rows * num_cols * min_compression_rate
+    return (
+        num_rows + num_cols
+    ) * matrix_approximation_rank < num_rows * num_cols * min_compression_rate
 
 
 class PowerSGDState(object):
@@ -162,7 +166,9 @@ class PowerSGDState(object):
             )
 
 
-def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
+def powerSGD_hook(
+    state: PowerSGDState, bucket: dist._GradBucket
+) -> torch.futures.Future:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -285,7 +291,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         n, m = tensor.shape
         matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
 
-        if _should_compress(n, m, matrix_approximation_rank, state.min_compression_rate):
+        if _should_compress(
+            n, m, matrix_approximation_rank, state.min_compression_rate
+        ):
             high_rank_tensors_to_compress.append(tensor)
             total_Ps_size += n * matrix_approximation_rank
             total_Qs_size += m * matrix_approximation_rank
