@@ -33,7 +33,7 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
       TORCH_CHECK(input1_w == input2_w || input1_w == 1, broadcast_error_msg);
     }
   }
-  if (input1_w != input2_w) {
+  else if (input1_w != input2_w) {
     if (input1_w > input2_w) {
       TORCH_CHECK(input2_w == 1, broadcast_error_msg);
     } else if (input2_w > input1_w) {
