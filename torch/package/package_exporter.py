@@ -4,7 +4,7 @@ import collections
 import io
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
-from ._custom_import_pickler import create_custom_import_pickler
+from ._package_pickler import create_pickler
 from ._file_structure_representation import _create_folder_from_file_list, Folder
 from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
@@ -135,16 +135,16 @@ class PackageExporter:
             self.save_source_string(module_name, _read_file(file_or_directory), is_package, dependencies, file_or_directory)
 
     def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
-        """Returns a file structure representation of package's zipfile. 
+        """Returns a file structure representation of package's zipfile.
 
         Args:
             include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be 
+                for the names of the files to be inluded in the zipfile representation. This can also be
                 a glob-style pattern, as described in :meth:`mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
         """
-        return _create_folder_from_file_list(self.zip_file.archive_name(), self.zip_file.get_all_written_records(), 
+        return _create_folder_from_file_list(self.zip_file.archive_name(), self.zip_file.get_all_written_records(),
                                              include, exclude)
 
     def save_source_string(self, module_name: str, src: str, is_package: bool = False,
@@ -294,7 +294,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_custom_import_pickler(data_buf, self.importer)
+        pickler = create_pickler(data_buf, self.importer)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()

@@ -6,7 +6,7 @@ from struct import pack
 from .importer import Importer, sys_importer, ObjMismatchError, ObjNotFoundError
 
 
-class CustomImportPickler(_Pickler):
+class PackagePickler(_Pickler):
     dispatch = _Pickler.dispatch.copy()
 
     def __init__(self, importer: Importer, *args, **kwargs):
@@ -73,10 +73,10 @@ class CustomImportPickler(_Pickler):
         self.memoize(obj)
     dispatch[FunctionType] = save_global
 
-def create_custom_import_pickler(data_buf, importer):
+def create_pickler(data_buf, importer):
     if importer is sys_importer:
         # if we are using the normal import library system, then
         # we can use the C implementation of pickle which is faster
         return Pickler(data_buf, protocol=3)
     else:
-        return CustomImportPickler(importer, data_buf, protocol=3)
+        return PackagePickler(importer, data_buf, protocol=3)
