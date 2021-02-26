@@ -1583,10 +1583,7 @@ class TestFrozenOptimizations(JitTestCase):
         torch._C._jit_pass_inline(mod.graph)
         FileCheck().check("aten::relu").run(mod.graph)
         frozen_mod = torch.jit.freeze(mod, optimize_numerics=False)
-        torch._C._jit_pass_remove_mutation(frozen_mod.graph)
-        print(frozen_mod.graph)
         torch._C._jit_pass_fuse_frozen_conv_relu(frozen_mod.graph)
-        print(frozen_mod.graph)
         FileCheck().check("aten::cudnn_convolution_bias_relu").run(frozen_mod.graph)
 
         input = torch.randn(10, 1, 8, 8, device=device)
