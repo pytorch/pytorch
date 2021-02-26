@@ -13,7 +13,7 @@ from collections import defaultdict
 from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
-                    Tuple)
+                    Tuple, Union)
 from xml.dom import minidom  # type: ignore[import]
 
 import requests
@@ -26,150 +26,28 @@ except ImportError:
     HAVE_BOTO3 = False
 
 
-# TODO: this is ugly duplicated code from run_test.py we should probably abstract out to common_utils.py
-TESTS = [
-    'test_type_hints',
-    'test_autograd',
-    'benchmark_utils/test_benchmark_utils',
-    'test_binary_ufuncs',
-    'test_bundled_inputs',
-    'test_complex',
-    'test_cpp_api_parity',
-    'test_cpp_extensions_aot_no_ninja',
-    'test_cpp_extensions_aot_ninja',
-    'test_cpp_extensions_jit',
-    'distributed/test_c10d',
-    'distributed/test_jit_c10d',
-    'distributed/test_c10d_spawn',
-    'test_cuda',
-    'test_jit_cuda_fuser',
-    'test_cuda_primary_ctx',
-    'test_dataloader',
-    'test_dataset',
-    'test_datapipe',
-    'distributed/test_data_parallel',
-    'distributed/test_distributed_fork',
-    'distributed/test_distributed_spawn',
-    'distributions/test_constraints',
-    'distributions/test_distributions',
-    'test_dispatch',
-    'test_expecttest',
-    'test_foreach',
-    'test_indexing',
-    'test_jit',
-    'test_linalg',
-    'test_logging',
-    'test_mkldnn',
-    'test_multiprocessing',
-    'test_multiprocessing_spawn',
-    'distributed/test_nccl',
-    'test_native_functions',
-    'test_numba_integration',
-    'test_nn',
-    'test_ops',
-    'test_optim',
-    'test_pytree',
-    'test_mobile_optimizer',
-    'test_set_default_mobile_cpu_allocator',
-    'test_xnnpack_integration',
-    'test_vulkan',
-    'test_sparse',
-    'test_quantization',
-    'test_pruning_op',
-    'test_spectral_ops',
-    'test_serialization',
-    'test_shape_ops',
-    'test_show_pickle',
-    'test_sort_and_select',
-    'test_tensor_creation_ops',
-    'test_testing',
-    'test_torch',
-    'test_type_info',
-    'test_unary_ufuncs',
-    'test_utils',
-    'test_view_ops',
-    'test_vmap',
-    'test_namedtuple_return_api',
-    'test_numpy_interop',
-    'test_jit_profiling',
-    'test_jit_legacy',
-    'test_jit_fuser_legacy',
-    'test_tensorboard',
-    'test_namedtensor',
-    'test_reductions',
-    'test_type_promotion',
-    'test_jit_disabled',
-    'test_function_schema',
-    'test_op_aliases',
-    'test_overrides',
-    'test_jit_fuser_te',
-    'test_tensorexpr',
-    'test_tensorexpr_pybind',
-    'test_openmp',
-    'test_profiler',
-    'distributed/nn/jit/test_instantiator',
-    'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/test_tensorpipe_agent',
-    'test_jit_py3',
-    'test_determination',
-    'test_futures',
-    'test_fx',
-    'test_fx_experimental',
-    'test_functional_autograd_benchmark',
-    'test_package',
-    'test_license',
-    'distributed/pipeline/sync/skip/test_api',
-    'distributed/pipeline/sync/skip/test_gpipe',
-    'distributed/pipeline/sync/skip/test_inspect_skip_layout',
-    'distributed/pipeline/sync/skip/test_leak',
-    'distributed/pipeline/sync/skip/test_portal',
-    'distributed/pipeline/sync/skip/test_stash_pop',
-    'distributed/pipeline/sync/skip/test_tracker',
-    'distributed/pipeline/sync/skip/test_verify_skippables',
-    'distributed/pipeline/sync/test_balance',
-    'distributed/pipeline/sync/test_bugs',
-    'distributed/pipeline/sync/test_checkpoint',
-    'distributed/pipeline/sync/test_copy',
-    'distributed/pipeline/sync/test_deferred_batch_norm',
-    'distributed/pipeline/sync/test_dependency',
-    'distributed/pipeline/sync/test_inplace',
-    'distributed/pipeline/sync/test_microbatch',
-    'distributed/pipeline/sync/test_phony',
-    'distributed/pipeline/sync/test_pipe',
-    'distributed/pipeline/sync/test_pipeline',
-    'distributed/pipeline/sync/test_stream',
-    'distributed/pipeline/sync/test_transparency',
-    'distributed/pipeline/sync/test_worker',
-    'distributed/optim/test_zero_redundancy_optimizer',
-]
-
-
 Commit = str  # 40-digit SHA-1 hex string
 Status = Optional[str]  # errored, failed, skipped, or None
 
-# represent suite as dict because indexing is useful
-SimplerCase = Tuple[float, Status]
-SimplerSuite = Dict[str, SimplerCase]
-SimplerReport = Dict[str, SimplerSuite]
 
-
-class Case(TypedDict):
-    name: str
+class CaseMeta(TypedDict):
     seconds: float
+
+
+class Version2Case(CaseMeta):
+    status: Status
+
+
+class Version1Case(CaseMeta):
+    name: str
     errored: bool
     failed: bool
     skipped: bool
 
 
-# The original format of the s3 reports did not have this filename field. This maintains backwards-compatibility
-class SuiteMeta(TypedDict, total=False):
-    filename: str
-
-
-class Suite(SuiteMeta):
+class Version1Suite(TypedDict):
     total_seconds: float
-    cases: List[Case]
+    cases: List[Version1Case]
 
 
 class ReportMeta(TypedDict, total=False):
@@ -181,9 +59,34 @@ class ReportMeta(TypedDict, total=False):
     build_workflow_id: str
 
 
-class Report(ReportMeta):
+class Version1Report(ReportMeta):
     total_seconds: float
-    suites: Dict[str, Suite]
+    suites: Dict[str, Version1Suite]
+
+
+class Version2Suite(TypedDict):
+    total_seconds: float
+    cases: Dict[str, Version2Case]
+
+
+class Version2File(TypedDict):
+    total_seconds: float
+    suites: Dict[str, Version2Suite]
+
+
+# report: Version2Report implies report['format_version'] == 2
+class Version2Report(ReportMeta):
+    total_seconds: float
+    format_version: int
+    files: Dict[str, Version2File]
+
+
+Report = Union[Version1Report, Version2Report]
+
+SimplerSuite = Dict[str, Version2Case]
+# TODO: add in a layer for test file so that we don't clobber case names
+# that are duplicated across suites with the same name in diff files
+SimplerReport = Dict[str, SimplerSuite]
 
 
 class Stat(TypedDict):
@@ -195,7 +98,7 @@ class CaseDiff(TypedDict):
     margin: str
     name: str
     was: Optional[Tuple[Stat, Status]]
-    now: Optional[SimplerCase]
+    now: Optional[Version2Case]
 
 
 class SuiteDiff(TypedDict):
@@ -206,21 +109,40 @@ class SuiteDiff(TypedDict):
     cases: List[CaseDiff]
 
 
-def case_status(case: Case) -> Status:
+def case_status(case: Version1Case) -> Status:
     for k in {'errored', 'failed', 'skipped'}:
         if case[k]:  # type: ignore[misc]
             return k
     return None
 
 
-def simplify(report: Report) -> SimplerReport:
+def newify_case(case: Version1Case) -> Version2Case:
     return {
-        suite_name: {
-            case['name']: (case['seconds'], case_status(case))
-            for case in suite['cases']
-        }
-        for suite_name, suite in report['suites'].items()
+        'seconds': case['seconds'],
+        'status': case_status(case),
     }
+
+
+def simplify(report: Report) -> SimplerReport:
+    version = report.get('format_version')
+    if not version:  # version 1 implicitly
+        return {
+            suite_name: {
+                case['name']: newify_case(case)
+                for case in suite['cases']
+            }
+            for suite_name, suite in report['suites'].items()
+        }
+    elif version == 2:
+        suites: DefaultDict[str, SimplerSuite] = defaultdict(dict)
+        for filename, file_data in report['files'].items():
+            for suite_name, suite in file_data['suites']:
+                oldified_suite = suites[suite_name]
+                oldified_suite['total_seconds'] += suite['total_seconds']
+                oldified_suite['cases'].extend(suite['cases'])
+        return dict(suites)
+    else:
+        raise RuntimeError('aaaaahhh')
 
 
 def plural(n: int) -> str:
@@ -303,7 +225,8 @@ def matching_test_times(
             if suite:
                 case = suite.get(case_name)
                 if case:
-                    t, s = case
+                    t = case['seconds']
+                    s = case['status']
                     if s == status:
                         times.append(t)
     return times
@@ -331,12 +254,16 @@ def analyze(
         case_diffs: List[CaseDiff] = []
         head_suite = head_report.get(suite_name)
         base_cases: Dict[str, Status] = dict(sorted(set.intersection(*[
-            {(n, s) for n, (_, s) in report.get(suite_name, {}).items()}
+            {
+                (n, case['status'])
+                for n, case
+                in report.get(suite_name, {}).items()
+            }
             for report in base_report
         ] or [set()])))
         case_stats: Dict[str, Stat] = {}
         if head_suite:
-            now = sum(case[0] for case in head_suite.values())
+            now = sum(case['seconds'] for case in head_suite.values())
             if any(suite_name in report for report in base_report):
                 removed_cases: List[CaseDiff] = []
                 for case_name, case_status in base_cases.items():
@@ -360,7 +287,7 @@ def analyze(
                     if head_case_name in base_cases:
                         stat = case_stats[head_case_name]
                         base_status = base_cases[head_case_name]
-                        if head_case[1] != base_status:
+                        if head_case['status'] != base_status:
                             modified_cases.append({
                                 'margin': '!',
                                 'name': head_case_name,
@@ -442,9 +369,9 @@ def case_diff_lines(diff: CaseDiff) -> List[str]:
 
     now = diff['now']
     if now:
-        now_stat: Stat = {'center': now[0], 'spread': None}
+        now_stat: Stat = {'center': now['seconds'], 'spread': None}
         now_line = f'    # now {display_stat(now_stat, case_fmt)}'
-        now_status = now[1]
+        now_status = now['status']
         if now_status:
             now_line += f' ({now_status})'
         lines.append(now_line)
@@ -536,7 +463,7 @@ def case_delta(case: CaseDiff) -> Stat:
     now = case['now']
     return recenter(
         was[0] if was else zero_stat(),
-        now[0] if now else 0,
+        now['seconds'] if now else 0,
     )
 
 
@@ -666,9 +593,8 @@ class TestCase:
 
 
 class TestSuite:
-    def __init__(self, name: str, filename: str) -> None:
+    def __init__(self, name: str) -> None:
         self.name = name
-        self.filename = filename
         self.test_cases: List[TestCase] = []
         self.failed_count = 0
         self.skipped_count = 0
@@ -676,7 +602,7 @@ class TestSuite:
         self.total_time = 0.0
 
     def __repr__(self) -> str:
-        rc = f'{self.name} filename: {self.filename} run_time: {self.total_time:.2f} tests: {len(self.test_cases)}'
+        rc = f'{self.name} run_time: {self.total_time:.2f} tests: {len(self.test_cases)}'
         if self.skipped_count > 0:
             rc += f' skipped: {self.skipped_count}'
         return f'TestSuite({rc})'
@@ -704,29 +630,36 @@ class TestSuite:
         print("")
 
 
+class TestFile: 
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.total_time = 0.0
+        self.test_suites: Dict[str, TestSuite] = dict()
+
+    def append(self, test_case: TestCase) -> None:
+        suite_name = test_case.class_name
+        if suite_name not in self.test_suites:
+            self.test_suites[suite_name] = TestSuite(suite_name)
+        self.test_suites[suite_name].append(test_case)
+        self.total_time += test_case.time
+
+
 def parse_report(path: str) -> Iterator[TestCase]:
     dom = minidom.parse(path)
     for test_case in dom.getElementsByTagName('testcase'):
         yield TestCase(test_case)
 
 
-def parse_reports(folder: str) -> Dict[str, TestSuite]:
+def parse_reports(folder: str) -> Dict[str, TestFile]:
     reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
-    tests_by_class = dict()
+    tests_by_file = dict()
     for report in reports:
         test_filename = re.sub(r'\.', '/', os.path.basename(os.path.dirname(report)))
-        # Ignore non-Python tests (any test NOT defined in TESTS)
-        if test_filename in TESTS:
-            for test_case in parse_report(report):
-                class_name = test_case.class_name
-                if class_name not in tests_by_class:
-                    tests_by_class[class_name] = TestSuite(class_name, test_filename)
-                orig_filename = tests_by_class[class_name].filename
-                if test_filename != orig_filename:
-                    raise RuntimeError(f'Suite {class_name} belongs to different test files: {test_filename} vs {orig_filename}')
-                tests_by_class[class_name].append(test_case)
-    return tests_by_class
-
+        if test_filename not in tests_by_file:
+            tests_by_file[test_filename] = TestFile(test_filename)
+        for test_case in parse_report(report):
+            tests_by_file[test_filename].append(test_case)
+    return tests_by_file
 
 def build_info() -> ReportMeta:
     return {
@@ -786,34 +719,37 @@ def send_report_to_scribe(reports: Dict[str, TestSuite]) -> None:
 
 
 def assemble_s3_object(
-    reports: Dict[str, TestSuite],
+    reports: Dict[str, TestFile],
     *,
     total_seconds: float,
-) -> Report:
+) -> Version2Report:
     return {
         **build_info(),  # type: ignore[misc]
         'total_seconds': total_seconds,
-        'suites': {
+        'files' : {
             name: {
-                'total_seconds': suite.total_time,
-                'filename': suite.filename,
-                'cases': [
-                    {
-                        'name': case.name,
-                        'seconds': case.time,
-                        'errored': case.errored,
-                        'failed': case.failed,
-                        'skipped': case.skipped,
+                'total_seconds': test_file.total_time,
+                'suites': {
+                    name: {
+                        'total_seconds': suite.total_time,
+                        'filename': suite.filename,
+                        'cases': {
+                            case.name: {
+                                'seconds': case.time,
+                                'status': case.status,
+                            }
+                            for case in suite.test_cases
+                        },
                     }
-                    for case in suite.test_cases
-                ],
+                    for name, suite in test_file.items()
+                }
             }
-            for name, suite in reports.items()
+            for name, test_file in reports.items()
         }
     }
 
 
-def send_report_to_s3(head_report: Report) -> None:
+def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.environ.get('CIRCLE_JOB')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
@@ -907,6 +843,18 @@ def positive_float(value: str) -> float:
     return parsed
 
 
+def merge_suites(test_files: Dict[str, TestFile]) -> Dict[str, TestSuite]:
+    test_suites = dict()
+    for _, test_file in test_files.items():
+        for suite_name, test_suite in test_file.test_suites.items():
+            if suite_name not in test_suites:
+                test_suites[suite_name] = test_suite
+            else:
+                # This makes the assumption that test cases 
+                test_suites[suite_name].total_time += test_suite.total_time
+                test_suites[suite_name].test_cases.extend(test_suite.test_cases) 
+    return test_suites
+
 if __name__ == '__main__':
     import argparse
     import sys
@@ -964,24 +912,27 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    reports = parse_reports(args.folder)
-    if len(reports) == 0:
+    reports_by_file = parse_reports(args.folder)
+    if len(reports_by_file) == 0:
         print(f"No test reports found in {args.folder}")
         sys.exit(0)
 
-    send_report_to_scribe(reports)
+    reports_by_suite = merge_suites(reports_by_file)
+
+    # TODO: fix the below
+    send_report_to_scribe(reports_by_suite)
 
     longest_tests : List[TestCase] = []
     total_time = 0.0
-    for name in sorted(reports.keys()):
-        test_suite = reports[name]
+    for name in sorted(reports_by_suite.keys()):
+        test_suite = reports_by_suite[name]
         if test_suite.total_time >= args.class_print_threshold:
             test_suite.print_report(args.longest_of_class)
         total_time += test_suite.total_time
         longest_tests.extend(test_suite.test_cases)
     longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
-    obj = assemble_s3_object(reports, total_seconds=total_time)
+    obj = assemble_s3_object(reports_by_file, total_seconds=total_time)
 
     if args.upload_to_s3:
         send_report_to_s3(obj)
