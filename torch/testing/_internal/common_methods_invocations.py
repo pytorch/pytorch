@@ -1271,12 +1271,12 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
 
 
 def sample_inputs_polar(op_info, device, dtype, requires_grad):
-    def _make_tensor_helper(shape):
-        return make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
     samples = (
-        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)))),
-        SampleInput((_make_tensor_helper(()), _make_tensor_helper(()))),
+        SampleInput((_make_tensor_helper((S, S), low=0), _make_tensor_helper((S, S)))),
+        SampleInput((_make_tensor_helper((), low=0), _make_tensor_helper(()))),
     )
 
     return samples
