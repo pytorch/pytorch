@@ -737,17 +737,15 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   }
 
   // Handle the case when `self` is 0-dim
-  if (0 == self.dim()) {
-    self.unsqueeze_(-1);
-  }
+  Tensor self_nonzero_dim = (self.dim() == 0) ? self.unsqueeze(-1) : self;
 
-  dim = at::maybe_wrap_dim(dim, self);
+  dim = at::maybe_wrap_dim(dim, self_nonzero_dim);
   TORCH_CHECK(index.dim() <= 1, "Index has to be a vector/scalar");
 
   // Prepare `index` for TensorIterator.
   // It is restrided to be broadcastable over `self` in TensorIterator.
-  auto index_sizes = std::vector<int64_t>(self.dim(), 1);
-  auto index_strides = std::vector<int64_t>(self.dim(), 0);
+  auto index_sizes = std::vector<int64_t>(self_nonzero_dim.dim(), 1);
+  auto index_strides = std::vector<int64_t>(self_nonzero_dim.dim(), 0);
   index_sizes[dim] = index.numel();
   index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
   auto index_restrided = index.as_strided(
@@ -762,11 +760,11 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   // match as required by TensorIterator (input shape should
   // strictly broadcast over output shape, i.e.
   // output.shape[i] >= input.shape[i] for i in range(dims)).
-  auto self_sizes = self.sizes().vec();
-  auto self_strides = self.strides().vec();
+  auto self_sizes = self_nonzero_dim.sizes().vec();
+  auto self_strides = self_nonzero_dim.strides().vec();
   self_sizes[dim] = index.numel();
   self_strides[dim] = 0;
-  auto self_restrided = self.as_strided(self_sizes, self_strides);
+  auto self_restrided = self_nonzero_dim.as_strided(self_sizes, self_strides);
 
   auto iter = TensorIteratorConfig()
     // We do not check for overlap because `self` is restrided
@@ -779,8 +777,8 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
     .add_input(index_restrided)
     .build();
 
-  auto self_dim_size = (self.sizes())[dim];
-  auto self_dim_stride = (self.strides())[dim];
+  auto self_dim_size = (self_nonzero_dim.sizes())[dim];
+  auto self_dim_stride = (self_nonzero_dim.strides())[dim];
   index_fill_stub(
     iter.device_type(),
     iter,

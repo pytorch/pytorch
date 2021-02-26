@@ -128,6 +128,12 @@ void fractional_max_pool2d_out_cuda_template(
   IntArrayRef pool_size,
   IntArrayRef output_size,
   const Tensor& randomSamples) {
+  TORCH_CHECK(
+      pool_size.size() == 2,
+      "fractional_max_pool2d: kernel_size must either be a single Int or tuple of Ints")
+  TORCH_CHECK(
+      output_size.size() == 2,
+      "fractional_max_pool2d: output_size must either be a single Int or tuple of Ints")
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
