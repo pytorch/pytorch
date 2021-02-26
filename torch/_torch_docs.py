@@ -2242,6 +2242,7 @@ Keyword args:
     {out}
 
 Example::
+
     >>> a = torch.randn(10)
     >>> torch.logcumsumexp(a, dim=0)
     tensor([-0.42296738, -0.04462666,  0.86278635,  0.94622083,  1.05277811,
@@ -3923,16 +3924,16 @@ Tests if each element of :attr:`input` is infinite
     Complex values are infinite when their real or imaginary part is
     infinite.
 
-    Args:
-        {input}
+Args:
+    {input}
 
-    Returns:
-        A boolean tensor that is True where :attr:`input` is infinite and False elsewhere
+Returns:
+    A boolean tensor that is True where :attr:`input` is infinite and False elsewhere
 
-    Example::
+Example::
 
-        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([False,  True,  False,  True,  False])
+    >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+    tensor([False,  True,  False,  True,  False])
 """)
 
 add_docstr(torch.isposinf,
