@@ -724,7 +724,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = compare_weights('fp32_prepared', mp, 'int8', mq)
         self.assertTrue(len(results) == 2)
-        self.assert_ns_weight_compare_dict_valid(results)
+        self.assert_ns_compare_dict_valid(results)
 
     @override_qengines
     def test_compare_weights_fun(self):
@@ -750,7 +750,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = compare_weights('fp32_prepared', mp, 'int8', mq)
         self.assertTrue(len(results) == 2)
-        self.assert_ns_weight_compare_dict_valid(results)
+        self.assert_ns_compare_dict_valid(results)
 
     @override_qengines
     def test_match_activations_mod(self):
@@ -790,7 +790,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         act_compare_dict = get_matching_activations(
             'fp32_prepared', mp_ns, 'int8', mq_ns, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
     def test_match_activations_fun(self):
@@ -842,7 +842,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         act_compare_dict = get_matching_activations(
             'fp32_prepared', mp_ns, 'int8', mq_ns, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
     def test_prepare_model_with_stubs_mod(self):
@@ -870,7 +870,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         act_compare_dict = get_matching_activations_a_shadows_b(
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
     def test_prepare_model_with_stubs_fun(self):
@@ -911,7 +911,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         act_compare_dict = get_matching_activations_a_shadows_b(
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
 class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
     """
@@ -950,7 +950,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         act_compare_dict = get_matching_activations(
             'fp32_prepared', sparse_nn, 'int8', sparse_nn_q, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 4)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
     def test_sparsenn_shadow(self):
@@ -984,4 +984,4 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         act_compare_dict = get_matching_activations_a_shadows_b(
             sparse_nn_q, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 4)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
