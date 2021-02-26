@@ -13,6 +13,7 @@
 
 namespace torch {
 namespace jit {
+using namespace torch::jit::tensorexpr;
 
 void initTensorExprBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -226,9 +227,13 @@ void initTensorExprBindings(PyObject* module) {
 
   py::class_<tensorexpr::VarHandle, tensorexpr::ExprHandle>(te, "VarHandle")
       .def(py::init<const std::string&, tensorexpr::Dtype>());
-  py::class_<tensorexpr::BufHandle, tensorexpr::ExprHandle>( // NOLINT
+  py::class_<BufHandle, ExprHandle>( // NOLINT
       te,
-      "BufHandle");
+      "BufHandle")
+      .def(py::init<
+           const std::string&,
+           const std::vector<ExprHandle>&,
+           Dtype>());
 
   py::class_<tensorexpr::Placeholder>(te, "Placeholder")
       .def(py::init<
@@ -243,11 +248,21 @@ void initTensorExprBindings(PyObject* module) {
           });
   py::class_<tensorexpr::Tensor>(te, "Tensor")
       .def(
+          py::init([](BufHandle& b, Stmt* s) {
+            return std::unique_ptr<Tensor>(new Tensor(b.node(), s));
+          }),
+          py::return_value_policy::reference)
+      .def(
           "load",
           [](tensorexpr::Tensor& self,
              const std::vector<tensorexpr::ExprHandle>& v) {
             return self.call(v);
-          });
+          })
+      .def(
+          "buf",
+          [](Tensor& self) { return BufHandle(self.buf()); },
+          py::return_value_policy::reference)
+      .def("stmt", &Tensor::stmt, py::return_value_policy::reference);
   py::class_<tensorexpr::Cast>(te, "Cast")
       .def_static("make", &tensorexpr::Cast::make);
 
@@ -352,9 +367,21 @@ void initTensorExprBindings(PyObject* module) {
           "stmts",
           &tensorexpr::Block::stmts,
           py::return_value_policy::reference);
+  py::class_<ExternalCall, Stmt, std::unique_ptr<ExternalCall, py::nodelete>>(
+      te, "ExternalCall")
+      .def(py::init(&ExternalCall::make), py::return_value_policy::reference);
 
   py::class_<tensorexpr::LoopNest>(te, "LoopNest")
       .def(py::init<const std::vector<tensorexpr::Tensor*>&>())
+      .def(py::init([](tensorexpr::Stmt* s,
+                       const std::vector<tensorexpr::BufHandle>& bufs) {
+        std::unordered_set<const Buf*> buf_nodes;
+        for (const auto& buf : bufs) {
+          buf_nodes.insert(buf.node());
+        }
+        return std::unique_ptr<tensorexpr::LoopNest>(
+            new tensorexpr::LoopNest(s, buf_nodes));
+      }))
       .def("vectorize_inner_loops", &tensorexpr::LoopNest::vectorizeInnerLoops)
       .def("prepare_for_codegen", &tensorexpr::LoopNest::prepareForCodegen)
       .def(
@@ -500,7 +527,8 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<tensorexpr::CodeGen::BufferArg>(te, "BufferArg")
       .def(py::init<const tensorexpr::Placeholder&>())
       .def(py::init<tensorexpr::Tensor*>())
-      .def(py::init<const tensorexpr::VarHandle&>());
+      .def(py::init<const tensorexpr::VarHandle&>())
+      .def(py::init<const tensorexpr::BufHandle&>());
 
   te.def(
       "construct_codegen",
