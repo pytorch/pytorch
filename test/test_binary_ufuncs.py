@@ -385,20 +385,6 @@ class TestBinaryUfuncs(TestCase):
 
             self.assertEqual(actual, expect, exact_device=False, exact_dtype=exact_dtype)
 
-    # TODO: update to run on CUDA -- what is this test even testing?
-    @onlyCPU
-    def test_cast_binary_op(self, device):
-        # Scalar
-        a = torch.tensor(2)
-        b = torch.tensor(3)
-        a_copy = a.clone()
-        b_copy = b.clone()
-
-        self.assertEqual(torch.tensor(6, dtype=torch.float), a.float() * b)
-
-        self.assertEqualTypeString(a, a_copy)
-        self.assertEqualTypeString(b, b_copy)
-
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
     @onlyCUDA

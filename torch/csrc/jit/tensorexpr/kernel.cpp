@@ -276,6 +276,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::sinh:
     case aten::atan:
     case aten::tanh:
+    case aten::hardtanh:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -1276,6 +1277,18 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       });
     } break;
 
+    case aten::hardtanh: {
+      return computeThreeOperand(
+          "aten_hardtanh",
+          v,
+          [](const ExprHandle& a,
+             const ExprHandle& min_val,
+             const ExprHandle& max_val) {
+            auto mm = CompareSelect::make(a, min_val, min_val, a, kLT);
+            return CompareSelect::make(mm, max_val, max_val, mm, kGT);
+          });
+    } break;
+
     case aten::sqrt: {
       return computeOneOperand("aten_sqrt", v, [](const ExprHandle& a) {
         return tensorexpr::sqrt(promoteIntegerToDefaultType(a));
@@ -1519,7 +1532,12 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
-  torch::jit::tensorexpr::LoopNest l(tensorOutputs_);
+  // Find all tensors we need to compute (including dependencies) and put them
+  // in a topological order
+  std::vector<Tensor*> tensors_to_compute =
+      findAllNeededTensors(tensorOutputs_);
+
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs_, tensors_to_compute);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
@@ -2194,8 +2212,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   std::vector<CodeGen::CallArg> runArgs;
   runArgs.reserve(inputs.size() + tensorOutputs_.size());
 
-  for (size_t i = 0, e = inputs.size(); i < e; i++) {
-    auto const& input = inputs[i];
+  for (const auto& input : inputs) {
     if (input.isInt()) {
       runArgs.emplace_back(input.toInt());
     } else if (input.isDouble()) {
