@@ -1172,15 +1172,19 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
       self.dim() == indices.dim(),
       "self and indices should have same number of dimensions")
   dim = at::maybe_wrap_dim(dim, self.dim());
+
   DimVector self_sizes{self.sizes()};
+  // update number of elements at dim as per indices
   self_sizes[dim] = indices.size(dim);
   auto broadcast_shape = infer_size(self_sizes, indices.sizes());
   auto indices_broadcasted = at::broadcast_to(indices, broadcast_shape);
 
   DimVector indices_sizes{indices.sizes()};
+  // update number of elements at dim as per self
   indices_sizes[dim] = self.size(dim);
   broadcast_shape = infer_size(indices_sizes, self.sizes());
   auto self_broadcasted = at::broadcast_to(self, broadcast_shape);
+
   return std::make_tuple(self_broadcasted, indices_broadcasted, dim);
 }
 
