@@ -230,7 +230,7 @@ def add_activation_info_to_dict(
             )
         )
         if is_logger:
-            key = mod.ref_name + '.stats'
+            key = mod.ref_name
             if key not in results:
                 results[key] = {}
             results[key][model_name] = {
@@ -324,7 +324,7 @@ def get_matching_activations_a_shadows_b(
             )
         )
         if is_logger:
-            results[mod.ref_name + '.stats'][mod.model_name] = {
+            results[mod.ref_name][mod.model_name] = {
                 'type': NSSingleResultValuesType.NODE_OUTPUT.value,
                 'values': mod.stats,
                 'node_name': mod.node_name,
