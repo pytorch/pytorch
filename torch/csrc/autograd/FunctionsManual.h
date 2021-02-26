@@ -223,8 +223,7 @@ infinitely_differentiable_native_layer_norm_backward(
     std::array<bool, 3> grad_input_mask);
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
-    const Tensor& abs,
-    const Tensor& angle);
+    const Tensor& result);
 
 } // namespace details
 } // namespace generated

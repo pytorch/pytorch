@@ -2989,16 +2989,13 @@ bool any_variable_defined(variable_list& variables) {
 
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
-    const Tensor& abs,
-    const Tensor& angle) {
+    const Tensor& result) {
   Tensor grad_abs, grad_angle;
   if (grad.defined()) {
-    auto angle_cos = angle.cos();
-    auto angle_sin = angle.sin();
-    auto grad_real = at::real(grad);
-    auto grad_imag = at::imag(grad);
-    grad_abs = (grad_real * angle_cos) + (grad_imag * angle_sin);
-    grad_angle = (grad_real * abs * -angle_sin) + (grad_imag * abs * angle_cos);
+    auto result_mul_1_j = at::view_as_real(result * Scalar(c10::complex<double>{0.0, 1.0}));
+    auto grad_as_real = at::view_as_real(grad);
+    grad_angle = (result_mul_1_j * grad_as_real).sum(-1);
+    grad_abs = (at::view_as_real(at::sgn(result)) * grad_as_real).sum(-1);
   }
   return std::make_tuple(grad_abs, grad_angle);
 }
