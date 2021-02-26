@@ -27,7 +27,9 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  uint64_t virtual sequence_nr() const noexcept override {
+  // AccumulateGrad sets priority_nr to the max value so it's always called
+  // ASAP during backwards.
+  uint64_t virtual priority_nr() const noexcept override {
     return UINT64_MAX;
   }
 

@@ -824,20 +824,20 @@ void Engine::evaluate_function(
   }
 }
 
-inline static uint64_t compute_min_sequence_nr(const edge_list& outputs) {
-  // Computes the mininum sequence number among all the outputs
+inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
+  // Computes the mininum topological number among all the outputs
   if (outputs.empty()) {
     return 0;
   }
-  auto min_seq_nr = std::numeric_limits<uint64_t>::max();
+  auto min_topo_nr = std::numeric_limits<uint64_t>::max();
   for (auto & output_edge : outputs) {
-    auto seq_nr = output_edge.function.get()->topological_nr();
-    min_seq_nr = (min_seq_nr < seq_nr) ? min_seq_nr : seq_nr;
+    auto topo_nr = output_edge.function.get()->topological_nr();
+    min_topo_nr = (min_topo_nr < topo_nr) ? min_topo_nr : topo_nr;
   }
-  return min_seq_nr;
+  return min_topo_nr;
 }
 
-auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_seq_nr) -> void {
+auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr) -> void {
   // Computes the number of dependencies for each function which requires grad
   std::unordered_set<Node*> seen;
   std::vector<Node*> queue { root };
@@ -847,7 +847,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_seq_
   auto& dependencies = task.dependencies_;
   while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
-    if (fn->topological_nr() < min_seq_nr) {
+    if (fn->topological_nr() < min_topo_nr) {
       continue;
     }
     for (const auto& edge : fn->next_edges()) {
@@ -890,12 +890,12 @@ auto Engine::execute(const edge_list& roots,
     roots.at(0).function :
     std::make_shared<GraphRoot>(roots, inputs);
 
-  auto min_seq_nr = compute_min_sequence_nr(outputs);
+  auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
-  compute_dependencies(graph_root.get(), *graph_task, min_seq_nr);
+  compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
   if (!outputs.empty()) {
-    graph_task->init_to_execute(*graph_root, outputs, accumulate_grad, min_seq_nr);
+    graph_task->init_to_execute(*graph_root, outputs, accumulate_grad, min_topo_nr);
   }
 
   // Queue the root
@@ -1133,7 +1133,7 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_seq_nr) {
+void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_topo_nr) {
   // Populates exec_info so nodes that should be executed have `exec_info[node].needed_ = true`
   // Only nodes that have a path to any edge in `outputs` should be executed.
   // The code below populates exec_info using recursion, but the actual code does this
@@ -1220,7 +1220,7 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
 
     if (child_fn) {
       // (2) next child exists but has not been seen
-      if (child_fn->topological_nr() < min_seq_nr) {
+      if (child_fn->topological_nr() < min_topo_nr) {
         // child created before the first output means this child cannot have
         // an edge to output
         continue;

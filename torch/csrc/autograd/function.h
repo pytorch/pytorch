@@ -86,24 +86,15 @@ class NodeGuard {
 // you manipulate the set of outgoing edges of a `Node`. You can add an
 // edge with `add_next_edge()`, retrieve an edge with `next_edge(index)` and
 // iterate over them via the `next_edges()` method. Other methods exist for
-// integration with the JIT and other parts of PyTorch. Every `Node` has a
-// *sequence number* that increases monotonically in the order of `Node`
-// construction. It can be retrieved via the `sequence_nr()` method. Note that
-// this sequence number is *thread local*. This means that when `Node`s
-// `A`, `B` and `C` are created consecutively in the same thread, their
-// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
-// are created in one thread and `C` is created in a new thread, there are *no
-// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
+// integration with the JIT and other parts of PyTorch.
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
-  /// Construct a new `Node` with the given `next_edges`. `sequence_nr` is
-  /// a (currently THE) hint to prioritization in the backward() pass, with
-  /// higher sequence numbers prioritized before lower sequence numbers.
+  /// Construct a new `Node` with the given `next_edges`
   explicit Node(
-      uint64_t sequence_nr,
+      uint64_t topo_nr,
       edge_list&& next_edges = edge_list())
-    : topological_nr_(sequence_nr),
+    : topological_nr_(topo_nr),
     next_edges_(std::move(next_edges)) {
 
     if (AnomalyMode::is_enabled()) {
@@ -117,6 +108,14 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     }
 
     if (profiler::profilerEnabled()) {
+      // If profiler is enabled, a monotonically increasing sequence_nr is stored.
+      // sequence_nr, along with thread_id are used to annotate events recorded by the
+      // profiler. Because sequence_nr, thread_id pair uniquely identifies a given node
+      // it can be used to correlate backward nodes with its forward ops.
+      // The reason why we need both sequence_nr and thread_id to keep track of a node is
+      // because sequence_nr is thread_local, meaning that it starts over from zero if you
+      // create a node in a new thread.
+      sequence_nr_ = at::sequence_number::get_and_increment();
       thread_id_ = at::RecordFunction::currentThreadId();
     }
   }
@@ -231,44 +230,34 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return next_edges_[index];
   }
 
-  void set_next_edge(size_t index, Edge edge) {
-    TORCH_INTERNAL_ASSERT(!node_has_been_used, "cannot set next edge after node has been used")
+  void update_topological_nr(const Edge& edge) {
+#ifndef NDEBUG
+    TORCH_INTERNAL_ASSERT(!node_has_parent_,
+        "cannot update topological_nr after node already has parent")
+#endif
     Node* node = edge.function.get();
     if (node) {
-      auto topo_nr = edge.function.get()->topological_nr();
-      if (topological_nr_ <= topo_nr) {
-        topological_nr_ = topo_nr + 1;
-      }
-    }
-
-    next_edges_[index] = std::move(edge);
-  }
-
-  void add_next_edge(Edge edge) {
-    TORCH_INTERNAL_ASSERT(!node_has_been_used, "cannot set next edge after node has been used")
-    Node* node = edge.function.get();
-    if (node) {
-      auto topo_nr = edge.function.get()->topological_nr();
-      if (topological_nr_ <= topo_nr) {
-        topological_nr_ = topo_nr + 1;
-      }
-    }
-    next_edges_.push_back(std::move(edge));
-  }
-
-  void set_next_edges(edge_list&& next_edges) {
-    TORCH_INTERNAL_ASSERT(!node_has_been_used, "cannot set next edge after node has been used")
-    next_edges_ = std::move(next_edges);
-
-    for(const auto& next_edge : next_edges_) {
-      Node* node = next_edge.function.get();
-      if (!node) {
-        continue;
-      }
       auto topo_nr = node->topological_nr();
       if (topological_nr_ <= topo_nr) {
         topological_nr_ = topo_nr + 1;
       }
+    }
+  }
+
+  void set_next_edge(size_t index, Edge edge) {
+    update_topological_nr(edge);
+    next_edges_[index] = std::move(edge);
+  }
+
+  void add_next_edge(Edge edge) {
+    update_topological_nr(edge);
+    next_edges_.push_back(std::move(edge));
+  }
+
+  void set_next_edges(edge_list&& next_edges) {
+    next_edges_ = std::move(next_edges);
+    for(const auto& next_edge : next_edges_) {
+      update_topological_nr(next_edge);
     }
   }
 
@@ -287,14 +276,55 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Miscellaneous Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  /// The sequence number of this `Node`.
-  uint64_t virtual sequence_nr() const noexcept {
+  /// The sequence number of this `Node` to be used by the profiler
+  uint64_t sequence_nr() const noexcept {
+    return sequence_nr_;
+  }
+
+  // NOTE [ Topological Number ]
+  //
+  // topological_nr is used to prune branches in the DAG during autograd discovery as
+  // maintaining topological_nr helps us check in O(1) if there does NOT exist
+  // a directed path between two nodes.
+  //
+  // The topological order number of this `Node` representing the length of the
+  // longest possible path from this Node to any leaf node. If you are leaf node,
+  // aka AccumulateGrad, this will be zero. This value has the property that
+  // For every pair of nodes X, Y in G, existence of a directed path from X to Y
+  // implies topo_nr(X) > topo_nr(Y).
+  // This implies that if topo_nr(X) <= topo_nr(Y), there is no directed path from
+  // X to Y (logical contrapositive). Note that the converse is not true, so we
+  // cannot prove existence of a path from X to Y, only non-existence.
+  //
+  // WARNING: One big assumption we make when using topo_nr is that once a node
+  // has been used, i.e., has a parent node, its own topo_nr does not change
+  //
+  // What NOT to do:
+  //
+  //   1) 2 -> 1 -> 0               In this diagram we label nodes with their topo_nr.
+  //      2 -> 1 -> 0               We have two simple graphs that can each arise from
+  //                                `t.exp().exp()`, for example.
+  //   2)        2 -> 1 -> 0
+  //            /
+  //      2 -> 1 -> 0               We add 2 as a next edge to 1 even though 1 already
+  //                                has a parent.
+  //   3)        2 -> 1 -> 0
+  //            /
+  //      2 -> 3 -> 0               2 < 3, yet there exists a path from 2 to 3!
+  //
+  uint64_t topological_nr() const noexcept {
+#ifndef NDEBUG
+    node_has_parent_ = true;
+#endif
     return topological_nr_;
   }
 
-  // The topological order number of this `Node`
-  uint64_t topological_nr() const noexcept {
-    node_has_been_used = true;
+  // Used to determine execution priority in the engine. The ordering is arbitrary
+  // but deterministic. Nodes with higher priority numbers are executed first.
+  // priority_nr is currently a topological_nr clone except its overridden by
+  // AccumulateGrad to return UINT64_MAX. AccumulateGrad's topological_nr is always
+  // zero but we want to prioritize it (why?).
+  uint64_t virtual priority_nr() const noexcept {
     return topological_nr_;
   }
 
@@ -423,13 +453,17 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Calls `apply()`, but instruments it with tracing machinery.
   variable_list traced_apply(variable_list inputs);
 
-  // // Since `Node`s are neither copyable nor moveable, we can have const
-  // // fields.
-  // const uint64_t sequence_nr_;
+  // Sequence number used to correlate backward nodes with forward ops in the
+  // profiler
+  uint64_t sequence_nr_;
 
-  // Topological ordering of nodes
+  // See NOTE [ Topological Number ]
   uint64_t topological_nr_ = 0;
-  mutable bool node_has_been_used = 0;
+
+#ifndef NDEBUG
+  // Whether this node been added as the next_edge of another node
+  mutable bool node_has_parent_ = 0;
+#endif
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;
