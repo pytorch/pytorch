@@ -13,6 +13,15 @@ void initStaticRuntimeBindings(PyObject* module) {
   py::class_<StaticRuntime::IndividualMetrics>(
       static_runtime, "IndividualMetrics")
       .def_readonly("setup_time", &StaticRuntime::IndividualMetrics::setup_time)
+      .def_readonly(
+          "memory_alloc_time",
+          &StaticRuntime::IndividualMetrics::memory_alloc_time)
+      .def_readonly(
+          "memory_dealloc_time",
+          &StaticRuntime::IndividualMetrics::memory_dealloc_time)
+      .def_readonly(
+          "output_dealloc_time",
+          &StaticRuntime::IndividualMetrics::output_dealloc_time)
       .def_readonly("total_time", &StaticRuntime::IndividualMetrics::total_time)
       .def_readonly(
           "time_per_node", &StaticRuntime::IndividualMetrics::time_per_node)
