@@ -103,7 +103,7 @@ static struct PyGetSetDef ${op}_properties[] = {
 """)
 
 PY_GETSETDEF_STRUCT = CodeTemplate("""\
-{(char*)"_${name}", (getter)THP${op}_${name}_getter, nullptr, nullptr, nullptr}""")
+{(char*)"_saved_${name}", (getter)THP${op}_${name}_getter, nullptr, nullptr, nullptr}""")
 
 # Getter templates
 GETTER_DEFINITION = CodeTemplate("""\
