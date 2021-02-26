@@ -53,6 +53,9 @@ struct TORCH_API MetaBase {
   void set_output(IntArrayRef sizes, TensorOptions options) {
     set_output(0, sizes, {}, options, {});
   }
+  void set_output(IntArrayRef sizes) {
+    set_output(0, sizes, {}, TensorOptions(), {});
+  }
   // Returns a reference to an undefined tensor if there is no presupplied
   // output
   const Tensor& maybe_get_output() { return maybe_get_output(0); }
