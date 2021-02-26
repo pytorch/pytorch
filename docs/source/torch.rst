@@ -97,6 +97,8 @@ Indexing, Slicing, Joining, Mutating Ops
     nonzero
     reshape
     row_stack
+    scatter
+    scatter_add
     split
     squeeze
     stack
@@ -296,6 +298,8 @@ Pointwise Ops
     exp
     exp2
     expm1
+    fake_quantize_per_channel_affine
+    fake_quantize_per_tensor_affine
     fix
     float_power
     floor
@@ -338,6 +342,7 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    sgn
     signbit
     sin
     sinc
@@ -350,6 +355,7 @@ Pointwise Ops
     tanh
     true_divide
     trunc
+    xlogy
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -361,6 +367,8 @@ Reduction Ops
     argmin
     amax
     amin
+    all
+    any
     max
     min
     dist
@@ -411,6 +419,8 @@ Comparison Ops
     less
     maximum
     minimum
+    fmax
+    fmin
     ne
     not_equal
     sort
@@ -462,6 +472,7 @@ Other Operations
     diag_embed
     diagflat
     diagonal
+    diff
     einsum
     flatten
     flip
@@ -550,7 +561,9 @@ Utilities
     result_type
     can_cast
     promote_types
-    set_deterministic
-    is_deterministic
+    use_deterministic_algorithms
+    are_deterministic_algorithms_enabled
+    set_warn_always
+    is_warn_always_enabled
     vmap
     _assert

@@ -41,6 +41,8 @@ void THNN_(RReLU_updateOutput)(
     {
       rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
         n, rng_engine_inputs, input_data, noise_data, input_data, lower, upper);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
       THCTensor_(set)(state, output, input);
     }
     else
@@ -49,8 +51,8 @@ void THNN_(RReLU_updateOutput)(
       scalar_t *output_data = THCTensor_(data)(state, output);
       rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
         n, rng_engine_inputs, input_data, noise_data, output_data, lower, upper);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
-    THCudaCheck(cudaGetLastError());
   }
   else
   {
@@ -67,53 +69,4 @@ void THNN_(RReLU_updateOutput)(
     }
   }
 }
-
-void THNN_(RReLU_updateGradInput)(
-           THCState *state,
-           THCTensor *input,
-           THCTensor *gradOutput,
-           THCTensor *gradInput,
-           THCTensor *noise,
-           double lower,
-           double upper,
-           bool train,
-           bool inplace)
-{
-  THCUNN_check_nElement(state, input, gradOutput);
-  THCUNN_assertSameGPU(state, 4, input, gradOutput, gradInput, noise);
-
-  auto gradOutputTensor = THTensor_wrap(gradOutput).contiguous();
-  gradOutput = gradOutputTensor.unsafeGetTensorImpl();
-
-  if (train && upper - lower > 1E-6)    // e.g. if upper == lower, RReLU behaves like LeakyReLU
-  {
-    // multiply the gradient by the noise tensor
-    if (inplace)
-    {
-      THCTensor_(cmul)(state, gradOutput, gradOutput, noise);
-      THCTensor_(set)(state, gradInput, gradOutput);
-    }
-    else
-    {
-      THCTensor_(resizeAs)(state, gradInput, input);
-      THCTensor_(cmul)(state, gradInput, gradOutput, noise);
-    }
-  }
-  else
-  {
-    // use constant factor for negative input values
-    const scalar_t negSlope = ScalarConvert<double, scalar_t>::to((lower + upper) / 2);
-    if (inplace)
-    {
-      THC_pointwiseApply2<scalar_t, scalar_t>(state, gradOutput, input, RReLUupdateGradInputEvalIP_functor<scalar_t>(negSlope));
-      THCTensor_(set)(state, gradInput, gradOutput);
-    }
-    else
-    {
-      THCTensor_(resizeAs)(state, gradInput, input);
-      THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, gradInput, gradOutput, input, RReLUupdateGradInputEval_functor<scalar_t>(negSlope));
-    }
-  }
-}
-
 #endif

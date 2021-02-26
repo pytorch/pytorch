@@ -1,7 +1,6 @@
 #include <THC/THC.h>
 #include <THC/THCTensorMath.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCBlas.h>
 #include <THC/THCTensorCopy.h>
 #include <TH/THHalf.h>
 #include <THC/THCApply.cuh>
@@ -108,87 +107,6 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
     srcOffset += srcIndex * src.strides[srcCopyDim];
 
     dst.data[dstOffset] = src.data[srcOffset];
-  }
-}
-
-// We prefer this kernel to avoid reloading index points if the number
-// of indices is a small number.
-// This kernel in fact works for all choices of problem size, but if
-// the number of indices chosen is large, then the
-// indexFillLargeIndex kernel is a better choice to increase
-// parallelism.
-template <typename T, typename IndexType, int DstDim, int IdxDim>
-__global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
-                                    TensorInfo<int64_t, IndexType> indices,
-                                    int dstFillDim,
-                                    IndexType innerSize,
-                                    int64_t dstFillDimSize,
-                                    T val) {
-  // In order to avoid reloading the index that we are copying, load
-  // it once to handle all of the points that are being selected, so
-  // it can be reused as much as possible. This kernel is chosen when
-  // this is a good choice (small number of chosen indices), since
-  // re-accessing indices in addition to src elements can be slow.
-  for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
-    // Lua indices begin at 1
-    IndexType dstIndex_ =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex_ < dstFillDimSize);
-
-    // We stride over the output ignoring the indexed dimension
-    // (innerSize), whose offset calculation is handled differently
-    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-         linearIndex < innerSize;
-         linearIndex += gridDim.x * blockDim.x) {
-      IndexType dstOffset =
-          IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
-      dstOffset += dstIndex_ * dst.strides[dstFillDim];
-
-      dst.data[dstOffset] = val;
-    }
-  }
-}
-
-// We prefer this kernel to balance parallelism across index points,
-// if there are a large number of indices.
-// This kernel in fact works for all choices of problem size, but if
-// the number of indices chosen is small, then the
-// indexFillSmallIndex kernel is a better choice to reduce memory
-// accesses.
-template <typename T, typename IndexType, int DstDim, int IdxDim,
-          bool IndexIsMajor>
-__global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
-                                    TensorInfo<int64_t, IndexType> indices,
-                                    int dstFillDim,
-                                    IndexType totalSize,
-                                    IndexType innerSize,
-                                    int64_t dstFillDimSize,
-                                    T val) {
-  // We stride over the output including the indexed dimension
-  // (totalSize), and calculate the destination index point based on that
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < totalSize;
-       linearIndex += gridDim.x * blockDim.x) {
-    IndexType dstIndex, elementInSlice;
-    if (IndexIsMajor) {
-      dstIndex = linearIndex / innerSize;
-      elementInSlice = linearIndex % innerSize;
-    }
-    else {
-      elementInSlice = linearIndex / innerSize;
-      dstIndex = linearIndex % innerSize;
-    }
-
-    // Lua indices begin at 1
-    IndexType dstIndex_ =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex_ < dstFillDimSize);
-
-    IndexType dstOffset =
-      IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
-    dstOffset += dstIndex_ * dst.strides[dstFillDim];
-
-    dst.data[dstOffset] = val;
   }
 }
 

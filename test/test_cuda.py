@@ -16,13 +16,14 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
-from torch._six import inf, nan, container_abcs
+from torch.utils.checkpoint import checkpoint_sequential
+from torch._six import inf, nan
 
 from test_torch import AbstractTestCases
 
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
-from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
@@ -763,12 +764,6 @@ class TestCuda(TestCase):
             self.assertEqual(x.cuda().get_device(), 0)
             torch.cuda.set_device(1)
         self.assertEqual(x.cuda().get_device(), 0)
-
-    def test_is_tensor(self):
-        for t in types:
-            tensor = get_gpu_type(t)()
-            self.assertTrue(torch.is_tensor(tensor))
-        self.assertTrue(torch.is_tensor(torch.cuda.HalfTensor()))
 
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
@@ -2421,6 +2416,7 @@ t2.start()
                 self.assertEqual(results[t].sum().item(), size * size)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
@@ -2531,7 +2527,7 @@ t2.start()
         def cast(val, to_type):
             if isinstance(val, torch.Tensor):
                 return val.to(to_type) if val.is_floating_point() else val
-            elif isinstance(val, container_abcs.Iterable):
+            elif isinstance(val, collections.abc.Iterable):
                 return type(val)(cast(v, to_type) for v in val)
             else:
                 return val
@@ -2571,7 +2567,7 @@ t2.start()
             def compare(first, second):
                 if isinstance(first, torch.Tensor):
                     return torch.equal(first, second)
-                elif isinstance(first, container_abcs.Iterable):
+                elif isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
                 else:
                     return first == second
@@ -2882,6 +2878,17 @@ t2.start()
                     out = linear(data)
                 self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
 
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8)).cuda()
+        input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
+        with torch.cuda.amp.autocast():
+            output = checkpoint_sequential(model, 2, input)
+        self.assertTrue(output.requires_grad)
+        self.assertTrue(output.dtype is torch.float16)
+        output.sum().backward()
+
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_max_large_axis(self):
@@ -3097,6 +3104,24 @@ t2.start()
         for meth_with_args in tensor_with_args:
             # Adds an empty dict for kwargs, which none of the Tensor methods use
             run("Tensor", *(meth_with_args + ({},)))
+
+    def test_batch_norm_gather_stats(self):
+        input = torch.randn(1, 3, 3, 3, device='cuda')
+        mean, invstd = torch.batch_norm_gather_stats(
+            input, mean=torch.ones(2, 3, device='cuda'), invstd=torch.ones(2, 3, device='cuda'),
+            running_mean=None, running_var=None  , momentum=.1, eps=1e-5, count=2
+        )
+        self.assertEqual(mean, torch.ones(3, device='cuda'))
+        self.assertEqual(invstd, torch.ones(3, device='cuda'))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_cuda_device_memory_allocated(self):
+        from torch.cuda import memory_allocated
+        device_count = torch.cuda.device_count()
+        current_alloc = [memory_allocated(idx) for idx in range(device_count)]
+        x = torch.ones(10, device="cuda:0")
+        self.assertTrue(memory_allocated(0) > current_alloc[0])
+        self.assertTrue(all(memory_allocated(torch.cuda.device(idx)) == current_alloc[idx] for idx in range(1, device_count)))
 
 
 class TestCudaComm(TestCase):
@@ -3482,6 +3507,61 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_gather_namedtuple(self):
+        # tests ability to gather a list of namedtuples and return a namedtuple where each
+        # element is of the expected tensor type.
+        fields = ['a', 'b']
+        TestNamedTupleInput_0 = collections.namedtuple('NamedTuple', fields)
+
+        num_gpus = torch.cuda.device_count()
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=1)
+        out1 = TestNamedTupleInput_0(a, b)
+
+        a = torch.rand(num_gpus * 2, device=1)
+        b = torch.rand(num_gpus * 2, device=0)
+        out2 = TestNamedTupleInput_0(a, b)
+
+        outputs = [out1, out2]
+
+        out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
+
+        out = scatter_gather.gather(outputs, 0)  # test on GPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))
+
+        class TestNamedTupleInput_1(NamedTuple):
+            a: torch.tensor
+            b: torch.tensor
+
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=1)
+        out1 = TestNamedTupleInput_1(a, b)
+
+        a = torch.rand(num_gpus * 2, device=1)
+        b = torch.rand(num_gpus * 2, device=0)
+        out2 = TestNamedTupleInput_1(a, b)
+
+        outputs = [out1, out2]
+
+        out = scatter_gather.gather(outputs, 0)  # test on GPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))
+
+        out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
 
 if __name__ == '__main__':
     run_tests()

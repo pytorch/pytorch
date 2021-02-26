@@ -76,7 +76,7 @@ def _polynomial_value(poly, x, zero_power, transition):
     """
     A generic method for computing poly(x) using the Horner's rule.
 
-    Arguments:
+    Args:
       poly (Tensor): the (possibly batched) 1D Tensor representing
                      polynomial coefficients such that
                      poly[..., i] = (a_{i_0}, ..., a{i_n} (==1)), and
@@ -384,7 +384,7 @@ def lobpcg(A: Tensor,
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
-    Arguments:
+    Args:
 
       A (Tensor): the input tensor of size :math:`(*, m, m)`
 
@@ -925,7 +925,7 @@ class LOBPCG(object):
           matrix product `D M` with element-wise product `M *
           d`. Also, creating the diagonal matrix `D` is avoided.
 
-        Arguments:
+        Args:
         S (Tensor): the matrix basis for the search subspace, size is
                     :math:`(m, n)`.
 
@@ -957,7 +957,7 @@ class LOBPCG(object):
                   modification of the corresponding algorithm
                   introduced in [StathopolousWu2002].
 
-        Arguments:
+        Args:
 
           U (Tensor) : initial approximation, size is (m, n)
           drop (bool) : when True, drop columns that
@@ -1023,7 +1023,7 @@ class LOBPCG(object):
         .. note:: If all U columns are B-collinear to V then the
                   returned tensor U will be empty.
 
-        Arguments:
+        Args:
 
           U (Tensor) : initial approximation, size is (m, n)
           V (Tensor) : B-orthogonal external basis, size is (m, k)

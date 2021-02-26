@@ -9,7 +9,7 @@ class SparseAdam(Optimizer):
     In this variant, only moments that show up in the gradient get updated, and
     only those portions of the gradient get applied to the parameters.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-3)
@@ -54,7 +54,7 @@ class SparseAdam(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """

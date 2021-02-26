@@ -6,8 +6,7 @@ from .quant_type import QuantType, quant_type_to_str
 
 def get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()
-    for k, v in additional_dict.items():
-        d[k] = v
+    d.update(additional_dict)
     return d
 
 def is_per_tensor(qscheme):
@@ -33,7 +32,7 @@ def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, 
     quant_type = get_quant_type(qconfig)
     quant_type_str = quant_type_to_str(quant_type)
     class_mapping = custom_module_class_mapping.get(quant_type_str, {})
-    assert type(custom_module) in class_mapping, "did not found corresponding observed " \
+    assert type(custom_module) in class_mapping, "did not find corresponding observed " \
         "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
     return class_mapping[type(custom_module)]
 

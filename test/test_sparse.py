@@ -11,11 +11,14 @@ import random
 from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
-from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
+from torch.testing._internal.common_device_type import \
+    (instantiate_device_type_tests, ops)
+from torch.testing._internal.common_methods_invocations import \
+    (sparse_unary_ufuncs)
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -24,6 +27,8 @@ if TEST_SCIPY:
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+# batched grad doesn't support sparse
+gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 def cpu_only(inner):
     @functools.wraps(inner)
@@ -352,6 +357,11 @@ class TestSparse(TestCase):
         sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
         self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
+    def test_sparse_bool(self):
+        a = self.value_tensor([True, False]).to(torch.bool)
+        b = a.to_sparse().to_dense()
+        self.assertEqual(a, b)
+
     def test_scalar(self):
         # tensor with value
         a = self.sparse_tensor(self.index_tensor([]).unsqueeze(1), 12.3, [])
@@ -666,7 +676,6 @@ class TestSparse(TestCase):
         self.assertEqual(None, x1.grad)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_Sparse_to_Sparse_copy_multi_gpu(self):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
         sparse_dims = 3
@@ -970,7 +979,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < [10, 1],
+        TEST_CUDA and _get_torch_cuda_version() < (10, 1),
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm(self):
@@ -1034,7 +1043,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        _get_torch_cuda_version() < [10, 1],
+        _get_torch_cuda_version() < (10, 1),
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self):
@@ -1069,7 +1078,7 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        not IS_WINDOWS or _get_torch_cuda_version() >= [11, 0],
+        not IS_WINDOWS or _get_torch_cuda_version() >= (11, 0),
         "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
     def test_bmm_windows_error(self):
@@ -1083,7 +1092,7 @@ class TestSparse(TestCase):
     @cuda_only
     @skipIfRocm
     @unittest.skipIf(
-        _get_torch_cuda_version() >= [10, 1],
+        _get_torch_cuda_version() >= (10, 1),
         "this test ensures bmm gives error if CUDA version is less than 10.1"
     )
     def test_bmm_cuda_version_error(self):
@@ -1222,7 +1231,6 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 0, 0)
         test_shape(1000, 100, 0, 20)
 
-    @skipIfRocm
     def test_hsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]
@@ -1347,7 +1355,6 @@ class TestSparse(TestCase):
                 x.norm(**kwargs)
 
 
-    @skipIfRocm
     def test_sparse_sum(self):
 
         def run_tests(S, td=None):
@@ -1459,9 +1466,11 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        y1 = x1 // 37.5
+        with self.maybeWarnsRegex(UserWarning, 'floor_divide'):
+            y1 = x1 // 37.5
         y2 = x1.clone()
-        y2.floor_divide_(37.5)
+        with self.maybeWarnsRegex(UserWarning, 'floor_divide'):
+            y2.floor_divide_(37.5)
         expected = self.safeToDense(x1) // 37.5
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
@@ -2720,7 +2729,6 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
-    @skipIfRocm
     def test_softmax(self):
         import torch.nn.functional as F
 
@@ -3012,7 +3020,6 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2])
         test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
-    @skipIfRocm
     def test_sparse_matmul(self):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors. 
@@ -3164,6 +3171,14 @@ class TestSparse(TestCase):
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
         test_error_cases()
 
+    def test_assign(self):
+        def assign_to(a):
+            a, i_a, v_a = self._gen_sparse(2, 5, [2, 3])
+            a[0] = 100
+
+        self.assertRaises(TypeError, assign_to)
+
+
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()
@@ -3233,6 +3248,33 @@ class TestSparseOneOff(TestCase):
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
+class TestSparseUnaryUfuncs(TestCase):
+    exact_dtype = True
+
+    @ops(sparse_unary_ufuncs)
+    def test_sparse_consistency(self, device, dtype, op):
+        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+        if dtype in unsupportedTypes:
+            self.skipTest('Skipped! Unsupported dtypes for Sparse')
+
+        samples = op.sample_inputs(device, dtype)
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        sample = samples[0]
+
+        if len(sample.input) > 1:
+            self.skipTest("Skipped! Testing unary ops, one input is expected")
+        sample = sample.input[0]
+
+        expected = op(sample)
+        assert torch.is_tensor(expected)
+        output = op(sample.to_sparse())
+        assert torch.is_tensor(output)
+        self.assertEqual(output.to_dense(), expected)
+
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
 
 if __name__ == '__main__':
     run_tests()

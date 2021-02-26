@@ -2,8 +2,6 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
-import tools.codegen.api.native as native
-import tools.codegen.local as local
 
 import itertools
 from typing import Sequence, List, Union
@@ -31,17 +29,11 @@ def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
-    if local.use_c10_dispatcher().dispatcher_uses_new_style():
-        # This is a faux amis.  If it makes sense in the future to add
-        # more special cases here, or invert things so cpp.argument_type
-        # calls this, or just completely inline the function, please do
-        # it.
-        return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
-    else:
-        # This is real sharing.  If you're modifying this path, ask
-        # yourself why you are changing the native functions protocol
-        # here and not in native.
-        return native.argumenttype_type(t, mutable=mutable, binds=binds)
+    # This is a faux amis.  If it makes sense in the future to add
+    # more special cases here, or invert things so cpp.argument_type
+    # calls this, or just completely inline the function, please do
+    # it.
+    return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
 def argument_type(a: Argument, *, binds: ArgName) -> CType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
@@ -53,10 +45,6 @@ def returns_type(rs: Sequence[Return]) -> str:
 def argument(
     a: Union[Argument, TensorOptionsArguments, SelfArgument]
 ) -> List[Binding]:
-    # We could forward to native.argument but it is a bit suspect because
-    # the grouping may not be set correctly
-    assert local.use_c10_dispatcher().dispatcher_uses_new_style()
-
     if isinstance(a, Argument):
         return [Binding(
             ctype=argument_type(a, binds=a.name),
@@ -71,13 +59,10 @@ def argument(
         assert_never(a)
 
 def arguments(func: FunctionSchema) -> List[Binding]:
-    if local.use_c10_dispatcher().dispatcher_uses_new_style():
-        return [
-            r for a in itertools.chain(
-                func.arguments.positional,
-                func.arguments.kwarg_only,
-                func.arguments.out
-            ) for r in argument(a)
-        ]
-    else:
-        return native.arguments(func)
+    return [
+        r for a in itertools.chain(
+            func.arguments.positional,
+            func.arguments.kwarg_only,
+            func.arguments.out
+        ) for r in argument(a)
+    ]

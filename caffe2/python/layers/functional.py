@@ -11,7 +11,6 @@ from caffe2.python.layers.layers import (
 )
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
 import numpy as np
-import six
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,7 +30,7 @@ class Functional(ModelLayer):
         self._kwargs = kwargs
         return_struct = (
             isinstance(output_names_or_num, list) or
-            (isinstance(output_names_or_num, six.integer_types) and
+            (isinstance(output_names_or_num, int) and
              output_names_or_num != 1)
         )
 

@@ -331,7 +331,7 @@ struct TORCH_API LegacyEvent {
   uint64_t correlation_id_;
   // Extra arguments for computing op flops
   std::unordered_map<std::string, c10::IValue> extra_args_;
-  uint64_t flops_;
+  uint64_t flops_ = 0;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -387,16 +387,19 @@ struct TORCH_API ProfilerConfig {
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
-      bool with_stack = false)
+      bool with_stack = false,
+      bool with_flops = false)
       : state(state),
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
-        with_stack(with_stack) {}
+        with_stack(with_stack),
+        with_flops(with_flops) {}
   ~ProfilerConfig() = default;
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
   bool with_stack;
+  bool with_flops;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.

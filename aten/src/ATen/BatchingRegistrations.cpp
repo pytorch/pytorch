@@ -287,6 +287,25 @@ Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor trace_batching_rule(const Tensor& self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  // Batched Diagonal View
+  auto self_diag = at::diagonal(self_physical.tensor(), /*offset*/0, /*dim1*/-2, /*dim2*/-1);
+  auto result =  at::sum(self_diag, -1);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
+Tensor trace_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes) {
+  auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
+  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
+  // Batched Diagonal View
+  auto grad_input_diag = at::diagonal(grad_input, /*offset*/0, /*dim1*/-2, /*dim2*/-1);
+  // Append a dimension of size one to the grad output 
+  auto grad_physical_tensor = grad_physical.tensor().unsqueeze(-1);
+  grad_input_diag.copy_(grad_physical_tensor);
+  return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
+}
+
 Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
   // PyTorch has a special case where scalar_tensor.transpose(dim0, dim1) works
   // for dim0, dim1 in {0, -1} and returns the scalar tensor. If the following happens:
@@ -340,7 +359,12 @@ Tensor select_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }
 
-Tensor slice_batching_rule(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+Tensor slice_batching_rule(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().slice(dim_physical, start, end, step);
@@ -982,6 +1006,12 @@ Tensor new_empty_strided_batching_rule(
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+template <typename F, F Func>
+Tensor comparison_pointwise_batching_rule(const Tensor& self, const Tensor& other) {
+  auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
+  auto result = Func(physical_args[0].tensor(), physical_args[1].tensor());
+  return physical_args[0].getPhysicalToLogicalMap().apply(result);
+}
 
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
@@ -996,7 +1026,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
-  m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
+  m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
 
@@ -1029,6 +1059,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
+  m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
@@ -1089,6 +1120,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 #undef TO_BATCHING_RULE
   m.impl("clone", clone_batching_rule);
 
+  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
 
@@ -1108,6 +1140,12 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE_VA(rsub, Scalar);
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
+  {
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, std::string);
+    using Unop = Tensor (*)(const Tensor&, Scalar, std::string);
+    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, std::string>);
+    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, Scalar, std::string>);
+  }
 
   // at::pow has three out-of-place overloads
   m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);
@@ -1115,6 +1153,12 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
 
   m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
+  m.impl(
+      "threshold_backward",
+      binary_pointwise_batching_rule<
+          TensorTensorScalarType,
+          at::threshold_backward,
+          Scalar>);
 
   // for at::result_type, call the native::result_type implementation.
   // We don't have to do anything special because native::result_type operates
@@ -1150,6 +1194,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // backward operators
   m.impl("select_backward", select_backward_batching_rule);
   m.impl("slice_backward", slice_backward_batching_rule);
+  m.impl("trace_backward", trace_backward_batching_rule);
   m.impl("diagonal_backward", diagonal_backward_batching_rule);
 
   // Tensor.new_* operators
@@ -1158,6 +1203,20 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("new_zeros", new_zeros_batching_rule);
 
   m.impl("contiguous", contiguous_batching_rule);
+
+  // Comparison ops
+#define COMPARISON_POINTWISE(op) \
+  m.impl(#op".Tensor", comparison_pointwise_batching_rule<TensorTensorType, at::op>); \
+  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
+
+  COMPARISON_POINTWISE(eq);
+  COMPARISON_POINTWISE(gt);
+  COMPARISON_POINTWISE(ge);
+  COMPARISON_POINTWISE(le);
+  COMPARISON_POINTWISE(lt);
+  COMPARISON_POINTWISE(ne);
+
+#undef COMPARISON_POINTWISE
 }
 
 } // namespace at

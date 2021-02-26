@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
-from torch._jit_internal import _qualified_name
+from torch._jit_internal import _qualified_name, is_scripting, get_callable_argument_names
 from torch.autograd import function
 from torch.nn import Module
 
@@ -194,7 +194,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     parameters), so don't expect the model to come out exactly the same as what
     you passed in.
 
-    Arguments:
+    Args:
         model (compiled torch.nn.Module or function): the module/function to be
             verified.  The module/function definition MUST have been decorated with
             `@torch.jit.compile`.
@@ -626,7 +626,7 @@ def trace(
         invocations of the model. The tracer will try to emit warnings when
         doing something that may cause an incorrect trace to be produced.
 
-    Arguments:
+    Args:
         func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
             that will be run with `example_inputs`. `func` arguments and return
             values  must be tensors or (possibly nested) tuples that contain
@@ -776,7 +776,13 @@ def trace(
 
     name = _qualified_name(func)
     traced = torch._C._create_function_from_trace(
-        name, func, example_inputs, var_lookup_fn, strict, _force_outplace
+        name,
+        func,
+        example_inputs,
+        var_lookup_fn,
+        strict,
+        _force_outplace,
+        get_callable_argument_names(func)
     )
 
     # Check the trace against new traces created from user-specified inputs
@@ -830,7 +836,7 @@ def trace_module(
 
     See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
-    Arguments:
+    Args:
         mod (torch.nn.Module):  A ``torch.nn.Module`` containing methods whose names are
                                 specified in ``inputs``. The given methods will be compiled
                                 as a part of a single `ScriptModule`.
@@ -928,9 +934,19 @@ def trace_module(
         module = make_module(mod, _module_class, _compilation_unit)
 
         for method_name, example_inputs in inputs.items():
-            # this is needed since Module.__call__ sets up some extra tracing
-            func = mod if method_name == "forward" else getattr(mod, method_name)
+            if method_name == "forward":
+                # "forward" is a special case because we need to trace
+                # `Module.__call__`, which sets up some extra tracing, but uses
+                # argument names of the real `Module.forward` method.
+                func = mod
+                forward_method = getattr(mod, method_name)
+                argument_names = get_callable_argument_names(forward_method)
+            else:
+                func = getattr(mod, method_name)
+                argument_names = get_callable_argument_names(func)
+
             example_inputs = make_tuple(example_inputs)
+
             module._c._create_method_from_trace(
                 method_name,
                 func,
@@ -938,6 +954,7 @@ def trace_module(
                 var_lookup_fn,
                 strict,
                 _force_outplace,
+                argument_names,
             )
             check_trace_method = module._c._get_method(method_name)
 
@@ -976,6 +993,8 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
+    if is_scripting():
+        return False
     return torch._C._is_tracing()
 
 
@@ -1035,6 +1054,8 @@ class TracedModule(ScriptModule):
             )
 
         for name, submodule in orig._modules.items():
+            if submodule is None:
+                continue
             tmp_module._modules[name] = make_module(
                 submodule, TracedModule, _compilation_unit=None
             )
@@ -1075,7 +1096,7 @@ class TopLevelTracedModule(TracedModule):
         """
         Re-construct an instance of TopLevelTracedModule using an instance of a C++ module.
 
-        Arguments:
+        Args:
             cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
         """
         self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
@@ -1115,7 +1136,7 @@ def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False
     Tracing is guaranteed not to change the semantics of the function/module
     that is traced.
 
-    Arguments:
+    Args:
         f (torch.nn.Module or function): the function or module
             to be traced.
         args (tuple or Tensor): the positional arguments to pass to the

@@ -95,9 +95,12 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // Exec info has a bit complicated semantics. If it's empty, it means the task
   // is run in a "default" mode, which means that all next_edges we encounter
   // should get executed. If it's not empty, only functions that have an entry
-  // and this entry has needed == True should be executed. exec_info_.empty()
-  // means it's .backward(), otherwise it's .grad(). exec_info_ is safe to read
-  // without synchronization
+  // and this entry has needed == True should be executed. exec_info is only empty
+  // when the graph is executed via .backward() and the inputs parameter is not passed.
+  // Otherwise, when executed through .grad(), or when inputs arg is specified for
+  // .backward(), exec_info will be non-empty.
+  //
+  // exec_info_ is safe to read without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
   // Captures variables are grads captured that we return to the user. After
   // execution of the GraphTask is completed, the captured_vars_ are moved
@@ -118,7 +121,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // The number of parent graph tasks for this graph task
   const int reentrant_depth_;
 
-  bool can_checkpoint() {
+  bool can_checkpoint() const {
     return exec_info_.empty();
   }
 
@@ -144,7 +147,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   // CPU threads are dedicated to processing CPU work for the backward they invoked.
   // So any given graph task maintains its own cpu_ready_queue_ where you should send
-  // work for it to be done. We memorize the cpu_ready_queue_ per GraphTask so that
+  // work for it to be done. We memoize the cpu_ready_queue_ per GraphTask so that
   // we know which ready queue we should push to if we are on device thread (i.e. GPU)
   // and but next NodeTask should be run on CPU.
   std::shared_ptr<ReadyQueue> cpu_ready_queue_;
@@ -211,6 +214,15 @@ struct NodeTask {
         fn_(std::move(fn)),
         inputs_(std::move(inputs)),
         isShutdownTask_(isShutdownTask) {}
+};
+
+// Guard that sets and restores checkpoint_valid
+class CheckpointValidGuard {
+ public:
+  explicit CheckpointValidGuard(const std::shared_ptr<const GraphTask>& graph_task);
+  ~CheckpointValidGuard();
+ private:
+  bool prev_checkpoint_valid_state;
 };
 
 

@@ -47,7 +47,9 @@ Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_ten
     ld_tensor = tensor_strides[fast_dim];
   } else {
     transpose_tensor = !transpose_result;
-    if (tensor.is_contiguous()) {
+    // gemm call requires leading dimension and stride parameters to be non-zero
+    bool is_stride_non_zero = tensor.stride(1) != 0 && tensor.stride(2) != 0;
+    if (tensor.is_contiguous() && is_stride_non_zero) {
       tensor_ = tensor;
     } else {
       tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
@@ -76,7 +78,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes = self_.sizes();
-  TORCH_CHECK(mat1_sizes[1] == mat2_sizes[0], "mat1 dim 1 must match mat2 dim 0");
+  TORCH_CHECK(
+      mat1_sizes[1] == mat2_sizes[0],
+      "mat1 dim 1 must match mat2 dim 0",
+      " mat1 dim1:",
+      mat1_sizes[1],
+      " mat2 dim0: ",
+      mat2_sizes[0]);
   TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
   TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
 

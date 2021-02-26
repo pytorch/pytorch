@@ -1,15 +1,16 @@
-from pickle import Pickler, _Pickler, _getattribute, whichmodule, _extension_registry, _compat_pickle  # type: ignore
+from pickle import Pickler, _Pickler, _getattribute, _extension_registry, _compat_pickle  # type: ignore
 from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
 from types import FunctionType
 from struct import pack
-import importlib
+
+from .importer import Importer, sys_importer, ObjMismatchError, ObjNotFoundError
 
 
 class CustomImportPickler(_Pickler):
     dispatch = _Pickler.dispatch.copy()
 
-    def __init__(self, import_module, *args, **kwargs):
-        self.import_module = import_module
+    def __init__(self, importer: Importer, *args, **kwargs):
+        self.importer = importer
         super().__init__(*args, **kwargs)
 
     def save_global(self, obj, name=None):
@@ -19,26 +20,15 @@ class CustomImportPickler(_Pickler):
         write = self.write
         memo = self.memo
 
-        if name is None:
-            name = getattr(obj, '__qualname__', None)
-        if name is None:
-            name = obj.__name__
-
-        module_name = whichmodule(obj, name)
+        # CHANGED: import module from module environment instead of __import__
         try:
-            # CHANGED: self.import_module rather than
-            # __import__
-            module = self.import_module(module_name)
-            obj2, parent = _getattribute(module, name)
-        except (ImportError, KeyError, AttributeError):
-            raise PicklingError(
-                "Can't pickle %r: it's not found as %s.%s" %
-                (obj, module_name, name)) from None
-        else:
-            if obj2 is not obj:
-                raise PicklingError(
-                    "Can't pickle %r: it's not the same object as %s.%s" %
-                    (obj, module_name, name))
+            module_name, name = self.importer.get_name(obj, name)
+        except (ObjNotFoundError, ObjMismatchError) as err:
+            raise PicklingError(f"Can't pickle {obj}: {str(err)}") from None
+
+        module = self.importer.import_module(module_name)
+        _, parent = _getattribute(module, name)
+        # END CHANGED
 
         if self.proto >= 2:
             code = _extension_registry.get((module_name, name))
@@ -83,24 +73,10 @@ class CustomImportPickler(_Pickler):
         self.memoize(obj)
     dispatch[FunctionType] = save_global
 
-def import_module_from_importers(module_name, importers):
-    last_err = None
-    for import_module in importers:
-        try:
-            return import_module(module_name)
-        except ModuleNotFoundError as err:
-            last_err = err
-
-    if last_err is not None:
-        raise last_err
-    else:
-        raise ModuleNotFoundError(module_name)
-
-def create_custom_import_pickler(data_buf, importers):
-    if importers == [importlib.import_module]:
+def create_custom_import_pickler(data_buf, importer):
+    if importer is sys_importer:
         # if we are using the normal import library system, then
         # we can use the C implementation of pickle which is faster
         return Pickler(data_buf, protocol=3)
     else:
-        return CustomImportPickler(lambda mod: import_module_from_importers(mod, importers),
-                                   data_buf, protocol=3)
+        return CustomImportPickler(importer, data_buf, protocol=3)

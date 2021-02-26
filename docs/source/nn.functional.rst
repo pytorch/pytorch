@@ -137,6 +137,15 @@ Pooling functions
 
 .. autofunction:: adaptive_avg_pool3d
 
+:hidden:`fractional_max_pool2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fractional_max_pool2d
+
+:hidden:`fractional_max_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fractional_max_pool3d
 
 Non-linear activation functions
 -------------------------------
@@ -495,6 +504,11 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pixel_shuffle
+
+:hidden:`pixel_unshuffle`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pixel_unshuffle
 
 :hidden:`pad`
 ~~~~~~~~~~~~~~~~~~~~~~~

@@ -755,7 +755,7 @@ but intuitively the interface they provide looks like this::
       ONNX outputs whose values correspond to the original PyTorch return values
       of the autograd Function (or None if an output is not supported by ONNX).
 
-      Arguments:
+      Args:
         g (Graph): graph to write the ONNX representation into
         inputs (Value...): list of values representing the variables which contain
             the inputs for this function
@@ -782,7 +782,7 @@ but intuitively the interface they provide looks like this::
         The set of operators and the inputs/attributes they take
         is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
 
-        Arguments:
+        Args:
             opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
             args (Value...): The inputs to the operator; usually provided
                 as arguments to the `symbolic` definition.

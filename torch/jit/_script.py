@@ -8,6 +8,7 @@ functionalities in `torch.jit`.
 """
 import functools
 import collections
+import enum
 import inspect
 import copy
 import pickle
@@ -22,7 +23,7 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_method
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass, get_function_from_type
+from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
 from torch.jit._fuser import _graph_for
@@ -32,6 +33,8 @@ from torch.jit._state import (
     _set_jit_function_cache,
     _set_jit_overload_cache,
 )
+from torch.overrides import (
+    has_torch_function, has_torch_function_unary, has_torch_function_variadic)
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
@@ -49,6 +52,11 @@ else:
 
     def Attribute(value, type):  # type: ignore
         return value
+
+
+# Gets a function from the name of a method on a type
+def _get_function_from_type(cls, name):
+    return getattr(cls, name, None)
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -271,8 +279,8 @@ if _enabled:
     # which always throws an exception.
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore
-        """
-        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
+        r"""
+        A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
@@ -379,7 +387,7 @@ if _enabled:
             object is properly finalized (and in the future we may take
             control of how the RecursiveScriptModule instance is created).
 
-            Arguments:
+            Args:
                 cpp_module:  The C++ Module that will hold the actual state of
                              this RecursiveScriptModule instance.
                 init_fn:  Lambda that initializes the RecursiveScriptModule passed to it.
@@ -409,7 +417,7 @@ if _enabled:
             """
             Re-construct an instance of RecursiveScriptModule using an instance of a C++ module.
 
-            Arguments:
+            Args:
                 cpp_module: The C++ module that this RecursiveScriptModule will be rebuilt around.
             """
             self.__init__(cpp_module)  # type: ignore
@@ -493,7 +501,7 @@ if _enabled:
             Add (or update) the bytecode session to the script model. The updated model is used
             in lite interpreter for mobile applications.
 
-            Arguments:
+            Args:
                 f: a string containing a file name.
                 _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
@@ -627,7 +635,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__dir__"
             ):
                 return super(RecursiveScriptModule, self).__dir__()
@@ -638,7 +646,7 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__bool__"
             ):
                 return True
@@ -741,6 +749,43 @@ else:
         def __init__(self, arg=None):
             super().__init__()
 
+def call_prepare_scriptable_func_impl(obj, memo):
+    if not isinstance(obj, torch.nn.Module):
+        return obj
+
+    obj_id = id(obj)
+
+    # If obj_id is in memo, obj has already been prepared or is being
+    # prepared in another call up the stack.
+    if obj_id in memo:
+        return memo[id(obj)]
+
+    obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore
+    # Record obj in memo to avoid infinite recursion in the case of cycles in the module
+    # hierarchy when recursing below.
+    memo[obj_id] = obj
+
+    new_obj_dict = {}
+
+    for name in obj.__dict__:
+        sub_module = obj.__dict__.get(name)
+        if name == '_modules':
+            for k, v in sub_module.items():
+                sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
+            new_obj_dict[name] = sub_module
+        elif isinstance(sub_module, torch.nn.Module) and not isinstance(sub_module, ScriptModule):
+            new_obj_dict[name] = call_prepare_scriptable_func_impl(sub_module, memo)
+        else:
+            new_obj_dict[name] = sub_module
+
+    for k, v in new_obj_dict.items():
+        obj.__dict__[name] = v
+
+    return obj
+
+def call_prepare_scriptable_func(obj):
+    memo: Dict[int, torch.nn.Module] = {}
+    return call_prepare_scriptable_func_impl(obj, memo)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
@@ -754,7 +799,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     ``torch.jit.script`` can be used as a function for modules and functions, and as a decorator
     ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
 
-    Arguments:
+    Args:
         obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, or class type to
                                                   compile.
 
@@ -890,10 +935,15 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
+
+    # No-op for modules and functions that are already scripted
     if isinstance(obj, ScriptModule):
+        return obj
+    if isinstance(obj, ScriptFunction):
         return obj
 
     if isinstance(obj, torch.nn.Module):
+        obj = call_prepare_scriptable_func(obj)
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
@@ -908,6 +958,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                 " from nn.Module,"
                 " pass an instance instead".format(obj)
             )
+
+        # Enums are automatically usable in TorchScript, explicitly scripting
+        # is not necessary, but not harmful either.
+        if issubclass(obj, enum.Enum):
+            return obj
 
         if not _is_new_style_class(obj):
             raise RuntimeError(
@@ -1055,24 +1110,8 @@ def _recursive_compile_class(obj, loc):
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     _compile_and_register_class(obj, rcb, _qual_name)
 
-
-class CompilationUnit(object):
-    def __init__(self, lang=None, _frames_up=0):
-        self._c = torch._C.CompilationUnit()
-        if lang is not None:
-            self.define(lang, _frames_up=_frames_up + 1)
-
-    def define(self, lang, rcb=None, _frames_up=0):
-        if not rcb:
-            rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
-        self._c.define(lang, rcb)
-
-    def __getattr__(self, attr):
-        r = self._c.find_function(attr)
-        if r is None:
-            raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
-        return r
-
+CompilationUnit = torch._C.CompilationUnit
+set_module(CompilationUnit, "torch.jit")
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
@@ -1081,3 +1120,6 @@ def _unwrap_optional(x):
 
 _register_builtin(_unwrap_optional, "aten::_unwrap_optional")
 _register_builtin(_jit_internal.is_scripting, "aten::is_scripting")
+_register_builtin(has_torch_function, "aten::has_torch_function")
+_register_builtin(has_torch_function_unary, "aten::has_torch_function")
+_register_builtin(has_torch_function_variadic, "aten::has_torch_function")

@@ -67,7 +67,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
     Forks the RNG, so that when you return, the RNG is reset
     to the state that it was previously in.
 
-    Arguments:
+    Args:
         devices (iterable of CUDA IDs): CUDA devices for which to fork
             the RNG.  CPU RNG state is always forked.  By default, :meth:`fork_rng` operates
             on all devices, but will emit a warning if your machine has a lot

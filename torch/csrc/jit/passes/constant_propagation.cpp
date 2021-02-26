@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
+
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
@@ -45,7 +46,9 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
     case prim::ListConstruct: {
       listConstruct(
-          stack, n->output()->type()->expect<ListType>(), n->inputs().size());
+          stack,
+          n->output()->type()->expectRef<ListType>(),
+          n->inputs().size());
     } break;
     case prim::DictConstruct: {
       dictConstruct(
@@ -53,6 +56,10 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
     case prim::CreateObject: {
       createObject(stack, n->output()->type()->expect<ClassType>());
+    } break;
+    case prim::GetAttr: {
+      auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
+      push(stack, attr);
     } break;
     case prim::isinstance: {
       isinstance(stack, n->tys(attr::types));
@@ -104,7 +111,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::Uninitialized,
     prim::Guard,
     prim::profile,
-    prim::profile_optional,
+    prim::profile_ivalue,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.

@@ -6,6 +6,7 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/Math.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -33,7 +34,7 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
 }
 
 void exp_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exp_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "exp_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::exp(a);
     });
@@ -109,7 +110,8 @@ void sinc_kernel_cuda(TensorIterator& iter) {
       if (a == scalar_t(0)) {
         return scalar_t(1);
       } else {
-        scalar_t product = scalar_t(M_PI) * a;
+        // NVCC says constexpr var is not accessible from device
+        scalar_t product = c10::detail::pi<scalar_t>() * a;
         return std::sin(product) / product;
       }
     });
@@ -160,7 +162,7 @@ void erfc_kernel_cuda(TensorIterator& iter) {
 }
 
 void erfinv_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfinv_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfinv_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::erfinv(a);
     });

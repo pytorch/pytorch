@@ -42,6 +42,7 @@ Creating TorchScript Code
 
 .. autosummary::
     :toctree: generated
+    :nosignatures:
 
     script
     trace
@@ -548,17 +549,17 @@ best practices?
       cpu_model = gpu_model.cpu()
       sample_input_cpu = sample_input_gpu.cpu()
       traced_cpu = torch.jit.trace(cpu_model, sample_input_cpu)
-      torch.jit.save(traced_cpu, "cpu.pth")
+      torch.jit.save(traced_cpu, "cpu.pt")
 
       traced_gpu = torch.jit.trace(gpu_model, sample_input_gpu)
-      torch.jit.save(traced_gpu, "gpu.pth")
+      torch.jit.save(traced_gpu, "gpu.pt")
 
       # ... later, when using the model:
 
       if use_gpu:
-        model = torch.jit.load("gpu.pth")
+        model = torch.jit.load("gpu.pt")
       else:
-        model = torch.jit.load("cpu.pth")
+        model = torch.jit.load("cpu.pt")
 
       model(input)
 

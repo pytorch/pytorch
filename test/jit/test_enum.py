@@ -9,7 +9,7 @@ from typing import Any, List
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -18,23 +18,19 @@ if __name__ == '__main__':
 
 class TestEnum(JitTestCase):
     def test_enum_value_types(self):
-        global IntEnum
-
         class IntEnum(Enum):
             FOO = 1
             BAR = 2
-
-        global FloatEnum
 
         class FloatEnum(Enum):
             FOO = 1.2
             BAR = 2.3
 
-        global StringEnum
-
         class StringEnum(Enum):
             FOO = "foo as in foo bar"
             BAR = "bar as in foo bar"
+
+        make_global(IntEnum, FloatEnum, StringEnum)
 
         @torch.jit.script
         def supported_enum_types(a: IntEnum, b: FloatEnum, c: StringEnum):
@@ -46,11 +42,11 @@ class TestEnum(JitTestCase):
             .check("StringEnum") \
             .run(str(supported_enum_types.graph))
 
-        global TensorEnum
-
         class TensorEnum(Enum):
             FOO = torch.tensor(0)
             BAR = torch.tensor(1)
+
+        make_global(TensorEnum)
 
         def unsupported_enum_types(a: TensorEnum):
             return a.name
@@ -59,11 +55,11 @@ class TestEnum(JitTestCase):
             torch.jit.script(unsupported_enum_types)
 
     def test_enum_comp(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
+
+        make_global(Color)
 
         @torch.jit.script
         def enum_comp(x: Color, y: Color) -> bool:
@@ -75,8 +71,6 @@ class TestEnum(JitTestCase):
         self.assertEqual(enum_comp(Color.RED, Color.GREEN), False)
 
     def test_enum_comp_diff_classes(self):
-        global Foo, Bar
-
         class Foo(Enum):
             ITEM1 = 1
             ITEM2 = 2
@@ -84,6 +78,8 @@ class TestEnum(JitTestCase):
         class Bar(Enum):
             ITEM1 = 1
             ITEM2 = 2
+
+        make_global(Foo, Bar)
 
         @torch.jit.script
         def enum_comp(x: Foo) -> bool:
@@ -98,11 +94,11 @@ class TestEnum(JitTestCase):
         self.assertEqual(enum_comp(Foo.ITEM1), False)
 
     def test_heterogenous_value_type_enum_error(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = "green"
+
+        make_global(Color)
 
         def enum_comp(x: Color, y: Color) -> bool:
             return x == y
@@ -111,11 +107,11 @@ class TestEnum(JitTestCase):
             torch.jit.script(enum_comp)
 
     def test_enum_name(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
+
+        make_global(Color)
 
         @torch.jit.script
         def enum_name(x: Color) -> str:
@@ -131,11 +127,11 @@ class TestEnum(JitTestCase):
         self.assertEqual(enum_name(Color.GREEN), Color.GREEN.name)
 
     def test_enum_value(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
+
+        make_global(Color)
 
         @torch.jit.script
         def enum_value(x: Color) -> int:
@@ -151,11 +147,11 @@ class TestEnum(JitTestCase):
         self.assertEqual(enum_value(Color.GREEN), Color.GREEN.value)
 
     def test_enum_as_const(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
+
+        make_global(Color)
 
         @torch.jit.script
         def enum_const(x: Color) -> bool:
@@ -171,11 +167,11 @@ class TestEnum(JitTestCase):
         self.assertEqual(enum_const(Color.GREEN), False)
 
     def test_non_existent_enum_value(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
+
+        make_global(Color)
 
         def enum_const(x: Color) -> bool:
             if x == Color.PURPLE:
@@ -187,11 +183,11 @@ class TestEnum(JitTestCase):
             torch.jit.script(enum_const)
 
     def test_enum_ivalue_type(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
+
+        make_global(Color)
 
         @torch.jit.script
         def is_color_enum(x: Any):
@@ -207,8 +203,6 @@ class TestEnum(JitTestCase):
         self.assertEqual(is_color_enum(1), False)
 
     def test_closed_over_enum_constant(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
@@ -240,8 +234,6 @@ class TestEnum(JitTestCase):
         self.assertEqual(closed_over_aliased_value(), Color.RED.value)
 
     def test_enum_as_module_attribute(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
@@ -268,8 +260,6 @@ class TestEnum(JitTestCase):
         self.assertEqual(scripted(), Color.RED.value)
 
     def test_string_enum_as_module_attribute(self):
-        global Color
-
         class Color(Enum):
             RED = "red"
             GREEN = "green"
@@ -282,17 +272,18 @@ class TestEnum(JitTestCase):
             def forward(self):
                 return (self.e.name, self.e.value)
 
+        make_global(Color)
         m = TestModule(Color.RED)
         scripted = torch.jit.script(m)
 
         self.assertEqual(scripted(), (Color.RED.name, Color.RED.value))
 
     def test_enum_return(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
+
+        make_global(Color)
 
         @torch.jit.script
         def return_enum(cond: bool):
@@ -305,8 +296,6 @@ class TestEnum(JitTestCase):
         self.assertEqual(return_enum(False), Color.GREEN)
 
     def test_enum_module_return(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
@@ -319,6 +308,7 @@ class TestEnum(JitTestCase):
             def forward(self):
                 return self.e
 
+        make_global(Color)
         m = TestModule(Color.RED)
         scripted = torch.jit.script(m)
 
@@ -333,8 +323,6 @@ class TestEnum(JitTestCase):
 
 
     def test_enum_iterate(self):
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
@@ -347,6 +335,7 @@ class TestEnum(JitTestCase):
                     res.append(e.value)
             return res
 
+        make_global(Color)
         scripted = torch.jit.script(iterate_enum)
 
         FileCheck() \
@@ -356,6 +345,16 @@ class TestEnum(JitTestCase):
             .check_same("Color.BLUE") \
             .run(str(scripted.graph))
 
-        # PURPLE always appear last because we follow Python's Enum definition order.
+        # PURPLE always appears last because we follow Python's Enum definition order.
         self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.BLUE.value])
         self.assertEqual(scripted(Color.GREEN), [Color.RED.value, Color.BLUE.value])
+
+    # Tests that explicitly and/or repeatedly scripting an Enum class is permitted.
+    def test_enum_explicit_script(self):
+
+        @torch.jit.script
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        torch.jit.script(Color)

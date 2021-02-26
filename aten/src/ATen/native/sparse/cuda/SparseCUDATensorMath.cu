@@ -338,14 +338,15 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
-      AT_DISPATCH_ALL_TYPES_AND2(
-        at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND3(
+        at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
           apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
             <<<grid, block, 0, stream>>>(
               TensorCAddOp<scalar_t>(value.to<scalar_t>()),
               V_INFO(r), I_INFO(indices), V_INFO(values),
               static_cast<uint64_t>(nnz));
-          });
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
     } else {
       TORCH_CHECK(cuda::getApplyGrid(nnz * block.x, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
@@ -359,7 +360,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
               TensorCAddOp<scalar_t>(value.to<scalar_t>()),
               V_INFO(r), I_INFO(indices), V_INFO(values),
               static_cast<uint64_t>(nnz));
-          });
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
     }
   } else {
 
@@ -399,7 +401,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
 Tensor& add_out_dense_sparse_cuda(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value);
 
-SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
+SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src, Scalar value, SparseTensor& r_) {
   if (!t.is_sparse()) {
     return add_out_dense_sparse_cuda(r_, t, src, value);
   }
@@ -527,7 +529,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
             I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
             V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
             static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz));
-        THCudaCheck(cudaGetLastError());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
 
         apply::indexSparseIntersectionKernel<uint64_t, scalar_t>
           <<<1, 1, 0, stream>>>(
@@ -535,7 +537,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
             // reinterpret_cast shenanigans, because we don't actually have
             // unsigned tensors...
             static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz), reinterpret_cast<uint64_t*>(resultNnz.data_ptr()));
-        THCudaCheck(cudaGetLastError());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   r_values_ = r_values_.to(r_.scalar_type());
   get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
@@ -708,6 +710,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
           grad_values_expand_ti,
           grad_input_values_ti
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     }
 
@@ -783,6 +786,8 @@ void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices
     indices_1D_ti,
     num_elements
   );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   cudaDeviceSynchronize();
 }
 
@@ -889,7 +894,7 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   void* workspace_buffer = nullptr;
 
   // See Note [Enabling Deterministic Operations]
-  deterministic = deterministic || globalContext().deterministic();
+  deterministic = deterministic || globalContext().deterministicAlgorithms();
   cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG2 : CUSPARSE_COOMM_ALG1;
 
   // Iterate through each set of 2D matrices within the 3D

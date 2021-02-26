@@ -179,7 +179,7 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 /// C10_NOINLINE - Functions whose declaration is annotated with this will not
 /// be inlined.
 #ifdef __GNUC__
-#define C10_NOINLINE __attribute__((__noinline__))
+#define C10_NOINLINE __attribute__((noinline))
 #elif _MSC_VER
 #define C10_NOINLINE __declspec(noinline)
 #else
@@ -316,7 +316,7 @@ __host__ __device__
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
 
-// Portably determine if a type T is trivially copyable or not.
+// Portable determination of whether type T is trivially copyable.
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
 // treated as POD. This can cause unexpected behavior.

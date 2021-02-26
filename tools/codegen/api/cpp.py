@@ -1,7 +1,6 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-import tools.codegen.local as local
-from typing import Optional, Sequence, Union, List
+from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -88,10 +87,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             if mutable:
                 return MutRefCType(BaseCType('Tensor', binds))  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                    return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
-                else:
-                    return ConstRefCType(BaseCType('Tensor', binds))
+                return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return OptionalCType(elem)
     elif isinstance(t, ListType):
@@ -104,9 +100,8 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             return BaseCType("TensorList", binds)
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
-        # TODO: do something reasonable about lists of optional tensors
-        elif (not local.use_c10_dispatcher().dispatcher_uses_new_style()) and str(t.elem) == 'Tensor?':
-            return BaseCType("TensorList", binds)
+        elif str(t.elem) == 'Tensor?':
+            return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         # TODO: explicitly qualify namespace here
         return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
@@ -237,32 +232,43 @@ def default_expr(d: str, t: Type) -> str:
 
 def argument(
     a: Union[Argument, TensorOptionsArguments, SelfArgument],
-    *, method: bool = False, faithful: bool = False,
-    has_tensor_options: bool = False
+    *, cpp_no_default_args: Set[str], method: bool, faithful: bool,
+    has_tensor_options: bool
 ) -> List[Binding]:
+    def sub_argument(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> List[Binding]:
+        return argument(
+            a, cpp_no_default_args=cpp_no_default_args, method=method, faithful=faithful,
+            has_tensor_options=has_tensor_options)
+
     if isinstance(a, Argument):
         binds: ArgName
         if a.name == "memory_format" and has_tensor_options:
             binds = SpecialArgName.possibly_redundant_memory_format
         else:
             binds = a.name
+        default: Optional[str] = None
+        if a.name not in cpp_no_default_args and a.default is not None:
+            default = default_expr(a.default, a.type)
         return [Binding(
             ctype=argument_type(a, binds=binds),
             name=a.name,
-            default=default_expr(a.default, a.type) if a.default is not None else None,
+            default=default,
             argument=a,
         )]
     elif isinstance(a, TensorOptionsArguments):
         if faithful:
-            return argument(a.dtype) + argument(a.layout) + argument(a.device) + argument(a.pin_memory)
+            return sub_argument(a.dtype) + sub_argument(a.layout) + \
+                sub_argument(a.device) + sub_argument(a.pin_memory)
         else:
             default = None
+            # Enforced by NativeFunction.__post_init__
+            assert 'options' not in cpp_no_default_args
             if all(x.default == "None" for x in a.all()):
                 default = '{}'
             elif a.dtype.default == "long":
                 default = 'at::kLong'  # TODO: this is wrong
             return [Binding(
-                ctype=ConstRefCType(BaseCType('TensorOptions', 'options')),
+                ctype=BaseCType('TensorOptions', 'options'),
                 name='options',
                 default=default,
                 argument=a,
@@ -272,13 +278,13 @@ def argument(
             # Caller is responsible for installing implicit this in context!
             return []
         else:
-            return argument(a.argument)
+            return sub_argument(a.argument)
     else:
         assert_never(a)
 
 def arguments(
     arguments: Arguments,
-    *, faithful: bool, method: bool
+    *, faithful: bool, method: bool, cpp_no_default_args: Set[str]
 ) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     if faithful:
@@ -289,5 +295,8 @@ def arguments(
         args.extend(arguments.non_out)
     return [
         r.no_default() if faithful else r for a in args
-        for r in argument(a, faithful=faithful, method=method, has_tensor_options=arguments.tensor_options is not None)
+        for r in argument(
+            a, faithful=faithful, method=method,
+            has_tensor_options=arguments.tensor_options is not None,
+            cpp_no_default_args=cpp_no_default_args)
     ]

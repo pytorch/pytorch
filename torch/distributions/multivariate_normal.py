@@ -113,7 +113,7 @@ class MultivariateNormal(Distribution):
                        'covariance_matrix': constraints.positive_definite,
                        'precision_matrix': constraints.positive_definite,
                        'scale_tril': constraints.lower_cholesky}
-    support = constraints.real
+    support = constraints.real_vector
     has_rsample = True
 
     def __init__(self, loc, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):

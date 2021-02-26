@@ -15,10 +15,14 @@ const char* toString(DispatchKey t) {
       return "HIP";
     case DispatchKey::FPGA:
       return "FPGA";
+    case DispatchKey::XPU:
+      return "XPU";
     case DispatchKey::MSNPU:
       return "MSNPU";
     case DispatchKey::XLA:
       return "XLA";
+    case DispatchKey::MLC:
+      return "MLC";
     case DispatchKey::Vulkan:
       return "Vulkan";
     case DispatchKey::Metal:
@@ -35,6 +39,8 @@ const char* toString(DispatchKey t) {
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:
       return "QuantizedCUDA";
+    case DispatchKey::QuantizedXPU:
+      return "QuantizedXPU";
 
     case DispatchKey::ComplexCPU:
       return "ComplexCPU";
@@ -52,6 +58,8 @@ const char* toString(DispatchKey t) {
       return "SparseCUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
+    case DispatchKey::SparseXPU:
+      return "SparseXPU";
 
     case DispatchKey::NestedTensor:
       return "NestedTensor";
@@ -74,6 +82,8 @@ const char* toString(DispatchKey t) {
       return "AutogradCUDA";
     case DispatchKey::AutogradXLA:
       return "AutogradXLA";
+    case DispatchKey::AutogradMLC:
+      return "AutogradMLC";
     case DispatchKey::AutogradNestedTensor:
       return "AutogradNestedTensor";
     case DispatchKey::AutogradPrivateUse1:
@@ -137,6 +147,8 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
       return DispatchKey::AutogradCUDA;
     case DispatchKey::XLA:
       return DispatchKey::AutogradXLA;
+    case DispatchKey::MLC:
+      return DispatchKey::AutogradMLC;
     case DispatchKey::NestedTensor:
       return DispatchKey::AutogradNestedTensor;
     case DispatchKey::PrivateUse1:

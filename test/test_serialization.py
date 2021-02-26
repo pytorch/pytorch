@@ -17,7 +17,7 @@ from torch._utils import _rebuild_tensor
 from torch.serialization import check_module_version_greater_or_equal
 
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    TEST_DILL, run_tests, download_file, BytesIOContext
+    TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
@@ -137,25 +137,22 @@ class SerializationMixin(object):
         with tempfile.NamedTemporaryFile() as f:
             test(f)
 
-        if sys.platform != "win32":
-            with tempfile.NamedTemporaryFile() as f:
-                test(f.name)
+        with TemporaryFileName() as fname:
+            test(fname)
 
         test(io.BytesIO())
 
     def test_serialization(self):
         # Test serialization with a real file
         b = self._test_serialization_data()
-        for use_name in (False, True):
-            # Passing filename to torch.save(...) will cause the file to be opened twice,
-            # which is not supported on Windows
-            if sys.platform == "win32" and use_name:
-                continue
-            with tempfile.NamedTemporaryFile() as f:
-                handle = f if not use_name else f.name
-                torch.save(b, handle)
-                f.seek(0)
-                c = torch.load(handle)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(b, f)
+            f.seek(0)
+            c = torch.load(f)
+            self._test_serialization_assert(b, c)
+        with TemporaryFileName() as fname:
+            torch.save(b, fname)
+            c = torch.load(fname)
             self._test_serialization_assert(b, c)
         # test non-ascii encoding of bytes arrays/strings
         # The following bytes are produced by serializing
@@ -716,9 +713,8 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             test(f)
 
-        if sys.platform != "win32":
-            with tempfile.NamedTemporaryFile() as f:
-                test(f.name)
+        with TemporaryFileName() as fname:
+            test(fname)
 
         test(io.BytesIO())
 
@@ -737,12 +733,11 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
-    @unittest.skipIf(IS_WINDOWS, "torch.save with filename will open file twice, not supported in Windows.")
     def test_pathlike_serialization(self):
         model = torch.nn.Conv2d(20, 3200, kernel_size=3)
 
-        with tempfile.NamedTemporaryFile() as f:
-            path = pathlib.Path(f.name)
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
             torch.save(model, path)
             torch.load(path)
 

@@ -22,6 +22,10 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
+  export BUILD_SPLIT_CUDA=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
@@ -140,6 +144,12 @@ test_aten() {
   fi
 }
 
+test_without_numpy() {
+  pushd "$(dirname "${BASH_SOURCE[0]}")"
+  python -c "import sys;sys.path.insert(0, 'fake_numpy');from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase().assertRaises(RuntimeError, lambda: x.numpy())"
+  popd
+}
+
 # pytorch extensions require including torch/extension.h which includes all.h
 # which includes utils.h which includes Parallel.h.
 # So you can call for instance parallel_for() from your extension,
@@ -242,6 +252,21 @@ test_custom_script_ops() {
   fi
 }
 
+test_jit_hooks() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+    echo "Testing jit hooks in cpp"
+    HOOK_BUILD="$PWD/../jit-hook-build"
+    pushd test/jit_hooks
+    cp -a "$HOOK_BUILD" build
+    # Run tests Python-side and export the script modules with hooks
+    python model.py --export-script-module=model
+    # Run tests C++-side and load the exported script modules
+    build/test_jit_hooks ./model
+    popd
+    assert_git_not_dirty
+  fi
+}
+
 test_torch_function_benchmark() {
   echo "Testing __torch_function__ benchmarks"
   pushd benchmarks/overrides_benchmark
@@ -339,6 +364,12 @@ test_vec256() {
   fi
 }
 
+test_torch_deploy() {
+  python torch/csrc/deploy/example/generate_examples.py
+  build/bin/test_deploy
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -356,12 +387,16 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
+    test_torch_deploy
+  fi
+  test_without_numpy
   install_torchvision
   test_python_shard1
+  test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
   test_python_shard2
-  test_aten
   test_libtorch
   test_custom_script_ops
   test_custom_backend

@@ -32,15 +32,19 @@ allow_list = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::_qr_helper", datetime.date(2021, 1, 31)),
     ("aten::fft", datetime.date(2021, 1, 31)),
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
     ("aten::quantile", datetime.date(2021, 1, 31)),
     ("aten::nanquantile", datetime.date(2021, 1, 31)),
+    ("aten::make_dual", datetime.date(2021, 2, 20)),
+    ("aten::unpack_dual", datetime.date(2021, 2, 20)),
     ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
     ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
     ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
@@ -50,6 +54,26 @@ allow_list = [
     ("aten::set_", datetime.date(2021, 1, 31)),
     ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
     ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
+    ("aten::elu_backward", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
+    ("prim::profile_optional", datetime.date(2021, 1, 31)),
+    ("aten::fake_quantize_per_tensor_affine_backward", datetime.date(2021, 2, 20)),
+    ("aten::fake_quantize_per_channel_affine_backward", datetime.date(2021, 2, 20)),
+    ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
+    ("aten::_foreach_mul_", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_sub", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_addcdiv_", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_add_", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_mul", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_addcmul", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_add", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_sub_", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_div", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_div_", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_addcdiv", datetime.date(2021, 2, 25)),
+    ("aten::mkldnn_linear", datetime.date(2021, 3, 2)),
+    ("aten::linalg_multi_dot", datetime.date(2021, 3, 25)),
 ]
 
 def allow_listed(schema, allow_list):
@@ -71,7 +95,7 @@ def allow_listed(schema, allow_list):
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
-    ("c10d.frontend", datetime.date(2020, 12, 30)),
+    ("dist_c10d", datetime.date(2021, 1, 30)),
 ]
 
 

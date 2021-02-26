@@ -1,4 +1,5 @@
 #include <ATen/Config.h>
+#include <ATen/core/jit_type.h>
 #if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
 
