@@ -997,9 +997,13 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
 }
 
 Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
-  for (const auto d : dim) {
-    TORCH_CHECK(self.sizes()[d] != 0, "Expected reduction dim ", d, " to be non-zero");
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:",
+              self.scalar_type(), result.scalar_type());
+  auto sizes = self.sizes();
+  if (sizes.size() != 0) {
+    for (const auto d : dim) {
+      TORCH_CHECK(sizes[d] != 0, "Expected reduction dim ", d, " to be non-zero");
+    }
   }
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
   if (iter.numel() == 0) {
@@ -1016,8 +1020,11 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 
 Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
-  for (const auto d : dim) {
-    TORCH_CHECK(self.sizes()[d] != 0, "Expected reduction dim ", d, " to be non-zero");
+  auto sizes = self.sizes();
+  if (sizes.size() != 0) {
+    for (const auto d : dim) {
+      TORCH_CHECK(sizes[d] != 0, "Expected reduction dim ", d, " to be non-zero");
+    }
   }
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
   if (iter.numel() == 0) {

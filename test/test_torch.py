@@ -5061,9 +5061,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2))
             self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True))
 
-            # Check if function raises error on specified zero'd dimension as reduction dim.
-            self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1))
-
             # Check if returned data is correct.
             check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else
                          self.assertEqual)
