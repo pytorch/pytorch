@@ -4703,6 +4703,32 @@ class CommTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
 
+    def test_distributed_debug_mode(self):
+        # Default should be off
+        default_debug_mode = dist._get_debug_mode()
+        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
+        mapping = {
+            "OFF": dist._DistributedDebugMode.OFF,
+            "INFO": dist._DistributedDebugMode.INFO,
+            "DETAIL": dist._DistributedDebugMode.DETAIL,
+        }
+        invalid_debug_modes = ["foo", 0, 1, -1]
+
+        for mode in mapping.keys():
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            set_debug_mode = dist._get_debug_mode()
+            self.assertEqual(
+                set_debug_mode,
+                mapping[mode],
+                f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}"
+            )
+
+        for mode in invalid_debug_modes:
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+                dist._get_debug_mode()
+
+
 if __name__ == '__main__':
     assert (
         not torch.cuda._initialized
