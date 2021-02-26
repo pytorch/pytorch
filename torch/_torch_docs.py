@@ -8812,7 +8812,7 @@ Example::
 
 add_docstr(torch.take_along_dim,
            r"""
-take_along_dim(input, indices, dim) -> Tensor
+take_along_dim(input, indices, dim, *, out=None) -> Tensor
 
 Returns values from the :attr:`input` at the given 1-d indices along the given dim.
 
@@ -8824,6 +8824,9 @@ Args:
     {input}
     indices (LongTensor): the indices into tensor
     dim (int): dim to take 1d slices along.
+
+Keyword args:
+    {out}
 
 Example::
 
