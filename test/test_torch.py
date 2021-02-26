@@ -4137,14 +4137,23 @@ class TestTorchDeviceType(TestCase):
         def logcumsumexp(a, axis):
             return torch.cumsum(a.exp(), axis=axis).log_()
 
-        axis = 1
+        axis = -1
         a = torch.randn(100, 100, device=device)
 
-        actual = a.logcumsumexp(1)
+        actual = a.logcumsumexp(axis)
         expected = logcumsumexp(a, axis)
         self.assertEqual(a.dtype, actual.dtype)
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
+
+        # check -inf and nan handling
+        x = torch.tensor([-float('inf'), -float('inf'), 1.0, float('nan'), 1.0, 1.0], device=device)
+        x2d = x.unsqueeze(0).expand(2, -1)
+
+        for inp in (x, x2d):
+            actual = inp.logcumsumexp(axis)
+            expected = logcumsumexp(inp, axis)
+            self.assertEqual(expected, actual)
 
         # Check that out is actually inplace
         b = torch.randn(5, 2, device=device)
