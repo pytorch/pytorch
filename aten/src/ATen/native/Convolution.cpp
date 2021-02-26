@@ -236,7 +236,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
      input.scalar_type() == kFloat && // only on CPU Float Tensors
      !transposed && // or transposed tensors
      (is_strided() || is_dilated() || input.size(0) >= 16 ||
-      weight.size(-1) != 1 || weight.size(-2) != 1) &&
+      weight.size(-1) != 1 || weight.size(-2) != 1 || at::get_num_threads() > 1) &&
      (groups > 1
       || (weight.size(-1) > 3 && weight.size(-2) > 3)
       || input.size(0) > 1
@@ -244,7 +244,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
       // OneDNN < 1.8.1 produce incorrect results in this case (see #50042)
       // TODO(VitalyFedyunin): Remove this patch after OneDNN 1.8.1 merged in
       && !(groups == 24 && weight.size(0) == 24 && weight.size(1) == 1)
-      ); 
+      );
 
 #endif
   return false;
