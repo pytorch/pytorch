@@ -1194,7 +1194,9 @@ Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<i
         _take_along_dim_helper(self, indices, opt_dim.value());
     return self_broadcasted.gather(dim, indices_broadcasted);
   }
-  return self.take(indices);
+
+  // similar to `take`, but `take` doesn't support the same dtypes as `gather`.
+  return self.view(-1).gather(0, indices.view(-1));
 }
 
 Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
@@ -1205,7 +1207,9 @@ Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optio
         _take_along_dim_helper(self, indices, opt_dim.value());
     return at::gather_out(result, self_broadcasted, dim, indices_broadcasted);
   }
-  return at::take_out(result, self, indices);
+
+  // similar to `take`, but `take` doesn't support the same dtypes as `gather`.
+  return at::gather_out(result, self.view(-1), 0, indices.view(-1));
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

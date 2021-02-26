@@ -5744,11 +5744,11 @@
   variants: function
   device_guard: False
 
-- func: take_along_dim.out(Tensor self, Tensor indices, int? dim, *, Tensor(a!) out) -> Tensor(a!)
+- func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: take_along_dim_out
 
-- func: take_along_dim(Tensor self, Tensor indices, int? dim) -> Tensor
+- func: take_along_dim(Tensor self, Tensor indices, int? dim=None) -> Tensor
   variants: method, function
 
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
