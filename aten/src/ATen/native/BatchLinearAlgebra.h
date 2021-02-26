@@ -23,6 +23,9 @@ void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *w,
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
+template <class scalar_t, class value_t = scalar_t>
+void lapackSyevd(char jobz, char uplo, int n, scalar_t* a, int lda, value_t* w, scalar_t* work, int lwork, value_t* rwork, int lrwork, int* iwork, int liwork, int* info);
+
 #endif
 
 using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, bool /*upper*/);
@@ -100,5 +103,13 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t 
 
 using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/, Tensor& /*infos*/, int64_t /*n_columns*/);
 DECLARE_DISPATCH(orgqr_fn, orgqr_stub);
+
+using linalg_eigh_fn = void (*)(
+    Tensor& /*eigenvalues*/,
+    Tensor& /*eigenvectors*/,
+    Tensor& /*infos*/,
+    bool /*upper*/,
+    bool /*compute_eigenvectors*/);
+DECLARE_DISPATCH(linalg_eigh_fn, linalg_eigh_stub);
 
 }} // namespace at::native
