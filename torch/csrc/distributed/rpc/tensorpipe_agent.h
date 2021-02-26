@@ -337,7 +337,7 @@ class TensorPipeAgent : public RpcAgent {
     explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     mutable std::mutex mutex_;
-    bool readError_{false};
+    bool inError_{false};
     // Map from Message Request ID's to corresponding futures.
     std::unordered_map<uint64_t, std::shared_ptr<AtomicJitFuture>>
         pendingResponseMessage_;
@@ -410,6 +410,11 @@ class TensorPipeAgent : public RpcAgent {
     return std::chrono::time_point_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() + timeout);
   }
+
+  // Handle error on an outgoing pipe
+  void handleClientError(
+      ClientPipe& clientPipe,
+      const tensorpipe::Error& error);
 
   // This is a generic struct for capturing Time-Series Metrics. It keeps a
   // running sum and count of data points (observations), and can return an
