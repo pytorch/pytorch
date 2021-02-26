@@ -164,6 +164,7 @@ bool Tensor::is_metal() const {
   return impl_->is_metal();
 }
 
+
 bool is_vulkan(Tensor self) {
   return self.is_vulkan();
 }

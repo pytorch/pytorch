@@ -376,14 +376,6 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_is_floating_point(PyObject* self)
-{
-  HANDLE_TH_ERRORS
-  jit::tracer::warn("torch.is_floating_point", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::is_floating_point());
-  END_HANDLE_TH_ERRORS
-}
-
 // implemented on python object here because PyObject currently not natively declarable
 // See: ATen/native/README.md for more context
 static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
