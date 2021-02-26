@@ -178,7 +178,7 @@ class TestTEFuser(JitTestCase):
 
         inputs = (torch.rand(20, 28, device='cuda', requires_grad=True), torch.rand(20, device='cuda'))
 
-        scripted = self.checkScript(foo, inputs, extra_profile_runs=True)
+        scripted = self.checkScript(foo, inputs)
         self.assertAllFused(scripted.graph_for(*inputs))
 
     def _test_zero_element_tensors(self, device="cpu"):
@@ -430,7 +430,7 @@ class TestTEFuser(JitTestCase):
             funcs = (func2, funcInf, funcNegInf, funcOptMin, funcOptMax)
             for f, inputs in product(funcs, [[a, b], [a, nan]]):
                 inp1, inp2 = inputs
-                s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING, extra_profile_runs=True)
+                s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
                 self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
                 c = s(inp1, inp2)
                 with enable_profiling_mode_for_profiling_tests():
@@ -832,7 +832,7 @@ class TestTEFuser(JitTestCase):
 
         b = torch.randn(5, 5, requires_grad=True)
         a = torch.randn(5, 5, requires_grad=True)
-        s = self.checkScript(f, (a, b), extra_profile_runs=True)
+        s = self.checkScript(f, (a, b))
         self.assertAllFused(s.graph_for(a, b), except_for={
                             'aten::size', 'aten::_size_if_not_equal', 'prim::BroadcastSizes'})
 
@@ -951,7 +951,7 @@ class TestTEFuser(JitTestCase):
     def test_lstm(self):
         for device in self.devices:
             inputs = get_lstm_inputs(device, training=True)
-            module = self.checkScript(LSTMCellS, inputs, extra_profile_runs=True)
+            module = self.checkScript(LSTMCellS, inputs)
             self.assertAllFused(module.graph_for(inputs))
 
     def test_lstm_concat(self):
@@ -1000,7 +1000,7 @@ class TestTEFuser(JitTestCase):
     def test_milstm(self):
         for device in self.devices:
             inputs = get_milstm_inputs(device, training=True)
-            module = self.checkScript(MiLSTMCell, inputs, extra_profile_runs=True)
+            module = self.checkScript(MiLSTMCell, inputs)
             forward_graph = module.graph_for(*inputs)
             self.assertGraphContainsExactly(
                 forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
@@ -1057,7 +1057,7 @@ class TestTEFuser(JitTestCase):
             ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x))
             x.requires_grad_(True)
-            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING, extra_profile_runs=True)
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
                                                              "aten::_size_if_not_equal"))
 
@@ -1195,7 +1195,7 @@ class TestTEFuser(JitTestCase):
         s1 = torch.randn(5, 1, requires_grad=True, device='cuda')
         s2 = torch.randn(5, 5, requires_grad=True, device='cuda')
 
-        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1), profiling=ProfilingMode.PROFILING, extra_profile_runs=True)
+        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1), profiling=ProfilingMode.PROFILING)
         forward_graph = module.graph_for(s1, s1, s1)
         self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
                                                        "aten::_size_if_not_equal"))
@@ -1207,7 +1207,7 @@ class TestTEFuser(JitTestCase):
             args = s2 if i < 1 else s1, s2 if i < 2 else s1, s2
             args = [a.detach_().requires_grad_() for a in args]
             # recompile, so we don't trigger bailouts
-            module = self.checkScript(my_broadcasted_cell, args, profiling=ProfilingMode.PROFILING, extra_profile_runs=True)
+            module = self.checkScript(my_broadcasted_cell, args, profiling=ProfilingMode.PROFILING)
             res = module(s2 if i < 1 else s1, s2 if i < 2 else s1, s2)
             warmup_backward(res.sum(), args)
             grads = torch.autograd.grad(res.sum(), args)

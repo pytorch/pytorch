@@ -424,10 +424,10 @@ class JitTestCase(JitCommonTestCase):
                     frames_up=1,
                     profiling=ProfilingMode.PROFILING,
                     atol=None,
-                    rtol=None,
-                    extra_profile_runs=False):
+                    rtol=None):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
+                extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
