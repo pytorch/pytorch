@@ -24,7 +24,8 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if sys.executable == 'torch_deploy':
-    __version__ = "torch-deploy-1.8"
+    # Add major.minor suffix to torch-deploy version
+    __version__ = "torch-deploy-" + ".".join(torch.version.__version__.split('.')[:2])
 else:
     from .version import __version__
 from ._six import string_classes as _string_classes
