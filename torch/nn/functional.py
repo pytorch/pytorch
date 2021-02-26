@@ -1277,7 +1277,11 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu6, (input,), input, inplace=inplace)
-    return hardtanh(input, 0.0, 6.0, inplace)
+    if inplace:
+        result = torch._C._nn.relu6_(input)
+    else:
+        result = torch._C._nn.relu6(input)
+    return result
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
@@ -1711,9 +1715,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""hardsigmoid(input) -> Tensor
-
-    Applies the element-wise function
+    r"""Applies the element-wise function
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
