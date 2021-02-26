@@ -2306,7 +2306,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_build:
           name: binary_linux_conda_3_7_cpu_devtoolset7_nightly_build
           build_environment: "conda 3.7 cpu devtoolset7"
@@ -2317,7 +2317,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_build:
           name: binary_linux_conda_3_8_cpu_devtoolset7_nightly_build
           build_environment: "conda 3.8 cpu devtoolset7"
@@ -2328,7 +2328,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_build:
           name: binary_linux_conda_3_9_cpu_devtoolset7_nightly_build
           build_environment: "conda 3.9 cpu devtoolset7"
@@ -2339,7 +2339,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_build:
           name: binary_linux_conda_3_6_cu101_devtoolset7_nightly_build
           build_environment: "conda 3.6 cu101 devtoolset7"
@@ -2350,7 +2350,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
       - binary_linux_build:
           name: binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu101 devtoolset7"
@@ -2361,7 +2361,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
       - binary_linux_build:
           name: binary_linux_conda_3_8_cu101_devtoolset7_nightly_build
           build_environment: "conda 3.8 cu101 devtoolset7"
@@ -2372,7 +2372,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
       - binary_linux_build:
           name: binary_linux_conda_3_9_cu101_devtoolset7_nightly_build
           build_environment: "conda 3.9 cu101 devtoolset7"
@@ -2383,7 +2383,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
       - binary_linux_build:
           name: binary_linux_conda_3_6_cu102_devtoolset7_nightly_build
           build_environment: "conda 3.6 cu102 devtoolset7"
@@ -2394,7 +2394,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
       - binary_linux_build:
           name: binary_linux_conda_3_7_cu102_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu102 devtoolset7"
@@ -2405,7 +2405,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
       - binary_linux_build:
           name: binary_linux_conda_3_8_cu102_devtoolset7_nightly_build
           build_environment: "conda 3.8 cu102 devtoolset7"
@@ -2416,7 +2416,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
       - binary_linux_build:
           name: binary_linux_conda_3_9_cu102_devtoolset7_nightly_build
           build_environment: "conda 3.9 cu102 devtoolset7"
@@ -2427,7 +2427,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
       - binary_linux_build:
           name: binary_linux_conda_3_6_cu111_devtoolset7_nightly_build
           build_environment: "conda 3.6 cu111 devtoolset7"
@@ -2438,7 +2438,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
       - binary_linux_build:
           name: binary_linux_conda_3_7_cu111_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu111 devtoolset7"
@@ -2449,7 +2449,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
       - binary_linux_build:
           name: binary_linux_conda_3_8_cu111_devtoolset7_nightly_build
           build_environment: "conda 3.8 cu111 devtoolset7"
@@ -2460,7 +2460,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
       - binary_linux_build:
           name: binary_linux_conda_3_9_cu111_devtoolset7_nightly_build
           build_environment: "conda 3.9 cu111 devtoolset7"
@@ -2471,7 +2471,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
           build_environment: "libtorch 3.7m cpu devtoolset7"
@@ -3730,7 +3730,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_6_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_test:
           name: binary_linux_conda_3_7_cpu_devtoolset7_nightly_test
           build_environment: "conda 3.7 cpu devtoolset7"
@@ -3743,7 +3743,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_7_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_test:
           name: binary_linux_conda_3_8_cpu_devtoolset7_nightly_test
           build_environment: "conda 3.8 cpu devtoolset7"
@@ -3756,7 +3756,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_8_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_test:
           name: binary_linux_conda_3_9_cpu_devtoolset7_nightly_test
           build_environment: "conda 3.9 cpu devtoolset7"
@@ -3769,7 +3769,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_9_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_test:
           name: binary_linux_conda_3_6_cu101_devtoolset7_nightly_test
           build_environment: "conda 3.6 cu101 devtoolset7"
@@ -3782,7 +3782,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_6_cu101_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3797,7 +3797,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3812,7 +3812,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_8_cu101_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3827,7 +3827,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_9_cu101_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3842,7 +3842,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_6_cu102_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3857,7 +3857,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_7_cu102_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3872,7 +3872,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_8_cu102_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3887,7 +3887,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_9_cu102_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3902,7 +3902,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_6_cu111_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3917,7 +3917,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_7_cu111_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3932,7 +3932,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_8_cu111_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3947,7 +3947,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_9_cu111_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -7965,7 +7965,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - smoke_linux_test:
           name: smoke_linux_conda_3_7_cpu_devtoolset7_nightly
           build_environment: "conda 3.7 cpu devtoolset7"
@@ -7975,7 +7975,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - smoke_linux_test:
           name: smoke_linux_conda_3_8_cpu_devtoolset7_nightly
           build_environment: "conda 3.8 cpu devtoolset7"
@@ -7985,7 +7985,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - smoke_linux_test:
           name: smoke_linux_conda_3_9_cpu_devtoolset7_nightly
           build_environment: "conda 3.9 cpu devtoolset7"
@@ -7995,7 +7995,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cpu"
       - smoke_linux_test:
           name: smoke_linux_conda_3_6_cu101_devtoolset7_nightly
           build_environment: "conda 3.6 cu101 devtoolset7"
@@ -8005,7 +8005,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8017,7 +8017,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8029,7 +8029,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8041,7 +8041,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8053,7 +8053,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8065,7 +8065,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8077,7 +8077,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8089,7 +8089,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8101,7 +8101,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8113,7 +8113,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8125,7 +8125,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8137,7 +8137,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/conda-cuda"
+          docker_image: "pytorch/conda-builder:cuda111"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:

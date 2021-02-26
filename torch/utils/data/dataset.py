@@ -7,7 +7,7 @@ from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
@@ -153,7 +153,7 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
-    functions = {}
+    functions: Dict[str, Callable] = {}
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
