@@ -121,6 +121,7 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   fusion_ = *fusion;
   FusionGuard fg(&fusion_);
   options_ = options;
+  c10::DeviceGuard dg(options_.device);
 
   TORCH_INTERNAL_ASSERT(
       options.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");

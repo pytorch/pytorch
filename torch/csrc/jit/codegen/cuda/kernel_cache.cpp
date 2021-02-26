@@ -444,9 +444,10 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
         options.device = c10::Device(DeviceType::CUDA, device_index);
         // We do not need to copy fusion_ because we are not generating
         // multiple kernels for point-wise operations.
-        scheduleFusion(fusion_.get(), inputs);
+        auto fusion_clone = *fusion_;
+        scheduleFusion(&fusion_clone, inputs);
         pw_fusion_executor_cache_[device_index]->compileFusion(
-            fusion_.get(), options);
+            &fusion_clone, options);
       }
       // record new short cut to `FusionExecutor`
       code_to_fe_lookup_[unique_id] =

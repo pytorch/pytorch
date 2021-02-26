@@ -5,6 +5,7 @@ import random
 import torch
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing import FileCheck
 
@@ -1945,6 +1946,28 @@ class TestCudaFuser(JitTestCase):
             FileCheck().check(FUSION_GROUP).run(bwd_graph)
             self.assertEqual(x.grad.dtype, x.dtype)
             self.assertEqual(y.grad.dtype, y.dtype)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple CUDA device")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_multiple_device_pw(self):
+
+        def t(x):
+            o = x + 1.0
+            o = torch.relu(o)
+            return o
+
+        x = torch.randn(2, dtype=torch.float32, device="cuda")
+        t_jit = torch.jit.script(t)
+
+        for i in range(3):
+            jit_o = t_jit(x)
+
+        self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
+        torch.cuda.device(1)
+        x = x.to("cuda:1")
+        jit_o = t_jit(x)
 
 class TestPassManagerCudaFuser(JitTestCase):
 
