@@ -62,26 +62,6 @@ C10_DEFINE_int64(
 namespace torch {
 namespace jit {
 
-namespace {
-void removeProfileNodes(Block* b) {
-  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile) {
-      GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
-      it->output()->replaceAllUsesWith(it->input());
-      it.destroyCurrent();
-    } else {
-      for (Block* ib : it->blocks()) {
-        removeProfileNodes(ib);
-      }
-    }
-  }
-}
-
-void removeProfileNodes(std::shared_ptr<Graph>& graph) {
-  removeProfileNodes(graph->block());
-}
-} // namespace
-
 #if defined(C10_MOBILE)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
@@ -482,7 +462,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
-      removeProfileNodes(gradient.f);
+      RemoveTensorTypeSpecializations(gradient.f);
+      RemoveProfilingNodes(gradient.f);
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
       // just like inside autograd.Functions, the forward of a differentiable
