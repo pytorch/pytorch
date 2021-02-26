@@ -5027,17 +5027,14 @@ class TestTorchDeviceType(TestCase):
             ('argmin', torch.argmin, {'dtype': torch.int64}),
             ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, {}),
             ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, {}),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,{}),
-            #('mode', torch.mode, {}),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, {}),
             ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, {}),
         ]
 
         for name, fn, dtype in test_functions:
             # Check if reduction happens along the specified dim with and without keepdim.
-            print("function: ", fn)
-            self.assertEqual(torch.empty((2, 0), device=device,**dtype), fn(master_input, dim=2))
-            self.assertEqual(torch.empty((2, 0, 1), device=device,**dtype), 
-                fn(master_input, dim=2, keepdim=True))
+            self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True))
 
             # Check if function raises error on specified zero'd dimension as reduction dim.
             self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1))
@@ -5063,7 +5060,7 @@ class TestTorchDeviceType(TestCase):
 
             # Check if returned data is correct.
             check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else
-                         self.assertEqual)
+                          self.assertEqual)
             check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1))
             check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True))
 
