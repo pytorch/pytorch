@@ -545,5 +545,5 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
 
 if __name__ == "__main__":
-     # ! unittest should not be used here, else the tests are not properly registered
+    # ! unittest should not be used here, else the tests are not properly registered
     common_utils.run_tests()
