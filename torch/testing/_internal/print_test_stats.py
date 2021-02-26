@@ -25,6 +25,126 @@ try:
 except ImportError:
     HAVE_BOTO3 = False
 
+
+# TODO: this is ugly duplicated code from run_test.py we should probably abstract out to common_utils.py
+TESTS = [
+    'test_type_hints',
+    'test_autograd',
+    'benchmark_utils/test_benchmark_utils',
+    'test_binary_ufuncs',
+    'test_bundled_inputs',
+    'test_complex',
+    'test_cpp_api_parity',
+    'test_cpp_extensions_aot_no_ninja',
+    'test_cpp_extensions_aot_ninja',
+    'test_cpp_extensions_jit',
+    'distributed/test_c10d',
+    'distributed/test_jit_c10d',
+    'distributed/test_c10d_spawn',
+    'test_cuda',
+    'test_jit_cuda_fuser',
+    'test_cuda_primary_ctx',
+    'test_dataloader',
+    'test_dataset',
+    'test_datapipe',
+    'distributed/test_data_parallel',
+    'distributed/test_distributed_fork',
+    'distributed/test_distributed_spawn',
+    'distributions/test_constraints',
+    'distributions/test_distributions',
+    'test_dispatch',
+    'test_expecttest',
+    'test_foreach',
+    'test_indexing',
+    'test_jit',
+    'test_linalg',
+    'test_logging',
+    'test_mkldnn',
+    'test_multiprocessing',
+    'test_multiprocessing_spawn',
+    'distributed/test_nccl',
+    'test_native_functions',
+    'test_numba_integration',
+    'test_nn',
+    'test_ops',
+    'test_optim',
+    'test_pytree',
+    'test_mobile_optimizer',
+    'test_set_default_mobile_cpu_allocator',
+    'test_xnnpack_integration',
+    'test_vulkan',
+    'test_sparse',
+    'test_quantization',
+    'test_pruning_op',
+    'test_spectral_ops',
+    'test_serialization',
+    'test_shape_ops',
+    'test_show_pickle',
+    'test_sort_and_select',
+    'test_tensor_creation_ops',
+    'test_testing',
+    'test_torch',
+    'test_type_info',
+    'test_unary_ufuncs',
+    'test_utils',
+    'test_view_ops',
+    'test_vmap',
+    'test_namedtuple_return_api',
+    'test_numpy_interop',
+    'test_jit_profiling',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
+    'test_tensorboard',
+    'test_namedtensor',
+    'test_reductions',
+    'test_type_promotion',
+    'test_jit_disabled',
+    'test_function_schema',
+    'test_op_aliases',
+    'test_overrides',
+    'test_jit_fuser_te',
+    'test_tensorexpr',
+    'test_tensorexpr_pybind',
+    'test_openmp',
+    'test_profiler',
+    'distributed/nn/jit/test_instantiator',
+    'distributed/rpc/test_faulty_agent',
+    'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/test_tensorpipe_agent',
+    'test_jit_py3',
+    'test_determination',
+    'test_futures',
+    'test_fx',
+    'test_fx_experimental',
+    'test_functional_autograd_benchmark',
+    'test_package',
+    'test_license',
+    'distributed/pipeline/sync/skip/test_api',
+    'distributed/pipeline/sync/skip/test_gpipe',
+    'distributed/pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/pipeline/sync/skip/test_leak',
+    'distributed/pipeline/sync/skip/test_portal',
+    'distributed/pipeline/sync/skip/test_stash_pop',
+    'distributed/pipeline/sync/skip/test_tracker',
+    'distributed/pipeline/sync/skip/test_verify_skippables',
+    'distributed/pipeline/sync/test_balance',
+    'distributed/pipeline/sync/test_bugs',
+    'distributed/pipeline/sync/test_checkpoint',
+    'distributed/pipeline/sync/test_copy',
+    'distributed/pipeline/sync/test_deferred_batch_norm',
+    'distributed/pipeline/sync/test_dependency',
+    'distributed/pipeline/sync/test_inplace',
+    'distributed/pipeline/sync/test_microbatch',
+    'distributed/pipeline/sync/test_phony',
+    'distributed/pipeline/sync/test_pipe',
+    'distributed/pipeline/sync/test_pipeline',
+    'distributed/pipeline/sync/test_stream',
+    'distributed/pipeline/sync/test_transparency',
+    'distributed/pipeline/sync/test_worker',
+    'distributed/optim/test_zero_redundancy_optimizer',
+]
+
+
 Commit = str  # 40-digit SHA-1 hex string
 Status = Optional[str]  # errored, failed, skipped, or None
 
@@ -595,14 +715,16 @@ def parse_reports(folder: str) -> Dict[str, TestSuite]:
     tests_by_class = dict()
     for report in reports:
         test_filename = re.sub(r'\.', '/', os.path.basename(os.path.dirname(report)))
-        for test_case in parse_report(report):
-            class_name = test_case.class_name
-            if class_name not in tests_by_class:
-                tests_by_class[class_name] = TestSuite(class_name, test_filename)
-            orig_filename = tests_by_class[class_name].filename
-            if test_filename != orig_filename:
-                raise RuntimeError(f'Suite belongs to different test files: {0} vs {1}', test_filename, orig_filename)
-            tests_by_class[class_name].append(test_case)
+        # Ignore non-Python tests (any test NOT defined in TESTS)
+        if test_filename in TESTS:
+            for test_case in parse_report(report):
+                class_name = test_case.class_name
+                if class_name not in tests_by_class:
+                    tests_by_class[class_name] = TestSuite(class_name, test_filename)
+                orig_filename = tests_by_class[class_name].filename
+                if test_filename != orig_filename:
+                    raise RuntimeError(f'Suite {class_name} belongs to different test files: {test_filename} vs {orig_filename}')
+                tests_by_class[class_name].append(test_case)
     return tests_by_class
 
 
