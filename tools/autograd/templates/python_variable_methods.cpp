@@ -179,18 +179,6 @@ static PyObject * THPVariable_has_names(PyObject* self_, PyObject* args)
 }
 
 // implemented on the python object to avoid dispatch overhead
-static PyObject * THPVariable_is_floating_point(PyObject* self_, PyObject* args)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self_)) {
-    return handle_torch_function(self_, "is_floating_point", args);
-  }
-  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
-  return wrap(self.is_floating_point());
-  END_HANDLE_TH_ERRORS
-}
-
-// implemented on the python object to avoid dispatch overhead
 static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
