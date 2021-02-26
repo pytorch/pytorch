@@ -87,11 +87,13 @@ COLLECTIVES_OBJECT_TEST_LIST = [
 PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.NCCL,
     dist.Backend.GLOO,
+    dist.Backend.MPI,
 ]
 
 # Allowlist of distributed backends where profiling is supported with use_cuda=True
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
-    dist.Backend.GLOO
+    dist.Backend.GLOO,
+    dist.Backend.MPI,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
