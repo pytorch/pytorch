@@ -10,8 +10,6 @@
 
 #include <utility>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 
@@ -217,7 +215,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   if (self.sizes().size() != 0) {
-    TORCH_CHECK(self.sizes()[dim] != 0, "Expected reduction dim ", dim, " to be non-zero.");
+    TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
   }
   TORCH_CHECK(
       k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),

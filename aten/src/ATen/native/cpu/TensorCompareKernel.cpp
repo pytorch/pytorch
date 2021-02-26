@@ -3,7 +3,6 @@
 #include <numeric>
 #include <iterator>
 #include <algorithm>
-#include <iostream>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -26,8 +25,6 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
 
   // result1 and result2 may be a empty tensor, if not,
   // reshape them as self dims
-  std::cout << "pre res1.sizes(): " << result1.sizes() << std::endl;
-  std::cout << "pre res2.sizes(): " << result2.sizes() << std::endl;
   if (!keepdim) {
     if (result1.ndimension() >= dim) {
       result1.unsqueeze_(dim);
@@ -36,14 +33,10 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
       result2.unsqueeze_(dim);
     }
   }
-  
-  std::cout << "unsqueeze res1.sizes(): " << result1.sizes() << std::endl;
-  std::cout << "unsqueeze res2.sizes(): " << result2.sizes() << std::endl;
+
   result1.resize_(self_sizes);
   result2.resize_(self_sizes);
 
-  std::cout << "resize res1.sizes(): " << result1.sizes() << std::endl;
-  std::cout << "resize res2.sizes(): " << result2.sizes() << std::endl;
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
   auto iter = TensorIteratorConfig()

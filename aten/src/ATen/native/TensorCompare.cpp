@@ -10,8 +10,6 @@
 
 #include <c10/util/irange.h>
 
-#include <iostream>
-
 namespace at { namespace native {
 
 DEFINE_DISPATCH(where_kernel);
@@ -291,7 +289,7 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
 
 void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices, const Tensor& self, int64_t dim,
                               bool keepdim) {
-  TORCH_CHECK(self.sizes()[dim] != 0, "Expected reduction dim ", dim, " to be non-zero");
+  TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero");
 
   if (keepdim) {
     auto sizes = ensure_nonempty_vec(self.sizes().vec());
