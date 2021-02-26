@@ -14,6 +14,7 @@ import torch.distributed as dist
 from torch.nn import Parameter
 from torch.optim import Optimizer
 import io
+import logging
 
 __all__ = ["ZeroRedundancyOptimizer"]
 
@@ -100,8 +101,13 @@ class ZeroRedundancyOptimizer(Optimizer):
         params (list of tensors):
             parameters to be optimized
     Keyword Args:
-        optim (torch.nn.Optimizer): optimizer to shard
-        group (group): torch.distributed group (default: group.WORLD)
+        optim (torch.nn.Optimizer):
+            optimizer to shard
+        group (group):
+            torch.distributed group (default: group.WORLD)
+        parameters_as_bucket_view (bool):
+            whether to pack the parameters into bigger buckets, which speeds up communications.
+            If this is enabled, `params.data` should not be modified outside of ZeroRedundancyOptimizer.
         **default: all trailing arguments will be forwarded to the requested optimizer
 
     .. warning: ZeroRedundancyOptimizer is experimental and subject to change.
@@ -115,6 +121,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         params,
         optim: Type[Optimizer],
         group: Optional[Any] = None,
+        parameters_as_bucket_view: bool = False,
         **default: Any,
     ):
         # Hold all the model params in the root .param_groups
@@ -140,6 +147,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         self.world_size = dist.get_world_size(self.group)
         self.rank = dist.get_rank(self.group)
         self.global_rank = _get_global_rank(self.group, self.rank)
+        self.parameters_as_bucket_view = parameters_as_bucket_view
 
         # Default empty values + immutables
         self._optim_defaults = default
@@ -280,7 +288,8 @@ class ZeroRedundancyOptimizer(Optimizer):
             self.optim = self._optim_constructor(self.partition_parameters()[self.rank], **self._optim_defaults)
             self._sync_param_groups(self.optim.param_groups, self.param_groups)
 
-        self._setup_flat_buffers()
+        if self.parameters_as_bucket_view:
+            self._setup_flat_buffers()
 
     @property
     def per_device_params(self) -> Dict[torch.device, List[List[Parameter]]]:
@@ -363,10 +372,19 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         # Sync all the updated shards in between the ranks
         handles = []
-        for device in self.buckets.keys():
-            for src_rank, bucket in enumerate(self.buckets[device]):
-                global_src_rank = _get_global_rank(self.group, src_rank)
-                handles.append(dist.broadcast(tensor=bucket, src=global_src_rank, group=self.group, async_op=True))
+        if self.parameters_as_bucket_view:
+            for device in self.buckets.keys():
+                for src_rank, bucket in enumerate(self.buckets[device]):
+                    global_src_rank = _get_global_rank(self.group, src_rank)
+                    handles.append(dist.broadcast(tensor=bucket, src=global_src_rank, group=self.group, async_op=True))
+        else:
+            for device, per_rank_params in self.per_device_params.items():
+                for dst_rank, params in enumerate(per_rank_params):
+                    global_dst_rank = _get_global_rank(self.group, dst_rank)
+                    for param in params:
+                        handles.append(
+                            dist.broadcast(tensor=param.data, src=global_dst_rank, group=self.group, async_op=True)
+                        )
 
         _ = list(map(lambda x: x.wait(), handles))
 
