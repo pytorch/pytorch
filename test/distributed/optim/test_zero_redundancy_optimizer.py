@@ -396,7 +396,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         _ = optimizer.step(closure=closure)
 
         # Update the optimizer state on the reference rank
-        optimizer.consolidate_state_dict(recipient_rank=RECIPIENT_RANK)
+        optimizer.consolidate_state_dict(to=RECIPIENT_RANK)
 
         # Fetch the state on the reference rank
         # - check that it has the correct size
