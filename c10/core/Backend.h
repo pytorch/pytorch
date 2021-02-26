@@ -147,7 +147,7 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
-    AT_ERROR("Unrecognized tensor type ID: ", t);
+    TORCH_CHECK(false, "Unrecognized tensor type ID: ", t);
   }
 }
 
@@ -230,9 +230,9 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::MLC:
       return DeviceType::MLC;
     case Backend::Undefined:
-      AT_ERROR("Undefined backend is not a valid device type");
+      TORCH_CHECK(false, "Undefined backend is not a valid device type");
     default:
-      AT_ERROR("Unknown backend");
+      TORCH_CHECK(false, "Unknown backend");
   }
 }
 
@@ -272,7 +272,7 @@ static inline Backend backendToCPU(Backend b) {
     case Backend::Undefined:
       return Backend::Undefined;
     default:
-      AT_ERROR("Unknown backend");
+      TORCH_CHECK(false, "Unknown backend");
   }
 }
 
@@ -300,7 +300,7 @@ static inline Backend backendToXPU(Backend b) {
     case Backend::Undefined:
       return Backend::Undefined;
     default:
-      AT_ERROR("Unknown backend");
+      TORCH_CHECK(false, "Unknown backend");
   }
 }
 
@@ -323,7 +323,7 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::Undefined:
       return Backend::Undefined;
     default:
-      AT_ERROR("Unknown backend");
+      TORCH_CHECK(false, "Unknown backend");
   }
 }
 
@@ -346,7 +346,7 @@ static inline Backend backendToHIP(Backend b) {
     case Backend::Undefined:
       return Backend::Undefined;
     default:
-      AT_ERROR("Unknown backend");
+      TORCH_CHECK(false, "Unknown backend");
   }
 }
 

@@ -239,8 +239,8 @@ struct ReLUClass : public torch::CustomClassHolder {
 
 TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<ReLUClass>("_ReLUClass")
-    .def(torch::init<>())
-    .def("run", &ReLUClass::run);
+      .def(torch::init<>())
+      .def("run", &ReLUClass::run);
 
   m.class_<_StaticMethod>("_StaticMethod")
       .def(torch::init<>())

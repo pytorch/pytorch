@@ -1099,13 +1099,14 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "__eq__",
-          [](const Module& self, py::object other) {
-        // TODO: call UDF if it exists
-        if (!py::isinstance<Module>(other)) {
-          return false;
-        }
-        return self._ivalue().get() == py::cast<Module>(other)._ivalue().get();
-      })
+          [](const Module& self, const py::object& other) {
+            // TODO: call UDF if it exists
+            if (!py::isinstance<Module>(other)) {
+              return false;
+            }
+            return self._ivalue().get() ==
+                py::cast<Module>(other)._ivalue().get();
+          })
       .def(
           "__deepcopy__",
           [](const Module& self, const py::dict& memo) {
@@ -1366,9 +1367,8 @@ void initJitScriptBindings(PyObject* module) {
                 std::vector<py::object> overloaded_types;
                 overloaded_types.reserve(overloaded_args.size());
                 for (auto& oarg : overloaded_args) {
-                  overloaded_types.push_back(
-                      py::reinterpret_borrow<py::object>(
-                          (PyObject*)Py_TYPE(oarg.ptr())));
+                  overloaded_types.push_back(py::reinterpret_borrow<py::object>(
+                      (PyObject*)Py_TYPE(oarg.ptr())));
                 }
                 py::tuple py_types = py::cast(overloaded_types);
 
@@ -1412,19 +1412,21 @@ void initJitScriptBindings(PyObject* module) {
           [](Method& self) {
             return self.get_executor().debugFlushCompilationCache();
           })
-      .def_property_readonly("code_with_constants", [](Method& self) {
-        std::vector<at::IValue> constants;
-        PrintDepsTable deps;
-        PythonPrint pp(constants, deps);
-        pp.printMethod(self.function());
-        std::map<std::string, at::IValue> consts;
-        int i = 0;
-        for (auto const& constant : constants) {
-          consts["c" + std::to_string(i)] = constant;
-          i += 1;
-        }
-        return std::make_tuple(pp.str(), consts);
-      })
+      .def_property_readonly(
+          "code_with_constants",
+          [](Method& self) {
+            std::vector<at::IValue> constants;
+            PrintDepsTable deps;
+            PythonPrint pp(constants, deps);
+            pp.printMethod(self.function());
+            std::map<std::string, at::IValue> consts;
+            int i = 0;
+            for (auto const& constant : constants) {
+              consts["c" + std::to_string(i)] = constant;
+              i += 1;
+            }
+            return std::make_tuple(pp.str(), consts);
+          })
       .def_property_readonly("owner", &Method::owner);
   m.def(
       "_jit_script_compile",
