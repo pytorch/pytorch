@@ -516,7 +516,7 @@ if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
   if(MSVC_TOOLSET_VERSION LESS 142)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-openmp")
   else()
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-Qopenmp")
+    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/Qopenmp")
   endif()
 endif()
 
