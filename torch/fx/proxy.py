@@ -4,7 +4,7 @@ import inspect
 import operator
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
+from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Union
 from .node import Target, Node, Argument, base_types, map_aggregate
 
 class TracerBase:
@@ -221,3 +221,31 @@ def _define_reflectable(orig_method_name):
 
 for orig_method_name in reflectable_magic_methods:
     _define_reflectable(orig_method_name)
+
+class DimSpecializedProxy(Proxy):
+    def __init__(self, p : Proxy, dim : int):
+        super().__init__(p.node)
+        self._dim = dim
+
+    def dim(self):
+        return self._dim
+
+    def __iter__(self) -> Iterable['Proxy']:
+        return (self[i] for i in range(self._dim))
+
+    @property
+    def shape(self):
+        shape = Proxy(self.node).shape
+        return tuple(shape[i] for i in range(self._dim))
+
+    def __repr__(self):
+        return f'DimSpecializedProxy({self.node}, dim={self.dim})'
+
+    def __str__(self):
+        return repr(self)
+
+def annotate_dim(x : Union[torch.Tensor, Proxy], dim : int):
+    if isinstance(x, Proxy):
+        torch._assert(x.dim() == dim, f'Expected tensor to have dimension {dim}')
+        return DimSpecializedProxy(x, dim)
+    return x

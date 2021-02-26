@@ -1630,6 +1630,26 @@ class TestFX(JitTestCase):
         input = torch.rand(3, 4)
         self.assertEqual(traced(input), Pair(input, input))
 
+    def test_dim_specialized_annotation(self):
+        def foo(x):
+            x = torch.fx.proxy.annotate_dim(x, 2)
+            for x in range(x.dim()):
+                x = x + 2.0
+            return x
+
+        self.checkGraphModule(foo, (torch.rand(3, 4),))
+
+    def test_dim_specialized_annotation_iter(self):
+        def foo(x):
+            x = torch.fx.proxy.annotate_dim(x, 2)
+            for s_x in x.shape:
+                x = x + s_x
+            return x
+
+        traced = symbolic_trace(foo)
+
+        self.checkGraphModule(foo, (torch.randn(3, 4),))
+
     def test_return_type_exists(self):
         class ReturnTypeModule(torch.nn.Module):
             def other(self, x: List[str]) -> List[str]:
