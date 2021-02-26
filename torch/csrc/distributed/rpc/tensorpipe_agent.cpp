@@ -938,21 +938,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                          << clientPipe.pipe_->getRemoteName() << ": "
                          << error.what();
           }
-          std::shared_ptr<AtomicJitFuture> futureResponseMessage;
-          {
-            std::lock_guard<std::mutex> lock(clientPipe.mutex_);
-            auto pendingFutIt =
-                clientPipe.pendingResponseMessage_.find(messageId);
-            TORCH_INTERNAL_ASSERT(
-                pendingFutIt != clientPipe.pendingResponseMessage_.end(),
-                "message ID ",
-                messageId,
-                " is not recognized");
-            futureResponseMessage = std::move(pendingFutIt->second);
-            clientPipe.pendingResponseMessage_.erase(pendingFutIt);
-          }
-          markFutureWithError(futureResponseMessage, error.what());
-          removeFromTimeoutMap(messageId);
+          handleClientError(clientPipe, error);
           return;
         }
 
@@ -976,23 +962,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                       << clientPipe.pipe_->getRemoteName() << ": "
                       << error.what();
                 }
-                // We may get garbage content in responseMessage upon error.
-                // Flushing all future messages belonging to this pipe due to
-                // error state.
-                decltype(clientPipe.pendingResponseMessage_) pendingMsgs;
-                {
-                  std::lock_guard<std::mutex> lock(clientPipe.mutex_);
-                  std::swap(clientPipe.pendingResponseMessage_, pendingMsgs);
-                  clientPipe.readError_ = true;
-                }
-                std::string errorMsg = error.what();
-                for (auto& p : pendingMsgs) {
-                  markFutureWithError(std::move(p.second), errorMsg);
-
-                  // Remove entry from timeoutMap_.
-                  removeFromTimeoutMap(p.first);
-                }
-
+                handleClientError(clientPipe, error);
                 return;
               }
 
@@ -1009,7 +979,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                 // A read error will lead all following callbacks to be
                 // invoked with error, and shouldn't reach here.
                 TORCH_INTERNAL_ASSERT(
-                    !clientPipe.readError_, "Shouldn't in error state");
+                    !clientPipe.inError_, "Shouldn't be in error state");
                 auto it = clientPipe.pendingResponseMessage_.find(messageId);
                 TORCH_INTERNAL_ASSERT(
                     it != clientPipe.pendingResponseMessage_.end(),
@@ -1040,6 +1010,27 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
       deviceMap);
 
   return futureResponseMessage->jitFuture;
+}
+
+void TensorPipeAgent::handleClientError(
+    ClientPipe& clientPipe,
+    const tensorpipe::Error& error) {
+  // When an error occurs on a pipe all pending operations will be aborted and
+  // all callbacks invoked with error, hence we immediately flush all future
+  // messages belonging to this pipe.
+  decltype(clientPipe.pendingResponseMessage_) pendingMsgs;
+  {
+    std::lock_guard<std::mutex> lock(clientPipe.mutex_);
+    std::swap(clientPipe.pendingResponseMessage_, pendingMsgs);
+    clientPipe.inError_ = true;
+  }
+  std::string errorMsg = error.what();
+  for (auto& p : pendingMsgs) {
+    markFutureWithError(std::move(p.second), errorMsg);
+
+    // Remove entry from timeoutMap_.
+    removeFromTimeoutMap(p.first);
+  }
 }
 
 void TensorPipeAgent::pollTimeoutRpcs() {
