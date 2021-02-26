@@ -310,7 +310,7 @@ def shutdown(graceful=True):
     if graceful:
         _wait_all_workers()
         _delete_all_user_and_unforked_owner_rrefs()
-        _get_current_rpc_agent().join()
+        _get_current_rpc_agent().join(shutdown=True)
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
@@ -347,7 +347,7 @@ def get_worker_info(worker_name=None):
         ``worker_name`` or :class:`~torch.distributed.rpc.WorkerInfo` of the
         current worker if ``worker_name`` is ``None``.
     """
-    if worker_name:
+    if worker_name is not None:
         return _get_current_rpc_agent().get_worker_info(worker_name)
     else:
         return _get_current_rpc_agent().get_worker_info()

@@ -21,14 +21,14 @@ import json
 torch.set_default_dtype(torch.double)
 
 from torch import nn
-from torch._six import inf, nan, istuple
+from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
@@ -599,6 +599,35 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "Set allow_unused=True"):
             grad_x, grad_y = torch.autograd.grad(x * 2, [x, y], allow_unused=False)
+
+    def test_grad_unreachable_discovery(self):
+        # Test that certain nodes are not erroneously executed when an input
+        # is unreachable. See #39784
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                self.fail("This node should not be executed!")
+
+        x = MyFunc.apply(torch.randn(1, requires_grad=True) * 2)
+        y = torch.randn(1, requires_grad=True)
+        (gY,) = torch.autograd.grad(x, (y, ), allow_unused=True)
+        self.assertIsNone(gY)
+
+        x = MyFunc.apply(torch.randn(1, requires_grad=True) * 2)
+        y = torch.randn(1, requires_grad=True)
+        z = torch.randn(1, requires_grad=True)
+        (gY, gZ) = torch.autograd.grad(x + z, (y, z), allow_unused=True)
+        self.assertIsNone(gY)
+        self.assertIsNotNone(gZ)
+
+        x = MyFunc.apply(torch.randn(1, requires_grad=True) * 2)
+        y = torch.randn(1, requires_grad=True)
+        torch.autograd.backward(x, inputs=(y, ))  # allow_unused is implicitly True!
+        self.assertIsNone(y.grad)
 
     def test_hooks(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -4128,6 +4157,16 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
+    def test_checkpoint_valid_reset_on_error(self):
+        a = torch.randn(2, 2, requires_grad=True)
+
+        with self.assertRaisesRegex(Exception, "Checkpointing is not compatible with .grad()"):
+            b = checkpoint(torch.exp, a).sum()
+            torch.autograd.grad(b, (a,))
+
+        c = checkpoint(torch.exp, a).sum()
+        c.backward()
+
     def _test_reentrant_with_callbacks(self, install_callbacks_in_depths):
         counter = {}
         counter["inner"] = 0
@@ -4986,18 +5025,25 @@ separate_complex_tests = ['view_as_real', 'real', 'imag', 'div', 'pow', 'rsqrt',
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
 
+complex_list_filter = []
+
+# TODO: Add back 'sgn' to complex_list; removed because of Windows test failure with 11.2
+# See: https://github.com/pytorch/pytorch/issues/51980
+if _get_torch_cuda_version() != (11, 2):
+    complex_list_filter.append('sgn')
+
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
                 'repeat', 'expand', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'mul',
-                '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
+                '__rmul__', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
                 'mean', 'inverse', 'solve', 'addcmul',
                 'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile',
-                'baddbmm', 'addbmm', 'addmv'] + separate_complex_tests
+                'baddbmm', 'addbmm', 'addmv'] + complex_list_filter + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
@@ -5065,7 +5111,7 @@ def add_test(
                     if not exclude_tensor_method(name, test_name):
                         output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                         output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
-                        if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
+                        if not isinstance(output_tensor, torch.Tensor) and not isinstance(output_tensor, tuple):
                             if dtype.is_complex:
                                 output_tensor = torch.tensor((output_tensor, ), dtype=torch.cfloat, device=device)
                             else:

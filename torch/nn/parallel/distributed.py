@@ -24,6 +24,7 @@ from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
 from .parallel_apply import parallel_apply
 from torch._utils import _get_device_index, _get_all_device_indices
+from ._functions import _get_stream
 
 
 def _find_tensors(obj):
@@ -438,6 +439,8 @@ class DistributedDataParallel(Module):
 
         # reduction bucket size
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
+        # Whether to perform input tensor CPU to GPU copies on a side-stream
+        self.use_side_stream_for_tensor_copies = os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
 
         # Sync params and buffers
         self._sync_params_and_buffers(authoritative_rank=0)
@@ -614,9 +617,10 @@ class DistributedDataParallel(Module):
             self.find_unused_parameters,
             self.gradient_as_bucket_view)
 
+        self.logger = dist.Logger(self.reducer)
+
         # Set logging data that can be got during construction time.
-        dist._set_construction_logging_data(
-            self.reducer,
+        self.logger.set_construction_data_and_log(
             self.module.__class__.__name__,
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,
@@ -630,6 +634,7 @@ class DistributedDataParallel(Module):
         attrs = copy.copy(self.__dict__)
         del attrs['process_group']
         del attrs['reducer']
+        del attrs['logger']
         return attrs
 
     def __setstate__(self, state):
@@ -679,6 +684,10 @@ class DistributedDataParallel(Module):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
+        self.reducer.save_thread_local_state()
+        if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            self.logger.set_runtime_stats_and_log()
+            self.reducer.prepare_for_forward()
         if self.ddp_uneven_inputs_config.ddp_join_enabled:
             ones = torch.ones(
                 1, device=self.device
@@ -740,7 +749,23 @@ class DistributedDataParallel(Module):
         """
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
-                return (obj.to(target_gpu), )
+                if not self.use_side_stream_for_tensor_copies:
+                    return (obj.to(target_gpu), )
+                else:
+                    # Perform CPU -> GPU copies in a background stream. This code is
+                    # motivated from similar logic in torch/nn/parallel/_functions.py
+                    stream = _get_stream(target_gpu)
+                    with torch.cuda.stream(stream):
+                        output = obj.to(target_gpu)
+                    # synchronize with the copy stream
+                    with torch.cuda.device(target_gpu):
+                        current_stream = torch.cuda.current_stream()
+                        # Sync the current stream with the copy stream
+                        current_stream.wait_stream(stream)
+                        # Ensure tensor memory is not reused until work on
+                        # main stream is complete
+                        output.record_stream(current_stream)
+                    return (output, )
             if is_namedtuple(obj):
                 return [type(obj)(*args) for args in zip(*map(to_map, obj))]
             if isinstance(obj, tuple) and len(obj) > 0:
@@ -780,9 +805,6 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
         return self
-
-    def get_ddp_logging_data(self):
-        return dist._get_ddp_logging_data(self.reducer)
 
     # When running in join mode, schedules an allreduce to match the one in the
     # forward pass to determine the no. of currently active processes and whether

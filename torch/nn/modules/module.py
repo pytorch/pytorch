@@ -850,7 +850,7 @@ class Module:
         recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
             # type ignore was added because at this point one knows that
-            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
+            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
             name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
                 tracing_state.push_scope(name)
@@ -864,41 +864,45 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
+        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        # If we don't have any hooks, we want to skip the rest of the logic in
+        # this function, and just call forward.
+        if not (self._backward_hooks or self._forward_hooks or self._forward_pre_hooks or _global_backward_hooks
+                or _global_forward_hooks or _global_forward_pre_hooks):
+            return forward_call(*input, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
-        if len(self._backward_hooks) > 0 or len(_global_backward_hooks) > 0:
+        if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
-
-        for hook in itertools.chain(
-                _global_forward_pre_hooks.values(),
-                self._forward_pre_hooks.values()):
-            result = hook(self, input)
-            if result is not None:
-                if not isinstance(result, tuple):
-                    result = (result,)
-                input = result
+        if _global_forward_pre_hooks or self._forward_pre_hooks:
+            for hook in itertools.chain(
+                    _global_forward_pre_hooks.values(),
+                    self._forward_pre_hooks.values()):
+                result = hook(self, input)
+                if result is not None:
+                    if not isinstance(result, tuple):
+                        result = (result,)
+                    input = result
 
         bw_hook = None
-        if len(full_backward_hooks) > 0:
+        if full_backward_hooks:
             bw_hook = hooks.BackwardHook(self, full_backward_hooks)
             input = bw_hook.setup_input_hook(input)
 
-        if torch._C._get_tracing_state():
-            result = self._slow_forward(*input, **kwargs)
-        else:
-            result = self.forward(*input, **kwargs)
-        for hook in itertools.chain(
-                _global_forward_hooks.values(),
-                self._forward_hooks.values()):
-            hook_result = hook(self, input, result)
-            if hook_result is not None:
-                result = hook_result
+        result = forward_call(*input, **kwargs)
+        if _global_forward_hooks or self._forward_hooks:
+            for hook in itertools.chain(
+                    _global_forward_hooks.values(),
+                    self._forward_hooks.values()):
+                hook_result = hook(self, input, result)
+                if hook_result is not None:
+                    result = hook_result
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
 
         # Handle the non-full backward hooks
-        if len(non_full_backward_hooks) > 0:
+        if non_full_backward_hooks:
             var = result
             while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
@@ -1137,7 +1141,7 @@ class Module:
                 # This is used to avoid copying uninitialized parameters into
                 # non-lazy modules, since they dont have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
-                is_param_lazy = isinstance(param, torch.nn.parameter.UninitializedParameter)
+                is_param_lazy = torch.nn.parameter.is_lazy(param)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
                 if not is_param_lazy and len(param.shape) == 0 and len(input_param.shape) == 1:
                     input_param = input_param[0]
@@ -1512,6 +1516,7 @@ class Module:
                     p.grad.zero_()
 
     def share_memory(self: T) -> T:
+        r"""See :meth:`torch.Tensor.share_memory_`"""
         return self._apply(lambda t: t.share_memory_())
 
     def _get_name(self):

@@ -11,14 +11,15 @@ import time
 from collections import defaultdict
 from glob import glob
 from pathlib import Path
-from typing import DefaultDict, Dict, Iterable, List, Optional, Tuple
-from xml.dom import minidom
+from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
+                    Tuple)
+from xml.dom import minidom  # type: ignore[import]
 
 import requests
 from typing_extensions import TypedDict
 
 try:
-    import boto3
+    import boto3  # type: ignore[import]
     HAVE_BOTO3 = True
 except ImportError:
     HAVE_BOTO3 = False
@@ -81,7 +82,7 @@ class SuiteDiff(TypedDict):
 
 def case_status(case: Case) -> Status:
     for k in {'errored', 'failed', 'skipped'}:
-        if case[k]:  # type: ignore
+        if case[k]:  # type: ignore[misc]
             return k
     return None
 
@@ -187,11 +188,13 @@ def analyze(
     head_report: SimplerReport,
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
-    # most recent master ancestor with at least one S3 report
-    base_sha = next(sha for sha, reports in base_reports.items() if reports)
+    nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
+    # most recent master ancestor with at least one S3 report,
+    # or empty list if there are none (will show all tests as added)
+    base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
     # find all relevant suites (those in either base or head or both)
-    all_reports = [head_report] + base_reports[base_sha]
+    all_reports = [head_report] + base_report
     all_suites = {k for r in all_reports for k in r.keys()}
 
     removed_suites: List[SuiteDiff] = []
@@ -203,12 +206,12 @@ def analyze(
         head_suite = head_report.get(suite_name)
         base_cases: Dict[str, Status] = dict(sorted(set.intersection(*[
             {(n, s) for n, (_, s) in report.get(suite_name, {}).items()}
-            for report in base_reports[base_sha]
+            for report in base_report
         ] or [set()])))
         case_stats: Dict[str, Stat] = {}
         if head_suite:
             now = sum(case[0] for case in head_suite.values())
-            if any(suite_name in report for report in base_reports[base_sha]):
+            if any(suite_name in report for report in base_report):
                 removed_cases: List[CaseDiff] = []
                 for case_name, case_status in base_cases.items():
                     case_stats[case_name] = list_stat(matching_test_times(
@@ -527,7 +530,7 @@ def regression_info(
 
 
 class TestCase:
-    def __init__(self, dom) -> None:
+    def __init__(self, dom: Any) -> None:
         self.class_name = str(dom.attributes['classname'].value)
         self.name = str(dom.attributes['name'].value)
         self.time = float(dom.attributes['time'].value)
@@ -537,7 +540,7 @@ class TestCase:
 
 
 class TestSuite:
-    def __init__(self, name) -> None:
+    def __init__(self, name: str) -> None:
         self.name = name
         self.test_cases: List[TestCase] = []
         self.failed_count = 0
@@ -545,20 +548,20 @@ class TestSuite:
         self.errored_count = 0
         self.total_time = 0.0
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         rc = f'{self.name} run_time: {self.total_time:.2f} tests: {len(self.test_cases)}'
         if self.skipped_count > 0:
             rc += f' skipped: {self.skipped_count}'
         return f'TestSuite({rc})'
 
-    def append(self, test_case):
+    def append(self, test_case: TestCase) -> None:
         self.test_cases.append(test_case)
         self.total_time += test_case.time
         self.failed_count += 1 if test_case.failed else 0
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
 
-    def print_report(self, num_longest=3):
+    def print_report(self, num_longest: int = 3) -> None:
         sorted_tests = sorted(self.test_cases, key=lambda x: x.time)
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
@@ -574,13 +577,13 @@ class TestSuite:
         print("")
 
 
-def parse_report(path):
+def parse_report(path: str) -> Iterator[TestCase]:
     dom = minidom.parse(path)
     for test_case in dom.getElementsByTagName('testcase'):
         yield TestCase(test_case)
 
 
-def parse_reports(folder):
+def parse_reports(folder: str) -> Dict[str, TestSuite]:
     reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
     tests_by_class = dict()
     for report in reports:
@@ -592,18 +595,18 @@ def parse_reports(folder):
     return tests_by_class
 
 
-def build_info():
+def build_info() -> ReportMeta:
     return {
-        "build_pr": os.environ.get("CIRCLE_PR_NUMBER"),
-        "build_tag": os.environ.get("CIRCLE_TAG"),
-        "build_sha1": os.environ.get("CIRCLE_SHA1"),
-        "build_branch": os.environ.get("CIRCLE_BRANCH"),
-        "build_job": os.environ.get("CIRCLE_JOB"),
-        "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
+        "build_pr": os.environ.get("CIRCLE_PR_NUMBER", ""),
+        "build_tag": os.environ.get("CIRCLE_TAG", ""),
+        "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
+        "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
+        "build_job": os.environ.get("CIRCLE_JOB", ""),
+        "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
     }
 
 
-def build_message(test_case):
+def build_message(test_case: TestCase) -> Dict[str, Dict[str, Any]]:
     return {
         "normal": {
             **build_info(),
@@ -621,7 +624,7 @@ def build_message(test_case):
     }
 
 
-def send_report_to_scribe(reports):
+def send_report_to_scribe(reports: Dict[str, TestSuite]) -> None:
     access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
 
     if not access_token:
@@ -649,9 +652,13 @@ def send_report_to_scribe(reports):
     r.raise_for_status()
 
 
-def assemble_s3_object(reports, *, total_seconds):
+def assemble_s3_object(
+    reports: Dict[str, TestSuite],
+    *,
+    total_seconds: float,
+) -> Report:
     return {
-        **build_info(),
+        **build_info(),  # type: ignore[misc]
         'total_seconds': total_seconds,
         'suites': {
             name: {
@@ -672,7 +679,7 @@ def assemble_s3_object(reports, *, total_seconds):
     }
 
 
-def send_report_to_s3(obj):
+def send_report_to_s3(head_report: Report) -> None:
     job = os.environ.get('CIRCLE_JOB')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
@@ -683,23 +690,16 @@ def send_report_to_s3(obj):
     now = datetime.datetime.utcnow().isoformat()
     key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
     s3 = boto3.resource('s3')
-    try:
-        s3.get_bucket_acl(Bucket='ossci-metrics')
-    except Exception as e:
-        print(f"AWS ACL failed: {e}")
-    print("AWS credential found, uploading to S3...")
-
     obj = s3.Object('ossci-metrics', key)
-    print("")
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
     # input files of a few megabytes in size like these JSON files, and
     # because for some reason zlib doesn't seem to play nice with the
     # gunzip command whereas Python's bz2 does work with bzip2
-    obj.put(Body=bz2.compress(json.dumps(obj).encode()))
+    obj.put(Body=bz2.compress(json.dumps(head_report).encode()))
 
 
-def print_regressions(obj, *, num_prev_commits):
+def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
     sha1 = os.environ.get("CIRCLE_SHA1", "HEAD")
 
     base = subprocess.check_output(
@@ -750,7 +750,7 @@ def print_regressions(obj, *, num_prev_commits):
     print()
     print(regression_info(
         head_sha=sha1,
-        head_report=obj,
+        head_report=head_report,
         base_reports=objects,
         job_name=job,
         on_master=on_master,
@@ -759,14 +759,14 @@ def print_regressions(obj, *, num_prev_commits):
     ), end="")
 
 
-def positive_integer(value):
+def positive_integer(value: str) -> float:
     parsed = int(value)
     if parsed < 1:
         raise argparse.ArgumentTypeError(f"{value} is not a natural number")
     return parsed
 
 
-def positive_float(value):
+def positive_float(value: str) -> float:
     parsed = float(value)
     if parsed <= 0.0:
         raise argparse.ArgumentTypeError(f"{value} is not a positive rational number")
@@ -838,7 +838,7 @@ if __name__ == '__main__':
     send_report_to_scribe(reports)
 
     longest_tests = []
-    total_time = 0
+    total_time = 0.0
     for name in sorted(reports.keys()):
         test_suite = reports[name]
         if test_suite.total_time >= args.class_print_threshold:

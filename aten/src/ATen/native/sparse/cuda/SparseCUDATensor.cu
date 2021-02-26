@@ -1,13 +1,14 @@
+#include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
-#include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-
-#include <THC/THCThrustAllocator.cuh>
+#include <c10/macros/Macros.h>
+#include <c10/util/accumulate.h>
 #include <THC/THCTensorSort.cuh>
+#include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -16,6 +17,7 @@
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <thrust/system/cuda/execution_policy.h>
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 #include <thrust/system/cuda/execution_policy.h>
@@ -132,7 +134,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   if (newValues.numel() > 0) {
     const int SZ = 4;
     values = values.contiguous();
-    int64_t stride = at::prod_intlist(values.sizes().slice(1));
+    int64_t stride = c10::multiply_integers(values.sizes().slice(1));
     dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
     dim3 block(C10_WARP_SIZE, SZ);
     AT_DISPATCH_ALL_TYPES_AND2(
@@ -147,6 +149,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
           newNnz,
           stride
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   }
 
@@ -164,6 +167,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   //   newNnz,
   //   stride
   // );
+  // C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ////////////////////////////////////////////////////////////
   // unflatten indices if necessary
@@ -179,7 +183,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
       // broadcasting logic; instead, it will blast the elements from one
       // to the other so long as the numel is the same
       indicesSlice.copy_(indices1D);
-      indices1D.floor_divide_(self.size(d));
+      indices1D.divide_(self.size(d), "trunc");
       indicesSlice.add_(indices1D, -self.size(d));
     }
   }
@@ -206,8 +210,8 @@ Tensor sparse_mask_helper_cuda(
       `t`             - coalesced sparse tensor input
       `mask_indices`  - mask indices tensor
 
-    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will 
-    works independently if the mask is coalesced or not. 
+    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will
+    works independently if the mask is coalesced or not.
   */
   TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
   TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
@@ -221,12 +225,12 @@ Tensor sparse_mask_helper_cuda(
   auto vsize = t_values.sizes().vec();
   vsize[0] = r_nnz;
 
- 
+
   if (t.sparse_dim() == 0) {
     Tensor t_values_expand = t_values;
     t_values_expand = t_values_expand.expand(vsize).contiguous();
     return t_values_expand;
-  } 
+  }
   Tensor r_values = at::zeros({vsize}, t_values.options());
   auto t_indices = t._indices().contiguous();
   auto t_nnz = t._nnz();
@@ -282,6 +286,7 @@ Tensor sparse_mask_helper_cuda(
               t_indices_pos_ti,
               t_values_ti,
               r_values_ti);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
   }
   return r_values;
