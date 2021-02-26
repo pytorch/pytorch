@@ -233,7 +233,6 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 
 struct ReLUClass : public torch::CustomClassHolder {
   at::Tensor run(const at::Tensor& t) {
-    throw 3;
     return t.relu();
   }
 };

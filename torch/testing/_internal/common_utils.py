@@ -1528,7 +1528,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 # Used in test_autograd.py and test_torch.py
-def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None, 
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
                 requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 

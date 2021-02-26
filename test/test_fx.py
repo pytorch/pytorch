@@ -1636,8 +1636,8 @@ class TestFX(JitTestCase):
         m = FooBar2341()
 
         traced = symbolic_trace(m)
-        print(traced.graph)
-        import pdb; pdb.set_trace()
+        input = torch.randn(3, 4)
+        self.assertEqual(traced(input), m(input))
 
     def test_namedtuple_return_trace(self):
         class NamedTupReturn(torch.nn.Module):

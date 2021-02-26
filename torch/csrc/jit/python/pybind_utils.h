@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/six.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/py_rref.h>
@@ -967,6 +968,7 @@ inline py::object invokeScriptMethodFromPython(
     const tuple_slice& args,
     const py::kwargs& kwargs) {
   auto self = callee.owner()._ivalue();
+
   return runAndInsertCall(
       callee.function(),
       args,
