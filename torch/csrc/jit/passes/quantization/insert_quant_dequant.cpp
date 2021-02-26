@@ -248,13 +248,13 @@ at::ScalarType getObserverComputeDtype(Module& module, Value* v) {
   if (observer_name.has_value()) {
     auto observer_module = module.attr(observer_name.value()).toModule();
     if (observer_module.hasattr("compute_dtype")) {
-      at::ScalarType scalar_type = observer_module.attr("compute_dtype").toScalarType();
+      at::ScalarType scalar_type =
+          observer_module.attr("compute_dtype").toScalarType();
       return scalar_type;
     }
   }
   return at::ScalarType::Undefined;
 }
-
 
 c10::optional<std::string> getEmbeddingBagObsName(
     script::Module& module,
@@ -442,15 +442,17 @@ void insertQuantizationOps(
       dequant = insertFP16CastOps(g, observer_out);
     } else if (!isWeight(module, observer_out)) {
       auto observer_dtype = getObserverDtype(module, observer_out);
-      auto observer_compute_dtype = getObserverComputeDtype(module, observer_out);
+      auto observer_compute_dtype =
+          getObserverComputeDtype(module, observer_out);
       if (observer_dtype == at::ScalarType::QUInt8 ||
           observer_dtype == at::ScalarType::QInt8 ||
           observer_compute_dtype == at::ScalarType::QUInt8 ||
           observer_compute_dtype == at::ScalarType::QInt8) {
         // For activation tensors we insert choose_qparams, quant, dequant ops.
         Value* dtype = g->insertGetAttr(self, qparam_names.back());
-        std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
-            g, observer_out, dtype, at::Symbol::aten(quantize_func));
+        std::tie(choose_qparams, quant, dequant) =
+            insertChooseQParamQuantDequant(
+                g, observer_out, dtype, at::Symbol::aten(quantize_func));
       } else {
         // dtype does not require quantization, e.g. float32
         // will just remove the observer call
@@ -460,7 +462,7 @@ void insertQuantizationOps(
     } else {
       // For weight tensors we insert quant-dequant ops.
       dequant =
-        insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
+          insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
     }
   } else { // Static quant
     dequant =
@@ -1149,11 +1151,10 @@ void InsertQuantDeQuantHelper::propagateQParams(
         "q_zero_point");
     Node* dtype = insertQParam(
         graph, quantized_input, prim::dtype, IntType::get(), "dtype");
-    quant_inputs = {
-        original_output,
-        scale->output(),
-        zero_point->output(),
-        dtype->output()};
+    quant_inputs = {original_output,
+                    scale->output(),
+                    zero_point->output(),
+                    dtype->output()};
   }
   Node* quant = insertQuant(
       graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
