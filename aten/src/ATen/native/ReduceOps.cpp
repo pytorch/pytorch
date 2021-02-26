@@ -735,7 +735,6 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dims, keepdim);
 }
-
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
   return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
 }
@@ -1002,7 +1001,7 @@ Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepd
   auto sizes = self.sizes();
   if (sizes.size() != 0) {
     for (const auto d : dim) {
-      TORCH_CHECK(sizes[d] != 0, "Expected reduction dim ", d, " to be non-zero");
+      TORCH_CHECK(self.size(d) != 0, "Expected reduction dim ", d, " to be non-zero");
     }
   }
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
@@ -1023,7 +1022,7 @@ Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepd
   auto sizes = self.sizes();
   if (sizes.size() != 0) {
     for (const auto d : dim) {
-      TORCH_CHECK(sizes[d] != 0, "Expected reduction dim ", d, " to be non-zero");
+      TORCH_CHECK(self.size(d) != 0, "Expected reduction dim ", d, " to be non-zero");
     }
   }
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
@@ -1043,8 +1042,10 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
-    TORCH_CHECK(sizes[dim.value()] != 0, "Expected reduction dim ", dim.value(), " to be non-zero");
-
+    if (sizes.size() != 0) {
+      TORCH_CHECK(self.size(dim.value()) != 0, "Expected reduction dim ", dim.value(), " to be non-zero");
+    }
+    
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {
       if (keepdim) {
@@ -1078,8 +1079,10 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
-    TORCH_CHECK(sizes[dim.value()] != 0, "Expected reduction dim ", dim.value(), " to be non-zero");
-    
+    if (sizes.size() != 0) {
+      TORCH_CHECK(self.size(dim.value()) != 0, "Expected reduction dim ", dim.value(), " to be non-zero");
+    }
+
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {
       if (keepdim) {
