@@ -349,7 +349,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store.set("key0", "value0")
         self.assertEqual(b"value0", store.get("key0"))
         old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"wrong_old_value", old_value_result)
+        self.assertEqual(b"value0", old_value_result)
         self.assertEqual(b"value0", store.get("key0"))
         new_value_result = store.compare_set("key0", "value0", "new_value0")
         self.assertEqual(b"new_value0", new_value_result)
@@ -4702,6 +4702,32 @@ class CommTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
+
+    def test_distributed_debug_mode(self):
+        # Default should be off
+        default_debug_mode = dist._get_debug_mode()
+        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
+        mapping = {
+            "OFF": dist._DistributedDebugMode.OFF,
+            "INFO": dist._DistributedDebugMode.INFO,
+            "DETAIL": dist._DistributedDebugMode.DETAIL,
+        }
+        invalid_debug_modes = ["foo", 0, 1, -1]
+
+        for mode in mapping.keys():
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            set_debug_mode = dist._get_debug_mode()
+            self.assertEqual(
+                set_debug_mode,
+                mapping[mode],
+                f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}"
+            )
+
+        for mode in invalid_debug_modes:
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+                dist._get_debug_mode()
+
 
 if __name__ == '__main__':
     assert (
