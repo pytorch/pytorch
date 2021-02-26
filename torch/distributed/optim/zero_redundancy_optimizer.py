@@ -128,9 +128,9 @@ class ZeroRedundancyOptimizer(Optimizer):
             OrderedDict()
         )  # device, rank, params
         self._param_rank: Dict[torch.Tensor, int] = {}
-        self._param_to_index: Dict[int, int] = {}
+        self._param_to_index_cache: Dict[int, int] = {}
         self._partition_parameters: List[List[Dict]] = []
-        self._index_to_param: Dict[int, torch.Tensor] = {}
+        self._index_to_param_cache: Dict[int, torch.Tensor] = {}
 
         # Build the wrapped optimizer, responsible for a shard of the params
         self.group = group if group is not None else dist.group.WORLD
@@ -162,8 +162,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         self._partition_parameters.clear()
         self._per_device_params.clear()
         self._param_rank.clear()
-        self._index_to_param.clear()
-        self._param_to_index.clear()
+        self._index_to_param_cache.clear()
+        self._param_to_index_cache.clear()
         self._local_params = None
 
     def add_param_group(self, param_group: dict) -> None:
@@ -307,20 +307,22 @@ class ZeroRedundancyOptimizer(Optimizer):
         return self._param_rank
 
     @property
-    def param_to_index(self) -> Dict[int, int]:
+    def _param_to_index(self) -> Dict[int, int]:
         """Hash table in between parameter indices in the global optimizer scheme, and the actual params"""
-        if len(self._param_to_index) == 0:
-            self._param_to_index = {id(p): i for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
+        if len(self._param_to_index_cache) == 0:
+            self._param_to_index_cache = {
+                id(p): i for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))
+            }
 
-        return self._param_to_index
+        return self._param_to_index_cache
 
     @property
-    def index_to_param(self) -> Dict[int, torch.Tensor]:
+    def _index_to_param(self) -> Dict[int, torch.Tensor]:
         """Hash table in between parameter indices in the global optimizer scheme, and the actual params"""
-        if len(self._index_to_param) == 0:
-            self._index_to_param = {i: p for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
+        if len(self._index_to_param_cache) == 0:
+            self._index_to_param_cache = {i: p for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
 
-        return self._index_to_param
+        return self._index_to_param_cache
 
     def step(self, closure: Optional[Callable[[], float]] = None, **kwargs: Any) -> Optional[float]:
         """Performs a single optimization step (parameter update).
@@ -358,12 +360,8 @@ class ZeroRedundancyOptimizer(Optimizer):
                 from a call to :meth:`state_dict`
         """
 
-        # NOTE: PyTorch 1.5 does not index linearly but with the id(params) at saving time
-        # we work around that here by using the fact that the params are ordered as in the param_groups
-        pytorch15_index_redirect = {k: i for i, k in enumerate(state_dict["state"].keys())}
-
         for key, value in state_dict["state"].items():
-            param = self.index_to_param[pytorch15_index_redirect[key]]
+            param = self._index_to_param[key]
 
             # Populate the sharded optimizer state on the fly
             if self.param_to_rank[param] != self.rank:
@@ -425,7 +423,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                 for local_param_index in local_pg["params"]:
                     # Update the state, if any
                     if local_param_index in s["state"].keys():
-                        global_id = self.param_to_index[local_index_to_param_id[local_param_index]]
+                        global_id = self._param_to_index[local_index_to_param_id[local_param_index]]
                         state_dict["state"][global_id] = s["state"][local_param_index]
 
         # Make sure that the parameters are sorted in the state, as expected

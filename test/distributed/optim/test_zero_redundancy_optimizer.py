@@ -492,8 +492,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 # The model should be synchronized in between the ranks at construction time, check that
                 check_same_model_params()
 
-                # The models should stay the same in between the ranks
-                for i in range(20):
+                def check_step():
                     input_tensor = torch.rand((64, 2))
 
                     def closure_ddp(input_tensor=input_tensor):
@@ -516,6 +515,32 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     ), "Losses differ in between Pytorch optim and ZeroRedundancyOptimizer"
 
                     check_same_model_params()
+
+                # The models should stay the same in between the ranks
+                for i in range(20):
+                    check_step()
+
+                # Check that the checkpoints are compatible
+                reference_rank = 0
+                # - get states
+                ddp_state_dict = ddp_optimizer.state_dict()
+                sharded_optimizer.consolidate_state_dict(recipient_rank=reference_rank)
+                sharded_optim_state_dict = [sharded_optimizer.state_dict() if self.rank == reference_rank else {}]
+                dist.broadcast_object_list(sharded_optim_state_dict, src=reference_rank, group=dist.group.WORLD)
+                sharded_optim_state_dict = sharded_optim_state_dict[0]
+
+                # - cross load the states
+                # run one step and check that the models are still the same
+                ddp_state_dict_ref = copy.deepcopy(ddp_state_dict)  # OSS will remove some states
+                ddp_optimizer.load_state_dict(sharded_optim_state_dict)  # mixup on purpose !
+                sharded_optimizer.load_state_dict(ddp_state_dict)
+                check_step()
+
+                #  - self load, rewind, check no problem
+                # run one step and check that the models are still the same
+                ddp_optimizer.load_state_dict(ddp_state_dict_ref)
+                sharded_optimizer.load_state_dict(sharded_optim_state_dict)
+                check_step()
 
             for opt in [torch.optim.SGD, torch.optim.Adam]:
                 check_optimizer_equivalence(opt)
