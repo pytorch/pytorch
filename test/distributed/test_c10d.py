@@ -9,7 +9,6 @@ import tempfile
 import threading
 import time
 import unittest
-import logging
 import traceback
 from contextlib import contextmanager
 from datetime import timedelta
@@ -50,7 +49,6 @@ from torch.testing._internal.common_utils import (
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
     TEST_WITH_TSAN,
-    IS_WINDOWS,
 )
 
 
@@ -271,7 +269,7 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
         return c10d.PrefixStore(self.prefix, self.filestore)
 
 
-def create_tcp_store(addr):
+def create_tcp_store(addr, world_size=1, wait_for_workers=True):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
     """
@@ -280,7 +278,7 @@ def create_tcp_store(addr):
         try:
             port = common.find_free_port()
             ports.append(port)
-            return c10d.TCPStore(addr, port, 1, True)
+            return c10d.TCPStore(addr, port, world_size, True, wait_for_workers=wait_for_workers)
         except RuntimeError as error:
             if str(error) == "Address already in use":
                 continue
@@ -355,54 +353,42 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(b"new_value0", new_value_result)
         self.assertEqual(b"new_value0", store.get("key0"))
 
-    def _create_client(self, addr, port, world_size):
+    def _create_client(self, addr, port, world_size, messages):
         try:
             client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
             self.assertEqual(b"value", client_store.get("key"))
             client_store.set("new_key", "new_value0")
             client_store.compare_set("new_key", "new_value1", "new_value0")
         except Exception:
-            logging.error('Caught exception: \n{}exiting process with exit code: {}'
-                          .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
+            messages.put('Caught exception: \n{}exiting process with exit code: {}'
+                         .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
-    @unittest.skipIf(IS_WINDOWS, "Skip test for windows because it cannot serialize logger instance")
+    def _multi_worker_helper(self, world_size):
+        addr = DEFAULT_HOSTNAME
+        server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
+        server_store.set("key", "value")
+        port = server_store.port
+        messages = mp.Queue()
+        processes = []
+        num_proccesses = random.randint(3, 5) if world_size == -1 else world_size
+        for _ in range(num_proccesses):
+            p = mp.Process(target=self._create_client, args=(addr, port, world_size, messages))
+            processes.append(p)
+            p.start()
+        for p in processes:
+            p.join()
+        error_message = ""
+        while not messages.empty():
+            error_message += messages.get() + "\n"
+        if error_message:
+            raise RuntimeError(error_message)
+
     def test_multi_worker_with_fixed_world_size(self):
-        addr = DEFAULT_HOSTNAME
-        port = common.find_free_port()
-        world_size = 5
-        processes = []
-        for _ in range(world_size):
-            p = mp.Process(target=self._create_client, args=(addr, port, world_size))
-            processes.append(p)
-            p.start()
-        server_store = dist.TCPStore(addr, port, world_size, True, timedelta(seconds=30))
-        server_store.set("key", "value")
-        for (i, p) in enumerate(processes):
-            # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
-                                "Process {} terminated with exit code {}. Check logs for exception stacktrace."
-                                .format(i, p.exitcode))
-            p.join()
+        self._multi_worker_helper(5)
 
-    @unittest.skipIf(IS_WINDOWS, "Skip test for windows because it cannot serialize logger instance")
     def test_multi_worker_with_nonfixed_world_size(self):
-        addr = DEFAULT_HOSTNAME
-        port = common.find_free_port()
-        server_store = dist.TCPStore(addr, port, is_master=True, timeout=timedelta(seconds=30))
-        server_store.set("key", "value")
-
-        processes = []
-        for _ in range(random.randint(3, 5)):
-            p = mp.Process(target=self._create_client, args=(addr, port, -1))
-            processes.append(p)
-            p.start()
-        for (i, p) in enumerate(processes):
-            # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
-                                "Process {} terminated with exit code {}. Check logs for exception stacktrace."
-                                .format(i, p.exitcode))
-            p.join()
+        self._multi_worker_helper(-1)
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
