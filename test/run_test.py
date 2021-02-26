@@ -101,6 +101,7 @@ TESTS = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'test_typing',
     'test_jit_py3',
     'test_determination',
     'test_futures',
