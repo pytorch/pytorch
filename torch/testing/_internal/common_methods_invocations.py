@@ -1868,11 +1868,15 @@ op_db: List[OpInfo] = [
                    decorators=[skipCUDAIfRocm],
                    test_inplace_grad=False,
                    skips=(
-                       # skips OpInfo-based `test_reference_numerics` and `test_out_arg_all_dtypes`,
-                       # as torch.frexp returns two tensors, a floating mantissa and a int32 exponent.
+                       # skip OpInfo `test_reference_numerics_*` and `test_out_arg_all_dtypes`.
+                       # torch.frexp returns two tensors, a floating mantissa and a int32 exponent.
+                       # It is hard to update the above OpInfo tests to support testing two output tensors
+                       # with different dtype.
                        # Test out-variants as well as extremal values with torch.frexp
                        # in the specific test methods `test_frexp_reference_numerics` and `test_frexp_out`.
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
     OpInfo('linalg.norm',
