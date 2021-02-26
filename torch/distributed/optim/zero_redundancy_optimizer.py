@@ -78,30 +78,50 @@ def _get_global_rank(group: Any, rank: int) -> int:
 
 
 class ZeroRedundancyOptimizer(Optimizer):
-    """Wraps an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>`
-    optimizer and shards its state as described by ZeRO_.
-    ::
+    """
+    This class wraps an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>`
+    and shards its states across ranks in the group as described by
+    ZeRO_. The optimizer instance in each rank is only responsible for
+    updating ``1 / world_size`` parameters and hence only needs to keep
+    ``1 / world_size`` optimizer states. After parameters are updated locally,
+    each rank will broadcast its parameters to all other peers to keep all
+    model replicas in the same state. ``ZeroRedundancyOptimizer`` can be used
+    in conjuction with :class:`torch.nn.parallel.DistributedDataparallel` to
+    reduce per-rank peak memory consumption.
 
-        opt = ZeroRedundancyOptimizer(params, optim=torch.optim.Adam, lr=0.01)
-
-
-    We use a greedy algorithm to pack a number of parameters at each rank.
-    Each parameter belongs to a single rank and is not divided among ranks.
-    The partition is arbitrary and does not correspond to the information flow for instance.
-
-    After each rank completed their parameter update, they broadcast
-    the new version of the parameters to all other ranks to synchronize
-    the parameters for next round forward/backward computation.
+    ``ZeroRedundancyOptimizer`` use a greedy algorithm to pack a number of
+    parameters at each rank. Each parameter belongs to a single rank and is not
+    divided among ranks. The partition is arbitrary and might not match the
+    the parameter registration or usage order.
 
     Arguments:
-        params (list of tensors):
-            parameters to be optimized
+        params (``Iterable``): an ``Iterable`` of :class:`torch.Tensor` s
+
     Keyword Args:
-        optim (torch.nn.Optimizer): optimizer to shard
-        group (group): torch.distributed group (default: group.WORLD)
+        optim_class (:class:`torch.nn.Optimizer`): the class of the local
+            optimizer.
+        group (``ProcessGroup``, optional): ``torch.distributed``
+            ``ProcessGroup`` (default: ``group.WORLD`` initialized by
+            :method:`torch.distributed.init_process_group`).
         bucket_cap (int): the size of the buffer used to batch the small parameter tensors,
-            in number of elements (default 16M)
-        **default: all trailing arguments will be forwarded to the requested optimizer
+            in number of elements (default: 16M)
+        **default: all trailing arguments will be forwarded to the given optimizer.
+
+    Example::
+
+        >>> import torch.nn as nn
+        >>> from torch.distributed.optim import ZeroRedundancyOptimizer
+        >>> from torch.nn.parallel import DistributedDataParallel as DDP
+
+        >>> model = nn.Sequential(*[nn.Linear(2000, 2000).to(rank) for _ in range(20)])
+        >>> ddp = DDP(model, device_ids=[rank])
+        >>> opt = ZeroRedundancyOptimizer(
+        >>>     ddp.parameters(),
+        >>>     optim=torch.optim.Adam,
+        >>>     lr=0.01
+        >>> )
+        >>> ddp(inputs).sum().backward()
+        >>> opt.step()
 
     .. warning: ZeroRedundancyOptimizer is experimental and subject to change.
 
@@ -158,18 +178,22 @@ class ZeroRedundancyOptimizer(Optimizer):
         self.initialized = True
 
     def add_param_group(self, param_group: dict) -> None:
-        """Add a param group to the :class:`Optimizer` s `param_groups`.
+        """
+        Add a param group to the :class:`Optimizer` s `param_groups`.
 
-        This can be useful when fine tuning a pre-trained network as frozen layers can be made
-        trainable and added to the :class:`Optimizer` as training progresses.
+        This can be useful when fine tuning a pre-trained network, as frozen
+        layers can be made trainable and added to the :class:`Optimizer` as
+        training progresses.
 
         Arguments:
-            param_group (dict): Specifies what Tensors should be optimized along with group
-                specific optimization options
+            param_group (``Dict``): Specifies what Tensors should be optimized
+                along with group specific optimization options.
 
-        .. warning: This handles updating the shards on all partitions, but needs to be called on all ranks.
-            Calling this on a subset of the ranks will cause the training to hang, because communication primitives
-            are called depending on the managed parameters, and expect all the ranks to participate.
+        .. warning: This method handles updating the shards on all partitions,
+            but needs to be called on all ranks. Calling this on a subset of the
+            ranks will cause the training to hang, because communication
+            primitives are called depending on the managed parameters, and
+            expect all the ranks to participate on the sane set of parameters.
         """
 
         super().add_param_group(param_group)
@@ -186,10 +210,15 @@ class ZeroRedundancyOptimizer(Optimizer):
             # Update the bucketing strategy accordingly
             self._setup_bucket_strategy()
 
-    def consolidate_state_dict(self, recipient_rank: int = 0) -> None:
-        """Update the consolidated state_dict list, one per rank.
+    def consolidate_state_dict(self, to: int = 0) -> None:
+        """
+        Update the consolidated state_dict list, one per rank.
 
-        .. warning: This needs to be called on all replicas"""
+        Arguments:
+            to (``int``): the rank that receives the global states. (default: 0)
+
+        .. warning: This needs to be called on all replicas
+        """
 
         # Sync lr and other attributes in case its been updated
         self._update_param_groups()
@@ -208,7 +237,7 @@ class ZeroRedundancyOptimizer(Optimizer):
             global_rank = _get_global_rank(self.group, rank)
 
             # This rank collects the whole state
-            if self.rank == recipient_rank:
+            if self.rank == to:
                 if rank == self.rank:
                     self._all_states.append(
                         _recursive_copy_to_device(
@@ -233,7 +262,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                         self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
                     )
 
-                elif rank != recipient_rank:
+                elif rank != to:
                     # Discard this tensor/rank, broadcast was being use for compatibility reasons
                     _ = _broadcast_object(
                         empty_messenger, src_rank=global_rank, group=self.group, dist_device=self._device
@@ -242,7 +271,8 @@ class ZeroRedundancyOptimizer(Optimizer):
     def partition_parameters(self) -> List[List[Dict]]:
         """Partitions parameters across distributed data parallel ranks.
 
-        Returns: a list of ``param_groups`` (which is a list of dict) where each
+        Returns:
+            a list of ``param_groups`` (which is a list of dict) where each
             element of the list contains the param_groups for a rank. Element 0
             corresponds to rank 0, etc. We need all the ranks for the broadcast
             inside ``step()``.
