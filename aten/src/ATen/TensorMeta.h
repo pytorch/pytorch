@@ -26,6 +26,7 @@ namespace impl {
 #define TORCH_META_FUNC(name) void name::meta
 #define TORCH_META_FUNC2(name, overload) void name##_##overload::meta
 #define TORCH_META_FUNC3(name, overload) void name##_##overload2::meta
+#define TORCH_META_FUNC4(name, overload) void name##_##overload3::meta
 
 // Use this to define the prototype for an implementation.  This takes only
 // one argument, which is the name of the dispatch key entry you're
@@ -55,6 +56,12 @@ struct TORCH_API MetaBase {
   }
   void set_output(IntArrayRef sizes) {
     set_output(0, sizes, {}, TensorOptions(), {});
+  }
+  void set_output(
+      int64_t output_idx,
+      IntArrayRef sizes,
+      TensorOptions options) {
+    set_output(output_idx, sizes, {}, options, {});
   }
   // Returns a reference to an undefined tensor if there is no presupplied
   // output
