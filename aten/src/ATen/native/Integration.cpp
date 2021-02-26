@@ -69,4 +69,34 @@ Tensor trapz(const Tensor& y, double dx, int64_t dim) {
     return do_trapz(y, dx, dim);
 }
 
+Tensor do_cumulative_trapezoid(const Tensor& y, const Tensor& dx, int64_t dim) {
+  Tensor left = y.slice(dim, 0, -1);
+  Tensor right = y.slice(dim, 1);
+
+  return ((left + right) * dx).cumsum(dim) / 2.;
+}
+
+Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
+  dim = maybe_wrap_dim(dim, y);
+  // asking for the integral with zero samples is a bit nonsensical,
+  // but we'll return "0" to match numpy behavior.
+  if (y.size(dim) == 0) {
+      return zeros_like_except(y, dim);
+  }
+  Tensor x_viewed;
+  if (x.dim() == 1) {
+      TORCH_CHECK(x.size(0) == y.size(dim), "cumulative_trapezoid: There must be one `x` value for each sample point");
+      DimVector sizes(y.dim(), 1); // shape = [1] * y.
+      sizes[dim] = x.size(0); // shape[axis] = d.shape[0]
+      x_viewed = x.view(sizes);
+  } else {
+    x_viewed = x;
+  }
+  Tensor x_left = x_viewed.slice(dim, 0, -1);
+  Tensor x_right = x_viewed.slice(dim, 1);
+
+  Tensor dx = x_right - x_left;
+  return do_cumulative_trapezoid(y, dx, dim);
+}
+
 }} // namespace at::native
