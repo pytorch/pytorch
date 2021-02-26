@@ -1085,6 +1085,121 @@ class TestJit(JitTestCase):
                 self.assertFalse(fn.has_trace_for(*unk_config))
         self.assertEqual(fn.hits, 0)
 
+    def test_torch_complex(self):
+        def fn(real, img):
+            return torch.complex(real, img)
+
+        def fn_out(real, img, out):
+            return torch.complex(real, img, out=out)
+        self.checkScript(fn, (torch.rand(3, 4), torch.rand(3, 4), ))
+        self.checkScript(fn, (torch.ones(5, 1, 4), torch.ones(5, 1, 4), ))
+        self.checkScript(fn, (torch.zeros(1, 6), torch.ones(6, 1), ))
+        self.checkScript(fn, (torch.zeros(1, 6), torch.zeros(6, 1), ))
+        self.checkScript(fn, (torch.empty(3, 4), torch.empty(3, 4), ))
+
+        real = torch.tensor([1, 2], dtype=torch.float32)
+        img = torch.tensor([3, 4], dtype=torch.float32)
+        out = torch.empty([3, 4], dtype=torch.complex64)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.tensor([5, 2], dtype=torch.float64)
+        img = torch.tensor([3, 4], dtype=torch.float64)
+        out = torch.empty([5, 2], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.ones([1, 2])
+        img = torch.ones([1, 2])
+        out = torch.empty([1, 2], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.ones([3, 8, 7])
+        img = torch.ones([3, 8, 7])
+        out = torch.empty([3, 8, 7], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.empty([3, 2, 6])
+        img = torch.empty([3, 2, 6])
+        out = torch.empty([3, 2, 6], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.zeros([1, 3])
+        img = torch.empty([3, 1])
+        out = torch.empty([3, 3], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.ones([2, 5])
+        img = torch.empty([2, 1])
+        out = torch.empty([2, 5], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.ones([2, 5])
+        img = torch.zeros([2, 1])
+        out = torch.empty([2, 5], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+    def test_torch_complex_fails(self):
+        # Since complex type is not available in torchscript yet,
+        # the below tests are bound to fail in TS
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_int(real: int, img: int):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_float(real: float, img: float):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_bool(real: bool, img: bool):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_str(real: str, img: float):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_bool_int(real: bool, img: int):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_int_bool(real: int, img: bool):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_float_int(real: float, img: int):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_int_float(real: int, img: float):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_tensor_float(real, img: float):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_int_tensor(real: int, img):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_bool_tensor(real: bool, img):
+                return complex(real, img)
+
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+            @torch.jit.script
+            def fn_str_tensor(real: str, img):
+                return complex(real, img)
+
     def test_torch_sum(self):
         def fn(x):
             return torch.sum(x)
