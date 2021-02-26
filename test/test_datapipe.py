@@ -7,8 +7,10 @@ import tarfile
 import zipfile
 import numpy as np
 from PIL import Image
+from unittest import skipIf
 
 import torch
+import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterDataPipe, RandomSampler
 from typing import List, Tuple, Dict, Any, Type
@@ -18,6 +20,13 @@ import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler)
+
+try:
+    import torchvision.transforms
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 def create_temp_dir_and_files():
@@ -235,34 +244,38 @@ class IDP(IterDataPipe):
         return self.length
 
 
-def _fake_fn(self, data, *args, **kwargs):
+def _fake_fn(data, *args, **kwargs):
     return data
 
-def _fake_filter_fn(self, data, *args, **kwargs):
+def _fake_filter_fn(data, *args, **kwargs):
     return data >= 5
 
 class TestFunctionalIterDataPipe(TestCase):
 
     def test_picklable(self):
         arr = range(10)
-        picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Dict[str, Any]]] = [
-            (dp.iter.Map, IDP(arr), {}),
-            (dp.iter.Map, IDP(arr), {'fn': _fake_fn, 'fn_args': (0), 'fn_kwargs': {'test': True}}),
-            (dp.iter.Collate, IDP(arr), {}),
-            (dp.iter.Collate, IDP(arr), {'collate_fn': _fake_fn, 'fn_args': (0), 'fn_kwargs': {'test': True}}),
-            (dp.iter.Filter, IDP(arr), {'filter_fn': _fake_filter_fn, 'fn_args': (0), 'fn_kwargs': {'test': True}}),
+        picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
+            (dp.iter.Map, IDP(arr), (), {}),
+            (dp.iter.Map, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Collate, IDP(arr), (), {}),
+            (dp.iter.Collate, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Filter, IDP(arr), (_fake_filter_fn, (0, ), {'test': True}), {}),
         ]
-        for dpipe, input_dp, kargs in picklable_datapipes:
-            p = pickle.dumps(dpipe(input_dp, **kargs))  # type: ignore
+        for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
+            p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore
 
-        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Dict[str, Any]]] = [
-            (dp.iter.Map, IDP(arr), {'fn': lambda x: x}),
-            (dp.iter.Collate, IDP(arr), {'collate_fn': lambda x: x}),
-            (dp.iter.Filter, IDP(arr), {'filter_fn': lambda x: x >= 5}),
+        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
+            (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
+            (dp.iter.Collate, IDP(arr), (lambda x: xi, ), {}),
+            (dp.iter.Filter, IDP(arr), (lambda x: x >= 5, ), {}),
         ]
-        for dpipe, input_dp, kargs in unpicklable_datapipes:
-            with self.assertRaises(AttributeError):
-                p = pickle.dumps(dpipe(input_dp, **kargs))  # type: ignore
+        for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
+            with warnings.catch_warnings(record=True) as wa:
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)
+                self.assertEqual(len(wa), 1)
+                self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
+                with self.assertRaises(AttributeError):
+                    p = pickle.dumps(datapipe)  # type: ignore
 
     def test_map_datapipe(self):
         arr = range(10)
@@ -418,23 +431,62 @@ class TestFunctionalIterDataPipe(TestCase):
             temp = list(d for d in filter_dp)
 
     def test_sampler_datapipe(self):
-        arrs = range(10)
-        input_dp = IDP(arrs)
+        input_dp = IDP(range(10))
         # Default SequentialSampler
         sampled_dp = dp.iter.Sampler(input_dp)  # type: ignore
         self.assertEqual(len(sampled_dp), 10)
-        i = 0
-        for x in sampled_dp:
+        for i, x in enumerate(sampled_dp):
             self.assertEqual(x, i)
-            i += 1
 
         # RandomSampler
-        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, replacement=True)  # type: ignore
+        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, sampler_kwargs={'replacement': True})  # type: ignore
 
-        # Requires `__len__` to build SamplerDataset
-        input_dp_nolen = IDP_NoLen(arrs)
+        # Requires `__len__` to build SamplerDataPipe
+        input_dp_nolen = IDP_NoLen(range(10))
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
+
+    @skipIfNoTorchVision
+    def test_transforms_datapipe(self):
+        torch.set_default_dtype(torch.float)
+        # A sequence of numpy random numbers representing 3-channel images
+        w = h = 32
+        inputs = [np.random.randint(0, 255, (h, w, 3), dtype=np.uint8) for i in range(10)]
+        tensor_inputs = [torch.tensor(x, dtype=torch.float).permute(2, 0, 1) / 255. for x in inputs]
+
+        input_dp = IDP(inputs)
+        # Raise TypeError for python function
+        with self.assertRaisesRegex(TypeError, r"`transforms` are required to be"):
+            dp.iter.Transforms(input_dp, _fake_fn)
+
+        # transforms.Compose of several transforms
+        transforms = torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
+        ])
+        tsfm_dp = dp.iter.Transforms(input_dp, transforms)
+        self.assertEqual(len(tsfm_dp), len(input_dp))
+        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
+            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
+
+        # nn.Sequential of several transforms (required to be instances of nn.Module)
+        input_dp = IDP(tensor_inputs)
+        transforms = nn.Sequential(
+            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
+        )
+        tsfm_dp = dp.iter.Transforms(input_dp, transforms)
+        self.assertEqual(len(tsfm_dp), len(input_dp))
+        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
+            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
+
+        # Single transform
+        input_dp = IDP_NoLen(inputs)
+        transform = torchvision.transforms.ToTensor()
+        tsfm_dp = dp.iter.Transforms(input_dp, transform)
+        with self.assertRaises(NotImplementedError):
+            len(tsfm_dp)
+        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
+            self.assertEqual(tsfm_data, input_data)
 
 
 if __name__ == '__main__':

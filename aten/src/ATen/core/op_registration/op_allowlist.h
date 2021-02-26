@@ -34,8 +34,8 @@ namespace c10 {
 namespace impl {
 
 // returns true iff allowlist contains item
-// op_whitelist_contains("a;bc;d", "bc") == true
-constexpr bool op_whitelist_contains(string_view allowlist, string_view item) {
+// op_allowlist_contains("a;bc;d", "bc") == true
+constexpr bool op_allowlist_contains(string_view allowlist, string_view item) {
     //Choose a really big value for next so that if something goes wrong
     //this code will blow up in a hopefully detectable way.
     size_t next = std::numeric_limits<size_t>::max();
@@ -58,14 +58,14 @@ constexpr bool op_whitelist_contains(string_view allowlist, string_view item) {
 
 // Returns true iff the given op name is on the allowlist
 // and should be registered
-constexpr bool op_whitelist_check(string_view op_name) {
+constexpr bool op_allowlist_check(string_view op_name) {
   assert(op_name.find("::") != string_view::npos);
 #if !defined(TORCH_OPERATOR_WHITELIST)
   // If the TORCH_OPERATOR_WHITELIST parameter is not defined,
   // all ops are to be registered
   return true;
 #else
-  return op_whitelist_contains(
+  return op_allowlist_contains(
     C10_STRINGIZE(TORCH_OPERATOR_WHITELIST),
     // This function is majorly used for mobile selective build with
     // root operators, where the overload is included in the allowlist.
@@ -79,25 +79,25 @@ constexpr bool op_whitelist_check(string_view op_name) {
 
 // Returns true iff the given schema string is on the allowlist
 // and should be registered
-constexpr bool schema_whitelist_check(string_view schema) {
+constexpr bool schema_allowlist_check(string_view schema) {
 #if defined(TORCH_FORCE_SCHEMA_REGISTRATION)
   return true;
 #else
-  return op_whitelist_check(schema.substr(0, schema.find("(")));
+  return op_allowlist_check(schema.substr(0, schema.find("(")));
 #endif
 }
 
-// schema_whitelist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
+// schema_allowlist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
 // Add this API to pass arbitrary allowlist.
-constexpr bool op_whitelist_contains_name_in_schema(string_view allowlist, string_view schema) {
-  return op_whitelist_contains(allowlist, schema.substr(0, schema.find("(")));
+constexpr bool op_allowlist_contains_name_in_schema(string_view allowlist, string_view schema) {
+  return op_allowlist_contains(allowlist, schema.substr(0, schema.find("(")));
 }
 
 // Returns true iff the given dispatch key is on the allowlist
 // and should be registered.  When we turn this on, the list of valid
 // mobile dispatch keys is hard coded (but you need to make sure
 // that you have the correct set of dispatch keys for this).
-constexpr bool dispatch_key_whitelist_check(DispatchKey k) {
+constexpr bool dispatch_key_allowlist_check(DispatchKey k) {
 #ifdef C10_MOBILE
   return true;
   // Disabled for now: to be enabled later!
