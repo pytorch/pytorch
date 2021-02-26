@@ -238,7 +238,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean' or arg == 'egg_info':
+    if arg in ['clean', 'egg_info', 'sdist']:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
