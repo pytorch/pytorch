@@ -142,6 +142,16 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
     return data_ptrs;
   }
 
+  bool completed() const override {
+    TORCH_WARN_ONCE(
+        "Calling completed() on instance of at::CUDAFuture. Note that this "
+        "does not have the same semantics as completed() on a vanilla "
+        "at::ivalue::future, as this returns true if the CUDA operation has "
+        "enqueued on the stream and makes no guarantees regarding actual "
+        "execution or stream synchronization.");
+    return at::ivalue::Future::completed();
+  }
+
  private:
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks.

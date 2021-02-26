@@ -479,7 +479,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Check if the current future has completed
-  bool completed() const {
+  virtual bool completed() const {
     return completed_;
   }
 
