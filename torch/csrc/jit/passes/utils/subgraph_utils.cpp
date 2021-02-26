@@ -26,10 +26,15 @@ std::vector<c10::optional<const Use>> gatherLastUses(
 // Values which do not have uses or which do not have a last use
 // outside of the subgraph to be merged into we do not need to track.
 struct ValueMapper {
-  ValueMapper(Node* to_merge, AliasDb& db, c10::optional<Node*> existing) {
+  // `to_merge` is the node we're merginginto a subgraph, `existing_subgraph` is
+  // the subgraph node that we're merging into if it exists
+  ValueMapper(
+      Node* to_merge,
+      AliasDb& db,
+      c10::optional<Node*> existing_subgraph) {
     last_uses_ = gatherLastUses(to_merge->outputs());
-    if (existing) {
-      existing_last_uses_ = gatherLastUses((*existing)->outputs());
+    if (existing_subgraph) {
+      existing_last_uses_ = gatherLastUses((*existing_subgraph)->outputs());
     }
     WithInsertPoint guard(to_merge);
     auto g = to_merge->owningGraph();
@@ -212,7 +217,7 @@ void mergeNodeIntoSubgraph(
 
   auto subgraph = getSubgraph(subgraphNode);
 
-  // Map from values in the surrounding graph to values in the subgraph
+  // Map from values in the surrounding graph to inputs/outputs in the subgraph
   std::unordered_map<Value*, Value*> externalValuesMap;
 
   AT_ASSERT(subgraphNode->inputs().size() == subgraph->inputs().size());
@@ -308,8 +313,9 @@ void mergeNodeIntoSubgraph(
     toMerge->destroy();
   }
 
-  // Only register the output in the group node if it's actually used
-  // outside the subgraph.
+  // We wait till destroying `toMerge` before pruning subgraph outputs,
+  // since destroying `toMerge` could cause a subgraph output to no longer
+  // have any uses
   const auto hasUsesOutsideSubgraph = [&](Value* v) {
     return std::any_of(
         v->uses().cbegin(), v->uses().cend(), [&](const Use& use) {
@@ -317,7 +323,6 @@ void mergeNodeIntoSubgraph(
         });
   };
 
-  // prune extra outputs
   for (int64_t i = subgraphNode->outputs().size() - 1; i >= 0; i--) {
     if (!hasUsesOutsideSubgraph(subgraphNode->outputs().at(i))) {
       subgraphNode->eraseOutput(i);
