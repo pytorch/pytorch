@@ -1164,7 +1164,7 @@ Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& inde
 
 namespace {
 
-inline std::tuple<int64_t, Tensor> _take_along_dim_helper(
+inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
     const Tensor& self,
     const Tensor& indices,
     int64_t dim) {
@@ -1174,8 +1174,14 @@ inline std::tuple<int64_t, Tensor> _take_along_dim_helper(
   dim = at::maybe_wrap_dim(dim, self.dim());
   DimVector self_sizes{self.sizes()};
   self_sizes[dim] = indices.size(dim);
-  auto indices_broadcasted = at::broadcast_to(indices, self_sizes);
-  return std::make_tuple(dim, indices_broadcasted);
+  auto broadcast_shape = infer_size(self_sizes, indices.sizes());
+  auto indices_broadcasted = at::broadcast_to(indices, broadcast_shape);
+
+  DimVector indices_sizes{indices.sizes()};
+  indices_sizes[dim] = self.size(dim);
+  broadcast_shape = infer_size(indices_sizes, self.sizes());
+  auto self_broadcasted = at::broadcast_to(self, broadcast_shape);
+  return std::make_tuple(self_broadcasted, indices_broadcasted, dim);
 }
 
 } // anonymous namespace
@@ -1183,10 +1189,10 @@ inline std::tuple<int64_t, Tensor> _take_along_dim_helper(
 Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
   if (opt_dim.has_value()) {
     int64_t dim;
-    Tensor indices_broadcasted;
-    std::tie(dim, indices_broadcasted) =
+    Tensor self_broadcasted, indices_broadcasted;
+    std::tie(self_broadcasted, indices_broadcasted, dim) =
         _take_along_dim_helper(self, indices, opt_dim.value());
-    return self.gather(dim, indices_broadcasted);
+    return self_broadcasted.gather(dim, indices_broadcasted);
   }
   return self.take(indices);
 }
@@ -1194,10 +1200,10 @@ Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<i
 Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
   if (opt_dim.has_value()) {
     int64_t dim;
-    Tensor indices_broadcasted;
-    std::tie(dim, indices_broadcasted) =
+    Tensor self_broadcasted, indices_broadcasted;
+    std::tie(self_broadcasted, indices_broadcasted, dim) =
         _take_along_dim_helper(self, indices, opt_dim.value());
-    return at::gather_out(result, self, dim, indices_broadcasted);
+    return at::gather_out(result, self_broadcasted, dim, indices_broadcasted);
   }
   return at::take_out(result, self, indices);
 }
