@@ -2252,6 +2252,27 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (2, 3, 4))
         self.run_test(PowModule(), (x, y))
 
+        class PowModule2(torch.nn.Module):
+            def forward(self, x):
+                return torch.pow(2, x)
+
+        x = torch.randn(1, 10)
+        self.run_test(PowModule2(), (x,))
+
+        x = torch.randint(10, (2, 3, 4))
+        self.run_test(PowModule2(), (x,))
+
+        x = torch.randn(1, 10).to(dtype=torch.float64)
+        self.run_test(PowModule2(), (x,))
+
+        class PowModule3(torch.nn.Module):
+            def forward(self, x, y):
+                return y[torch.pow(2, x)]
+
+        x = torch.randint(5, (2, 3, 4))
+        y = torch.rand(100)
+        self.run_test(PowModule3(), (x, y))
+
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
