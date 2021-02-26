@@ -10,7 +10,13 @@ import argparse
 import torch
 import torch.utils.benchmark as benchmark_utils
 from .utils import load_dlmc_dataset
+from scipy.sparse import isspmatrix
 
+
+def scipy_matmul(mat1, mat2):
+    if isspmatrix(mat1) and isspmatrix(mat2):
+        return mat1.dot(mat2).tocoo()
+    return mat1.dot(mat2)
 
 def matmul_backward(a_dense, b_dense, grad_output):
     r1 = a_dense.matmul(b_dense)
@@ -38,7 +44,7 @@ def parse_args():
     parser.add_argument('--backward_test', action="store_true")
     parser.add_argument('--operation', type=str, help="|".join(OPS_MAP.keys()), default=next(iter(OPS_MAP)))
     parser.add_argument('--with_cuda', action='store_true')
-    parser.add_argument('--timer_min_run_time', default=1.0, type=float)
+    parser.add_argument('--timer_min_run_time', default=1, type=float)
     return parser
 
 
@@ -57,7 +63,7 @@ def get_tasks(op, backward_test, device):
                 (test_name, device, "torch:" + operation.replace("sparse", "dense"),
                  "{}(dx, dy)".format(OPS_MAP[operation])),
                 (test_name, device, "torch:" + operation, "{}(x, y)".format(OPS_MAP[operation])),
-                (test_name, device, "scipy:" + operation, "sx.dot(sy)") if device == "cpu" else None
+                (test_name, device, "scipy:" + operation, "scipy_matmul(sx, sy)") if device == "cpu" else None
             ]))
 
     all_operations = {
@@ -81,11 +87,12 @@ if __name__ == '__main__':
     device = 'cuda' if args.with_cuda else 'cpu'
 
     tasks = get_tasks(args.operation, args.backward_test, device)
-    repeats = 2
+    repeats = 3
     timers = [
         benchmark_utils.Timer(
             stmt=stmt,
             globals={
+                "scipy_matmul": scipy_matmul,
                 "matmul_backward": matmul_backward,
                 "sparse_matmul_backward": sparse_matmul_backward,
                 **variables
