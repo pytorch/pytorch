@@ -85,57 +85,7 @@ class TestCUDA(JitTestCase):
             e = torch.jit.cuda.Event()
             return e is not None
 
-        @torch.jit.script
-        def event_arg_blocking() -> bool:
-            e = torch.jit.cuda.Event(blocking=True)
-            s0 = torch.cuda.current_stream(0)
-            s = torch.jit.cuda.Stream()
-            e.record(s0)
-            e.wait(s)
-            A = torch.rand(1000, 1000, device="cuda")
-            with torch.jit.cuda.stream(s):
-                B = torch.mm(A, A)
-            s.synchronize()
-            e.record(s0)
-
-            return s.query() and e.query()
-
-        @torch.jit.script
-        def event_arg_enable_timing() -> float:
-            e_tik = torch.jit.cuda.Event(enable_timing=True)
-            e_tok = torch.jit.cuda.Event(enable_timing=True)
-            s0 = torch.cuda.current_stream(0)
-            e_tik.record(s0)
-            A = torch.rand(1000, 1000, device="cuda")
-            with torch.jit.cuda.stream(s0):
-                B = torch.mm(A, A)
-            s0.synchronize()
-            e_tok.record(s0)
-            e_tok.synchronize()
-            return e_tik.elapsed_time(e_tok)
-
-        @torch.jit.script
-        def event_arg_interprocess() -> bool:
-            e = torch.jit.cuda.Event(interprocess=True)
-            s1 = torch.jit.cuda.Stream()
-            s2 = torch.jit.cuda.Stream()
-            A = torch.rand(1000, 1000, device="cuda")
-            with torch.jit.cuda.stream(s1):
-                B = torch.mm(A, A)
-                s1.record_event(e)
-
-            with torch.jit.cuda.stream(s2):
-                C = torch.mm(A, A)
-                s2.record_event(e)
-            s1.synchronize()
-            s2.synchronize()
-
-            return s1.query() and s2.query() and e.query()
-
         self.assertTrue(event_default_args)
-        self.assertTrue(event_arg_blocking)
-        self.assertGreater(event_arg_enable_timing(), 0)
-        self.assertTrue(event_arg_interprocess)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
@@ -371,8 +321,8 @@ class TestCUDA(JitTestCase):
             device_index = torch.cuda._current_device()
             prev_current_stream = torch.cuda.current_stream(device_index)
             d = torch.device("cuda:0")
-            s1 = torch.jit.cuda.Stream(d)
-            s2 = torch.jit.cuda.Stream(d)
+            s1 = torch.jit.cuda.Stream(d, 0)
+            s2 = torch.jit.cuda.Stream(d, 0)
             event = torch.jit.cuda.Event(False, False, False)
 
             A = torch.rand(1000, 1000, device="cuda")
