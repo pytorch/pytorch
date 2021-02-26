@@ -847,7 +847,7 @@ ATEN_NATIVE_SOURCE_LIST = [
     "aten/src/ATen/native/Pooling.cpp",
     "aten/src/ATen/native/Pow.cpp",
     "aten/src/ATen/native/QuantizedLinear.cpp",
-    "aten/src/ATen/native/RNN.cpp",
+    # "aten/src/ATen/native/RNN.cpp",
     "aten/src/ATen/native/RangeFactories.cpp",
     "aten/src/ATen/native/ReduceAllOps.cpp",
     "aten/src/ATen/native/ReduceOps.cpp",

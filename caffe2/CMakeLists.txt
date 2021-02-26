@@ -58,7 +58,15 @@ endif()
 if(INTERN_BUILD_ATEN_OPS)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+  list(APPEND ATen_CPU_SRCS_FROM_TEMPLATE ${ATen_CPU_SRCS})
   add_subdirectory(../aten aten)
+  list(APPEND ATen_CPU_SRCS_LITE ${ATen_CPU_SRCS_FROM_TEMPLATE})
+  append_filelist("ATEN_CPU_SOURCE_LIST" ATen_CPU_SRCS_LITE)
+  append_filelist("ATEN_NATIVE_SOURCE_LIST" ATen_CPU_SRCS_LITE)
+  set(ATen_CPU_SRCS ${ATen_CPU_SRCS_LITE})
+  list(SORT ATen_CPU_SRCS)
+
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
@@ -889,6 +897,8 @@ endif()
 # formerly-libtorch flags
 # ==========================================================
 
+message(STATUS "CPU_CAPABILITY_NAMES: ${CPU_CAPABILITY_NAMES}")
+
 if(NOT INTERN_BUILD_MOBILE)
   # Forces caffe2.pb.h to be generated before its dependents are compiled.
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
@@ -934,8 +944,8 @@ if(USE_TBB)
   list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
   target_link_libraries(torch_cpu PUBLIC tbb)
 endif()
-  list(APPEND ATen_CPU_INCLUDE_LITE "")
-  append_filelist("ATEN_CPU_SOURCE_LIST" ATen_CPU_INCLUDE_LITE)
+  # list(APPEND ATen_CPU_INCLUDE_LITE "")
+  # append_filelist("ATEN_CPU_SOURCE_LIST" ATen_CPU_INCLUDE_LITE)
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
   target_include_directories(torch_cpu PRIVATE
@@ -1499,7 +1509,6 @@ endif()
 
 # ---[ Test binaries.
 if(BUILD_TEST)
-
   foreach(test_src ${ATen_VEC256_TEST_SRCS})
     foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
         get_filename_component(test_name ${test_src} NAME_WE)
