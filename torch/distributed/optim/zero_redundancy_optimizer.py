@@ -102,7 +102,7 @@ class ZeroRedundancyOptimizer(Optimizer):
             optimizer.
         group (``ProcessGroup``, optional): ``torch.distributed``
             ``ProcessGroup`` (default: ``group.WORLD`` initialized by
-            :method:`torch.distributed.init_process_group`).
+            :meth:`torch.distributed.init_process_group`).
         bucket_cap (int): the size of the buffer used to batch the small parameter tensors,
             in number of elements (default: 16M)
         **default: all trailing arguments will be forwarded to the given optimizer.
@@ -186,7 +186,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         training progresses.
 
         Arguments:
-            param_group (``Dict``): Specifies what Tensors should be optimized
+            param_group (dict): Specifies what Tensors should be optimized
                 along with group specific optimization options.
 
         .. warning: This method handles updating the shards on all partitions,
@@ -215,7 +215,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         Update the consolidated state_dict list, one per rank.
 
         Arguments:
-            to (``int``): the rank that receives the global states. (default: 0)
+            to (int): the rank that receives the global states. (default: 0)
 
         .. warning: This needs to be called on all replicas
         """
