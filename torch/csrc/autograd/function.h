@@ -92,9 +92,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
   /// Construct a new `Node` with the given `next_edges`
   explicit Node(
-      uint64_t topo_nr,
+      uint64_t topological_nr,
       edge_list&& next_edges = edge_list())
-    : topological_nr_(topo_nr),
+    : topological_nr_(topological_nr),
     next_edges_(std::move(next_edges)) {
 
     if (AnomalyMode::is_enabled()) {
@@ -121,7 +121,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
-    : Node(/*sequence_nr=*/0, std::move(next_edges)) {}
+    : Node(/*topological_nr=*/0, std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -455,7 +455,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler
-  uint64_t sequence_nr_;
+  uint64_t sequence_nr_ = 0;
 
   // See NOTE [ Topological Number ]
   uint64_t topological_nr_ = 0;
