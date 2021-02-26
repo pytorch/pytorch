@@ -681,7 +681,7 @@ class QuantizationTestCase(TestCase):
                     f"Layer {layer_name} does not have exactly two model results.")
                 k0, k1 = layer_data.keys()
                 self.assertTrue(
-                    layer_data[k0].shape == layer_data[k1].shape,
+                    layer_data[k0][0].shape == layer_data[k1][0].shape,
                     f"Layer {layer_name}, {k0} and {k1} have a shape mismatch.")
 
         def assert_ns_logger_act_compare_dict_valid(
