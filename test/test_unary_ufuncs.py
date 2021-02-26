@@ -52,11 +52,11 @@ _float_vals = (0.,
                -math.pi + .00001, math.pi - .00001,
                -math.pi, math.pi,
                -math.pi - .00001, math.pi + .00001)
-_large_float_vals = (-501, 501,
-                     -1001.2, 1001.2,
-                     -13437.7, 13437.7,
-                     -4988429.2, 4988429.2,
-                     -1e20, 1e20)
+_large_float_vals_1 = (-501, 501,
+                       -1001.2, 1001.2,
+                       -13437.7, 13437.7)
+_large_float_vals_2 = (-4988429.2, 4988429.2,
+                       -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
 _medium_length = 812
 _large_size = (1029, 917)
@@ -146,8 +146,9 @@ def generate_numeric_tensors_hard(device, dtype, *,
         return ()
 
     if dtype.is_floating_point:
-        vals = _large_float_vals
+        vals = _large_float_vals_1 if dtype == torch.half else _large_float_vals_1 + _large_float_vals_2
     elif dtype.is_complex:
+        _large_float_vals = _large_float_vals_1 + _large_float_vals_2
         vals = tuple(complex(x, y) for x, y in chain(product(_large_float_vals, _large_float_vals),
                                                      product(_float_vals, _large_float_vals),
                                                      product(_large_float_vals, _float_vals)))
@@ -608,37 +609,46 @@ class TestUnaryUfuncs(TestCase):
                                -0.000000111, 0, -0, -1, -2, -931], dtype=dtype, device=device)
         self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
 
-    # skip testing extremal values for CUDA due to Windows-CUDA CI checks
-    # CUDA 10.x returns the different exponent compared to NumPy on Windows
-    # CUDA 10.x
-    #   >>> x = torch.tensor(float('inf'), device='cuda')
-    #   >>> torch.frexp(x)
-    #   torch.return_types.frexp(
-    #   mantissa=tensor(inf, device='cuda:0'),
-    #   exponent=tensor(0, device='cuda:0', dtype=torch.int32))
-    # NumPy
-    #   >>> np.frexp(x.cpu().numpy())
-    #   (inf, -1)
-    @onlyCPU
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
     def test_frexp_reference_numerics(self, device, dtype):
+        def _frexp_reference_numerics_helper(tensors):
+            for t in tensors:
+                actual = torch.frexp(t)
+                expected = np.frexp(t.cpu().numpy())
+
+                # Crafts a custom error message for smaller, printable tensors
+                if t.numel() < 10:
+                    msg = ("Failed to produce expected results! Input tensor was"
+                           " {0}, torch result is {1}, and reference result is"
+                           " {2}.").format(t, actual, expected)
+                else:
+                    msg = None
+
+                mantissa, exponent = actual
+                np_mantissa, np_exponent = expected
+                self.assertEqualHelper(mantissa, np_mantissa, msg, dtype=dtype)
+                self.assertEqualHelper(exponent, np_exponent, msg, dtype=torch.int32)
+
         tensors = generate_numeric_tensors(device, dtype)
-        for t in tensors:
-            actual = torch.frexp(t)
-            expected = np.frexp(t.cpu().numpy())
+        _frexp_reference_numerics_helper(tensors)
 
-            # Crafts a custom error message for smaller, printable tensors
-            if t.numel() < 10:
-                msg = ("Failed to produce expected results! Input tensor was"
-                       " {0}, torch result is {1}, and reference result is"
-                       " {2}.").format(t, actual, expected)
-            else:
-                msg = None
+        hard_tensors = generate_numeric_tensors_hard(device, dtype)
+        _frexp_reference_numerics_helper(hard_tensors)
 
-            mantissa, exponent = actual
-            np_mantissa, np_exponent = expected
-            self.assertEqualHelper(mantissa, np_mantissa, msg, dtype=dtype)
-            self.assertEqualHelper(exponent, np_exponent, msg, dtype=torch.int32)
+        # skip testing extremal values due to the CircleCI windows check.
+        # The CUDA 10.1 returns the different exponent compared to NumPy on Windows.
+        # CUDA 10.1
+        #   >>> x = torch.tensor(float('inf'), device='cuda')
+        #   >>> torch.frexp(x)
+        #   torch.return_types.frexp(
+        #   mantissa=tensor(inf, device='cuda:0'),
+        #   exponent=tensor(0, device='cuda:0', dtype=torch.int32))
+        # NumPy
+        #   >>> np.frexp(x.cpu().numpy())
+        #   (inf, -1)
+        if self.device_type != 'cuda':
+            generate_numeric_tensors_extremal(device, dtype)
 
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
