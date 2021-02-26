@@ -1639,6 +1639,28 @@ class TestFX(JitTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(traced(input), m(input))
 
+        self.assertTrue(any(n.op == 'call_method' for n in traced.graph.nodes))
+
+    def test_script_method_trace(self):
+        class Scripted(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        class Holder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.s = torch.jit.script(Scripted())
+
+            def forward(self, x):
+                return self.s(x)
+
+        h = Holder()
+        traced = symbolic_trace(h)
+        input = torch.randn(3, 4)
+        self.assertEqual(traced(input), h(input))
+
+        self.assertTrue(any(n.op == 'call_method' for n in traced.graph.nodes))
+
     def test_namedtuple_return_trace(self):
         class NamedTupReturn(torch.nn.Module):
             def forward(self, x):
