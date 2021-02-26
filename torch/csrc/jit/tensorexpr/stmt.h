@@ -64,7 +64,7 @@ class TORCH_API Block : public StmtNode<Block> {
  public:
   static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
-    for (auto stmt : stmts) {
+    for (auto& stmt : stmts) {
       if (!stmt) {
         continue;
       }
