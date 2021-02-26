@@ -1,19 +1,20 @@
-from test_jit import JitTestCase
 from torch.testing._internal.common_utils import run_tests
 
 import torch
+import unittest
 
-
-class TestBindings(JitTestCase):
+class TestPublicBindings(unittest.TestCase):
     def test_no_new_bindings(self):
         """
         This test aims to stop the introduction of new JIT bindings into torch._C
         whose names do not start with _. Such bindings are made available as
         torch.XXX, which may not be desirable.
 
-        If your change causes this test to fail, add your new binding torch._C._jit
-        (or other relevant submodule of torch._C). If your binding really needs to
-        be available as torch.XXX, add it to torch._C and add it to the allowlist below.
+        If your change causes this test to fail, add your new binding to a relevant
+        submodule of torch._C, such as torch._C._jit (or other relevant submodule of
+        torch._C). If your binding really needs to be available as torch.XXX, add it
+        to torch._C and add it to the allowlist below.
+
         If you have removed a binding, remove it from the allowlist as well.
         """
         # This allowlist contains every binding in torch._C that is copied into torch at
