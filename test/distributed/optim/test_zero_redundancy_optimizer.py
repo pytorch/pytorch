@@ -246,39 +246,40 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         context = suppress() if not torch.cuda.is_available() else torch.cuda.device(self.rank)
 
         with context:
-            x_val = self.rank + 1
-            weight = 1.0
-            bias = 2.0
-            error = 1.0
-            target = torch.tensor([x_val * weight + bias + error], device=self.device)
-            loss_fn = torch.nn.L1Loss()
+            for bucket_view in [False, True]:
+                x_val = self.rank + 1
+                weight = 1.0
+                bias = 2.0
+                error = 1.0
+                target = torch.tensor([x_val * weight + bias + error], device=self.device)
+                loss_fn = torch.nn.L1Loss()
 
-            x = torch.tensor([float(x_val)], device=self.device)
-            m = torch.nn.Linear(1, 1)
-            m.weight.data = torch.tensor([[weight]])
-            m.bias.data = torch.tensor([bias])
-            m.to(self.device)
+                x = torch.tensor([float(x_val)], device=self.device)
+                m = torch.nn.Linear(1, 1)
+                m.weight.data = torch.tensor([[weight]])
+                m.bias.data = torch.tensor([bias])
+                m.to(self.device)
 
-            o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
+                o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1, parameters_as_bucket_view=bucket_view)
 
-            y = m(x)
-            y.backward(x)
-            for p in m.parameters():
-                dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
-                p.grad.data /= self.world_size
+                y = m(x)
+                y.backward(x)
+                for p in m.parameters():
+                    dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
+                    p.grad.data /= self.world_size
 
-            def closure():
-                o.zero_grad()
-                output = m(x)
-                loss = loss_fn(output, target)
-                loss.backward()
-                return loss
+                def closure():
+                    o.zero_grad()
+                    output = m(x)
+                    loss = loss_fn(output, target)
+                    loss.backward()
+                    return loss
 
-            loss = o.step(closure=closure)
+                loss = o.step(closure=closure)
 
-            self.assertEqual(loss, torch.tensor(error))
-            self.assertEqual(m.weight, torch.tensor([[1.1]]))
-            self.assertEqual(m.bias, torch.tensor([2.1]))
+                self.assertEqual(loss, torch.tensor(error))
+                self.assertEqual(m.weight, torch.tensor([[1.1]]))
+                self.assertEqual(m.bias, torch.tensor([2.1]))
 
     def test_sharding(self):
         """ Check the sharding at construction time"""
