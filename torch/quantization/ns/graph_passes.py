@@ -35,8 +35,16 @@ def _insert_logger_after_node(
     # create new name
     logger_node_name = \
         get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
+    # create a string representation of the node's target type
+    target_type = ''
+    if node.op == 'call_function':
+        target_type = str(node.target)
+    elif node.op == 'call_module':
+        assert isinstance(node.target, str)
+        target_mod = getattr_from_fqn(gm, node.target)
+        target_type = str(type(target_mod))
     # create the logger object
-    logger_obj = logger_cls(node.name, model_name, ref_name)
+    logger_obj = logger_cls(node.name, model_name, ref_name, target_type)
     # attach the logger object to the parent module
     setattr(gm, logger_node_name, logger_obj)
     logger_node = node.graph.create_node(
