@@ -466,7 +466,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'0': ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d))}
+        expected_types = {
+            'base_op_torch.nn.Conv2d_0':
+                ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+        }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
@@ -489,7 +492,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'linear': ((F.linear, F.linear), (toq.linear, toq.linear))}
+        expected_types = {
+            'base_op_torch.nn.functional.linear_0':
+                ((F.linear, F.linear), (toq.linear, toq.linear))
+        }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
@@ -514,7 +520,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'linear_relu': ((F.linear, F.relu), (toq.linear_relu, toq.linear_relu))}
+        expected_types = {
+            'base_op_torch.nn.functional.linear_0':
+                ((F.linear, F.relu), (toq.linear_relu, toq.linear_relu)),
+        }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
@@ -595,9 +604,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         expected_types = {
-            'cat': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
-            'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.cat_0': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
+            'base_op_torch.add_0': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.add_1': ((torch.add, torch.add), (toq.add, toq.add)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -624,9 +633,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         expected_types = {
-            'add': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add_2': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.add_0': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.add_1': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.add_2': ((torch.add, torch.add), (toq.add, toq.add)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -666,8 +675,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # so its type is the same in mp and mq. sigmoid and relu should not be
         # matched because they use the same function in mp and mq.
         expected_types = {
-            'conv1': ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
-            'mul': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
+            'base_op_torch.nn.Conv2d_0':
+                ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+            'base_op_torch.mul_0': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
