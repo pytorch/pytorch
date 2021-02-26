@@ -224,7 +224,7 @@ TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
 
-size_t dataTypeSize(DataType type);
+TORCH_CUDA_CU_API size_t dataTypeSize(DataType type);
 
 enum class LaunchConfigType {
   Compatible,
