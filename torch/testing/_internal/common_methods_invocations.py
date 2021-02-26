@@ -663,18 +663,6 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad):
                                      low=None, high=None,
                                      requires_grad=requires_grad),
                         gather_variable((M, S // 2), 0, S, True, device=device), 1)),
-            SampleInput((make_tensor((), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                        torch.tensor([0], dtype=torch.int64, device=device), 0)),
-            SampleInput((make_tensor((S,), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                        torch.tensor(0, dtype=torch.int64, device=device), 0)),
-            SampleInput((make_tensor((), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                        torch.tensor(0, dtype=torch.int64, device=device), 0)),
             )
 
 def sample_inputs_diff(op_info, device, dtype, requires_grad):
