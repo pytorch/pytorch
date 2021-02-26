@@ -1044,6 +1044,13 @@ class TestIndexing(TestCase):
             self.assertRaises(RuntimeError, lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
 
     def test_take_along_dim(self, device):
+        def _test_against_numpy(t, indices, dim):
+            actual = torch.take_along_dim(t, indices, dim=dim)
+            t_np = t.cpu().numpy()
+            indices_np = indices.cpu().numpy()
+            expected = np.take_along_axis(t_np, indices_np, axis=dim)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
         for shape in [(2, 3, 5), (3, 2), (2, 3, 1, 4)]:
             t = torch.randn(shape, device=device)
             for dim in list(range(t.ndim)) + [None]:
@@ -1052,11 +1059,7 @@ class TestIndexing(TestCase):
                 else:
                     indices = torch.argsort(t, dim=dim)
 
-                actual = torch.take_along_dim(t, indices, dim=dim)
-                t_np = t.cpu().numpy()
-                indices_np = indices.cpu().numpy()
-                expected = np.take_along_axis(t_np, indices_np, axis=dim)
-                self.assertEqual(actual, expected, atol=0, rtol=0)
+            _test_against_numpy(t, indices, dim)
 
         # dim of `t` and `indices` does not match
         with self.assertRaises(RuntimeError):
@@ -1079,16 +1082,17 @@ class TestIndexing(TestCase):
         with self.assertRaises(RuntimeError):
             torch.take_along_dim(t, indices, dim=7)
 
+        # test broadcasting
         t = torch.ones((3, 4, 1), device=device)
         indices = torch.ones((1, 2, 5), dtype=torch.long, device=device)
 
-        self.assertEqual(torch.take_along_dim(t, indices, dim=1).shape, (3, 2, 5))
+        _test_against_numpy(t, indices, 1)
 
+        # test empty indices
         t = torch.ones((3, 4, 5), device=device)
         indices = torch.ones((3, 0, 5), dtype=torch.long, device=device)
 
-        actual = torch.take_along_dim(t, indices, axis=1)
-        self.assertEqual(actual.shape, indices.shape)
+        _test_against_numpy(t, indices, 1)
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
