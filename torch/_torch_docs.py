@@ -8814,7 +8814,7 @@ add_docstr(torch.take_along_dim,
            r"""
 take_along_dim(input, indices, dim) -> Tensor
 
-Returns values from the :attr:`input` at the given 1-d indices in the given dim.
+Returns values from the :attr:`input` at the given 1-d indices along the given dim.
 
 .. note::
     This function is similar to NumPy's `take_along_axis`.
