@@ -3268,6 +3268,12 @@
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
 
+- func: relu6(Tensor self) -> Tensor
+  python_module: nn
+
+- func: relu6_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
   dispatch:
@@ -9226,18 +9232,6 @@
   variants: function
   dispatch:
     Math: linalg_matrix_rank_out
-
-- func: linalg_multi_dot(Tensor[] tensors) -> Tensor
-  python_module: linalg
-  variants: function
-  dispatch:
-    Math: linalg_multi_dot
-
-- func: linalg_multi_dot.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-  variants: function
-  dispatch:
-    Math: linalg_multi_dot_out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
