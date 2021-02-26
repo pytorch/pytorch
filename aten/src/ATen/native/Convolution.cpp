@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -235,6 +236,8 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
     (input.device().is_cpu() &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
      !transposed && // or transposed tensors
+     // For 1x1 filters, MKLDNN is faster than THNN when multi-threaded,
+     // but THNN is faster when single-threaded.
      (is_strided() || is_dilated() || input.size(0) >= 16 ||
       weight.size(-1) != 1 || weight.size(-2) != 1 || at::get_num_threads() > 1) &&
      (groups > 1
