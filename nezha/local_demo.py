@@ -21,6 +21,7 @@ def to_numpy(tensor):
     else:
         return tensor.cpu().numpy()
 
+############################## Preparation ##########################################################
 class SmartModule(nn.Module):
     def __init__(self, model):
         super(SmartModule, self).__init__()
@@ -28,25 +29,25 @@ class SmartModule(nn.Module):
 
     def forward(self, input, *args):
         self.inner_model.eval()
-        all_params = self.state_dict()
 
-        init_inputs = torch.randn_like(input)
-        model_1st = torch.jit.trace(self.inner_model, init_inputs)
-        model_1st.load_state_dict(all_params, strict=False)
-        model_1st.eval()
+        module_1st = torch.jit.trace(self.inner_model, input)
+        module_2nd = torch.jit.trace(self.inner_model, input)
 
-        model_2nd = torch.jit.trace(self.inner_model, init_inputs)
-        model_2nd.load_state_dict(all_params, strict=False)
-        model_2nd.eval()
+        torch._C._jit_nezha_update_graph(module_1st._c, module_2nd._c)
 
-        torch._C._jit_nezha_update_graph(model_1st._c, model_2nd._c)
+        all_modules = [module_1st, module_2nd]
 
-        outputs_1st = model_1st.forward(input)
-        outputs_2nd = model_2nd.forward(outputs_1st)
+        outputs = input
+        for m in all_modules:
+            outputs = m.forward(outputs, *args)
+        
+        return outputs
 
-        return outputs_2nd
+        # outputs_1st = module_1st.forward(input, *args)
+        # outputs_2nd = module_2nd.forward(outputs_1st, *args)
+        # return outputs_2nd
+
         # return self.inner_model(input, *args)
-
 
 class NeuralNet_All(nn.Module):
     def __init__(self, input_size, hidden_size, num_classes):
@@ -63,6 +64,8 @@ class NeuralNet_All(nn.Module):
         out = self.relu(out)
 
         return out
+
+#####################################################################################################
 
 total_input_size=5
 total_hidden_size=4
