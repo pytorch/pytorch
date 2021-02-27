@@ -119,7 +119,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
-      AT_ASSERT(num_tensors == (int)output_nr);
+      AT_ASSERT(num_tensors == output_nr);
     }
     set_history(var, num_tensors, is_input, is_modified, is_differentiable);
 

@@ -103,10 +103,8 @@ class CheckpointFunction(torch.autograd.Function):
         tensors = ctx.saved_tensors
 
         # Fill in inputs with appropriate saved tensors.
-        tensors_idx = 0
-        for idx in tensor_indices:
-            inputs[idx] = tensors[tensors_idx]
-            tensors_idx += 1
+        for i, idx in enumerate(tensor_indices):
+            inputs[idx] = tensors[i]
 
         # Stash the surrounding rng state, and mimic the state that was
         # present at this time during forward.  Restore the surrounding state
@@ -129,12 +127,12 @@ class CheckpointFunction(torch.autograd.Function):
         # run backward() with only tensor that requires grad
         outputs_with_grad = []
         args_with_grad = []
-        args_index = 0
+        tensor_args_index = 0
         for i in range(len(outputs)):
             if torch.is_tensor(outputs[i]) and outputs[i].requires_grad:
                 outputs_with_grad.append(outputs[i])
-                args_with_grad.append(args[args_index])
-                args_index += 1
+                args_with_grad.append(args[tensor_args_index])
+                tensor_args_index += 1
         if len(outputs_with_grad) == 0:
             raise RuntimeError(
                 "none of output has requires_grad=True,"
