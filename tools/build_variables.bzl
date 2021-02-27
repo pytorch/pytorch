@@ -33,7 +33,7 @@ libtorch_nvfuser_runtime_sources = [
     "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
 ]
 
-libtorch_nvfuser_generated_headers = ["{}.h".format(name[36:-3]) for name in libtorch_nvfuser_runtime_sources]
+libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".")[0]) for name in libtorch_nvfuser_runtime_sources]
 
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
