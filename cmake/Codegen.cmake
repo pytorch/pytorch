@@ -33,27 +33,6 @@ function(filter_list_exclude output input)
     set(${output} ${result} PARENT_SCOPE)
 endfunction()
 
-function(append_filelist name outputvar)
-  set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
-  # configure_file adds its input to the list of CMAKE_RERUN dependencies
-  configure_file(
-      ${PROJECT_SOURCE_DIR}/tools/build_variables.bzl
-      ${PROJECT_BINARY_DIR}/caffe2/build_variables.bzl)
-  execute_process(
-    COMMAND "${PYTHON_EXECUTABLE}" -c
-            "exec(open('${PROJECT_SOURCE_DIR}/tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
-    WORKING_DIRECTORY "${_rootdir}"
-    RESULT_VARIABLE _retval
-    OUTPUT_VARIABLE _tempvar)
-  if(NOT _retval EQUAL 0)
-    message(FATAL_ERROR "Failed to fetch filelist ${name} from build_variables.bzl")
-  endif()
-  string(REPLACE "\n" "" _tempvar "${_tempvar}")
-  list(APPEND ${outputvar} ${_tempvar})
-  set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
-endfunction()
-
-
 ################################################################################
 
 # ---[ Write the macros file
@@ -97,10 +76,6 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   file(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
-
-  # list(APPEND cpu_kernel_cpp_in_lite "")
-  # append_filelist("ATEN_CPU_SOURCE_LIST" cpu_kernel_cpp_in_lite)
-  # append_filelist("ATEN_NATIVE_SOURCE_LIST" cpu_kernel_cpp_in_lite)
 
   list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
@@ -151,9 +126,6 @@ if(INTERN_BUILD_ATEN_OPS)
       string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
-
-      message(STATUS "IMPL: ${IMPL}, name:${NAME}, NEW_IMPL: ${NEW_IMPL}")
-
       configure_file(${IMPL} ${NEW_IMPL} COPYONLY)
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
@@ -177,8 +149,6 @@ if(INTERN_BUILD_ATEN_OPS)
     endforeach()
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
-
-  message(STATUS "generated cpu_kernel_cpp: ${cpu_kernel_cpp}")
 
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
 
@@ -269,6 +239,26 @@ if(INTERN_BUILD_ATEN_OPS)
   add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
 endif()
+
+function(append_filelist name outputvar)
+  set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
+  # configure_file adds its input to the list of CMAKE_RERUN dependencies
+  configure_file(
+      ${PROJECT_SOURCE_DIR}/tools/build_variables.bzl
+      ${PROJECT_BINARY_DIR}/caffe2/build_variables.bzl)
+  execute_process(
+    COMMAND "${PYTHON_EXECUTABLE}" -c
+            "exec(open('${PROJECT_SOURCE_DIR}/tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
+    WORKING_DIRECTORY "${_rootdir}"
+    RESULT_VARIABLE _retval
+    OUTPUT_VARIABLE _tempvar)
+  if(NOT _retval EQUAL 0)
+    message(FATAL_ERROR "Failed to fetch filelist ${name} from build_variables.bzl")
+  endif()
+  string(REPLACE "\n" "" _tempvar "${_tempvar}")
+  list(APPEND ${outputvar} ${_tempvar})
+  set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
+endfunction()
 
 set(NUM_CPU_CAPABILITY_NAMES ${NUM_CPU_CAPABILITY_NAMES} PARENT_SCOPE)
 set(CPU_CAPABILITY_FLAGS ${CPU_CAPABILITY_FLAGS} PARENT_SCOPE)
