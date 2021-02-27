@@ -183,9 +183,8 @@ joined.
 Post-Initialization
 --------------
 
-Once :func:`torch.distributed.init_process_group` was run, the following functions become available.
-You may need to call :func:`torch.distributed.is_initialized` to make sure it was called before
-using these functions.
+Once :func:`torch.distributed.init_process_group` was run, the following functions can be used. To
+check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
 
 .. autoclass:: Backend
 
