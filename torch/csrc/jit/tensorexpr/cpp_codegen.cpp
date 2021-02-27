@@ -228,6 +228,44 @@ void CppPrinter::visit(const BitCast* v) {
        << v->dtype().ToCppString() << ">(" << *v->src_value() << ")";
 }
 
+void CppPrinter::visit(const Intrinsics* v) {
+  switch (v->op_type()) {
+    case kRand:
+    case kSigmoid:
+      throw std::runtime_error("kRand and kSigmoid are not supported");
+  }
+
+  if (v->param(0)->dtype().lanes() == 1) {
+    os() << "std::" << v->func_name() << "(";
+    for (int i = 0; i < v->nparams(); i++) {
+      if (i > 0) {
+        os() << ", ";
+      }
+      os() << *v->param(i);
+    }
+    os() << ")";
+  } else {
+    ScalarType ty = v->param(0)->dtype().scalar_type();
+    for (int i = 1; i < v->nparams(); ++i) {
+      ty = promoteTypes(ty, v->param(i)->dtype().scalar_type());
+    }
+    const std::string input_type = Dtype(ty).ToCppString();
+    const std::string ret_type = (v->op_type() == kIsNan)
+        ? "int"
+        : (is_integral(ty) ? "double" : input_type);
+
+    os() << "ComputeIntrinsics<" << input_type << ", " << ret_type << ">(";
+    os() << "std::" << v->func_name() << ", ";
+    for (int i = 0; i < v->nparams(); i++) {
+      if (i > 0) {
+        os() << ", ";
+      }
+      os() << *v->param(i);
+    }
+    os() << ")";
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

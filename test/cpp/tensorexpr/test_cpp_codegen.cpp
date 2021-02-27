@@ -316,5 +316,61 @@ TEST(CppPrinter, Cond) {
   FILE_CHECK(cond, pattern);
 }
 
+TEST(CppPrinter, Intrinsics) {
+  KernelScope kernel_scope;
+  const std::unordered_set<IntrinsicsOp> unsupported_ops{kRand, kSigmoid};
+  for (int i = 0; i < kMaxIntrinsicsOp; i++) {
+    IntrinsicsOp op = static_cast<IntrinsicsOp>(i);
+    if (unsupported_ops.count(op)) {
+      continue;
+    }
+
+    if (Intrinsics::OpArgCount(op) == 1) {
+      {
+        auto v = new Intrinsics(op, new FloatImm(2.0f));
+        STR_CHECK(v, "std::" + v->func_name() + "(2.f)");
+      }
+
+      {
+        auto v = new Intrinsics(op, new Ramp(new IntImm(0), new IntImm(1), 3));
+        if (op == kIsNan) {
+          STR_CHECK(
+              v,
+              "ComputeIntrinsics<int, int>(std::" + v->func_name() +
+                  ", Ramp(0, 1, 3))");
+        } else {
+          STR_CHECK(
+              v,
+              "ComputeIntrinsics<int, double>(std::" + v->func_name() +
+                  ", Ramp(0, 1, 3))");
+        }
+      }
+    } else {
+      {
+        auto v = new Intrinsics(op, new FloatImm(1.0f), new FloatImm(2.0f));
+        STR_CHECK(v, "std::" + v->func_name() + "(1.f, 2.f)");
+      }
+
+      {
+        auto v = new Intrinsics(
+            op,
+            new Ramp(new IntImm(0), new IntImm(1), 3),
+            new Broadcast(new DoubleImm(1.1), 3));
+        if (op == kIsNan) {
+          STR_CHECK(
+              v,
+              "ComputeIntrinsics<double, int>(std::" + v->func_name() +
+                  ", Ramp(0, 1, 3), Broadcast<double>(1.1, 3))");
+        } else {
+          STR_CHECK(
+              v,
+              "ComputeIntrinsics<double, double>(std::" + v->func_name() +
+                  ", Ramp(0, 1, 3), Broadcast<double>(1.1, 3))");
+        }
+      }
+    }
+  }
+}
+
 } // namespace jit
 } // namespace torch

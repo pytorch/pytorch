@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/tensorexpr/cpp_intrinsics.h>
 #include <torch/csrc/jit/tensorexpr/cpp_tensor.h>
 #include <torch/csrc/jit/tensorexpr/cpp_vector.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -34,6 +35,9 @@ class TORCH_API CppPrinter : public IRPrinter {
 
     os() << cpp_tensor_definition << std::endl;
     os() << std::endl;
+
+    os() << cpp_intrinsics_definition << std::endl;
+    os() << std::endl;
   }
 
   using IRPrinter::visit;
@@ -60,6 +64,9 @@ class TORCH_API CppPrinter : public IRPrinter {
   // Casts.
   void visit(const Cast*) override;
   void visit(const BitCast*) override;
+
+  // Calls.
+  void visit(const Intrinsics*) override;
 
  private:
   std::string to_lambda(CompareSelectOperation op, const std::string& ty);

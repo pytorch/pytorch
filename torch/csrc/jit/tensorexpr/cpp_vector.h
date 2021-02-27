@@ -89,11 +89,11 @@ Vector<TReturn> vectorizedUnaryOp(const Vector<TInput>& v,
   return res;
 }
 
-template <typename T>
-Vector<T> vectorizedBinaryOp(const Vector<T>& a, const Vector<T>& b,
-    std::function<T(T, T)> binary_op) const {
+template <typename TInput, typename TReturn>
+Vector<TReturn> vectorizedBinaryOp(const Vector<TInput>& a, const Vector<TInput>& b,
+    std::function<TReturn(TInput, TInput)> binary_op) const {
   assert(a.len() == b.len());
-  DenseVector<T> res(a.len());
+  DenseVector<TReturn> res(a.len());
   for (size_t i = 0; i < a.len(); i++) {
     res[i] = binary_op(a[i], b[i]);
   }
@@ -102,27 +102,27 @@ Vector<T> vectorizedBinaryOp(const Vector<T>& a, const Vector<T>& b,
 
 template <typename T>
 Vector<T> operator+(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a + b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a + b; });
 }
 
 template <typename T>
 Vector<T> operator-(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a - b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a - b; });
 }
 
 template <typename T>
 Vector<T> operator*(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a * b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a * b; });
 }
 
 template <typename T>
 Vector<T> operator/(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a / b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a / b; });
 }
 
 template <typename T>
 Vector<T> operator%(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) {
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) {
     if (std::is_floating_point<T>::value) {
       return std::fmod(a, b);
     } else if (std::is_integral<T>::value) {
@@ -135,27 +135,27 @@ Vector<T> operator%(const Vector<T>& lhs, const Vector<T>& rhs) const {
 
 template <typename T>
 Vector<T> operator&(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a & b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a & b; });
 }
 
 template <typename T>
 Vector<T> operator|(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a | b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a | b; });
 }
 
 template <typename T>
 Vector<T> operator^(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a ^ b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a ^ b; });
 }
 
 template <typename T>
 Vector<T> operator<<(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a << b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a << b; });
 }
 
 template <typename T>
 Vector<T> operator>>(const Vector<T>& lhs, const Vector<T>& rhs) const {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) { return a >> b; });
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) { return a >> b; });
 }
 
 template <typename T>
@@ -174,7 +174,7 @@ typename std::enable_if_t<!std::is_floating_point<T>::value && !std::is_integral
 
 template <typename T>
 Vector<T> Max(const Vector<T>& lhs, const Vector<T>& rhs) {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) {
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) {
     return max_value(a, b);
   });
 }
@@ -195,15 +195,15 @@ typename std::enable_if_t<!std::is_floating_point<T>::value && !std::is_integral
 
 template <typename T>
 Vector<T> Min(const Vector<T>& lhs, const Vector<T>& rhs) {
-  return vectorizedBinaryOp(lhs, rhs, [](T a, T b) {
+  return vectorizedBinaryOp<T, T>(lhs, rhs, [](T a, T b) {
     return min_value(a, b);
   });
 }
 
 template <typename From, typename To>
-Vector<To> Cast(const Vector<From>& v) {
-  return vectorizedUnaryOp<From, To>(v, [](From v) {
-    return static_cast<To>(v);
+Vector<To> Cast(const Vector<From>& vec) {
+  return vectorizedUnaryOp<From, To>(vec, [](From val) {
+    return static_cast<To>(val);
   });
 }
 
@@ -216,9 +216,9 @@ To BitCast(const From& v) {
 }
 
 template <typename From, typename To>
-Vector<To> BitCast(const Vector<From>& v) {
-  return vectorizedUnaryOp<From, To>(v, [](From v) {
-    return BitCast<From, To>(v);
+Vector<To> BitCast(const Vector<From>& vec) {
+  return vectorizedUnaryOp<From, To>(vec, [](From val) {
+    return BitCast<From, To>(val);
   });
 }
 
@@ -232,6 +232,18 @@ Vector<TReturn> CompareSelect(std::function<bool(TInput, TInput)> cmp,
     res[i] = cmp(lhs[i], rhs[i]) ? true_result[i] : false_result[i];
   }
   return res;
+}
+
+template <typename TInput, typename TReturn>
+Vector<TReturn> ComputeIntrinsics(std::function<TReturn(TInput)> intrinsics_func,
+    const Vector<TInput>& vec) {
+  return vectorizedUnaryOp<TInput, TReturn>(vec, f);
+}
+
+template <typename TInput, typename TReturn>
+Vector<TReturn> ComputeIntrinsics(std::function<TReturn(TInput, TInput)> intrinsics_func,
+    const Vector<TInput>& vec1, const Vector<TInput>& vec2) {
+  return vectorizedBinaryOp<TInput, TReturn>(vec1, vec2, f);
 }
 
 )";
