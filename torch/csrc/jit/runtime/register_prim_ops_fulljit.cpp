@@ -1017,6 +1017,73 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::complex.int(int real, int img) -> complex",
+        [](Stack* stack) {
+          int real, img;
+          pop(stack, real, img);
+          auto comp = c10::complex<double>(real, img);
+          push(stack, comp);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::complex.float(float real, float img) -> complex",
+        [](Stack* stack) {
+          double real, img;
+          pop(stack, real, img);
+          auto comp = c10::complex<double>(real, img);
+          push(stack, comp);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::complex.bool(bool real, bool img) -> complex",
+        [](Stack* stack) {
+          bool real, img;
+          pop(stack, real, img);
+          auto comp = c10::complex<double>(real, img);
+          push(stack, comp);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::complex.int_float(int real, float img) -> complex",
+        [](Stack* stack) {
+          int real;
+          double img;
+          pop(stack, real, img);
+          auto comp = c10::complex<double>(real, img);
+          push(stack, comp);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::complex.float_int(float real, int img) -> complex",
+        [](Stack* stack) {
+          double real;
+          int img;
+          pop(stack, real, img);
+          auto comp = c10::complex<double>(real, img);
+          push(stack, comp);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::complex.bool_float(bool real, float img) -> complex",
+        [](Stack* stack) {
+          bool real;
+          double img;
+          pop(stack, real, img);
+          auto comp = c10::complex<double>(real, img);
+          push(stack, comp);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::complex.float_bool(float real, bool img) -> complex",
+        [](Stack* stack) {
+          double real;
+          bool img;
+          pop(stack, real, img);
+          auto comp = c10::complex<double>(real, img);
+          push(stack, comp);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::sum.int(int[] self) -> int",
         [](Stack* stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
@@ -1216,6 +1283,22 @@ RegisterOperators reg2({
         "aten::hash.generic(t value) -> int",
         hashValue,
         aliasAnalysisFromSchema()),
+
+#define DEFINE_COMPLEX_MIXED_OP(type_a, type_b)                      \
+  Operator(                                                          \
+      "aten::complex." #type_a "_" #type_b "(" #type_a " x," #type_b \
+      " y) -> complex",                                              \
+      [](Stack* stack) {                                             \
+        type_a a;                                                    \
+        type_b b;                                                    \
+        pop(stack, a, b);                                            \
+        auto comp = c10::complex<double>(a, b);                      \
+        push(stack, comp);                                           \
+      },                                                             \
+      aliasAnalysisFromSchema())
+
+    DEFINE_COMPLEX_MIXED_OP(int, bool),
+    DEFINE_COMPLEX_MIXED_OP(bool, int),
 });
 
 bool isSortableTupleType(
