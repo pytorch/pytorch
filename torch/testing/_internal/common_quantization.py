@@ -558,7 +558,6 @@ class QuantizationTestCase(TestCase):
                     nodes_in_graph[n] = 1
 
         if expected_node is not None:
-            print('expected_node', expected_node)
             self.assertTrue(expected_node in nodes_in_graph, 'node:' + str(expected_node) +
                             ' not found in the graph module')
 

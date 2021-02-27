@@ -36,21 +36,36 @@ def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, 
         "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
     return class_mapping[type(custom_module)]
 
-def activation_is_statically_quantized(qconfig):
-    """ Given a qconfig, decide if the activation needs to be
-    statically quantized or not
-    """
+def activation_dtype(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
-    return activation.dtype in [torch.quint8, torch.qint8]
+    return activation.dtype
 
 def weight_dtype(qconfig):
     assert qconfig is not None
     weight = qconfig.weight()
     return weight.dtype
 
-def weight_is_statically_quantized(qconfig):
+def activation_is_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    quantized or not, this includes quantizing to quint8, qint8 and float16
+    """
+    return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+
+def activation_is_statically_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    statically quantized or not
+    """
+    return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
+
+def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be
+    quantized or not
+    """
+    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+
+def weight_is_statically_quantized(qconfig):
+    """ Given a qconfig, decide if the weight needs to be statically
     quantized or not
     """
     return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
