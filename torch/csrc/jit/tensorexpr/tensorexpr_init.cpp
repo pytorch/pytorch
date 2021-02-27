@@ -60,7 +60,9 @@ void initTensorExprBindings(PyObject* module) {
           .def("sigmoid", [](const ExprHandle& self) { return sigmoid(self); })
           .def("exp", [](const ExprHandle& self) { return exp(self); })
           .def("expm1", [](const ExprHandle& self) { return expm1(self); })
-          .def("abs", [](const ExprHandle& self) { return abs(self); })
+          .def(
+              "abs",
+              [](const ExprHandle& self) { return tensorexpr::abs(self); })
           .def("log", [](const ExprHandle& self) { return log(self); })
           .def(
               "fast_log", [](const ExprHandle& self) { return fast_log(self); })
@@ -69,7 +71,9 @@ void initTensorExprBindings(PyObject* module) {
           .def("log1p", [](const ExprHandle& self) { return log1p(self); })
           .def("erf", [](const ExprHandle& self) { return erf(self); })
           .def("erfc", [](const ExprHandle& self) { return erfc(self); })
-          .def("sqrt", [](const ExprHandle& self) { return sqrt(self); })
+          .def(
+              "sqrt",
+              [](const ExprHandle& self) { return tensorexpr::sqrt(self); })
           .def("rsqrt", [](const ExprHandle& self) { return rsqrt(self); })
           .def("ceil", [](const ExprHandle& self) { return ceil(self); })
           .def("floor", [](const ExprHandle& self) { return floor(self); })
@@ -122,7 +126,7 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<Tensor>(te, "Tensor")
       .def(
           py::init([](BufHandle& b, Stmt* s) {
-            return std::unique_ptr<Tensor>(new Tensor(b.node(), s));
+            return std::make_unique<Tensor>(b.node(), s);
           }),
           py::return_value_policy::reference)
       .def(
@@ -237,7 +241,7 @@ void initTensorExprBindings(PyObject* module) {
         for (const auto& buf : bufs) {
           buf_nodes.insert(buf.node());
         }
-        return std::unique_ptr<LoopNest>(new LoopNest(s, buf_nodes));
+        return std::make_unique<LoopNest>(s, buf_nodes);
       }))
       .def("vectorize_inner_loops", &LoopNest::vectorizeInnerLoops)
       .def("prepare_for_codegen", &LoopNest::prepareForCodegen)
@@ -353,14 +357,15 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<CodeGen>(te, "CodeGen")
       .def("call", [](CodeGen& self, const std::vector<at::Tensor>& values) {
         std::vector<CodeGen::CallArg> value_ptrs;
+        value_ptrs.reserve(values.size());
         for (const auto& value : values) {
           value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
         }
         self.call(value_ptrs);
       });
-  py::class_<SimpleIREvaluator, CodeGen>(te, "SimpleIREvaluator");
+  py::class_<SimpleIREvaluator, CodeGen>(te, "SimpleIREvaluator"); // NOLINT
 #ifdef TORCH_ENABLE_LLVM
-  py::class_<LLVMCodeGen, CodeGen>(te, "LLVMCodeGen");
+  py::class_<LLVMCodeGen, CodeGen>(te, "LLVMCodeGen"); // NOLINT
 #endif
 
   py::class_<CodeGen::BufferArg>(te, "BufferArg")
