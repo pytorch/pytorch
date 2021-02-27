@@ -24,7 +24,7 @@ TORCH_CUDA_CU_API void scheduleReduction(
     Fusion* fusion,
     const ReductionParams& rparams,
     TensorView* red_tv,
-    std::vector<TensorView*> outs_of_red);
+    const std::vector<TensorView*>& outs_of_red);
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
