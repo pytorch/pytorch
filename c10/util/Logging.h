@@ -362,6 +362,7 @@ struct DDPLoggingData {
   std::string gloo_device_transport = "";
   std::string nccl_socket_ifname = "";
   std::string nccl_blocking_wait = "";
+  std::string nccl_async_error_handling = "";
   std::string nccl_debug = "";
   std::string nccl_nthreads = "";
   std::string nccl_ib_timeout = "";
@@ -428,7 +429,7 @@ struct DDPLoggingData {
       " parameter_dtype: ", ddp_logging_data.dtype, " total_parameter_size_in_bytes: ",
       ddp_logging_data.total_parameter_size_bytes, " num_parameter_tensors: ",
       ddp_logging_data.num_parameter_tensors, " bucket_sizes: ", bucketSizesStr,
-      " CUDA_VISIBLE_DEVICES: ", ddp_logging_data.cuda_visible_devices, "broadcast_buffers: ",
+      " CUDA_VISIBLE_DEVICES: ", ddp_logging_data.cuda_visible_devices, " broadcast_buffers: ",
       ddp_logging_data.broadcast_buffers, " bucket_cap_mb: ", ddp_logging_data.bucket_cap_mb,
       " find_unused_parameters: ", ddp_logging_data.find_unused_parameters,
       " gradient_as_bucket_view: ", ddp_logging_data.gradient_as_bucket_view,

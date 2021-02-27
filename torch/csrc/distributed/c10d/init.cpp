@@ -687,8 +687,8 @@ Example::
 A TCP-based distributed key-value store implementation. The server store holds
 the data, while the client stores can connect to the server store over TCP and
 perform actions such as :meth:`~torch.distributed.store.set` to insert a key-value
-pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There 
-should always be one server store initialized because the client store(s) will wait for 
+pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There
+should always be one server store initialized because the client store(s) will wait for
 the server to establish a connection.
 
 Arguments:
@@ -1267,6 +1267,7 @@ Arguments:
       .def_readwrite("gloo_device_transport", &c10::DDPLoggingData::gloo_device_transport)
       .def_readwrite("nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
       .def_readwrite("nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
+      .def_readwrite("nccl_async_error_handling", &c10::DDPLoggingData::nccl_async_error_handling)
       .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
       .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
       .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
