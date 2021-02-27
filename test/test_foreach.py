@@ -68,7 +68,8 @@ class TestForeach(TestCase):
         if dtype in [torch.bfloat16, torch.bool, torch.float16]:
             tensors = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
         elif dtype in torch.testing.get_all_int_dtypes():
-            tensors = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
+            # Constrains the range between 1 and 10 for less stress on int8 tensors.
+            tensors = [torch.randint(1, 10, (N, N), device=device, dtype=dtype) for _ in range(N)]
         else:
             tensors = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
 
@@ -94,7 +95,8 @@ class TestForeach(TestCase):
 
     def _test_pointwise_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in N_values:
-            values = [2 + i for i in range(N)]
+            # Constrains the range a bit for int8 tensors.
+            values = [2 + (i % 5) for i in range(N)]
             for vals in [values[0], values]:
                 tensors = self._get_test_data(device, dtype, N)
                 tensors1 = self._get_test_data(device, dtype, N)
@@ -136,12 +138,15 @@ class TestForeach(TestCase):
                     with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N - 1)])
 
+                    msg = "Tensor lists must have the same number of tensors, got {} and {}".format(N + 1, N)
+
                     tensors = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, msg):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
+                    # This case looks identical to the case above. What was your intention? N - 1?
                     tensors1 = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, msg):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
