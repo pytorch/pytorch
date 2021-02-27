@@ -118,7 +118,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
             scalar_t max = std::isnan(y) ? y : std::max(x,y); //std::max returns first arg if one of the args is nan
             if (min != max) {
               // nan will be propagated here
-              return ::log1p(std::exp(min - max)) + std::max(x, y);
+              return std::log1p(std::exp(min - max)) + std::max(x, y);
             } else {
            // special case to correctly handle -inf and -inf
               return static_cast<scalar_t>(::log(2.)) + x;
