@@ -180,22 +180,6 @@ joined.
 
 .. autofunction:: is_nccl_available
 
-Post-Initialization
---------------
-
-Once :func:`torch.distributed.init_process_group` was run, the following functions can be used. To
-check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
-
-.. autoclass:: Backend
-
-.. autofunction:: get_backend
-
-.. autofunction:: get_rank
-
-.. autofunction:: get_world_size
-
---------------------------------------------------------------------------------
-
 Currently three initialization methods are supported:
 
 TCP initialization
@@ -275,6 +259,22 @@ The machine with rank 0 will be used to set up all connections.
 
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
+
+Post-Initialization
+--------------
+
+Once :func:`torch.distributed.init_process_group` was run, the following functions can be used. To
+check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
+
+.. autoclass:: Backend
+
+.. autofunction:: get_backend
+
+.. autofunction:: get_rank
+
+.. autofunction:: get_world_size
+
+--------------------------------------------------------------------------------
 
 Distributed Key-Value Store
 ---------------------------
