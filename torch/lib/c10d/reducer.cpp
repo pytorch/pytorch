@@ -16,6 +16,12 @@
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
+
+const char* kDistDebugEnvVar = "TORCH_DISTRIBUTED_DEBUG";
+const char* kDistDebugDetailLogLevel = "DETAIL";
+const char* kDistDebugInfoLogLevel = "INFO";
+const char* kDistDebugOffLogLevel = "OFF";
+
 namespace {
 
 inline int64_t current_time_in_nanos() {
