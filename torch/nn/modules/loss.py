@@ -1074,8 +1074,6 @@ class ComplementaryCrossEntropyLoss(_WeightedLoss):
         \text{loss}(x, class) = -\log\left(1-\frac{\exp(x[class])}{\sum_j \exp(x[j])}\right)
                        = -x[class] + \log\left(1-\sum_j \exp(x[j])\right)
 
-
-
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
             If given, has to be a Tensor of size `C`
