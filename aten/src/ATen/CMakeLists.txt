@@ -127,11 +127,29 @@ endforeach()
 list(APPEND ATen_CPU_SRCS_LITE "")
 append_filelist("aten_cpu_source_list" ATen_CPU_SRCS_LITE)
 append_filelist("aten_native_source_list" ATen_CPU_SRCS_LITE)
-# append_filelist("aten_gap_list" ATen_CPU_SRCS_LITE)
-append_filelist("aten_excluded_list" ATen_CPU_SRCS_LITE)
+#append_filelist("aten_gap_list" ATen_CPU_SRCS_LITE)
+ append_filelist("aten_excluded_list" ATen_CPU_SRCS_LITE)
 
-list(APPEND all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
+list(
+  APPEND
+  generated_cpp_lite
+  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/RegisterBackendSelect.cpp
+  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/Functions.cpp
+  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/RedispatchFunctions.cpp
+  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/RedispatchFunctions.h
+  )
+
+list(
+  APPEND
+  core_generated_cpp_lite
+  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/core/ATenOpList.cpp
+  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/core/TensorMethods.cpp
+  )
+
+# list(APPEND all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
 # list(APPEND all_cpu_cpp_lite ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
+list(APPEND all_cpu_cpp ${generated_cpp_lite} ${core_generated_cpp_lite} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
+# list(APPEND all_cpu_cpp_lite ${generated_cpp_lite} ${core_generated_cpp_lite} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
 
 list(SORT all_cpu_cpp)
 list(SORT all_cpu_cpp_lite)
@@ -182,6 +200,15 @@ foreach(tmp ${core_generated_cpp})
   message(STATUS "  " ${tmp})
 endforeach()
 
+message(STATUS "generated_cpp_lite: ")
+foreach(tmp ${generated_cpp_lite})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "core_generated_cpp_lite: ")
+foreach(tmp ${core_generated_cpp_lite})
+  message(STATUS "  " ${tmp})
+endforeach()
 
 message(STATUS "all_cpu_cpp_lite: ")
 foreach(tmp ${all_cpu_cpp_lite})
