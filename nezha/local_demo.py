@@ -49,8 +49,8 @@ class SmartModule(nn.Module):
         module_1st = torch.jit.trace(self.inner_model, input)
         module_2nd = torch.jit.trace(self.inner_model, input)
 
-        xxx = nezha_helper.split_modules(module_1st._c)
-        all_C_modules = torch._C._jit_nezha_split_modules(module_1st._c)
+        all_C_modules = nezha_helper.split_modules(module_1st._c)
+        # all_C_modules = torch._C._jit_nezha_split_modules(module_1st._c)
         
         all_modules = [module_1st, module_2nd]
         module_length = len(all_modules)
