@@ -1152,10 +1152,10 @@ void InsertQuantDeQuantHelper::propagateQParams(
     Node* dtype = insertQParam(
         graph, quantized_input, prim::dtype, IntType::get(), "dtype");
     quant_inputs = {
-      original_output,
-      scale->output(),
-      zero_point->output(),
-      dtype->output()};
+        original_output,
+        scale->output(),
+        zero_point->output(),
+        dtype->output()};
   }
   Node* quant = insertQuant(
       graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
