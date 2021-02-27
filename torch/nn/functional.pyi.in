@@ -240,6 +240,8 @@ def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., re
 def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,
                   ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
 
+def complementary_cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,
+                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
 
 def binary_cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ...,
                          size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
