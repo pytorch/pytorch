@@ -127,8 +127,11 @@ class TORCH_API StaticRuntime {
       const int main_runs);
 
   struct IndividualMetrics {
-    float setup_time;
-    float total_time;
+    float setup_time{0.0};
+    float memory_alloc_time{0.0};
+    float memory_dealloc_time{0.0};
+    float output_dealloc_time{0.0};
+    float total_time{0.0};
     std::vector<float> time_per_node;
     std::unordered_map<std::string, float> time_per_node_type;
     std::unordered_map<std::string, float> percent_per_node_type;
