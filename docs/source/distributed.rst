@@ -174,6 +174,17 @@ joined.
 
 .. autofunction:: init_process_group
 
+.. autofunction:: is_initialized
+
+.. autofunction:: is_mpi_available
+
+.. autofunction:: is_nccl_available
+
+Post-Initialization
+--------------
+
+Once :func:`torch.distributed.init_process_group` was run, the following functions become available. You may need to call :func:`torch.distributed.is_initialized` to make sure it was called before using these functions.
+
 .. autoclass:: Backend
 
 .. autofunction:: get_backend
@@ -181,12 +192,6 @@ joined.
 .. autofunction:: get_rank
 
 .. autofunction:: get_world_size
-
-.. autofunction:: is_initialized
-
-.. autofunction:: is_mpi_available
-
-.. autofunction:: is_nccl_available
 
 --------------------------------------------------------------------------------
 
