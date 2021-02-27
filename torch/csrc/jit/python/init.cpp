@@ -134,6 +134,7 @@ TORCH_API void runJITCPPTests();
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  auto jit = m.def_submodule("_jit");
 
   py::register_exception<JITException>(m, "JITException");
 
