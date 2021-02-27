@@ -4,7 +4,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 from torch._six import inf, nan
 
-N_values = [20] if not TEST_WITH_SLOW else [30, 300]
+N_values = [20, 23] if not TEST_WITH_SLOW else [30, 300]
 
 class TestForeach(TestCase):
     foreach_bin_ops = [

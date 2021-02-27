@@ -264,8 +264,6 @@ struct ZeroFunctor {
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
                 for(int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
-                    // Why were we loading anything when we're just going to zero it?
-                    // load_store(r_args[0], args[0], 0, i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         r_args[0][ii] = 0;
@@ -276,8 +274,6 @@ struct ZeroFunctor {
             }
             else {
                 for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
-                    // Why were we loading anything when we're just going to zero it?
-                    // load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         r_args[0][ii] = 0;
