@@ -204,8 +204,11 @@ struct ConvertTracedAttrReferences {
           if (i < prefix_atoms.size()) {
             TORCH_INTERNAL_ASSERT(attr_atoms[i] == prefix_atoms[i]);
           } else {
+            std::cout << "ycao_debug *n " << *n << std::endl;
+            std::cout << "ycao_debug replaced_value node: " << *replaced_value->node() << std::endl;
             replaced_value = n->owningBlock()->owningGraph()->insertGetAttr(
                 replaced_value, attr_atoms[i]);
+            std::cout << "ycao_debug replaced_value node after: " << *replaced_value->node() << std::endl;
           } // if (i < prefix_atoms.size())
         } // for (size_t i = 0; i < attr_atoms.size(); i++)
         n->replaceInput(inp_idx, replaced_value);

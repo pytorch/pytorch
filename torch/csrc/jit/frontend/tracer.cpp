@@ -329,11 +329,11 @@ static IValue addInput(
     Value* value) {
   value->setType(type);
   if (type->isSubtypeOf(TensorType::get())) {
-    auto input_tensor = input.toTensor();
+    auto& input_tensor = input.toTensor();
     auto name = Variable(input_tensor).name();
-    if (state->hasValue(input)) {
-      input_tensor = input_tensor.view(input_tensor.sizes());
-    }
+    //if (state->hasValue(input)) {
+    //  input_tensor = input_tensor.view(input_tensor.sizes());
+    //}
     if (!value->hasDebugName()) {
       value->setDebugName(name);
     }
