@@ -231,10 +231,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
   void update_topological_nr(const Edge& edge) {
-#ifndef NDEBUG
-    TORCH_INTERNAL_ASSERT(!node_has_parent_,
-        "cannot update topological_nr after node already has parent")
-#endif
     Node* node = edge.function.get();
     if (node) {
       auto topo_nr = node->topological_nr();
@@ -313,9 +309,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //      2 -> 3 -> 0               2 < 3, yet there exists a path from 2 to 3!
   //
   uint64_t topological_nr() const noexcept {
-#ifndef NDEBUG
-    node_has_parent_ = true;
-#endif
     return topological_nr_;
   }
 
@@ -459,11 +452,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // See NOTE [ Topological Number ]
   uint64_t topological_nr_ = 0;
-
-#ifndef NDEBUG
-  // Whether this node been added as the next_edge of another node
-  mutable bool node_has_parent_ = 0;
-#endif
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;
