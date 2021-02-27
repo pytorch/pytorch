@@ -2180,6 +2180,57 @@ class TestReductions(TestCase):
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
 
+    def test_tensor_compare_ops_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        test_functions = [
+            ('amax', torch.amax, {}),
+            ('amin', torch.amin, {}),
+            ('argmax', torch.argmax, {'dtype': torch.int64}),
+            ('argmin', torch.argmin, {'dtype': torch.int64}),
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, {}),
+            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, {}),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, {}),
+            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, {}),
+        ]
+
+        for name, fn, dtype in test_functions:
+            # Check if reduction happens along the specified dim with and without keepdim.
+            self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True))
+
+            # Check if function raises error on specified zero'd dimension as reduction dim.
+            self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1))
+
+    def test_tensor_reduce_ops_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        test_functions = [
+            ('prod', torch.prod, 1.),
+            ('sum', torch.sum, 0.),
+            ('norm', torch.norm, 0.),
+            ('mean', torch.mean, nan),
+            ('var', torch.var, nan),
+            ('std', torch.std, nan),
+            ('logsumexp', torch.logsumexp, -inf),
+        ]
+
+        for name, fn, return_value in test_functions:
+            # Check if reduction happens along the specified dimension.
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True))
+
+            # Check if returned data is correct.
+            check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else
+                          self.assertEqual)
+            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1))
+            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True))
+            try:
+                check_func(torch.full((), return_value, device=device), fn(master_input))
+            except TypeError as err:
+                # ignore if there is no allreduce.
+                self.assertTrue('dim' in str(err))
+
     def test_reduction_empty(self, device):
         fns_to_test = [
             # name, function, identity
@@ -2204,13 +2255,13 @@ class TestReductions(TestCase):
         x = torch.randn(shape, device=device)
 
         for fn in [torch.max, torch.min]:
-            ident_err = 'operation does not have an identity'
+            ident_err = 'Expected reduction dim'
             self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
 
         # median and nanmedian have been updated to follow the new convention for empty tensors
         # where it should only fail if the dimension being reduced has size 0.
         for name, fn in [('median', torch.median), ('nanmedian', torch.nanmedian)]:
-            ident_err = 'does not have an identity'
+            ident_err = 'Expected reduction dim'
             self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
             self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
             self.assertEqual(fn(x, dim=0)[0].shape, (shape[1], shape[2]))
@@ -2221,28 +2272,9 @@ class TestReductions(TestCase):
         for item in fns_to_test:
             name, fn, identity = item
             if identity is None:
-                ident_err = 'does not have an identity'
-
-                # Reductions over non-zero dimensions should work even for empty tensors
-                # See https://github.com/pytorch/pytorch/issues/34907 for a discussion on this.
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2))
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2, keepdim=True))
-
+                ident_err = 'Expected reduction dim'
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
-            else:
-                self.assertEqual(torch.empty((2, 0), device=device), fn(x, dim=2))
-                self.assertEqual(torch.empty((2, 0, 1), device=device), fn(x, dim=2, keepdim=True))
-                # assertEqual doesn't work with inf, -inf, nan and two tensors.
-                check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else
-                         self.assertEqual)
-                check(torch.full((2, 4), identity, device=device), fn(x, dim=1))
-                check(torch.full((2, 1, 4), identity, device=device), fn(x, dim=1, keepdim=True))
-                try:
-                    check(torch.full((), identity, device=device), fn(x))
-                except TypeError as err:
-                    # ignore if there is no allreduce.
-                    self.assertTrue('dim' in str(err))
 
         for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                                   include_bool=True, include_complex=True):

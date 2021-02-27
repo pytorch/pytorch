@@ -83,6 +83,13 @@ class Pair(NamedTuple):
     y : torch.Tensor
 
 class TestFX(JitTestCase):
+    def setUp(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            return
+        torch_root = Path(__file__).resolve().parent.parent
+        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        torch.ops.load_library(str(p))
+
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
         for a given set of args/kwargs.
@@ -376,9 +383,6 @@ class TestFX(JitTestCase):
     def test_native_callable(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        torch_root = Path(__file__).resolve().parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
-        torch.ops.load_library(str(p))
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
         #
