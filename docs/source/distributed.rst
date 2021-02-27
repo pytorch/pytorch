@@ -180,6 +180,8 @@ joined.
 
 .. autofunction:: is_nccl_available
 
+--------------------------------------------------------------------------------
+
 Currently three initialization methods are supported:
 
 TCP initialization
