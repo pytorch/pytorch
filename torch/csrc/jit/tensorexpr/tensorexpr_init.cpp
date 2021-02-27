@@ -26,7 +26,7 @@ void initTensorExprBindings(PyObject* module) {
 
 #define DTYPE_SINGLETON_ACCESSOR(ctype, name) \
   dtype_class.def_property_readonly_static(   \
-      #name, [](py::object) { return k##name; });
+      #name, [](py::object) { return k##name; }); // NOLINT
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_SINGLETON_ACCESSOR)
 #undef DTYPE_SINGLETON_ACCESSOR
 
@@ -321,7 +321,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "flatten",
           [](const LoopNest& self, const std::vector<For*>& loops) {
-            For* flattened;
+            For* flattened = nullptr;
             self.flatten(loops, &flattened);
             return flattened;
           },
