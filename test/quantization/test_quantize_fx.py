@@ -69,6 +69,8 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
+from torch.testing._internal.common_utils import TemporaryFileName
+
 from torch.testing._internal.common_distributed import skip_if_not_multigpu
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
@@ -1546,15 +1548,17 @@ class TestQuantizeFx(QuantizationTestCase):
         # ensure it is scriptable
         scripted = torch.jit.script(m)
         scripted_keys = scripted.state_dict().keys()
-        self.assertTrue(scripted_keys == keys, "Expected the scripted model to preserve the state_dict")
-        assert hasattr(m, "mods1_0_input_scale_0")
-        assert hasattr(m, "mods1_0_input_zero_point_0")
-        assert hasattr(m, "mods1_0_scale_0")
-        assert hasattr(m, "mods1_0_zero_point_0")
-        assert hasattr(m, "mods1_1_scale_0")
-        assert hasattr(m, "mods1_1_zero_point_0")
-        assert hasattr(m, "mods2_scale_0")
-        assert hasattr(m, "mods2_zero_point_0")
+        scripted.mods1_0_packed_weight_0 = m.state_dict()["mods1_0_packed_weight_0"]
+        non_packed_weight_keys = [key for key in keys if "_packed_weight" not in key]
+        self.assertTrue(
+            set(scripted_keys) == set(non_packed_weight_keys),
+            "Expected the scripted model to preserve the state_dict for non-packed weight attributes")
+        for attr_name in [
+                "mods1_0_input_scale_0", "mods1_0_input_zero_point_0",
+                "mods1_0_scale_0", "mods1_0_zero_point_0",
+                "mods1_1_scale_0", "mods1_1_zero_point_0",
+                "mods2_scale_0", "mods2_zero_point_0"]:
+            self.assertTrue(hasattr(m, attr_name))
 
     @skipIfNoFBGEMM
     def test_packed_weight_fused_op(self):
@@ -1623,6 +1627,84 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_fx(m)
         # make sure it runs
         m(torch.randn(5, 5))
+
+    def test_state_dict(self):
+        """ Make sure packed params appear in state_dict
+        """
+
+        # test linear packed weight
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.rand(4, 30)
+                self.b = torch.rand(4)
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        m = M1().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        state_dict = m.state_dict()
+        self.assertTrue("_packed_weight_0" in state_dict)
+
+        # test conv packed weight
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.rand(3, 3, 3, 3)
+                self.b = torch.rand(3)
+                self.stride = (1, 1)
+                self.padding = (0, 0)
+                self.dilation = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                return F.conv2d(x, self.w, self.b, self.stride, self.padding, self.dilation, self.groups)
+
+        m = M2().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        state_dict = m.state_dict()
+        self.assertTrue("_packed_weight_0" in state_dict)
+
+        # test load
+        ref_weight, ref_bias = torch.ops.quantized.conv2d_unpack(state_dict["_packed_weight_0"])
+        data = torch.rand(1, 3, 5, 5)
+        ref_res = m(data)
+        m = M2().eval()
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        res = m(data)
+        weight, bias = m._packed_weight_0.unpack()
+        # check that random model weight/bias does not match ref weight/bias
+        self.assertNotEqual(weight, ref_weight)
+        self.assertNotEqual(bias, ref_bias)
+        self.assertNotEqual(res, ref_res)
+        m.load_state_dict(state_dict)
+
+        def checkModel(m, data, ref_weight, ref_bias, ref_res):
+            res = m(data)
+            weight, bias = m._packed_weight_0.unpack()
+            # check that weight/bias matches after load the state_dict
+            self.assertEqual(weight, ref_weight)
+            self.assertEqual(bias, ref_bias)
+            self.assertEqual(res, ref_res)
+
+        checkModel(m, data, ref_weight, ref_bias, ref_res)
+
+        # Test save to disk and load back
+        m = M2().eval()
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        m.load_state_dict(state_dict)
+        with TemporaryFileName() as fname:
+            torch.save(m.state_dict(), fname)
+            m.load_state_dict(torch.load(fname))
+
+        checkModel(m, data, ref_weight, ref_bias, ref_res)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -1737,6 +1819,58 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 model, data, quant_type, qlinear_fun,
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
+                expected_node_occurrence=convert_node_occurrence)
+
+    def test_linear_dynamic_fp16(self):
+        class FuncLinear(torch.nn.Module):
+            def __init__(self, use_bias, has_relu, f_relu):
+                super(FuncLinear, self).__init__()
+                self.w = torch.randn(4, 30)
+                self.b = torch.randn(4)
+                self.use_bias = use_bias
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
+
+            def forward(self, x):
+                if self.use_bias:
+                    x = F.linear(x, self.w, self.b)
+                else:
+                    x = F.linear(x, self.w)
+                x = self.relu(x)
+                return x
+
+        data = (torch.rand((1, 30), dtype=torch.float),)
+        options = itertools.product(
+            (True, False),  # use_bias
+            (True, False),  # has_relu
+            (True, False),  # functional relu
+            (True, False),  # is_reference
+        )
+        for use_bias, has_relu, f_relu, is_reference in options:
+            model = FuncLinear(use_bias, has_relu, f_relu)
+            if is_reference:
+                qlinear_fun = ns.call_function(torch.nn.functional.linear)
+            else:
+                qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
+            prepare_node_occurrence = {
+                # weight
+                ns.call_module(torch.quantization.PlaceholderObserver): 1
+            }
+            convert_node_occurrence = {
+                qlinear_fun: 1,
+                # weight
+                ns.call_method("to"): 1 if is_reference else 0
+            }
+            self.checkGraphModeFxOp(
+                model, data, QuantType.DYNAMIC, qlinear_fun,
+                is_reference=is_reference,
+                custom_qconfig=float16_dynamic_qconfig,
+                prepare_expected_node_occurrence=prepare_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
 
     @skipIfNoFBGEMM
