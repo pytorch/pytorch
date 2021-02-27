@@ -8,13 +8,15 @@
 import os
 
 import numpy as np
+import unittest
 import torch
 import torch.distributed as dist
 from typing import List, Any, Type, cast
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
+from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
-from torch.testing._internal import common_utils, common_distributed
+from torch.testing._internal.common_distributed import skip_if_rocm
 
 import copy
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -24,7 +26,7 @@ BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
+class TestZeroRedundancyOptimizer(MultiProcessTestCase):
     def setUp(self):
         super(TestZeroRedundancyOptimizer, self).setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
@@ -197,7 +199,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def world_size(self):
         return max(2, torch.cuda.device_count())
 
-    @common_distributed.skip_if_rocm
+    @skip_if_rocm
     def test_step(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step()` interface"""
         if self.rank > 1 or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
@@ -224,7 +226,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             self.assertEqual(m.weight, torch.tensor([[0.75]], device=self.device))
             self.assertEqual(m.bias, torch.tensor([1.85], device=self.device))
 
-    @common_distributed.skip_if_rocm
+    @skip_if_rocm
     def test_step_with_closure(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step(closure)` interface"""
 
@@ -444,7 +446,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
             check(optimizer)
 
-    @common_distributed.skip_if_no_gpu
+    @skip_if_no_gpu
     def test_pytorch_parity(self):
         """When combined with DDP, check that ZeroRedundancyOptimizer(optimizer) and the same monolithic optimizer
         give the exact same results
@@ -545,5 +547,4 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
 
 if __name__ == "__main__":
-    # ! unittest should not be used here, else the tests are not properly registered
-    common_utils.run_tests()
+    unittest.main()

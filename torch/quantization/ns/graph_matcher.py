@@ -1,3 +1,4 @@
+import enum
 import operator
 
 import torch
@@ -13,18 +14,15 @@ from torch.fx.graph import Graph, Node
 
 from .utils import getattr_from_fqn
 
-from typing import Dict, Tuple, List, Optional, Set, Callable
+from typing import Dict, Tuple, List, Optional, Set, Callable, Any
 
 def _get_output_nodes(g: Graph) -> List[Node]:
     return [n for n in g.nodes if n.op == 'output']
 
-def get_type_a_related_to_b() -> Set[Tuple[Callable, Callable]]:
-    # TODO(future PR): allow customizations
-    # TODO(future PR): reuse existing quantization mappings
-    # TODO(future PR): add the rest of modules and ops here
-    sets_of_related_ops: List[Set[Callable]] = [
+def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
+    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]] = {
         # conv modules
-        set([
+        'torch.nn.Conv2d': set([
             nn.Conv2d,
             nnq.Conv2d,
             nnqat.Conv2d,
@@ -33,33 +31,45 @@ def get_type_a_related_to_b() -> Set[Tuple[Callable, Callable]]:
             nniqat.ConvBn2d,
         ]),
         # linear modules
-        set([
+        'torch.nn.Linear': set([
             nn.Linear,
             nnq.Linear,
             nnqat.Linear,
         ]),
         # linear functionals
-        set([
+        'torch.nn.functional.linear': set([
             F.linear,
             toq.linear,
             toq.linear_relu,
         ]),
         # add
-        set([
+        'torch.add': set([
             torch.add,
             toq.add,
             operator.add,  # x + y
         ]),
         # cat
-        set([
+        'torch.cat': set([
             torch.cat,
             toq.cat,
         ]),
-    ]
+        # mul
+        'torch.mul': set([
+            torch.mul,
+            toq.mul,
+        ]),
+    }
+    return base_name_to_sets_of_related_ops
 
+def get_type_a_related_to_b(
+    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]],
+) -> Set[Tuple[Callable, Callable]]:
+    # TODO(future PR): allow customizations
+    # TODO(future PR): reuse existing quantization mappings
+    # TODO(future PR): add the rest of modules and ops here
     type_a_related_to_b: Set[Tuple[Callable, Callable]] = set()
 
-    for s in sets_of_related_ops:
+    for base_name, s in base_name_to_sets_of_related_ops.items():
         s_list = list(s)
         # add every bidirectional pair
         for idx_0 in range(0, len(s_list) - 1):
@@ -181,9 +191,7 @@ class _NSGraphMatchableSubgraphsIterator:
             # add args of previous nodes to stack
             # TODO(future PR): handle kwargs as needed
             for arg in cur_start_node.args:
-                if isinstance(arg, Node):
-                    self.stack.append(arg)
-                # TODO(future PR): handle other arg types such as Tuple, etc
+                self._recursively_add_node_arg_to_stack(arg)
 
             # skip observers, etc
             # note: this check is done on the start_node, i.e.
@@ -195,6 +203,20 @@ class _NSGraphMatchableSubgraphsIterator:
             return cur_start_node, cur_end_node
 
         raise StopIteration
+
+    def _recursively_add_node_arg_to_stack(self, arg: Any) -> None:
+        """
+        Adds all of the nodes in this arg to the stack, properly navigating
+        through list, dicts and tuples.
+        """
+        if isinstance(arg, Node):
+            self.stack.append(arg)
+        elif isinstance(arg, torch.fx.immutable_collections.immutable_list) or type(arg) is tuple:
+            for inner_arg in arg:
+                self._recursively_add_node_arg_to_stack(inner_arg)
+        elif isinstance(arg, torch.fx.immutable_collections.immutable_dict):
+            for key, value in arg.items():
+                self._recursively_add_node_arg_to_stack(value)
 
     def _is_matchable(self, node: Node) -> bool:
         if node.op == 'call_function':
@@ -215,24 +237,37 @@ class GraphMatchingException(Exception):
     """
     pass
 
-def _node_a_related_to_b(
+class NodeTypeRelationship(enum.Enum):
+    # same type
+    # example: F.linear and toq.linear, or nn.Conv2d and nn.Conv2d
+    EQUAL = enum.auto()
+    # same node_relationship set, but not the same type
+    # example: F.linear and toq.linear
+    RELATED_BUT_NOT_EQUAL = enum.auto()
+    # not related
+    NOT_RELATED = enum.auto()
+
+def _get_node_relationship_type(
     node_a: Node,
     node_b: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
     type_a_related_to_b: Set[Tuple[Callable, Callable]],
-) -> bool:
+) -> NodeTypeRelationship:
     if node_a.op != node_b.op:
         # for now, comparing call_module to call_function is not supported
         # this can be added later if needed
-        return False
+        return NodeTypeRelationship.NOT_RELATED
 
     if node_a.op == 'call_function':
         if node_a.target == node_b.target:
             # nodes with equivalent targets always match (i.e. F.linear and F.linear)
-            return True
+            return NodeTypeRelationship.EQUAL
         key = (node_a.target, node_b.target)
-        return key in type_a_related_to_b
+        if key in type_a_related_to_b:
+            return NodeTypeRelationship.RELATED_BUT_NOT_EQUAL
+        else:
+            return NodeTypeRelationship.NOT_RELATED
     elif node_a.op == 'call_module':
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node_a.target, str)
@@ -241,23 +276,66 @@ def _node_a_related_to_b(
         mod_b = getattr_from_fqn(gm_b, node_b.target)
         # modules with equivalent types always match (i.e. nn.Conv2d and nn.Conv2d)
         if type(mod_a) == type(mod_b):
-            return True
+            return NodeTypeRelationship.EQUAL
         key = (type(mod_a), type(mod_b))
-        return key in type_a_related_to_b
-    return False
+        if key in type_a_related_to_b:
+            return NodeTypeRelationship.RELATED_BUT_NOT_EQUAL
+        else:
+            return NodeTypeRelationship.NOT_RELATED
+    return NodeTypeRelationship.NOT_RELATED
 
-def _get_name_for_subgraph_pair(
+def _get_name_for_subgraph(
     start_node_a: Node,
     end_node_a: Node,
-    start_node_b: Node,
-    end_node_b: Node,
+    gm_a: GraphModule,
+    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]],
+    existing_names: Set[str],
 ) -> str:
-    if end_node_b.op == 'call_module':
-        assert isinstance(end_node_b.target, str)
-        return end_node_b.target
-    # for now, use node name.
-    # TODO(future PR): find a better solution
-    return end_node_b.name
+    """
+    Returns a unique name for a subgraph. This name is based on two things:
+    1. the name of the set containing the underlying type of the base op in the
+       subgraph (i.e. 'torch.nn.functional.linear' if this is related to a linear op)
+    2. the number of previous subgraphs with related underlying type of the base op
+
+    For example, in the graph
+
+    linear0 -> relu0 -> linear1 -> relu1
+
+    The subgraphs are (linear0, relu0) and (linear1, relu1).  If we iterate
+    from the output node backwards, the name given to (linear1, relu1) will be
+    `base_op_torch.nn.functional.linear_0`, and the name given to (linear0, relu0)
+    will be `base_op_torch.nn.functional.linear_1`.
+
+    Why are we not just using the node name? Answer: because of two requirements:
+    A. fusions must be supported
+    B. some Numeric Suite APIs can be called without having all of the models in memory
+
+    For example, let's say we need to match nodes of
+
+    (1) ... -> linear0 -> relu0 -> ...
+
+    And
+
+    (2) ... -> linear_relu0 -> ...
+
+    Without being able to inspect them together. With the current naming scheme, if
+    we iterate through both of these graphs in the same order, and assuming the rest
+    of the graphs match, both of these subgraphs will get the same name without
+    (1) and (2) knowing anything about each other.
+    """
+    target_type = _get_node_target_type(start_node_a, gm_a)
+    target_base_type = None
+    for base_name, sets_of_related_ops in base_name_to_sets_of_related_ops.items():
+        if target_type in sets_of_related_ops:
+            target_base_type = base_name
+    target_base_name = 'base_op_' + str(target_base_type)
+    counter = 0
+    proposed_name = target_base_name + '_' + str(counter)
+    while proposed_name in existing_names:
+        counter += 1
+        proposed_name = target_base_name + '_' + str(counter)
+    existing_names.add(proposed_name)
+    return proposed_name
 
 def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[Callable]:
     if node.op == 'call_function':
@@ -342,7 +420,12 @@ def get_matching_subgraph_pairs(
     graph_b_iterator = _NSGraphMatchableSubgraphsIterator(
         gm_b, non_matchable_functions, non_matchable_modules)
     results = {}
-    type_a_related_to_b = get_type_a_related_to_b()
+    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    type_a_related_to_b = \
+        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+    existing_names_a: Set[str] = set()
+    existing_names_b: Set[str] = set()
 
     while True:
         # fetch the next nodes from a and b
@@ -368,17 +451,29 @@ def get_matching_subgraph_pairs(
         if cur_end_node_a is not None and cur_end_node_b is not None:
             assert isinstance(cur_start_node_a, Node)
             assert isinstance(cur_start_node_b, Node)
-            # both nodes were fetched, check for relatedness
-            # note: relatedness is checked on the start node, i.e.
-            # if a linear-relu pattern is checked, we would check for relatedness
+            # both nodes were fetched, check for node_relationship
+            # note: node_relationship is checked on the start node, i.e.
+            # if a linear-relu pattern is checked, we would check for node_relationship
             # of the linear
-            if not _node_a_related_to_b(cur_start_node_a, cur_start_node_b,
-                                        gm_a, gm_b, type_a_related_to_b):
+            node_relationship = _get_node_relationship_type(
+                cur_start_node_a, cur_start_node_b,
+                gm_a, gm_b, type_a_related_to_b)
+            if node_relationship == NodeTypeRelationship.NOT_RELATED:
                 msg = f"({cur_start_node_a}, {type_a}) and ({cur_start_node_b}, {type_b}) are not related"
                 raise GraphMatchingException(msg)
-            key_name = _get_name_for_subgraph_pair(
-                cur_start_node_a, cur_end_node_a, cur_start_node_b, cur_end_node_b)
-            results[key_name] = (
+            elif node_relationship == NodeTypeRelationship.EQUAL:
+                # For now, skip nodes with equal types. In the future, this can
+                # be made configurable.
+                continue
+            key_name_a = _get_name_for_subgraph(
+                cur_start_node_a, cur_end_node_a, gm_a, base_name_to_sets_of_related_ops,
+                existing_names_a)
+            key_name_b = _get_name_for_subgraph(
+                cur_start_node_b, cur_end_node_b, gm_b, base_name_to_sets_of_related_ops,
+                existing_names_b)
+            assert key_name_a == key_name_b, \
+                f"Subgraph names {key_name_a} and {key_name_b} do not match"
+            results[key_name_a] = (
                 (cur_start_node_a, cur_end_node_a),
                 (cur_start_node_b, cur_end_node_b),
             )
