@@ -666,11 +666,11 @@ class RNNDynamic(QuantizeHandler):
         # Supported combinations are:
         # quant_type  | activation | weight | activation_compute_type
         # dynamic |  float32   | qint8 | quint8
-        # dynamic |  float16   | float16 | None
+        # dynamic |  float32   | float16 | None
         # tuple (activation_dtype, weight_dtype, compute_dtype)
         supported_dtypes = [
             (torch.float32, torch.qint8, torch.quint8),
-            (torch.float16, torch.float16, None),
+            (torch.float32, torch.float16, None),
         ]
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
