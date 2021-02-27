@@ -123,7 +123,6 @@ class TestTEFuser(JitTestCase):
         scripted = self.checkScript(func, (a,))
         self.assertLastGraphAllFused()
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_typecheck(self):
         a = torch.ones(1)
 
