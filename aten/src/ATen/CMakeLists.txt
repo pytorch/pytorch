@@ -116,7 +116,85 @@ append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
 add_subdirectory(nnapi)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
+
+message(STATUS "ATen_CPU_SRCS sources before set: ")
+foreach(tmp ${ATen_CPU_SRCS})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+# set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
+
+list(APPEND ATen_CPU_SRCS_LITE "")
+append_filelist("aten_cpu_source_list" ATen_CPU_SRCS_LITE)
+append_filelist("aten_native_source_list" ATen_CPU_SRCS_LITE)
+# append_filelist("aten_gap_list" ATen_CPU_SRCS_LITE)
+append_filelist("aten_excluded_list" ATen_CPU_SRCS_LITE)
+
+list(APPEND all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
+# list(APPEND all_cpu_cpp_lite ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
+
+list(SORT all_cpu_cpp)
+list(SORT all_cpu_cpp_lite)
+
+message(STATUS "atttten cpu sources lite: ")
+foreach(tmp ${ATen_CPU_SRCS_LITE})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "ATen_CPU_SRCS sources: ")
+foreach(tmp ${ATen_CPU_SRCS})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "native_cpp sources: ")
+foreach(tmp ${native_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "native_quantized_cpp sources: ")
+foreach(tmp ${native_quantized_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "ATen_QUANTIZED_SRCS sources: ")
+foreach(tmp ${ATen_QUANTIZED_SRCS})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "cpu_kernel_cpp sources: ")
+foreach(tmp ${cpu_kernel_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "ATen_CORE_SRCS sources: ")
+foreach(tmp ${ATen_CORE_SRCS})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+
+message(STATUS "generated_cpp sources: ")
+foreach(tmp ${generated_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "core_generated_cpp sources: ")
+foreach(tmp ${core_generated_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+
+message(STATUS "all_cpu_cpp_lite: ")
+foreach(tmp ${all_cpu_cpp_lite})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+
+message(STATUS "all_cpu_cpp: ")
+foreach(tmp ${all_cpu_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
