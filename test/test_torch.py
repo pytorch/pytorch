@@ -4147,7 +4147,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(expected, actual)
 
         # check -inf and nan handling
-        x = torch.tensor([-float('inf'), -float('inf'), 1.0, float('nan'), 1.0, 1.0], device=device)
+        x = torch.tensor([-float('inf'), -float('inf'), 1.0, 1.0, float('inf'), float('inf'), float('nan'), 1.0, 1.0], device=device)
         x2d = x.unsqueeze(0).expand(2, -1)
 
         for inp in (x, x2d):
