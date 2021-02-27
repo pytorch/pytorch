@@ -301,6 +301,34 @@ static void mode_kernel_impl(
       });
 }
 
+// Default imperative implementation of isin(). Used when the number of test elements is small.
+static void isin_default_kernel_cpu(
+    const Tensor& elements,
+    const Tensor& test_elements,
+    bool invert,
+    const Tensor& out) {
+  // Since test elements is not an input of the TensorIterator, type promotion
+  // must be done manually.
+  ScalarType common_type = promoteTypes(elements.scalar_type(), test_elements.scalar_type());
+  Tensor test_elements_flat = test_elements.to(common_type).ravel();
+  auto iter = TensorIteratorConfig()
+    .add_output(out)
+    .add_input(elements.to(common_type))
+    .check_all_same_dtype(false)
+    .build();
+  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
+    cpu_kernel(iter, [&](scalar_t element_val) -> bool {
+      const auto* test_element_data = reinterpret_cast<scalar_t*>(test_elements_flat.data_ptr());
+      for (auto j = 0; j < test_elements_flat.numel(); ++j) {
+        if (element_val == test_element_data[j]) {
+          return !invert;
+        }
+      }
+      return invert;
+    });
+  });
+}
+
 static void clamp_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_cpu", [&]() {
     cpu_kernel_vec(iter,
@@ -403,5 +431,6 @@ REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_impl);
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
+REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
 
 }} // namespace at::native
