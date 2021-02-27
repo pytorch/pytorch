@@ -10,7 +10,6 @@ const int LoggingIterations[] = {10, 20, 100, 1000};
 namespace {
 
 const int kMilliSecondToNanosSecond = 1000000;
-const int kDistDebugLoggingFrequency = 50;
 
 std::string parse_env(const char* env_var_name) {
   char* stringValue = std::getenv(env_var_name);
