@@ -2992,10 +2992,10 @@ std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& result) {
   Tensor grad_abs, grad_angle;
   if (grad.defined()) {
-    auto result_mul_1_j = at::view_as_real(result * Scalar(c10::complex<double>{0.0, 1.0}));
-    auto grad_as_real = at::view_as_real(grad);
-    grad_angle = (result_mul_1_j * grad_as_real).sum(-1);
-    grad_abs = (at::view_as_real(at::sgn(result)) * grad_as_real).sum(-1);
+    auto grad_conj = grad.conj();
+    grad_abs = at::real(grad_conj * at::sgn(result));
+    auto result_mul_1_j = result * Scalar(c10::complex<double>{0.0, 1.0});
+    grad_angle = at::real(grad_conj * result_mul_1_j);
   }
   return std::make_tuple(grad_abs, grad_angle);
 }
