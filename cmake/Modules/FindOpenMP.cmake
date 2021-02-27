@@ -132,6 +132,7 @@ set(OpenMP_C_CXX_TEST_SOURCE
 int main(void) {
 #ifdef _OPENMP
   omp_get_max_threads();
+  omp_get_level();
   return 0;
 #else
   breaks_on_purpose
