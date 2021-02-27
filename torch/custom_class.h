@@ -131,7 +131,7 @@ class class_ {
   /// taking an `int` and a `std::string` as argument.
   template <typename... Types>
   class_& def(
-      detail::types<void, Types...>,
+      torch::detail::types<void, Types...>,
       std::string doc_string = "",
       std::initializer_list<arg> default_args = {}) { // Used in combination with
     // torch::init<...>()
