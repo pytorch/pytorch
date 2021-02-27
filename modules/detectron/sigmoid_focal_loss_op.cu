@@ -131,13 +131,13 @@ bool SigmoidFocalLossOp<float, CUDAContext>::RunOnDevice() {
 
   SigmoidFocalLossKernel<<<CAFFE_GET_BLOCKS(X.size()),
           CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-      N, D, H, W, X.data<float>(), T.data<int>(),
-      wp.data<float>(), gamma_, alpha_, num_classes_,
+      N, D, H, W, X.data_ptr<float>(), T.data_ptr<int>(),
+      wp.data_ptr<float>(), gamma_, alpha_, num_classes_,
       losses_.mutable_data<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   math::Sum<float, CUDAContext>(
-      losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
+      losses_.size(), losses_.data_ptr<float>(), avg_loss_data, &context_);
   math::Scale<float, float, CUDAContext>(
       1, scale_, avg_loss_data, avg_loss_data, &context_);
 
@@ -163,9 +163,9 @@ bool SigmoidFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   SigmoidFocalLossGradientKernel<<<CAFFE_GET_BLOCKS(X.size()),
           CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-      N, D, H, W, X.data<float>(), T.data<int>(), dX->mutable_data<float>(),
-      wp.data<float>(), gamma_, alpha_, num_classes_,
-      d_avg_loss.data<float>());
+      N, D, H, W, X.data_ptr<float>(), T.data_ptr<int>(), dX->mutable_data<float>(),
+      wp.data_ptr<float>(), gamma_, alpha_, num_classes_,
+      d_avg_loss.data_ptr<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   math::Scale<float, float, CUDAContext>(
       dX->size(),

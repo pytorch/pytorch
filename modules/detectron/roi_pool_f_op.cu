@@ -146,8 +146,8 @@ bool RoIPoolFOp<float, CUDAContext>::RunOnDevice() {
   RoIPoolFForward<float><<<CAFFE_GET_BLOCKS(output_size),
                           CAFFE_CUDA_NUM_THREADS,
                           0, context_.cuda_stream()>>>(
-      output_size, X.data<float>(), spatial_scale_, X.dim32(1), X.dim32(2),
-      X.dim32(3), pooled_height_, pooled_width_, R.data<float>(),
+      output_size, X.data_ptr<float>(), spatial_scale_, X.dim32(1), X.dim32(2),
+      X.dim32(3), pooled_height_, pooled_width_, R.data_ptr<float>(),
       Y->mutable_data<float>(), A->mutable_data<int>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
@@ -171,9 +171,9 @@ bool RoIPoolFGradientOp<float, CUDAContext>::RunOnDevice() {
     RoIPoolFBackward<float><<<CAFFE_GET_BLOCKS(dY.size()),
                              CAFFE_CUDA_NUM_THREADS,
                              0, context_.cuda_stream()>>>(
-        dY.size(), dY.data<float>(), A.data<int>(), R.dim32(0), spatial_scale_,
+        dY.size(), dY.data_ptr<float>(), A.data_ptr<int>(), R.dim32(0), spatial_scale_,
         X.dim32(1), X.dim32(2), X.dim32(3), pooled_height_, pooled_width_,
-        dX->mutable_data<float>(), R.data<float>());
+        dX->mutable_data<float>(), R.data_ptr<float>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;

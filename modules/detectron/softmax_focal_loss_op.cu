@@ -167,8 +167,8 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
       losses_.size(), 0.f, losses_.mutable_data<float>(), &context_);
   DCHECK_EQ(X.ndim(), 4);
 
-  const float* Xdata = X.data<float>();
-  const float* Wdata = wp.data<float>();
+  const float* Xdata = X.data_ptr<float>();
+  const float* Wdata = wp.data_ptr<float>();
 
 
   // Spatial Softmax Kernel
@@ -179,7 +179,7 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Compute loss for each x,y location
-  const int* Tdata = T.data<int>();
+  const int* Tdata = T.data_ptr<int>();
   SoftmaxFocalLossKernel
   <<<CAFFE_GET_BLOCKS(N * A * H * W), CAFFE_CUDA_NUM_THREADS,
       0, context_.cuda_stream()>>>(
@@ -190,7 +190,7 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
   // sum the losses
   float* avg_loss_data = avg_loss->mutable_data<float>();
   math::Sum<float, CUDAContext>(
-      losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
+      losses_.size(), losses_.data_ptr<float>(), avg_loss_data, &context_);
   math::Scale<float, float, CUDAContext>(
       1, scale_, avg_loss_data, avg_loss_data, &context_);
 
@@ -217,10 +217,10 @@ bool SoftmaxFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   auto* dX = Output(0, X.sizes(), at::dtype<float>()); // gradient wrt logits
 
-  const float* Xdata = X.data<float>();
-  const int* Tdata = T.data<int>();
-  const float* Pdata = P.data<float>();
-  const float* Wdata = wp.data<float>();
+  const float* Xdata = X.data_ptr<float>();
+  const int* Tdata = T.data_ptr<int>();
+  const float* Pdata = P.data_ptr<float>();
+  const float* Wdata = wp.data_ptr<float>();
 
 
   // Compute the weight for gradients
@@ -232,11 +232,11 @@ bool SoftmaxFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Compute the gradient with the weights
-  const float* Bdata = buff_.data<float>();
+  const float* Bdata = buff_.data_ptr<float>();
   SoftmaxFocalLossGradientKernel
       <<<CAFFE_GET_BLOCKS(N * D * H * W), CAFFE_CUDA_NUM_THREADS,
          0, context_.cuda_stream()>>>(
-    N, D, H, W, Pdata, Tdata, Bdata, d_avg_loss.data<float>(),
+    N, D, H, W, Pdata, Tdata, Bdata, d_avg_loss.data_ptr<float>(),
     dX->mutable_data<float>(), num_classes_);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   math::Scale<float, float, CUDAContext>(

@@ -89,19 +89,19 @@ bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       X.size(),
-      X.data<float>(),
-      T.data<int>(),
+      X.data_ptr<float>(),
+      T.data_ptr<int>(),
       losses_.mutable_data<float>(),
       counts_.mutable_data<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   float* avg_loss_data = avg_loss->mutable_data<float>();
   math::Sum<float, CUDAContext>(
-      losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
+      losses_.size(), losses_.data_ptr<float>(), avg_loss_data, &context_);
   if (normalize_) {
     float* normalizer_data = normalizer_.mutable_data<float>();
     math::Sum<float, CUDAContext>(
-        counts_.size(), counts_.data<float>(), normalizer_data, &context_);
+        counts_.size(), counts_.data_ptr<float>(), normalizer_data, &context_);
     // Prevent division by zero is all counts are zero
     ElementwiseMaxKernel<<<
         CAFFE_GET_BLOCKS(normalizer_.size()),
@@ -134,15 +134,15 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       X.size(),
-      X.data<float>(),
-      T.data<int>(),
+      X.data_ptr<float>(),
+      T.data_ptr<int>(),
       dX->mutable_data<float>(),
       counts_.mutable_data<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   if (normalize_) {
     float* normalizer_data = normalizer_.mutable_data<float>();
     math::Sum<float, CUDAContext>(
-        counts_.size(), counts_.data<float>(), normalizer_data, &context_);
+        counts_.size(), counts_.data_ptr<float>(), normalizer_data, &context_);
     // Prevent division by zero is all counts are zero
     ElementwiseMaxKernel<<<
         CAFFE_GET_BLOCKS(normalizer_.size()),
@@ -152,7 +152,7 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     math::Div<float, CUDAContext>(
         1,
-        d_avg_loss.data<float>(),
+        d_avg_loss.data_ptr<float>(),
         normalizer_data,
         normalizer_data,
         &context_);
@@ -173,7 +173,7 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
         &context_);
     math::Scale<float, float, CUDAContext>(
         dX->size(),
-        d_avg_loss.data<float>(),
+        d_avg_loss.data_ptr<float>(),
         dX->data<float>(),
         dX->mutable_data<float>(),
         &context_);

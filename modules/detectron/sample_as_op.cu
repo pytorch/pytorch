@@ -44,7 +44,7 @@ bool SampleAsOp<float, CUDAContext>::RunOnDevice() {
   // copy L to CPU:
   std::vector<int> labels(L.dim32(0));
   context_.CopyBytes<CUDAContext, CPUContext>(
-      L.dim32(0) * sizeof(int), L.data<int>(), &labels[0]);
+      L.dim32(0) * sizeof(int), L.data_ptr<int>(), &labels[0]);
   // Make sure that the copy is finished
   context_.FinishDeviceComputation();
 
@@ -67,7 +67,7 @@ bool SampleAsOp<float, CUDAContext>::RunOnDevice() {
   for (int i = 0; i < L.dim32(0); i++) {
     if (labels[i] > 0) {
       context_.CopyBytes<CUDAContext, CUDAContext>(
-          len * sizeof(float), X.data<float>() + i * len, output);
+          len * sizeof(float), X.data_ptr<float>() + i * len, output);
       output += len;
     } // if
   } // i
@@ -87,7 +87,7 @@ bool SampleAsGradientOp<float, CUDAContext>::RunOnDevice() {
   // copy L to CPU:
   std::vector<int> labels(L.dim32(0));
   context_.CopyBytes<CUDAContext, CPUContext>(
-      L.dim32(0) * sizeof(int), L.data<int>(), &labels[0]);
+      L.dim32(0) * sizeof(int), L.data_ptr<int>(), &labels[0]);
   // Make sure that the copy is finished
   context_.FinishDeviceComputation();
 
@@ -97,7 +97,7 @@ bool SampleAsGradientOp<float, CUDAContext>::RunOnDevice() {
 
   const int len = X.size() / X.dim32(0);
 
-  const float* input = dY.data<float>();
+  const float* input = dY.data_ptr<float>();
   for (int i = 0; i < L.dim32(0); i++) {
     if (labels[i] > 0) {
       context_.CopyBytes<CUDAContext, CUDAContext>(

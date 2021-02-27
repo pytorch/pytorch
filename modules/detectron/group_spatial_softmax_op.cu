@@ -105,7 +105,7 @@ bool GroupSpatialSoftmaxOp<float, CUDAContext>::RunOnDevice() {
   auto* P = Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
   DCHECK_EQ(X.ndim(), 4);
 
-  const float* Xdata = X.data<float>();
+  const float* Xdata = X.data_ptr<float>();
   float* Pdata = P->mutable_data<float>();
 
   // Softmax for each x,y location
@@ -137,8 +137,8 @@ bool GroupSpatialSoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
     ReinitializeTensor(&sum_probs_, {N * A * H * W}, at::dtype<float>().device(CUDA));
   }
 
-  const float* Ydata = Y.data<float>();
-  const float* dYdata = dY.data<float>();
+  const float* Ydata = Y.data_ptr<float>();
+  const float* dYdata = dY.data_ptr<float>();
   float* dXdata = dX->mutable_data<float>();
 
   float* sum_probs_data = sum_probs_.mutable_data<float>();
@@ -164,7 +164,7 @@ bool GroupSpatialSoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   // Step 2: dX[i] = dX[i] - s
   SubSumKernel<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS, 0,
                   context_.cuda_stream()>>>(
-    N, A, W, H, sum_probs_.data<float>(), dXdata, num_classes_);
+    N, A, W, H, sum_probs_.data_ptr<float>(), dXdata, num_classes_);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Step 3: dX[i] = Y[i] * dX[i]

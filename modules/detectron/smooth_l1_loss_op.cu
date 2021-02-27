@@ -84,13 +84,13 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   // Difference
   // d := y_hat - y
   math::Sub<float, CUDAContext>(
-      Y.size(), Y_hat.data<float>(), Y.data<float>(),
+      Y.size(), Y_hat.data_ptr<float>(), Y.data_ptr<float>(),
       buff_.mutable_data<float>(), &context_);
   // Element-wise weighted difference (can be used to ignore or reweight
   // specific components)
   // d := alpha_in * (y_hat - y)
   math::Mul<float, CUDAContext>(
-      buff_.size(), buff_.data<float>(), alpha_in.data<float>(),
+      buff_.size(), buff_.data_ptr<float>(), alpha_in.data_ptr<float>(),
       buff_.mutable_data<float>(), &context_);
 
   // Element-wise smooth l1 loss
@@ -100,7 +100,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
      CAFFE_CUDA_NUM_THREADS,
      0,
      context_.cuda_stream()>>>(
-          buff_.size(), buff_.data<float>(), buff_.mutable_data<float>(),
+          buff_.size(), buff_.data_ptr<float>(), buff_.mutable_data<float>(),
           beta_);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -108,13 +108,13 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   // loss weight)
   // l := alpha_out * SmoothL1(alpha_in * (y_hat - y))
   math::Mul<float, CUDAContext>(
-      buff_.size(), buff_.data<float>(), alpha_out.data<float>(),
+      buff_.size(), buff_.data_ptr<float>(), alpha_out.data_ptr<float>(),
       buff_.mutable_data<float>(), &context_);
   // Sum of all losses
   // al := sum_i l_i
   float* avg_loss_data = avg_loss->mutable_data<float>();
   math::Sum<float, CUDAContext>(
-      buff_.size(), buff_.data<float>(), avg_loss_data, &context_);
+      buff_.size(), buff_.data_ptr<float>(), avg_loss_data, &context_);
   // Average of input batch size
   // al := 1/N * al
   math::Scale<float, float, CUDAContext>(
@@ -149,13 +149,13 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   // Difference
   // d := y_hat - y
   math::Sub<float, CUDAContext>(
-      Y.size(), Y_hat.data<float>(), Y.data<float>(),
+      Y.size(), Y_hat.data_ptr<float>(), Y.data_ptr<float>(),
       buff_.mutable_data<float>(), &context_);
   // Element-wise weighted difference (can be used to ignore or reweight
   // specific components)
   // d := alpha_in * (y_hat - y)
   math::Mul<float, CUDAContext>(
-      buff_.size(), buff_.data<float>(), alpha_in.data<float>(),
+      buff_.size(), buff_.data_ptr<float>(), alpha_in.data_ptr<float>(),
       buff_.mutable_data<float>(), &context_);
   // d_Y_hat := d_avg_loss / N * SmoothL1'(alpha_in * (y_hat - y))
   SmoothL1GradientKernel<float>
@@ -163,16 +163,16 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
      CAFFE_CUDA_NUM_THREADS,
      0,
      context_.cuda_stream()>>>(
-         buff_.size(), buff_.data<float>(), d_Y_hat->mutable_data<float>(),
-         d_avg_loss.data<float>(), scale_ / N, beta_);
+         buff_.size(), buff_.data_ptr<float>(), d_Y_hat->mutable_data<float>(),
+         d_avg_loss.data_ptr<float>(), scale_ / N, beta_);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Element-wise scale by alpha_in and alpha_out
   math::Mul<float, CUDAContext>(
-      d_Y_hat->size(), d_Y_hat->data<float>(), alpha_in.data<float>(),
+      d_Y_hat->size(), d_Y_hat->data<float>(), alpha_in.data_ptr<float>(),
       d_Y_hat->mutable_data<float>(), &context_);
   math::Mul<float, CUDAContext>(
-      d_Y_hat->size(), d_Y_hat->data<float>(), alpha_out.data<float>(),
+      d_Y_hat->size(), d_Y_hat->data<float>(), alpha_out.data_ptr<float>(),
       d_Y_hat->mutable_data<float>(), &context_);
   return true;
 }

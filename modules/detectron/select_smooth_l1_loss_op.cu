@@ -126,16 +126,16 @@ bool SelectSmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
                          CAFFE_CUDA_NUM_THREADS,
                          0, context_.cuda_stream()>>>(
     D, H, W,
-    M, Y_hat.data<float>(), Y.data<float>(),
-    L.data<float>(), buff_.mutable_data<float>(),
-    S.data<float>(), beta_);
+    M, Y_hat.data_ptr<float>(), Y.data_ptr<float>(),
+    L.data_ptr<float>(), buff_.mutable_data<float>(),
+    S.data_ptr<float>(), beta_);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Sum of all losses
   // al := sum_i l_i
   float* avg_loss_data = avg_loss->mutable_data<float>();
   math::Sum<float, CUDAContext>(
-      buff_.size(), buff_.data<float>(), avg_loss_data, &context_);
+      buff_.size(), buff_.data_ptr<float>(), avg_loss_data, &context_);
 
   // Average of input batch size
   math::Scale<float, float, CUDAContext>(
@@ -173,9 +173,9 @@ bool SelectSmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   SelectSmoothL1GradientKernel<<<CAFFE_GET_BLOCKS(d_Y_hat->size()),
                                  CAFFE_CUDA_NUM_THREADS,
                                  0, context_.cuda_stream()>>>(
-    D, H, W, M, Y_hat.data<float>(), Y.data<float>(),
-    L.data<float>(), d_Y_hat->mutable_data<float>(),
-    d_avg_loss.data<float>(), scale_, S.data<float>(), beta_);
+    D, H, W, M, Y_hat.data_ptr<float>(), Y.data_ptr<float>(),
+    L.data_ptr<float>(), d_Y_hat->mutable_data<float>(),
+    d_avg_loss.data_ptr<float>(), scale_, S.data_ptr<float>(), beta_);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
