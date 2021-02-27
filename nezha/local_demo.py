@@ -8,6 +8,8 @@ import onnxruntime as ort
 import onnx
 import copy
 
+import nezha_helper
+
 old_call = torch._C.ScriptMethod.__call__
 
 def prof_meth_call(*args, **kwargs):
@@ -47,7 +49,7 @@ class SmartModule(nn.Module):
         module_1st = torch.jit.trace(self.inner_model, input)
         module_2nd = torch.jit.trace(self.inner_model, input)
 
-        # torch._C._jit_nezha_update_graph(module_1st._c, module_2nd._c)
+        xxx = nezha_helper.split_modules(module_1st._c)
         all_C_modules = torch._C._jit_nezha_split_modules(module_1st._c)
         
         all_modules = [module_1st, module_2nd]
