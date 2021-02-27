@@ -11,6 +11,8 @@ namespace {
 
 const int kMilliSecondToNanosSecond = 1000000;
 
+const char * kDefaultDDPComm = "builtin_allreduce";
+
 std::string parse_env(const char* env_var_name) {
   char* stringValue = std::getenv(env_var_name);
   std::string res = "N/A";
@@ -99,6 +101,11 @@ std::vector<int> Logger::get_bucket_sizes() {
     bucket_sizes.push_back(bucket_size);
   }
   return bucket_sizes;
+}
+
+void Logger::set_comm_hook(const std::string& hook) {
+  ddp_logging_data_->comm_hook = hook;
+  comm_hook_set_ = true;
 }
 
 void Logger::set_construction_data_and_log(
@@ -191,6 +198,13 @@ void Logger::set_runtime_stats_and_log() {
     return;
   }
   num_iterations_stats_recorded_++;
+
+  // Check if comm. hook has not been set, if so, set it as builtin allreduce.
+  if (!comm_hook_set_) {
+    ddp_logging_data_->comm_hook = kDefaultDDPComm;
+    comm_hook_set_ = true;
+  }
+
   // Set ith iteration when the runtime stats are set.
   ddp_logging_data_->iteration = reducer_->num_iterations_;
   // If unused_parameters_ is not empty, calculate its sizes.

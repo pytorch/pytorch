@@ -373,6 +373,9 @@ struct DDPLoggingData {
   bool find_unused_parameters = false;
   bool gradient_as_bucket_view = false;
 
+  // Communication hook, if set, otherwise, will be builtin_allreduce.
+  std::string comm_hook = "";
+
   // The following runtime stats are collected for the first 10 iterations
   // and then are collected every kDDPRuntimeLoggingSampleRate=100 iterations.
   // Users can get these stats at any iteration of training

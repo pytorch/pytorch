@@ -1137,6 +1137,7 @@ class DistributedDataParallel(Module):
             >>> ddp.register_comm_hook(state = None, hook = encode_and_decode)
         """
         self._check_comm_hook(hook)
+        self.logger.set_comm_hook(hook.__qualname__)
         dist._register_comm_hook(self.reducer, state, hook)
 
     def _register_builtin_comm_hook(
@@ -1171,6 +1172,7 @@ class DistributedDataParallel(Module):
             >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
 
         """
+        self.logger.set_comm_hook(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
     def _distributed_broadcast_coalesced(
