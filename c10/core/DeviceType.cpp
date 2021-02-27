@@ -27,6 +27,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "msnpu" : "MSNPU";
     case DeviceType::XLA:
       return lower_case ? "xla" : "XLA";
+    case DeviceType::MLC:
+      return lower_case ? "mlc" : "MLC";
     case DeviceType::Vulkan:
       return lower_case ? "vulkan" : "VULKAN";
     case DeviceType::Metal:
@@ -34,7 +36,7 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
     case DeviceType::XPU:
       return lower_case ? "xpu" : "XPU";
     default:
-      AT_ERROR(
+      TORCH_CHECK(false,
           "Unknown device: ",
           static_cast<int16_t>(d),
           ". If you have recently updated the caffe2.proto file to add a new "
@@ -65,6 +67,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::FPGA:
     case DeviceType::MSNPU:
     case DeviceType::XLA:
+    case DeviceType::MLC:
     case DeviceType::Vulkan:
     case DeviceType::Metal:
     case DeviceType::XPU:
