@@ -231,12 +231,12 @@ class DimSpecializedProxy(Proxy):
         return self._dim
 
     def __iter__(self) -> Iterable['Proxy']:
-        return (self[i] for i in range(self._dim))
+        return (self[i] for i in range(self._dim))  # type: ignore
 
     @property
     def shape(self):
         shape = Proxy(self.node).shape
-        return tuple(shape[i] for i in range(self._dim))
+        return tuple(shape[i] for i in range(self._dim))  # type: ignore
 
     def __repr__(self):
         return f'DimSpecializedProxy({self.node}, dim={self.dim})'
