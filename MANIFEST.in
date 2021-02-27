@@ -1,4 +1,12 @@
-include CMakeLists.txt CITATION LICENSE NOTICE .gitmodules mypy.ini requirements.txt version.txt
+include MANIFEST.in
+include CMakeLists.txt
+include CITATION
+include LICENSE
+include NOTICE
+include .gitmodules
+include mypy.ini
+include requirements.txt
+include version.txt
 recursive-include android *.*
 recursive-include aten *.*
 recursive-include binaries *.*
@@ -16,4 +24,5 @@ recursive-include benchmarks *.*
 recursive-include scripts *.*
 recursive-include mypy_plugins *.*
 recursive-include modules *.*
-global-exclude *.o *.so *.dylib *.a .git
+prune */__pycache__
+global-exclude *.o *.so *.dylib *.a .git *.pyc *.swp
