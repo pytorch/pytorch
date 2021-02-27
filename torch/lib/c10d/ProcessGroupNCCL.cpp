@@ -431,7 +431,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const char * ncclDebugLevel = std::getenv("NCCL_DEBUG");
 
   if (!ncclDebugLevel) {
-    ncclDebugLevel = "N/A";
+    ncclDebugLevel = "UNSET";
   }
 
   LOG(INFO) << "[Rank " << rank_
