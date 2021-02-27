@@ -257,7 +257,7 @@ are:
 * ``WORLD_SIZE`` - required; can be set either here, or in a call to init function
 * ``RANK`` - required; can be set either here, or in a call to init function
 
-The machine with rank 0 will be used to set up all connections.
+The process with rank 0 will be used to set up all connections.
 
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
