@@ -27,6 +27,20 @@ class SmartModule(nn.Module):
         super(SmartModule, self).__init__()
         self.inner_model = model
 
+    def inference_by_ort(self, m, export_input):
+        m.eval()
+        temp_results = m.forward(export_input)
+        torch.onnx.export(m, (export_input, ), 'test_model_01.onnx', example_outputs=temp_results)
+        ort_sess = ort.InferenceSession('test_model_01.onnx')
+        input_name = ort_sess.get_inputs()[0].name
+        label_name = ort_sess.get_outputs()[0].name
+
+        my_input, _ = torch.jit._flatten(export_input)
+        my_inputs = [to_numpy(inp) for inp in my_input]
+
+        ort_outs = ort_sess.run([label_name], {input_name: my_inputs[0]})
+        return ort_outs[0]
+
     def forward(self, input, *args):
         self.inner_model.eval()
 
@@ -36,11 +50,16 @@ class SmartModule(nn.Module):
         torch._C._jit_nezha_update_graph(module_1st._c, module_2nd._c)
 
         all_modules = [module_1st, module_2nd]
-
-        outputs = input
-        for m in all_modules:
-            outputs = m.forward(outputs, *args)
         
+        outputs = input
+        use_ort = True
+        for m in all_modules:
+            if use_ort:
+                use_ort = False;
+                outputs = torch.from_numpy(self.inference_by_ort(m, outputs))
+            else:
+                outputs = m.forward(outputs, *args)
+
         return outputs
 
         # outputs_1st = module_1st.forward(input, *args)
@@ -81,5 +100,5 @@ with torch.no_grad():
     new_outputs = new_model(dummy_input)
 
     [np.testing.assert_allclose(my_results, new_outputs, rtol=1e-03, atol=1e-05)]
-
+    print('===================== Results are expected ===========================')
 print('End')
