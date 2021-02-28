@@ -725,7 +725,6 @@ aten_cpu_source_list = [
 # Files in ATen/native with a few exceptions
 # TODO: move the exceptions to proper locations
 aten_native_source_list = [
-    "aten/src/ATen/native/RNN.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/int_repr_quant.cpp",
     "aten/src/ATen/native/quantized/cpu/make_per_tensor_quantized_tensor.cpp",
