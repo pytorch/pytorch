@@ -698,7 +698,7 @@ class QuantizationTestCase(TestCase):
                                expected_node_list=None,
                                is_reference=False,
                                print_debug_info=False,
-                               custom_qconfig=None,
+                               custom_qconfig_dict=None,
                                prepare_expected_node=None,
                                prepare_expected_node_occurrence=None,
                                prepare_expected_node_list=None,
@@ -723,7 +723,7 @@ class QuantizationTestCase(TestCase):
                                 NodeSpec.call_method('dequantize')]
                     is_reference: if True, enables reference mode
                     print_debug_info: if True, prints debug info
-                    custom_qconfig: overrides default qconfig
+                    custom_qconfig_dict: overrides default qconfig_dict
                     prepare_expected_node: same as expected_node, but for prepare
                     prepare_expected_node_occurrence: same as
                         expected_node_occurrence, but for prepare
@@ -744,16 +744,15 @@ class QuantizationTestCase(TestCase):
                 qconfig = default_dynamic_qconfig
                 model.eval()
 
-            # overwrite qconfig with custom_qconfig
-            if custom_qconfig is not None:
-                qconfig = custom_qconfig
-
             if quant_type == QuantType.QAT:
                 prepare = prepare_qat_fx
             else:
                 prepare = prepare_fx
 
-            qconfig_dict = {'': qconfig}
+            qconfig_dict = {"": qconfig}
+            # overwrite qconfig_dict with custom_qconfig_dict
+            if custom_qconfig_dict is not None:
+                qconfig_dict = custom_qconfig_dict
             prepared = prepare(
                 model, qconfig_dict,
                 prepare_custom_config_dict=prepare_custom_config_dict)
