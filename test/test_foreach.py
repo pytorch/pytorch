@@ -122,7 +122,7 @@ class TestForeach(TestCase):
                 self.assertEqual(res, tensors)
 
                 if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+                    self.assertEqual(tensors, expected, atol=3.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
                     self.assertEqual(tensors, expected)
 
@@ -144,7 +144,6 @@ class TestForeach(TestCase):
                     with self.assertRaisesRegex(RuntimeError, msg):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
-                    # This case looks identical to the case above. What was your intention? N - 1?
                     tensors1 = self._get_test_data(device, dtype, N + 1)
                     with self.assertRaisesRegex(RuntimeError, msg):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
