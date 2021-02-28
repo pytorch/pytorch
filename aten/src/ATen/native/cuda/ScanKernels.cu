@@ -563,7 +563,7 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
     auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
       scalar_t min = at::_isnan(y) ? y : std::min<scalar_t>(x,y); //std::min returns first arg if one of the args is nan
       scalar_t max = at::_isnan(y) ? y : std::max<scalar_t>(x,y); //std::max returns first arg if one of the args is nan
-      if (min != max || std::isfinite(min)) {
+      if (min != max || ::isfinite(min)) {
       // nan will be propagated here
           return ::log1p(std::exp(min - max)) + max;
       } else {
