@@ -318,7 +318,8 @@ TEST(CppPrinter, Cond) {
 
 TEST(CppPrinter, Intrinsics) {
   KernelScope kernel_scope;
-  const std::unordered_set<IntrinsicsOp> unsupported_ops{kRand, kSigmoid};
+  const std::unordered_set<IntrinsicsOp, std::hash<int>> unsupported_ops{
+      kRand, kSigmoid};
   for (int i = 0; i < kMaxIntrinsicsOp; i++) {
     IntrinsicsOp op = static_cast<IntrinsicsOp>(i);
     if (unsupported_ops.count(op)) {
@@ -370,6 +371,34 @@ TEST(CppPrinter, Intrinsics) {
       }
     }
   }
+}
+
+TEST(CppPrinter, ExternalCall) {
+  KernelScope kernel_scope;
+  Buf* output = new Buf("out", {new IntImm(2), new IntImm(2)}, kFloat);
+  Buf* buf_arg1 = new Buf("a", {new IntImm(2), new IntImm(2)}, kFloat);
+  Buf* buf_arg2 = new Buf("b", {new IntImm(2), new IntImm(2)}, kFloat);
+  Expr* scalar_arg = new Add(new IntImm(1), new IntImm(2));
+  auto call = new ExternalCall(
+      output, "nnc_aten_matmul", {buf_arg1, buf_arg2}, {scalar_arg});
+  const std::string pattern = R"(
+   # CHECK: {
+   # CHECK:   std::vector<void*> buf_ptrs{&out, &a, &b};
+   # CHECK:   std::vector<int64_t> buf_ranks{2, 2, 2};
+   # CHECK:   std::vector<int64_t> buf_dims{2, 2, 2, 2, 2, 2};
+   # CHECK:   std::vector<int8_t> buf_dtypes{6, 6, 6};
+   # CHECK:   std::vector<int64_t> extra_args{1 + 2};
+   # CHECK:   nnc_aten_matmul(
+   # CHECK:       buf_ptrs.size(),
+   # CHECK:       buf_ptrs.data(),
+   # CHECK:       buf_ranks.data(),
+   # CHECK:       buf_dims.data(),
+   # CHECK:       buf_dtypes.data(),
+   # CHECK:       extra_args.size(),
+   # CHECK:       extra_args.data());
+   # CHECK: }
+  )";
+  FILE_CHECK(call, pattern);
 }
 
 } // namespace jit

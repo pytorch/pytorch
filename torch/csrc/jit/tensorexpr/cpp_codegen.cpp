@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
 #include <torch/csrc/jit/tensorexpr/cpp_tensor.h>
 #include <torch/csrc/jit/tensorexpr/cpp_vector.h>
+#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 namespace torch {
@@ -264,6 +265,91 @@ void CppPrinter::visit(const Intrinsics* v) {
     }
     os() << ")";
   }
+}
+
+void CppPrinter::visit(const ExternalCall* v) {
+  // The generated code needs to link against functions defined
+  // in external_functions.cpp.
+
+  auto& func_registry = getNNCFunctionRegistry();
+  if (!func_registry.count(v->func_name())) {
+    throw unimplemented_lowering(v);
+  }
+
+  std::vector<const Buf*> bufs(v->buf_args());
+  bufs.insert(bufs.begin(), v->buf());
+  auto for_buf = [&](std::function<void(const Buf*)> print_buf) {
+    for (size_t i = 0; i < bufs.size(); i++) {
+      if (i > 0) {
+        os() << ", ";
+      }
+      print_buf(bufs[i]);
+    }
+  };
+
+  emitIndent();
+  os() << "{" << std::endl;
+  indent_++;
+
+  emitIndent();
+  os() << "std::vector<void*> buf_ptrs{";
+  for_buf([&](const Buf* b) { os() << "&" << *b->base_handle(); });
+  os() << "};" << std::endl;
+
+  emitIndent();
+  os() << "std::vector<int64_t> buf_ranks{";
+  for_buf([&](const Buf* b) { os() << b->ndim(); });
+  os() << "};" << std::endl;
+
+  emitIndent();
+  os() << "std::vector<int64_t> buf_dims{";
+  for_buf([&](const Buf* buf) {
+    for (size_t i = 0; i < buf->ndim(); i++) {
+      if (i > 0) {
+        os() << ", ";
+      }
+      os() << *buf->dim(i);
+    }
+  });
+  os() << "};" << std::endl;
+
+  emitIndent();
+  os() << "std::vector<int8_t> buf_dtypes{";
+  for_buf([&](const Buf* buf) {
+    os() << static_cast<int>(buf->dtype().scalar_type());
+  });
+  os() << "};" << std::endl;
+
+  emitIndent();
+  os() << "std::vector<int64_t> extra_args{";
+  for (size_t i = 0; i < v->args().size(); i++) {
+    if (i > 0) {
+      os() << ", ";
+    }
+    os() << *v->args()[i];
+  }
+  os() << "};" << std::endl;
+
+  emitIndent();
+  os() << v->func_name() << "(" << std::endl;
+  emitIndent();
+  os() << "    buf_ptrs.size()," << std::endl;
+  emitIndent();
+  os() << "    buf_ptrs.data()," << std::endl;
+  emitIndent();
+  os() << "    buf_ranks.data()," << std::endl;
+  emitIndent();
+  os() << "    buf_dims.data()," << std::endl;
+  emitIndent();
+  os() << "    buf_dtypes.data()," << std::endl;
+  emitIndent();
+  os() << "    extra_args.size()," << std::endl;
+  emitIndent();
+  os() << "    extra_args.data());" << std::endl;
+
+  indent_--;
+  emitIndent();
+  os() << "}";
 }
 
 } // namespace tensorexpr

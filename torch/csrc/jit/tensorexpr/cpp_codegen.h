@@ -67,6 +67,7 @@ class TORCH_API CppPrinter : public IRPrinter {
 
   // Calls.
   void visit(const Intrinsics*) override;
+  void visit(const ExternalCall*) override;
 
  private:
   std::string to_lambda(CompareSelectOperation op, const std::string& ty);
