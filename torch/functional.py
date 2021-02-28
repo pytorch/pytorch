@@ -1013,8 +1013,8 @@ def cartesian_prod(*tensors):
 
     Returns:
         Tensor: A tensor equivalent to converting all the input tensors into lists,
-            do `itertools.product` on these lists, and finally convert the resulting list
-            into tensor.
+        do `itertools.product` on these lists, and finally convert the resulting list
+        into tensor.
 
     Example::
 
@@ -1044,8 +1044,8 @@ def block_diag(*tensors):
 
     Returns:
         Tensor: A 2 dimensional tensor with all the input tensors arranged in
-            order such that their upper left and lower right corners are
-            diagonally adjacent. All other elements are set to 0.
+        order such that their upper left and lower right corners are
+        diagonally adjacent. All other elements are set to 0.
 
     Example::
 
