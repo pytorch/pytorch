@@ -29,18 +29,17 @@ inline void parallel_for(
   // caused by some buggy OpenMP versions and the fact that omp_in_parallel()
   // returns false when omp_get_max_threads() == 1 inside nested "omp parallel"
   // See issue gh-32284
+  int64_t num_threads = omp_get_level() ? 1 : omp_get_max_threads();
 
-#pragma omp parallel if (omp_get_max_threads() > 1 && !omp_in_parallel() && ((end - begin) > grain_size))
+  // choose number of tasks based on grain size and number of threads
+  if (grain_size > 0) {
+    num_threads = std::min(num_threads, divup((end - begin), grain_size));
+  }
+  int64_t chunk_size = divup((end - begin), num_threads);
+
+#pragma omp parallel if ((end - begin) > grain_size) num_threads(num_threads)
   {
-    // choose number of tasks based on grain size and number of threads
-    // can't use num_threads clause due to bugs in GOMP's thread pool (See #32008)
-    int64_t num_threads = omp_get_num_threads();
-    if (grain_size > 0) {
-      num_threads = std::min(num_threads, divup((end - begin), grain_size));
-    }
-
     int64_t tid = omp_get_thread_num();
-    int64_t chunk_size = divup((end - begin), num_threads);
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {
