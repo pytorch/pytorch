@@ -42,7 +42,7 @@ from abc import ABC, abstractmethod
 import operator
 import warnings
 
-from typing import Any, Callable, Dict, Union
+from typing import Any, Callable, Dict, Union, Optional
 
 # -------------------------
 # Pattern Registrations
@@ -110,12 +110,11 @@ class BinaryOp(QuantizeHandler):
             torch.mul: torch.ops.quantized.mul_relu,
         }
         # corresponding quantized op
+        self.qop: Optional[Callable] = None
         if self.bop in qbin_op_mapping:
             self.qop = qbin_relu_op_mapping[self.bop] \
                 if self.relu_node is not None \
-                   else qbin_op_mapping[self.bop]  # type: ignore
-        else:
-             self.qop = None
+                else qbin_op_mapping[self.bop]  # type: ignore
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
@@ -160,6 +159,7 @@ class BinaryOp(QuantizeHandler):
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
         if dtypes in [(torch.quint8, torch.qint8, None)]:
+            assert self.qop is not None
             if self.num_node_args == 1:
                 # add/mul scalar
                 if isinstance(self.bop_node.args[0], Node):
@@ -186,7 +186,8 @@ class BinaryOp(QuantizeHandler):
                 op = quantizer.quantized_graph.create_node(
                     'call_function', self.qop, add_args, kwargs)
                 return op
-        elif dtypes in [(torch.float16, torch.float16, None)]:
+        else:
+            assert dtypes == (torch.float16, torch.float16, None)
             # TODO (refactor) this is duplicated, maybe have a helper function
             if self.relu_node:
                 op_out = quantizer.quantized_graph.node_copy(self.bop_node, load_arg(quantized=False))
