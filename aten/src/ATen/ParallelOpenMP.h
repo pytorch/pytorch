@@ -35,10 +35,10 @@ inline void parallel_for(
   if (grain_size > 0) {
     num_threads = std::min(num_threads, divup((end - begin), grain_size));
   }
-  int64_t chunk_size = divup((end - begin), num_threads);
 
 #pragma omp parallel if ((end - begin) > grain_size) num_threads(num_threads)
   {
+    int64_t chunk_size = divup((end - begin), omp_get_num_threads());
     int64_t tid = omp_get_thread_num();
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
