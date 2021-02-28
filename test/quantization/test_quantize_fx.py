@@ -87,6 +87,8 @@ from typing import Callable
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
+        """ ibinary_op means inplace binary op
+        """
         super().__init__()
         self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
         self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
@@ -104,6 +106,8 @@ class BinaryOp(torch.nn.Module):
 
 class BinaryOpNonQuantizedInput(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
+        """ ibinary_op means inplace binary op
+        """
         super().__init__()
         self.is_scalar = is_scalar
         self.op = ibinary_op if ibinary_op and is_inplace else binary_op
@@ -116,6 +120,8 @@ class BinaryOpNonQuantizedInput(torch.nn.Module):
 class BinaryOpRelu(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_functional_relu,
                  is_scalar):
+        """ ibinary_op means inplace binary op
+        """
         super().__init__()
         self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
         self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
