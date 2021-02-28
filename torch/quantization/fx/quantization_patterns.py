@@ -171,7 +171,8 @@ class BinaryOp(QuantizeHandler):
                 op = quantizer.quantized_graph.create_node(
                     'call_function', self.qop, add_args, kwargs)
                 return op
-        elif dtypes in [(torch.float16, torch.float16, None)]:
+        else:
+            assert dtypes == (torch.float16, torch.float16, None)
             # TODO (refactor) this is duplicated, maybe have a helper function
             if self.relu_node:
                 op_out = quantizer.quantized_graph.node_copy(self.bop_node, load_arg(quantized=False))
