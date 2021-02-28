@@ -146,13 +146,14 @@ BytecodeDeserializer::BytecodeDeserializer(
       reader_(std::move(reader)) {}
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
+  static const c10::QualifiedName jitPrefix = "torch.jit";
   static const c10::QualifiedName torchPrefix = "__torch__";
   // HACK: first we check whether the name starts with `__torch__` to
   // tell if it's "supposed" to be a class type. This is a reliable
   // check today, but there is no guarantee that this is the case. The
   // real solution is to merge type parsers so we can share class
   // resolution logic.
-  if (torchPrefix.isPrefixOf(qn)) {
+  if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
     if (compilation_unit_->get_class(qn) == nullptr) {
       auto typeptr = ClassType::create(qn, compilation_unit_, true);
       compilation_unit_->register_type(typeptr);
