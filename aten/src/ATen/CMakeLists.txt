@@ -122,33 +122,15 @@ foreach(tmp ${ATen_CPU_SRCS})
   message(STATUS "  " ${tmp})
 endforeach()
 
-# set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
+if(BUILD_LITE_INTERPRETER)
+  list(APPEND ATen_CPU_SRCS_LITE "")
+  append_filelist("aten_cpu_source_list" ATen_CPU_SRCS_LITE)
+  append_filelist("aten_native_source_list" ATen_CPU_SRCS_LITE)
+  set(all_cpu_cpp ${ATen_CORE_SRCS} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
+else()
+  set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
+endif()
 
-list(APPEND ATen_CPU_SRCS_LITE "")
-append_filelist("aten_cpu_source_list" ATen_CPU_SRCS_LITE)
-append_filelist("aten_native_source_list" ATen_CPU_SRCS_LITE)
-#append_filelist("aten_gap_list" ATen_CPU_SRCS_LITE)
- append_filelist("aten_excluded_list" ATen_CPU_SRCS_LITE)
-
-list(
-  APPEND
-  generated_cpp_lite
-  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/RegisterBackendSelect.cpp
-  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/Functions.cpp
-  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/RedispatchFunctions.cpp
-  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/RedispatchFunctions.h
-  )
-
-list(
-  APPEND
-  core_generated_cpp_lite
-  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/core/ATenOpList.cpp
-  /Users/chenlai/pytorch/build_android_x86/aten/src/ATen/core/TensorMethods.cpp
-  )
-
-# list(APPEND all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
-# list(APPEND all_cpu_cpp_lite ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
-list(APPEND all_cpu_cpp ${generated_cpp_lite} ${core_generated_cpp_lite} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
 # list(APPEND all_cpu_cpp_lite ${generated_cpp_lite} ${core_generated_cpp_lite} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
 
 list(SORT all_cpu_cpp)
@@ -164,10 +146,53 @@ foreach(tmp ${ATen_CPU_SRCS})
   message(STATUS "  " ${tmp})
 endforeach()
 
+message(STATUS "base_cpp sources: ")
+foreach(tmp ${base_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "ATen_CORE_SRCS sources: ")
+foreach(tmp ${ATen_CORE_SRCS})
+  message(STATUS "  " ${tmp})
+endforeach()
+
 message(STATUS "native_cpp sources: ")
 foreach(tmp ${native_cpp})
   message(STATUS "  " ${tmp})
 endforeach()
+
+message(STATUS "native_sparse_cpp sources: ")
+foreach(tmp ${native_sparse_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "native_quantized_cpp sources: ")
+foreach(tmp ${native_quantized_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "native_mkl_cpp sources: ")
+foreach(tmp ${native_mkl_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "native_mkldnn_cpp sources: ")
+foreach(tmp ${native_mkldnn_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "native_utils_cpp sources: ")
+foreach(tmp ${native_utils_cpp})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "ATen_QUANTIZED_SRCS sources: ")
+foreach(tmp ${ATen_QUANTIZED_SRCS})
+  message(STATUS "  " ${tmp})
+endforeach()
+
+
+
 
 message(STATUS "native_quantized_cpp sources: ")
 foreach(tmp ${native_quantized_cpp})
@@ -184,10 +209,7 @@ foreach(tmp ${cpu_kernel_cpp})
   message(STATUS "  " ${tmp})
 endforeach()
 
-message(STATUS "ATen_CORE_SRCS sources: ")
-foreach(tmp ${ATen_CORE_SRCS})
-  message(STATUS "  " ${tmp})
-endforeach()
+
 
 
 message(STATUS "generated_cpp sources: ")
