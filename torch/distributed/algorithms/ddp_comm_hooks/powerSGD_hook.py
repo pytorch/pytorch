@@ -381,7 +381,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         idx = 0
         for tensor in uncompressed_tensors:
             tensor.copy_(uncompressed_tensors_memory[idx : idx + tensor.numel()].view_as(tensor))
-            idx += tensor.shape[0]
+            idx += tensor.tensor.numel()
 
         # Since these Ps will be orthogonalized later, no need to divide them by world size.
         return [
