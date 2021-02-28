@@ -235,7 +235,6 @@ struct RegisterHIPDispatch {
 
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!
-// #define CPU_CAPABILITY DEFAULT
 #if defined(__CUDACC__)
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
 #elif defined(__HIPCC__)
@@ -246,6 +245,7 @@ struct RegisterHIPDispatch {
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
+
 
 }} // namespace at::native
 

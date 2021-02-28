@@ -104,8 +104,6 @@ fi
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
 
-CMAKE_ARGS+=("-DCPU_CAPABILITY=DEFAULT")
-
 # If there exists env variable and it equals to 1, build lite interpreter.
 # cmd:  BUILD_LITE_INTERPRETER=1 ./scripts/build_android.sh
 if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
