@@ -279,12 +279,13 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     total_Ps_size = 0
     total_Qs_size = 0
     for tensor in tensors:
-        n, m = tensor.shape[0], tensor.numel() / tensor.shape[0]
+        matrix = tensor.view(tensor.shape[0], -1)
+        n, m = matrix.shape
         matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
         if _should_compress(
             n, m, matrix_approximation_rank, state.min_compression_rate
         ):
-            tensors_to_compress.append(tensor.view(n, m))
+            tensors_to_compress.append(matrix)
             total_Ps_size += n * matrix_approximation_rank
             total_Qs_size += m * matrix_approximation_rank
         else:
@@ -379,7 +380,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         uncompressed_tensors_memory = fut.value()[0].div_(world_size)
         idx = 0
         for tensor in uncompressed_tensors:
-            tensor.copy_(uncompressed_tensors_memory[idx : idx + tensor.shape[0]].view_as(tensor))
+            tensor.copy_(uncompressed_tensors_memory[idx : idx + tensor.numel()].view_as(tensor))
             idx += tensor.shape[0]
 
         # Since these Ps will be orthogonalized later, no need to divide them by world size.
