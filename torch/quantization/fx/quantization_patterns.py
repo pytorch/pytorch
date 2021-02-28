@@ -42,7 +42,7 @@ from abc import ABC, abstractmethod
 import operator
 import warnings
 
-from typing import Any, Callable, Dict, Union, Optional
+from typing import Any, Callable, Dict, Union, Optional, Tuple, List
 
 # -------------------------
 # Pattern Registrations
@@ -98,9 +98,9 @@ class BinaryOp(QuantizeHandler):
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]  # type: ignore
-        self.bop_node = node
-        self.bop = node.target
-        self.num_node_args = len([a for a in self.bop_node.args[:2] if isinstance(a, Node)])
+        self.binary_op_node = node
+        self.binary_op = node.target
+        self.num_node_args = len([a for a in self.binary_op_node.args[:2] if isinstance(a, Node)])
         qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
             operator.add: torch.ops.quantized.add,
             torch.add: torch.ops.quantized.add,
@@ -114,11 +114,11 @@ class BinaryOp(QuantizeHandler):
             torch.mul: torch.ops.quantized.mul_relu,
         }
         # corresponding quantized op
-        self.qop: Optional[Callable] = None
-        if self.bop in qbin_op_mapping:
-            self.qop = qbin_relu_op_mapping[self.bop] \
+        self.quantized_binary_op: Optional[Callable] = None
+        if self.binary_op in qbin_op_mapping:
+            self.quantized_binary_op = qbin_relu_op_mapping[self.binary_op] \
                 if self.relu_node is not None \
-                else qbin_op_mapping[self.bop]  # type: ignore
+                else qbin_op_mapping[self.binary_op]  # type: ignore
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
@@ -136,7 +136,7 @@ class BinaryOp(QuantizeHandler):
         float16_dtypes = [
             (torch.float16, torch.float16, None)
         ]
-        supported_dtypes = {
+        supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
             operator.add: all_bop_dtypes,
             torch.add: all_bop_dtypes,
             operator.mul: all_bop_dtypes,
@@ -151,13 +151,13 @@ class BinaryOp(QuantizeHandler):
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
-        if dtypes not in supported_dtypes[self.bop]:
+        if dtypes not in supported_dtypes[self.binary_op]:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by {} "
-                "supported dtype combinations are: {}".format(dtypes, self.bop, supported_dtypes[self.bop]))
+                "supported dtype combinations are: {}".format(dtypes, self.binary_op, supported_dtypes[self.binary_op]))
             if self.relu_node:
-                op_out = quantizer.quantized_graph.node_copy(self.bop_node, load_arg(quantized=False))
+                op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
                 relu_args = [op_out]
                 relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
                 relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
@@ -167,17 +167,17 @@ class BinaryOp(QuantizeHandler):
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
         if dtypes in [(torch.quint8, torch.qint8, None)]:
-            assert self.qop is not None
+            assert self.quantized_binary_op is not None
             if self.num_node_args == 1:
                 # add/mul scalar
-                if isinstance(self.bop_node.args[0], Node):
+                if isinstance(self.binary_op_node.args[0], Node):
                     quantized_index = 0
                 else:
                     quantized_index = 1
 
                 return quantizer.quantized_graph.create_node(
-                    'call_function', self.qop,
-                    load_arg(quantized=[quantized_index])(self.bop_node.args), self.bop_node.kwargs)
+                    'call_function', self.quantized_binary_op,
+                    load_arg(quantized=[quantized_index])(self.binary_op_node.args), self.binary_op_node.kwargs)
             else:
                 activation_post_process = quantizer.activation_post_process_map[node.name]
                 scale, zero_point = activation_post_process.calculate_qparams()
@@ -189,16 +189,15 @@ class BinaryOp(QuantizeHandler):
                     op = torch.ops.quantized.add_relu
                 else:
                     op = torch.ops.quantized.add
-                kwargs = {**self.bop_node.kwargs}
-                add_args = (*load_arg(quantized=True)(self.bop_node.args), scale_arg, zero_point_arg)
+                kwargs = {**self.binary_op_node.kwargs}
+                add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
                 op = quantizer.quantized_graph.create_node(
-                    'call_function', self.qop, add_args, kwargs)
+                    'call_function', self.quantized_binary_op, add_args, kwargs)
                 return op
-        else:
-            assert dtypes == (torch.float16, torch.float16, None)
+        elif dtypes in [(torch.float16, torch.float16, None)]:
             # TODO (refactor) this is duplicated, maybe have a helper function
             if self.relu_node:
-                op_out = quantizer.quantized_graph.node_copy(self.bop_node, load_arg(quantized=False))
+                op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
                 relu_args = [op_out]
                 relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
                 relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
