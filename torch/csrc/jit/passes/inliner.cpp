@@ -15,7 +15,7 @@ void inlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
-    printf("\n--------inliner::inlineCalls(), kind: %s \n", cur->kind().toDisplayString());
+    // printf("\n--------inliner::inlineCalls(), kind: %s \n", cur->kind().toDisplayString());
     switch (cur->kind()) {
       case prim::CallFunction: {
         AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
@@ -58,7 +58,7 @@ void Inline(Graph& graph) {
   GRAPH_DUMP("Before Inlining: ", &graph);
   inlineCalls(graph.block());
   GRAPH_DUMP("After Inlining: ", &graph);
-  printf("\n--------inliner::Inline(), graph: \n");
+  // printf("\n--------inliner::Inline(), graph: \n");
   graph.dump();
 }
 
