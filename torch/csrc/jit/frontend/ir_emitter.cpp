@@ -488,6 +488,7 @@ struct Environment {
           {"any", std::make_shared<BuiltinFunction>(aten::any, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
+          {"sum", std::make_shared<BuiltinFunction>(aten::sum, at::nullopt)},
           {"list", SpecialFormValue::create(prim::list)},
           {"dict", SpecialFormValue::create(prim::dict)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},

@@ -7,7 +7,10 @@ from torch._six import inf, nan
 from torch.testing._internal.common_methods_invocations import \
     (foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_min_max_op_db)
 
-N_values = [20] if not TEST_WITH_SLOW else [30, 300]
+# Includes some values such that N * N won't be a multiple of 4,
+# which should ensure we test the vectorized and non-vectorized
+# kernel code paths.
+N_values = [20, 23] if not TEST_WITH_SLOW else [23, 30, 300]
 
 class TestForeach(TestCase):
     bin_ops = [
@@ -21,7 +24,8 @@ class TestForeach(TestCase):
         if dtype in [torch.bfloat16, torch.bool, torch.float16]:
             tensors = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
         elif dtype in torch.testing.get_all_int_dtypes():
-            tensors = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
+            # Constrains the range between 1 and 10 for less stress on int8 tensors.
+            tensors = [torch.randint(1, 10, (N, N), device=device, dtype=dtype) for _ in range(N)]
         else:
             tensors = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
 
