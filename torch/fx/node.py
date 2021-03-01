@@ -148,6 +148,9 @@ class Node:
         self._next = self
         self._erased = False
 
+        # If set, use this fn to print this node
+        self._repr_fn : Optional[Callable[[Node], str]] = None
+
     @property
     def next(self) -> 'Node':
         """
@@ -280,6 +283,8 @@ class Node:
             new_use.users.setdefault(self)
 
     def __repr__(self) -> str:
+        if self._repr_fn:
+            return self._repr_fn(self)
         return self.name
 
     def _pretty_print_target(self, target):
