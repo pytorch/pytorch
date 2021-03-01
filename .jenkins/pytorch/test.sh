@@ -144,6 +144,12 @@ test_aten() {
   fi
 }
 
+test_without_numpy() {
+  pushd "$(dirname "${BASH_SOURCE[0]}")"
+  python -c "import sys;sys.path.insert(0, 'fake_numpy');from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase().assertRaises(RuntimeError, lambda: x.numpy())"
+  popd
+}
+
 # pytorch extensions require including torch/extension.h which includes all.h
 # which includes utils.h which includes Parallel.h.
 # So you can call for instance parallel_for() from your extension,
@@ -384,12 +390,13 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
     test_torch_deploy
   fi
+  test_without_numpy
   install_torchvision
   test_python_shard1
+  test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
   test_python_shard2
-  test_aten
   test_libtorch
   test_custom_script_ops
   test_custom_backend

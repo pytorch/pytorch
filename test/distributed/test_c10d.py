@@ -353,12 +353,13 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(b"new_value0", new_value_result)
         self.assertEqual(b"new_value0", store.get("key0"))
 
-    def _create_client(self, addr, port, world_size, messages):
+    def _create_client(self, index, addr, port, world_size, messages):
         try:
             client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
-            self.assertEqual(b"value", client_store.get("key"))
-            client_store.set("new_key", "new_value0")
-            client_store.compare_set("new_key", "new_value1", "new_value0")
+            self.assertEqual("value".encode(), client_store.get("key"))
+            client_store.set(f"new_key{index}", f"new_value{index}")
+            self.assertEqual(f"next_value{index}".encode(), 
+                             client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
         except Exception:
             messages.put('Caught exception: \n{}exiting process with exit code: {}'
                          .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
@@ -372,8 +373,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         messages = mp.Queue()
         processes = []
         num_proccesses = random.randint(3, 5) if world_size == -1 else world_size
-        for _ in range(num_proccesses):
-            p = mp.Process(target=self._create_client, args=(addr, port, world_size, messages))
+        for i in range(num_proccesses):
+            p = mp.Process(target=self._create_client, args=(i, addr, port, world_size, messages))
             processes.append(p)
             p.start()
         for p in processes:
@@ -381,7 +382,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         error_message = ""
         while not messages.empty():
             error_message += messages.get() + "\n"
-        if error_message:
+        if any(map(lambda p: p.exitcode != 0, processes)):
             raise RuntimeError(error_message)
 
     def test_multi_worker_with_fixed_world_size(self):
@@ -4688,6 +4689,32 @@ class CommTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
+
+    def test_distributed_debug_mode(self):
+        # Default should be off
+        default_debug_mode = dist._get_debug_mode()
+        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
+        mapping = {
+            "OFF": dist._DistributedDebugMode.OFF,
+            "INFO": dist._DistributedDebugMode.INFO,
+            "DETAIL": dist._DistributedDebugMode.DETAIL,
+        }
+        invalid_debug_modes = ["foo", 0, 1, -1]
+
+        for mode in mapping.keys():
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            set_debug_mode = dist._get_debug_mode()
+            self.assertEqual(
+                set_debug_mode,
+                mapping[mode],
+                f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}"
+            )
+
+        for mode in invalid_debug_modes:
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+                dist._get_debug_mode()
+
 
 if __name__ == '__main__':
     assert (
