@@ -524,13 +524,13 @@ def init_process_group(backend,
         # default devices and messes up NCCL internal state.
         _store_based_barrier(rank, store, timeout)
 
-def _new_process_group_helper(world_size,
-                              rank,
+def _new_process_group_helper(world_size: int,
+                              rank: int,
                               group_ranks,
-                              backend,
+                              backend: str,
                               store,
-                              group_name=None,
-                              timeout=default_pg_timeout):
+                              group_name: Optional[str] = None,
+                              timeout=default_pg_timeout) -> ProcessGroup:
     """
     Create a new distributed process group.
 
