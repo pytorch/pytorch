@@ -30,6 +30,7 @@ from torch.quantization import (
     default_qat_qconfig,
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
+    float16_static_qconfig,
     float_qparams_weight_only_qconfig,
     get_default_qconfig,
     get_default_qat_qconfig,
@@ -1821,6 +1822,109 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
 
+    def test_linear_dynamic_fp16(self):
+        class FuncLinear(torch.nn.Module):
+            def __init__(self, use_bias, has_relu, f_relu):
+                super(FuncLinear, self).__init__()
+                self.w = torch.randn(4, 30)
+                self.b = torch.randn(4)
+                self.use_bias = use_bias
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
+
+            def forward(self, x):
+                if self.use_bias:
+                    x = F.linear(x, self.w, self.b)
+                else:
+                    x = F.linear(x, self.w)
+                x = self.relu(x)
+                return x
+
+        data = (torch.rand((1, 30), dtype=torch.float),)
+        options = itertools.product(
+            (True, False),  # use_bias
+            (True, False),  # has_relu
+            (True, False),  # functional relu
+            (True, False),  # is_reference
+        )
+        for use_bias, has_relu, f_relu, is_reference in options:
+            model = FuncLinear(use_bias, has_relu, f_relu)
+            if is_reference:
+                qlinear_fun = ns.call_function(torch.nn.functional.linear)
+            else:
+                qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
+            prepare_node_occurrence = {
+                # weight
+                ns.call_module(torch.quantization.PlaceholderObserver): 1
+            }
+            convert_node_occurrence = {
+                qlinear_fun: 1,
+                # weight
+                ns.call_method("to"): 1 if is_reference else 0
+            }
+            self.checkGraphModeFxOp(
+                model, data, QuantType.DYNAMIC, qlinear_fun,
+                is_reference=is_reference,
+                custom_qconfig=float16_dynamic_qconfig,
+                prepare_expected_node_occurrence=prepare_node_occurrence,
+                expected_node_occurrence=convert_node_occurrence)
+
+    def test_linear_static_fp16(self):
+        class FuncLinear(torch.nn.Module):
+            def __init__(self, use_bias, has_relu, f_relu):
+                super(FuncLinear, self).__init__()
+                self.w = torch.randn(4, 30)
+                self.b = torch.randn(4)
+                self.use_bias = use_bias
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
+
+            def forward(self, x):
+                if self.use_bias:
+                    x = F.linear(x, self.w, self.b)
+                else:
+                    x = F.linear(x, self.w)
+                x = self.relu(x)
+                return x
+
+        data = (torch.rand((1, 30), dtype=torch.float),)
+        options = itertools.product(
+            (True, False),  # use_bias
+            (True, False),  # has_relu
+            (True, False),  # functional relu
+            (True, False),  # is_reference
+        )
+        for use_bias, has_relu, f_relu, is_reference in options:
+            model = FuncLinear(use_bias, has_relu, f_relu)
+            linear_fun = ns.call_function(torch.nn.functional.linear)
+            prepare_node_occurrence = {
+                # activation, weight, bias, output
+                ns.call_module(torch.quantization.PlaceholderObserver): 4 if use_bias else 3
+            }
+            convert_node_occurrence = {
+                # we don't support static fp16 ops, so the linear functino
+                # is unfused
+                linear_fun: 1,
+                # activation, weight, bias, output
+                ns.call_method("to"): 4 if use_bias else 3
+            }
+            self.checkGraphModeFxOp(
+                model, data, QuantType.DYNAMIC, linear_fun,
+                is_reference=is_reference,
+                custom_qconfig=float16_static_qconfig,
+                prepare_expected_node_occurrence=prepare_node_occurrence,
+                expected_node_occurrence=convert_node_occurrence)
+
     @skipIfNoFBGEMM
     def test_conv_module(self):
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
@@ -2068,22 +2172,22 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
-    def test_quantized_add(self):
+    def test_add(self):
         self._test_quantized_binary_op_impl(
             operator.add, operator.iadd, torch.ops.quantized.add)
 
     @skipIfNoFBGEMM
-    def test_quantized_mul(self):
+    def test_mul(self):
         self._test_quantized_binary_op_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul)
 
     @skipIfNoFBGEMM
-    def test_quantized_add_relu(self):
+    def test_add_relu(self):
         self._test_quantized_binary_op_relu_impl(
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
 
     @skipIfNoFBGEMM
-    def test_quantized_mul_relu(self):
+    def test_mul_relu(self):
         self._test_quantized_binary_op_relu_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul_relu)
 
