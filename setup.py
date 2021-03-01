@@ -694,9 +694,6 @@ def configure_extension_build():
         library_dirs.append(
             os.path.dirname(cmake_cache_vars['CUDA_CUDA_LIB']))
 
-    if cmake_cache_vars['USE_NUMPY']:
-        extra_install_requires += ['numpy']
-
     if build_type.is_debug():
         if IS_WINDOWS:
             extra_compile_args.append('/Z7')
