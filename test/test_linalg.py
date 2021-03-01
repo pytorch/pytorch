@@ -2382,6 +2382,17 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_inverse_errors_large(self, device, dtype):
+        x = torch.empty((8, 10, 616, 616), dtype=dtype, device=device)
+        x[:] = torch.eye(616, dtype=dtype, device=device)
+        x[..., 10, 10] = 0
+        with self.assertRaisesRegex(RuntimeError, r'For batch 0: U\(11,11\) is zero'):
+            torch.inverse(x)
+
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

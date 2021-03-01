@@ -1414,6 +1414,7 @@ AT_ERROR("inverse: MAGMA library not found in "
     self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
     ipiv_array[i] = &ipiv_data[i * n];
   }
+  std::fill_n(ipiv_data, batch_size * n, 1);
 
   MAGMAQueue magma_queue(self.get_device());
   magmaLuBatched<scalar_t>(
