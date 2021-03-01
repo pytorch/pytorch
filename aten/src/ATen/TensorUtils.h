@@ -160,7 +160,7 @@ TORCH_API c10::optional<std::vector<int64_t>> computeStride(
 TORCH_API c10::optional<DimVector> computeStrideDV(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
-    DimVector newshape);
+    const DimVector& newshape);
 
 } // namespace detail
 } // namespace at

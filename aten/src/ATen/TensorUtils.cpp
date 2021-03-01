@@ -409,7 +409,7 @@ c10::optional<std::vector<int64_t>> computeStride(
 c10::optional<DimVector> computeStrideDV(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
-    DimVector newshape) {
+    const DimVector& newshape) {
   if (oldshape.empty()) {
     return DimVector(newshape.size(), 1);
   }
