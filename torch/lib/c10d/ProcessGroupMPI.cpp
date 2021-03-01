@@ -81,14 +81,14 @@ void checkSingleTensor(const std::vector<at::Tensor>& tensors) {
 }
 
 void checkSameSizeAndType(
-    const at::Tensor& tensor,
+    const at::Tensor& t_in,
     const std::vector<at::Tensor>& tensors) {
-  for (size_t i = 0; i < tensors.size(); ++i) {
-    if ((tensors[i].numel() != tensor.numel()) ||
-        (tensors[i].type() != tensor.type())) {
+  for (const auto & tensor : tensors) {
+    if ((tensor.numel() != t_in.numel()) ||
+        (tensor.scalar_type() != t_in.scalar_type())) {
       throw std::runtime_error("Tensors are not equal in size or data type");
     }
-    checkSingleTensorHelper(tensors[i]);
+    checkSingleTensorHelper(tensor);
   }
 }
 

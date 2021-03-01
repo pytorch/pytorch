@@ -63,12 +63,13 @@
 #endif
 #endif
 
+#if defined(USE_MLCOMPUTE)
+#include <mlc/torch_mlc/csrc/MLCInit.h>
+#endif
+
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
 #endif
-
-#define WITH_NUMPY_IMPORT_ARRAY
-#include <torch/csrc/utils/numpy_stub.h>
 
 namespace py = pybind11;
 
@@ -729,6 +730,15 @@ void initModule(PyObject *module);
 }} // namespace torch::cuda
 #endif
 
+#ifdef USE_MLCOMPUTE
+PyMethodDef* ModuleMLC_methods();
+namespace torch { namespace mlc {
+
+void initBindings(PyObject *module);
+
+}} // namespace torch::mlc
+#endif
+
 bool THDPDoubleStorage_init(PyObject *module);
 bool THDPFloatStorage_init(PyObject *module);
 // TODO: fix
@@ -777,6 +787,9 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
+#ifdef USE_MLCOMPUTE
+  THPUtils_addPyMethodDefs(methods, ModuleMLC_methods());
+#endif
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -822,6 +835,9 @@ PyObject* initModule() {
   torch::python::init_bindings(module);
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+#endif
+#ifdef USE_MLCOMPUTE
+  torch::mlc::init_bindings(module);
 #endif
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
@@ -937,6 +953,14 @@ Call this whenever a new thread is created in order to propagate values from
 #else
   PyObject *has_cuda = Py_False;
 #endif
+#ifdef USE_MLCOMPUTE
+  PyObject *has_mlc = Py_True;
+#else
+  PyObject *has_mlc = Py_False;
+#endif
+
+  ASSERT_TRUE(set_module_attr("has_mlc", has_mlc));
+
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
 
   ASSERT_TRUE(set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
@@ -977,9 +1001,6 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("DisableTorchFunction", (PyObject*)THPModule_DisableTorchFunctionType(), /* incref= */ false));
   torch::set_disabled_torch_function_impl(PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);
-#ifdef USE_NUMPY
-  if (_import_array() < 0) return nullptr;
-#endif
   return module;
   END_HANDLE_TH_ERRORS
 }
