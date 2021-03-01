@@ -118,6 +118,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::cosh(Tensor self) -> Tensor",
       "aten::sinh(Tensor self) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
+      "aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor",
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::rsqrt(Tensor self) -> Tensor",
       "aten::abs(Tensor self) -> Tensor",

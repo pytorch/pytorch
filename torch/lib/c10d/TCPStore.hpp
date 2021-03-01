@@ -66,7 +66,7 @@ class TCPStore : public Store {
   explicit TCPStore(
       const std::string& masterAddr,
       PortType masterPort,
-      int numWorkers,
+      c10::optional<int> numWorkers = c10::nullopt_t(-1),
       bool isServer = false,
       const std::chrono::milliseconds& timeout = kDefaultTimeout,
       bool waitWorkers = true);
@@ -99,8 +99,11 @@ class TCPStore : public Store {
   // Waits for all workers to join.
   void waitForWorkers();
 
+  // Returns the hostname used by the TCPStore.
+  const std::string& getHost() const noexcept;
+
   // Returns the port used by the TCPStore.
-  PortType getPort();
+  PortType getPort() const noexcept;
 
  protected:
   int64_t addHelper_(const std::string& key, int64_t value);
@@ -116,7 +119,7 @@ class TCPStore : public Store {
   std::string tcpStoreAddr_;
   PortType tcpStorePort_;
 
-  int numWorkers_;
+  c10::optional<int> numWorkers_;
   const std::string initKey_;
   const std::string regularPrefix_;
 

@@ -13,6 +13,8 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+${static_dispatch_extra_headers}
+
 namespace at {
 
 using Stream = c10::Stream;
@@ -143,6 +145,15 @@ bool is_mkldnn(Tensor self) {
   return self.is_mkldnn();
 }
 
+bool Tensor::is_mlc() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_mlc();
+}
+
+bool is_mlc(Tensor self) {
+  return self.is_mlc();
+}
+
 bool Tensor::is_vulkan() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_vulkan();
@@ -175,15 +186,15 @@ bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
-#define DEFINE_CAST(T, name)                     \
-  template <>                                    \
-  TORCH_API T* Tensor::data_ptr() const {           \
-    TORCH_CHECK(                                 \
-        scalar_type() == ScalarType::name,       \
-        "expected scalar type ",                 \
-        #name,                                   \
-        " but found ",                           \
-        c10::toString(scalar_type()));           \
+#define DEFINE_CAST(T, name)                                        \
+  template <>                                                       \
+  TORCH_API T* Tensor::data_ptr() const {                           \
+    TORCH_CHECK(                                                    \
+        scalar_type() == ScalarType::name,                          \
+        "expected scalar type "                                     \
+        #name                                                       \
+        " but found ",                                              \
+        scalar_type());                                             \
     return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
   }
 

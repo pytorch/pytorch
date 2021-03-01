@@ -402,7 +402,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
     )
 
-  if(NOT INTERN_DISABLE_AUTOGRAD)
+  if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND GENERATED_CXX_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
@@ -501,7 +501,22 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(TORCH_SRCS ${GENERATED_CXX_TORCH})
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
-  append_filelist("libtorch_cmake_sources" TORCH_SRCS)
+  list(APPEND LIBTORCH_CMAKE_SRCS "")
+
+  # Switch between the full jit interpreter and lite interpreter
+  if(BUILD_LITE_INTERPRETER)
+    append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  else()
+    append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  endif()
+  list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
+
+  if(PRINT_CMAKE_DEBUG_INFO)
+    message(STATUS "Interpreter sources: ")
+    foreach(tmp ${LIBTORCH_CMAKE_SRCS})
+      message(STATUS "  " ${tmp})
+    endforeach()
+  endif()
 
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
@@ -535,14 +550,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/utils/out_types.cpp
   )
 
-  if(NOT INTERN_DISABLE_AUTOGRAD)
+  if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
     )
   endif()
 
-  if(NOT INTERN_BUILD_MOBILE)
+  if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
@@ -601,6 +616,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
+  if(USE_MLCOMPUTE)
+    include(../mlc/mlc_build.cmake)
+  endif()
+
   if(USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
     if(USE_NCCL)
@@ -615,7 +634,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
-  if(NOT NO_API)
+  if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
@@ -750,6 +769,10 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
 add_library(torch ${DUMMY_EMPTY_FILE})
+if(BUILD_SPLIT_CUDA)
+  # When we split torch_cuda, we want a dummy torch_cuda library that contains both parts
+  add_library(torch_cuda ${DUMMY_EMPTY_FILE})
+endif()
 if(HAVE_SOVERSION)
   set_target_properties(torch PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -938,14 +961,24 @@ endif()
 
 
   if(BUILD_TEST)
-    add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
-    add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
-    if(USE_DISTRIBUTED AND NOT WIN32)
-      add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+    if(BUILD_LITE_INTERPRETER)
+      add_subdirectory(
+        ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
+        ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+    else()
+      add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+        add_subdirectory(
+          ${TORCH_ROOT}/test/cpp/tensorexpr
+          ${CMAKE_BINARY_DIR}/test_tensorexpr
+        )
+        if(USE_DISTRIBUTED AND NOT WIN32)
+          add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+        endif()
     endif()
   endif()
 
-  if(BUILD_TEST AND NOT NO_API)
+  if(BUILD_TEST AND NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
     add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
   endif()
@@ -1059,6 +1092,10 @@ if(USE_ROCM)
     /opt/rocm/rocblas/include
     /opt/rocm/hipsparse/include
     )
+endif()
+
+if(BUILD_LITE_INTERPRETER)
+  target_compile_definitions(torch_cpu PRIVATE BUILD_LITE_INTERPRETER)
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
@@ -1242,11 +1279,12 @@ endif()
 
 caffe2_interface_library(torch_cpu torch_cpu_library)
 
-if(BUILD_SPLIT_CUDA)
-  caffe2_interface_library(torch_cuda_cu torch_cuda_cu_library)
-  caffe2_interface_library(torch_cuda_cpp torch_cuda_cpp_library)
-elseif(USE_CUDA)
+if(USE_CUDA)
   caffe2_interface_library(torch_cuda torch_cuda_library)
+  if(BUILD_SPLIT_CUDA)
+    caffe2_interface_library(torch_cuda_cu torch_cuda_cu_library)
+    caffe2_interface_library(torch_cuda_cpp torch_cuda_cpp_library)
+  endif()
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
 endif()
@@ -1254,24 +1292,31 @@ endif()
 caffe2_interface_library(torch torch_library)
 
 install(TARGETS torch_cpu torch_cpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-if(BUILD_SPLIT_CUDA)
-  install(TARGETS torch_cuda_cu torch_cuda_cu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-  install(TARGETS torch_cuda_cpp torch_cuda_cpp_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-elseif(USE_CUDA)
+
+if(USE_CUDA)
   install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  if(BUILD_SPLIT_CUDA)
+    install(TARGETS torch_cuda_cu torch_cuda_cu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+    install(TARGETS torch_cuda_cpp torch_cuda_cpp_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 target_link_libraries(torch PUBLIC torch_cpu_library)
-if(BUILD_SPLIT_CUDA)
-  target_link_libraries(torch PUBLIC torch_cuda_cu_library)
-  target_link_libraries(torch PUBLIC torch_cuda_cpp_library)
-elseif(USE_CUDA)
+
+if(USE_CUDA)
   target_link_libraries(torch PUBLIC torch_cuda_library)
+  if(BUILD_SPLIT_CUDA)
+    target_link_libraries(torch_cuda PUBLIC torch_cuda_cu_library)
+    target_link_libraries(torch_cuda PUBLIC torch_cuda_cpp_library)
+  endif()
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
+endif()
+if(USE_MLCOMPUTE)
+  target_link_libraries(torch PUBLIC torch_mlc_library)
 endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)

@@ -7862,7 +7862,7 @@ Example::
 
 add_docstr(torch.sort,
            r"""
-sort(input, dim=-1, descending=False, *, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, stable=False, *, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -7872,14 +7872,21 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
+If :attr:`stable` is ``True`` then the sorting routine becomes stable, preserving
+the order of equivalent elements.
+
 A namedtuple of (values, indices) is returned, where the `values` are the
 sorted values and `indices` are the indices of the elements in the original
 `input` tensor.
+
+.. warning:: `stable=True` only works on the CPU for now.
 
 Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
+       of equivalent elements is preserved.
 
 Keyword args:
     out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
@@ -7907,6 +7914,15 @@ Example::
     tensor([[ 2,  0,  0,  1],
             [ 0,  1,  1,  2],
             [ 1,  2,  2,  0]])
+    >>> x = torch.tensor([0, 1] * 9)
+    >>> x.sort()
+    torch.return_types.sort(
+        values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+        indices=tensor([ 2, 16,  4,  6, 14,  8,  0, 10, 12,  9, 17, 15, 13, 11,  7,  5,  3,  1]))
+    >>> x.sort(stable=True)
+    torch.return_types.sort(
+        values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+        indices=tensor([ 0,  2,  4,  6,  8, 10, 12, 14, 16,  1,  3,  5,  7,  9, 11, 13, 15, 17]))
 """.format(**common_args))
 
 add_docstr(torch.argsort,
@@ -8518,9 +8534,9 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 .. note:: Irrespective of the original strides, the returned matrix `V` will
           be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
 
-.. note:: Extra care needs to be taken when backward through outputs. Such
-          operation is really only stable when all eigenvalues are distinct.
-          Otherwise, ``NaN`` can appear as the gradients are not properly defined.
+.. warning:: Extra care needs to be taken when backward through outputs. Such
+             operation is only stable when all eigenvalues are distinct and becomes
+             less stable the smaller :math:`\min_{i \neq j} |\lambda_i - \lambda_j|` is.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
