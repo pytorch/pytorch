@@ -175,17 +175,15 @@ class OutputLogger(nn.Module):
 def prepare_single_model_output(
     model_name: str,
     model: GraphModule,
-    subgraphs_to_instrument: List[Tuple[Tuple[Node, Node], str]],
+    nodes_and_names_to_instrument: List[Tuple[Node, str]],
     logger_cls: Callable,
 ) -> GraphModule:
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
-    # Note: for matching activations we always use the end nodes,
-    # such as observing the output of relu in linear-relu
     node_to_instrument_to_ref_name: Dict[Node, str] = {}
-    for (node_start, node_end), ref_name in subgraphs_to_instrument:
-        node_to_instrument_to_ref_name[node_end] = ref_name
+    for node, ref_name in nodes_and_names_to_instrument:
+        node_to_instrument_to_ref_name[node] = ref_name
 
     model = remove_observers_add_loggers(
         model, node_to_instrument_to_ref_name, logger_cls, model_name)
@@ -202,16 +200,20 @@ def prepare_model_outputs(
     logger_cls: Callable,
 ) -> Tuple[GraphModule, GraphModule]:
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
-    subgraphs_to_instrument_a = []
-    subgraphs_to_instrument_b = []
+    nodes_and_names_to_instrument_a = []
+    nodes_and_names_to_instrument_b = []
     for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
-        subgraphs_to_instrument_a.append((subgraph_a, match_name))
-        subgraphs_to_instrument_b.append((subgraph_b, match_name))
+        node_start_a, node_end_a = subgraph_a
+        node_start_b, node_end_b = subgraph_b
+        # Note: for matching activations we always use the end nodes,
+        # such as observing the output of relu in linear-relu
+        nodes_and_names_to_instrument_a.append((node_end_a, match_name))
+        nodes_and_names_to_instrument_b.append((node_end_b, match_name))
 
     gm_a = prepare_single_model_output(
-        name_a, gm_a, subgraphs_to_instrument_a, logger_cls)
+        name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls)
     gm_b = prepare_single_model_output(
-        name_b, gm_b, subgraphs_to_instrument_b, logger_cls)
+        name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls)
     return (gm_a, gm_b)
 
 def add_activation_info_to_dict(
