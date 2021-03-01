@@ -632,7 +632,11 @@ Example::
     >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"], timedelta(seconds=10))
-)");
+)")
+      .def_property_readonly(
+            "timeout",
+            &::c10d::Store::getTimeout,
+            R"(Gets the timeout of the store.)");
 
   intrusive_ptr_class_<::c10d::FileStore>(
       module,
@@ -719,7 +723,17 @@ Example::
           // prevents accidental implicit conversion to bool
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
-              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
+              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout))
+
+      .def_property_readonly(
+            "host",
+            &::c10d::TCPStore::getHost,
+            R"(Gets the hostname on which the store listens for requests.)")
+
+      .def_property_readonly(
+            "port",
+            &::c10d::TCPStore::getPort,
+            R"(Gets the port number on which the store listens for requests.)");
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,

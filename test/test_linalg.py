@@ -3271,7 +3271,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 torch.linalg.multi_dot(tensors, out=out)
 
-        a = torch.randn(2, device=device, dtype=dtype)
+        a = make_tensor(2, device, dtype)
 
         check([], None, "expected at least 2 tensors")
         check([a], None, "expected at least 2 tensors")
@@ -3280,17 +3280,17 @@ class TestLinalg(TestCase):
         check([a, torch.tensor(1, device=device, dtype=dtype)], None, "the last tensor must be 1D or 2D")
 
         check([a, a, a], None, "tensor 1 must be 2D")
-        check([a, torch.randn(2, 2, 2, device=device, dtype=dtype), a], None, "tensor 1 must be 2D")
+        check([a, make_tensor((2, 2, 2), device, dtype), a], None, "tensor 1 must be 2D")
 
-        check([a, torch.randn(2, device=device, dtype=torch.double)], None, "all tensors must have be the same dtype")
+        check([a, make_tensor(2, device, torch.double)], None, "all tensors must have be the same dtype")
         check([a, a], torch.empty(0, device=device, dtype=torch.double), "expected out tensor to have dtype")
 
         if self.device_type == 'cuda':
-            check([a, torch.randn(2, dtype=dtype)], None, "all tensors must be on the same device")
+            check([a, make_tensor(2, 'cpu', dtype)], None, "all tensors must be on the same device")
             check([a, a], torch.empty(0, dtype=dtype), "expected out tensor to be on device")
 
-        check([a, torch.randn(3, device=device, dtype=dtype)], None, "cannot be multiplied")
-        check([a, torch.randn(3, 2, device=device, dtype=dtype), a], None, "cannot be multiplied")
+        check([a, make_tensor(3, device, dtype)], None, "cannot be multiplied")
+        check([a, make_tensor((3, 2), device, dtype), a], None, "cannot be multiplied")
 
     @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
     @skipCUDAIfNoMagma

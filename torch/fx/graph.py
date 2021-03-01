@@ -94,6 +94,9 @@ class _Namespace:
         self._unassociated_names = set()
         self._used_names: Dict[str, int] = {}
 
+        self._illegal_char_regex = re.compile('[^0-9a-zA-Z_]+')
+        self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
+
     def create_name(self, candidate: str, obj: Optional[Any]) -> str:
         """Create a unique name.
 
@@ -105,12 +108,12 @@ class _Namespace:
             return self._obj_to_name[obj]
 
         # delete all characters that are illegal in a Python identifier
-        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
+        candidate = self._illegal_char_regex.sub('_', candidate)
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            match = re.match(r"(.*)_(\d+)$", candidate)
+            match = self._name_suffix_regex.match(candidate)
             if match is None:
                 candidate = candidate + '_1'
             else:
