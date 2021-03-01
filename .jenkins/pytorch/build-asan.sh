@@ -39,12 +39,11 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
 
 # Test building via the sdist source tarball
 python setup.py sdist
-pushd /tmp
-mkdir tmp
-tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/*.tar.gz"
+mkdir -p /tmp/tmp
+pushd /tmp/tmp
+tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
 cd torch-*
 python setup.py build --cmake-only
-cd ..
-popd tmp
+popd
 
 assert_git_not_dirty
