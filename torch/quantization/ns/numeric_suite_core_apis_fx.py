@@ -296,20 +296,5 @@ def get_matching_activations_a_shadows_b(
     TODO(future PR): real docblock
     """
     results: NSResultsType = collections.defaultdict(dict)
-    for name, mod in gm_a_shadows_b.named_modules():
-        # TODO(future PR): better check when scripted
-        is_logger = (
-            isinstance(mod, logger_cls)  # type: ignore
-            or (
-                isinstance(mod, torch.jit.RecursiveScriptModule)
-                and mod.original_name == 'OutputLogger'
-            )
-        )
-        if is_logger:
-            results[mod.ref_name][mod.model_name] = {
-                'type': NSSingleResultValuesType.NODE_OUTPUT.value,
-                'values': mod.stats,
-                'node_name': mod.node_name,
-                'node_target_type': mod.node_target_type,
-            }
+    add_activation_info_to_dict(gm_a_shadows_b, results, logger_cls)
     return dict(results)
