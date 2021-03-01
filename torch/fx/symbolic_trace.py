@@ -81,6 +81,8 @@ class Tracer(TracerBase):
         # modules we see while tracing
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
 
+        self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
+
 
     def create_arg(self, a: Any) -> 'Argument':
         """
@@ -185,10 +187,11 @@ class Tracer(TracerBase):
 
             mod (str): The ``Module`` to retrieve the qualified name for.
         """
-        for n, p in self.root.named_modules():
-            if mod is p:
-                return n
-        raise NameError('module is not installed as a submodule')
+        path = self.submodule_paths.get(mod)
+        if path is None:
+            raise NameError('module is not installed as a submodule')
+        assert isinstance(path, str)
+        return path
 
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
@@ -294,6 +297,7 @@ class Tracer(TracerBase):
         if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
+            self.submodule_paths = {mod: name for name, mod in root.named_modules()}
         else:
             self.root = torch.nn.Module()
             fn = root
