@@ -27,8 +27,8 @@
 
 #include <c10d/comm.hpp>
 #include <c10d/frontend.hpp>
-#include <c10d/reducer.hpp>
 #include <c10d/logger.hpp>
+#include <c10d/reducer.hpp>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -251,7 +251,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
           py::call_guard<py::gil_scoped_release>())
-      .def("prepare_for_forward",
+      .def(
+          "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -289,11 +290,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
-        .def(
+      .def(
           py::init<std::shared_ptr<::c10d::Reducer>>(),
           py::arg("reducer"),
           py::call_guard<py::gil_scoped_release>())
-        .def(
+      .def(
           "set_construction_data_and_log",
           &::c10d::Logger::set_construction_data_and_log,
           py::arg("module_name"),
@@ -301,11 +302,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
           py::call_guard<py::gil_scoped_release>())
-        .def(
+      .def(
           "set_runtime_stats_and_log",
           &::c10d::Logger::set_runtime_stats_and_log,
           py::call_guard<py::gil_scoped_release>())
-        .def(
+      .def(
           "get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>());
@@ -424,21 +425,21 @@ Example::
               "compare_set",
               [](::c10d::Store& store,
                  const std::string& key,
-                 const std::string& new_value,
-                 const std::string& old_value) -> py::bytes {
+                 const std::string& current_value,
+                 const std::string& new_value) -> py::bytes {
+                std::vector<uint8_t> currentValue_(
+                    current_value.begin(), current_value.end());
                 std::vector<uint8_t> newValue_(
                     new_value.begin(), new_value.end());
-                std::vector<uint8_t> oldValue_(
-                    old_value.begin(), old_value.end());
-                auto value = store.compareSet(key, newValue_, oldValue_);
+                auto value = store.compareSet(key, currentValue_, newValue_);
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value``
-will only be placed if ``old_value`` for the ``key`` already exists in the store.
+performs comparison between ``new_value`` and ``current_value`` before inserting. ``new_value``
+will only be placed if ``current_value`` for the ``key`` already exists in the store.
 
 .. warning::
     The ``compare_set`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
@@ -446,8 +447,8 @@ will only be placed if ``old_value`` for the ``key`` already exists in the store
 
 Arguments:
     key (str): The key to be checked in the store.
+    current_value (str): The value associated with ``key`` to be checked before insertion.
     new_value (str): The value associated with ``key`` to be added to the store.
-    old_value (str): The value associated with ``key`` to be checked before insertion.
 
 Example::
     >>> import torch.distributed as dist
@@ -632,7 +633,11 @@ Example::
     >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"], timedelta(seconds=10))
-)");
+)")
+          .def_property_readonly(
+              "timeout",
+              &::c10d::Store::getTimeout,
+              R"(Gets the timeout of the store.)");
 
   intrusive_ptr_class_<::c10d::FileStore>(
       module,
@@ -683,8 +688,8 @@ Example::
 A TCP-based distributed key-value store implementation. The server store holds
 the data, while the client stores can connect to the server store over TCP and
 perform actions such as :meth:`~torch.distributed.store.set` to insert a key-value
-pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There 
-should always be one server store initialized because the client store(s) will wait for 
+pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There
+should always be one server store initialized because the client store(s) will wait for
 the server to establish a connection.
 
 Arguments:
@@ -719,7 +724,17 @@ Example::
           // prevents accidental implicit conversion to bool
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
-              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
+              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout))
+
+      .def_property_readonly(
+          "host",
+          &::c10d::TCPStore::getHost,
+          R"(Gets the hostname on which the store listens for requests.)")
+
+      .def_property_readonly(
+          "port",
+          &::c10d::TCPStore::getPort,
+          R"(Gets the port number on which the store listens for requests.)");
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -1236,33 +1251,57 @@ Arguments:
       .def_readwrite("module_name", &c10::DDPLoggingData::module_name)
       .def_readwrite("device_ids", &c10::DDPLoggingData::device_ids)
       .def_readwrite("output_device", &c10::DDPLoggingData::output_device)
-      .def_readwrite("broadcast_buffers", &c10::DDPLoggingData::broadcast_buffers)
+      .def_readwrite(
+          "broadcast_buffers", &c10::DDPLoggingData::broadcast_buffers)
       .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
-      .def_readwrite("find_unused_parameters", &c10::DDPLoggingData::find_unused_parameters)
-      .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view)
+      .def_readwrite(
+          "find_unused_parameters",
+          &c10::DDPLoggingData::find_unused_parameters)
+      .def_readwrite(
+          "gradient_as_bucket_view",
+          &c10::DDPLoggingData::gradient_as_bucket_view)
       .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
       .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
       .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
-      .def_readwrite("total_parameter_size_bytes", &c10::DDPLoggingData::total_parameter_size_bytes)
-      .def_readwrite("num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
+      .def_readwrite(
+          "total_parameter_size_bytes",
+          &c10::DDPLoggingData::total_parameter_size_bytes)
+      .def_readwrite(
+          "num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
       .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
       .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
       .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
-      .def_readwrite("cuda_visible_devices", &c10::DDPLoggingData::cuda_visible_devices)
-      .def_readwrite("gloo_socket_ifname", &c10::DDPLoggingData::gloo_socket_ifname)
-      .def_readwrite("gloo_device_transport", &c10::DDPLoggingData::gloo_device_transport)
-      .def_readwrite("nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
-      .def_readwrite("nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
+      .def_readwrite(
+          "cuda_visible_devices", &c10::DDPLoggingData::cuda_visible_devices)
+      .def_readwrite(
+          "gloo_socket_ifname", &c10::DDPLoggingData::gloo_socket_ifname)
+      .def_readwrite(
+          "gloo_device_transport", &c10::DDPLoggingData::gloo_device_transport)
+      .def_readwrite(
+          "nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
+      .def_readwrite(
+          "nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
       .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
       .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
       .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
-      .def_readwrite("unused_parameter_size", &c10::DDPLoggingData::unused_parameter_size)
-      .def_readwrite("has_rebuilt_buckets", &c10::DDPLoggingData::has_rebuilt_buckets)
-      .def_readwrite("rebuilt_bucket_sizes", &c10::DDPLoggingData::rebuilt_bucket_sizes)
-      .def_readwrite("avg_forward_compute_time", &c10::DDPLoggingData::avg_forward_compute_time)
-      .def_readwrite("avg_backward_compute_time", &c10::DDPLoggingData::avg_backward_compute_time)
-      .def_readwrite("avg_backward_comm_time", &c10::DDPLoggingData::avg_backward_comm_time)
-      .def_readwrite("avg_backward_compute_comm_overlap_time", &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time);
+      .def_readwrite(
+          "unused_parameter_size", &c10::DDPLoggingData::unused_parameter_size)
+      .def_readwrite(
+          "has_rebuilt_buckets", &c10::DDPLoggingData::has_rebuilt_buckets)
+      .def_readwrite(
+          "rebuilt_bucket_sizes", &c10::DDPLoggingData::rebuilt_bucket_sizes)
+      .def_readwrite(
+          "avg_forward_compute_time",
+          &c10::DDPLoggingData::avg_forward_compute_time)
+      .def_readwrite(
+          "avg_backward_compute_time",
+          &c10::DDPLoggingData::avg_backward_compute_time)
+      .def_readwrite(
+          "avg_backward_comm_time",
+          &c10::DDPLoggingData::avg_backward_comm_time)
+      .def_readwrite(
+          "avg_backward_compute_comm_overlap_time",
+          &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time);
 
   module.def(
       "_compute_bucket_assignment_by_size",
@@ -1362,10 +1401,8 @@ static const auto StoreTorchBind =
 
 static const auto FileStoreTorchBind =
     torch::class_<::c10d::FileStore>("dist_c10d", "FileStore")
-        .def(torch::init([](const std::string& path,
-                            int64_t num_workers) {
-          return c10::make_intrusive<::c10d::FileStore>(
-              path, num_workers);
+        .def(torch::init([](const std::string& path, int64_t num_workers) {
+          return c10::make_intrusive<::c10d::FileStore>(path, num_workers);
         }));
 
 static const auto TCPStoreTorchBind =
@@ -1387,10 +1424,8 @@ static const auto PrefixStoreTorchBind =
     torch::class_<::c10d::PrefixStore>("dist_c10d", "PrefixStore")
         .def(torch::init([](const std::string& prefix,
                             const c10::intrusive_ptr<::c10d::Store>& store) {
-            return c10::make_intrusive<::c10d::PrefixStore>(
-                prefix, store);
+          return c10::make_intrusive<::c10d::PrefixStore>(prefix, store);
         }));
-
 
 // Torchbind the ProcessGroup to make it available in TorchScript
 static const auto ProcessGroupWorkTorchBind =
@@ -1416,7 +1451,7 @@ static const auto ProcessGroupTorchBind =
               return std::vector<std::string>{name};
             },
             [](std::vector<std::string> state) {
-                TORCH_CHECK(
+              TORCH_CHECK(
                   state.size() == 1,
                   "Expecting exactly 1 state when restoring ProcessGroup, got: ",
                   state.size());
@@ -1733,7 +1768,8 @@ static const auto ProcessGroupNCCLTorchBind =
                int64_t size,
                c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options> options,
                const std::string& name) {
-              auto pg = c10::make_intrusive<::c10d::ProcessGroupNCCL>(store, rank, size, options);
+              auto pg = c10::make_intrusive<::c10d::ProcessGroupNCCL>(
+                  store, rank, size, options);
               ::c10d::DistributedC10d::get()->registerProcessGroupName(
                   pg, name);
               return pg;
@@ -1751,14 +1787,17 @@ static const auto ProcessGroupNCCLTorchBind =
                   outputSplitSizes,
                   inputSplitSizes,
                   ::c10d::AllToAllOptions());
-
             })
-        .def("size", [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-            return (int64_t) self->getSize();
-        })
-        .def("rank", [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-            return (int64_t) self->getRank();
-        });
+        .def(
+            "size",
+            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+              return (int64_t)self->getSize();
+            })
+        .def(
+            "rank",
+            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+              return (int64_t)self->getRank();
+            });
 #endif
 
 static const auto DistributedC10dFrontendTorchBind =
