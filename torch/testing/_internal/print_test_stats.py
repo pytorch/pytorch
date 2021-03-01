@@ -793,6 +793,7 @@ def assemble_s3_object(
     return {
         **build_info(),  # type: ignore[misc]
         'total_seconds': total_seconds,
+        'format_version': 2,
         'files' : {
             name: {
                 'total_seconds': test_file.total_time,
