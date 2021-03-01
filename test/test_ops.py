@@ -200,12 +200,13 @@ class TestCommon(JitCommonTestCase):
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         test_backward = op.supports_autograd and op.test_complex_grad or not dtype.is_complex
-        samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         try:
+            samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
             next(iter(samples))
         except StopIteration:
             self.skipTest("Skipped! No sample inputs!")
 
+        samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         for sample in samples:
             # Acquires variants to test
             method = op.get_method()
@@ -272,12 +273,13 @@ class TestCommon(JitCommonTestCase):
             (dtype.is_complex and op.test_complex_grad) or
             (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
 
-        samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         try:
+            samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
             next(iter(samples))
         except StopIteration:
             self.skipTest("Skipped! No sample inputs!")
 
+        samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         for sample in samples:
 
             # Acquires variants to test
