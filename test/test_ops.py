@@ -78,8 +78,14 @@ class TestGradients(TestCase):
         if not op.supports_dtype(dtype, torch.device(device).type):
             self.skipTest(f"Skipped! {op.name} does not support dtype {str(dtype)}")
 
+        def is_inplace(variant):
+            return variant.__name__.endswith('_')
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
+            if sample.broadcasts_self and is_inplace(variant):
+                continue
+
             if sample.output_process_fn_grad is not None:
                 out_fn = sample.output_process_fn_grad
 
@@ -241,6 +247,14 @@ class TestCommon(JitCommonTestCase):
                     except Exception as e:
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
+
+                if sample.broadcasts_self and variant in inplace_ops:
+                    with self.assertRaises(RuntimeError):
+                        variant(*(clone_input_helper(input) for input in sample.input),
+                                *sample.args,
+                                **sample.kwargs)
+                    continue
+
                 # Compares variant's forward
                 # Note: copy the tensor-type inputs when testing inplace operation
                 variant_forward = variant(*(clone_input_helper(input) if variant in inplace_ops else input

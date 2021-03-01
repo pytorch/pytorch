@@ -76,14 +76,18 @@ class SampleInput(object):
     """Represents sample inputs to a function."""
 
     # output_process_fn_grad is a function that modifies the output of op compatible with input
-    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
+    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_self']
 
-    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
+    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None, broadcasts_self=False):
         # test_ops.py expects input to be a tuple
         self.input = input if isinstance(input, tuple) else (input,)
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
+
+        # whether `self` argument to method will be broadcasted or not.
+        # used to skip inplace tests for such samples.
+        self.broadcasts_self = broadcasts_self
 
     def __repr__(self):
         arguments = [
@@ -91,7 +95,8 @@ class SampleInput(object):
             f'args={self.args}' if len(self.args) > 0 else None,
             f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
             (f'output_process_fn_grad={self.output_process_fn_grad}'
-             if self.output_process_fn_grad is not None else None)]
+             if self.output_process_fn_grad is not None else None),
+            f'broadcasts_self={self.broadcasts_self}']
 
         return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
 
@@ -1320,6 +1325,11 @@ def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad):
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
                     args=(bernoulli_scalar().to(device),
                           make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+
+        SampleInput(make_tensor((M,), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                    args=(torch.randn(M, M, device=device) > 0,
+                          make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad)),
+                    broadcasts_self=True),
     )
 
     return samples
