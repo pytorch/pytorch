@@ -49,6 +49,7 @@ class TestCUDA(JitTestCase):
         torch.cuda.empty_cache()
         super(TestCUDA, self).tearDown()
 
+    @skipIfRocm
     def test_stream_args(self):
         # Test stream creation with default arguments
         @torch.jit.script
@@ -78,6 +79,7 @@ class TestCUDA(JitTestCase):
         self.assertTrue(stream_default_args_for_priority)
         self.assertTrue(stream_args_all)
 
+    @skipIfRocm
     def test_event_args(self):
         # Test Event creation with default arguments
         @torch.jit.script
