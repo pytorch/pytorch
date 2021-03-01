@@ -53,8 +53,8 @@ NSSingleResultType = Dict[str, Any]
 
 # {
 #   'logger_name_1': {
-#     'model_name_a': [torch.Tensor(...), ...],
-#     'model_name_b': [torch.Tensor(...), ...],
+#     'model_name_a': NSSingleResultType,
+#     'model_name_b': NSSingleResultType,
 #   },
 # }
 #
@@ -258,22 +258,7 @@ def get_matching_activations(
 
     TODO(future PR): real docblock
 
-    Output format:
-
-    {
-        'layer1.stats': {
-            'name_a': [torch.Tensor(...), ...],
-            'name_b': [torch.Tensor(...), ...],
-        },
-        ...
-    }
-
-    Note, there are three differences from the output format of Eager NS:
-    1. `name_a` and `name_b` are used instead of hardcoding names
-       to `float` and `quantized`.
-    2. Lists of Tensors are returned instead of individual Tensors, to unify
-       the return type for calibrating with 1 input vs N inputs.
-    3. `logger_cls` is included in the API for easy result extraction
+    Output format: NSResultsType
     """
     results: NSResultsType = {}
     for gm in (gm_a, gm_b):
