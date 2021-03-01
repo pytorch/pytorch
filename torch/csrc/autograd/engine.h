@@ -239,7 +239,7 @@ struct ReadyQueue {
       } else if (!t2.fn_) {
         return true;
       } else if (t1.getReentrantDepth() == t2.getReentrantDepth()) {
-        return t1.fn_->topological_nr() < t2.fn_->topological_nr();
+        return t1.fn_->sequence_nr() < t2.fn_->sequence_nr();
       } else {
         return t1.getReentrantDepth() < t2.getReentrantDepth();
       }

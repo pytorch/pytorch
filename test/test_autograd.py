@@ -4117,7 +4117,7 @@ for shape in [(1,), ()]:
                 return x
 
         a = MyFunction.apply(torch.tensor(6.0, requires_grad=True))
-        b = Reentrant.apply(torch.tensor(9.0, requires_grad=True).clone())
+        b = Reentrant.apply(torch.tensor(9.0, requires_grad=True))
         v = a * b
         v.backward()
         # The tasks for the Reentrant and MyFunction backward() will be added

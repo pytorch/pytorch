@@ -86,16 +86,28 @@ class NodeGuard {
 // you manipulate the set of outgoing edges of a `Node`. You can add an
 // edge with `add_next_edge()`, retrieve an edge with `next_edge(index)` and
 // iterate over them via the `next_edges()` method. Other methods exist for
-// integration with the JIT and other parts of PyTorch.
+// integration with the JIT and other parts of PyTorch. Every `Node` has a
+// *sequence number* that increases monotonically in the order of `Node`
+// construction. It can be retrieved via the `sequence_nr()` method. Note that
+// this sequence number is *thread local*. This means that when `Node`s
+// `A`, `B` and `C` are created consecutively in the same thread, their
+// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
+// are created in one thread and `C` is created in a new thread, there are *no
+// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
+// See NOTE [ Sequence Number] for more details on the usages of sequence number.
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
   /// Construct a new `Node` with the given `next_edges`
   explicit Node(
-      uint64_t topological_nr,
+      uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
-    : topological_nr_(topological_nr),
-    next_edges_(std::move(next_edges)) {
+      : sequence_nr_(sequence_nr),
+      next_edges_(std::move(next_edges)) {
+
+    for (const Edge& edge: next_edges_) {
+      update_topological_nr(edge);
+    }
 
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
@@ -108,20 +120,15 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     }
 
     if (profiler::profilerEnabled()) {
-      // If profiler is enabled, a monotonically increasing sequence_nr is stored.
-      // sequence_nr, along with thread_id are used to annotate events recorded by the
-      // profiler. Because sequence_nr, thread_id pair uniquely identifies a given node
-      // it can be used to correlate backward nodes with its forward ops.
-      // The reason why we need both sequence_nr and thread_id to keep track of a node is
-      // because sequence_nr is thread_local, meaning that it starts over from zero if you
-      // create a node in a new thread.
-      sequence_nr_ = at::sequence_number::get_and_increment();
+      // If profiler is enabled, thread_id is stored.
+      // See NOTE [ Sequence Numbers ]
       thread_id_ = at::RecordFunction::currentThreadId();
     }
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
-    : Node(/*topological_nr=*/0, std::move(next_edges)) {}
+    : Node(/*sequence_nr=*/at::sequence_number::get_and_increment(),
+    std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -140,7 +147,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
     bool pre_sampled = false;
     if (at::shouldRunRecordFunction(&pre_sampled)) {
-      // Using RecordFunction to trogger observers in the backward pass
+      // Using RecordFunction to trigger observers in the backward pass
       at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION, pre_sampled);
       if (guard.isActive()) {
         // Using sequence number and thread id to correlate with
@@ -226,11 +233,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Outputs ("Next Edges")
 
-  const Edge& next_edge(size_t index) const noexcept {
-    return next_edges_[index];
-  }
-
   void update_topological_nr(const Edge& edge) {
+    TORCH_INTERNAL_ASSERT(!has_parent_,
+      "Cannot update a node's topological_nr after it already has a parent."
+      " If we allow this, we can no longer guarantee that a parent's"
+      " topo_nr is always greater than those of all its children")
     Node* node = edge.function.get();
     if (node) {
       auto topo_nr = node->topological_nr();
@@ -257,6 +264,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     }
   }
 
+  const Edge& next_edge(size_t index) const noexcept {
+    return next_edges_[index];
+  }
+
   const edge_list& next_edges() const noexcept {
     return next_edges_;
   }
@@ -272,7 +283,23 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Miscellaneous Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  /// The sequence number of this `Node` to be used by the profiler
+  /// NOTE [ Sequence Number]
+  ///
+  /// The sequence_nr has two main usages in autograd:
+  ///
+  /// 1) Determine the node's execution priority in the engine.
+  ///    Nodes with higher priority numbers are executed first. There is actually no
+  ///    particular reason why we want nodes corresponding to ops executed later to be
+  ///    the first to be executed in the backward pass. The point is to simply make
+  ///    it *deterministic* so its a bit easier to reason about.
+  ///    One caveat is that sequence_nr is UINT64_MAX for AccumulateGrad nodes
+  ///    because we want to prioritize them (why?)
+  /// 2) The sequence number of this `Node` is paired with with thread_id it was created in
+  ///    as a unique identifier by the profiler to annotate recorded events.
+  ///    The purpose of this is to help users (and possibly programs) interpreting the profiler's
+  ///    output to correlate backward nodes with its forward ops.
+  ///    We need both sequence_nr and thread_id to identify a node because sequence_nr is
+  ///    thread_local, i.e., starts counting up from zero in a new thread
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
   }
@@ -287,13 +314,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // longest possible path from this Node to any leaf node. If you are leaf node,
   // aka AccumulateGrad, this will be zero. This value has the property that
   // For every pair of nodes X, Y in G, existence of a directed path from X to Y
-  // implies topo_nr(X) > topo_nr(Y).
-  // This implies that if topo_nr(X) <= topo_nr(Y), there is no directed path from
-  // X to Y (logical contrapositive). Note that the converse is not true, so we
+  // implies topo_nr(X) > topo_nr(Y). The converse is not true, however, so we
   // cannot prove existence of a path from X to Y, only non-existence.
   //
-  // WARNING: One big assumption we make when using topo_nr is that once a node
+  // One assumption we make when using topo_nr is that once a node
   // has been used, i.e., has a parent node, its own topo_nr does not change
+  // we have added some checks with the `has_parent_` field to enforce this.
   //
   // What NOT to do:
   //
@@ -309,15 +335,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //      2 -> 3 -> 0               2 < 3, yet there exists a path from 2 to 3!
   //
   uint64_t topological_nr() const noexcept {
-    return topological_nr_;
-  }
-
-  // Used to determine execution priority in the engine. The ordering is arbitrary
-  // but deterministic. Nodes with higher priority numbers are executed first.
-  // priority_nr is currently a topological_nr clone except its overridden by
-  // AccumulateGrad to return UINT64_MAX. AccumulateGrad's topological_nr is always
-  // zero but we want to prioritize it (why?).
-  uint64_t virtual priority_nr() const noexcept {
+    has_parent_ = true;
     return topological_nr_;
   }
 
@@ -447,11 +465,16 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   variable_list traced_apply(variable_list inputs);
 
   // Sequence number used to correlate backward nodes with forward ops in the
-  // profiler
-  uint64_t sequence_nr_ = 0;
+  // profiler and provide determinisim in the engine.
+  const uint64_t sequence_nr_;
 
   // See NOTE [ Topological Number ]
   uint64_t topological_nr_ = 0;
+
+  // Tracks whether this node has been added as the next_edge of another node
+  // via set_next_edge(s), which always calls topological_nr() of all its children
+  // See NOTE [ Topological Number ] for why we need this.
+  mutable bool has_parent_ = false;
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;

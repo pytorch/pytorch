@@ -11,9 +11,8 @@
 namespace torch { namespace autograd {
 
 struct TORCH_API Error : public Node {
-  // See GraphRoot below for explanation of why we set topological_nr.
   Error(std::string msg, edge_list&& next_edges)
-    : Node(/*topological_nr=*/UINT64_MAX, std::move(next_edges))
+    : Node(std::move(next_edges))
     , msg(std::move(msg)) {}
 
   Error(std::string msg)
@@ -58,9 +57,8 @@ struct TORCH_API UndefinedGrad : public Node {
 };
 
 struct TORCH_API UndefinedGradBackward : public Node {
-  // See GraphRoot below for explanation of why we set topological_nr.
   UndefinedGradBackward(edge_list&& next_edges)
-    : Node(/*topological_nr=*/UINT64_MAX, std::move(next_edges)) {}
+    : Node(std::move(next_edges)) {}
 
   UndefinedGradBackward() {}
 
@@ -68,11 +66,8 @@ struct TORCH_API UndefinedGradBackward : public Node {
 };
 
 struct TORCH_API GraphRoot : public Node {
-  // Set topological_nr to int max because we always want to execute this node
-  // but we never call set_next_edges, so topological_nr is going to be zero
-  // otherwise.
   GraphRoot(edge_list functions, variable_list inputs)
-      : Node(/*topological_nr=*/UINT64_MAX, std::move(functions)),
+      : Node(std::move(functions)),
       outputs(std::move(inputs)) {
     // Ensures calls to stream() on a GraphRoot instance reflect current stream(s)
     // on devices of root grad tensors at the time the instance is constructed.

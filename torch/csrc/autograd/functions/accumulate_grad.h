@@ -27,12 +27,6 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  // AccumulateGrad sets priority_nr to the max value so it's always called
-  // ASAP during backwards.
-  uint64_t virtual priority_nr() const noexcept override {
-    return UINT64_MAX;
-  }
-
   static at::Tensor callHooks(
       const Variable& variable,
       at::Tensor new_grad) {
