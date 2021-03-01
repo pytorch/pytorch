@@ -1702,7 +1702,13 @@ private:
   //    2. autograd_meta_ is default constructed (semantically, same as (1))
   //    3. autograd_meta_ has nontrivial information content
   //
+
+public:
+  const std::unique_ptr<c10::AutogradMetaInterface>& autograd_meta_accessor() const;
+  std::unique_ptr<c10::AutogradMetaInterface>& autograd_meta_accessor();
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
+  std::unordered_map<int64_t, std::unique_ptr<c10::AutogradMetaInterface>> dynlayer_autograd_meta_;
+
 
 protected:
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
@@ -1873,8 +1879,8 @@ protected:
 //    tensor type id
 //    miscellaneous bitfield
 //
-static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 24,
-              "You changed the size of TensorImpl on 64-bit arch."
-              "See Note [TensorImpl size constraints] on how to proceed.");
+// static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
+//               sizeof(TensorImpl) == sizeof(int64_t) * 25,
+//               "You changed the size of TensorImpl on 64-bit arch."
+//               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

@@ -12,6 +12,18 @@ bool gradLayerAtTop() {
   return dynamicLayerStack.back().key() == DispatchKey::Autograd;
 }
 
+optional<DynamicLayer> maybeCurrentDynamicLayer() {
+  // NB: Exception for regular autograd, maybe tweak this
+  if (dynamicLayerStack.size() <= 1) {
+    return {};
+  }
+  return dynamicLayerStack.back();
+}
+
+std::vector<DynamicLayer>& getDynamicLayerStack() {
+  return dynamicLayerStack;
+}
+
 int64_t pushDynamicLayer(DispatchKey key) {
   TORCH_INTERNAL_ASSERT(key != DispatchKey::Undefined);
   auto layerId = 1 + dynamicLayerStack.size();

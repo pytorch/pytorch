@@ -4,6 +4,8 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+// TODO: it's probably not kosher to import aten from c10
+#include <ATen/DynamicLayer.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -29,8 +31,8 @@ const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "        x.set_(y)";
 
 at::Tensor& TensorImpl::mutable_grad() {
-  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
-  return autograd_meta_->mutable_grad();
+  if (!autograd_meta_accessor()) autograd_meta_accessor() = impl::GetAutogradMetaFactory()->make();
+  return autograd_meta_accessor()->mutable_grad();
 }
 
 const at::Tensor& TensorImpl::grad() const {
@@ -40,19 +42,19 @@ const at::Tensor& TensorImpl::grad() const {
   // is not so easy to fix right now because the mutable counterpart of
   // this function must keep working so that "x.grad() = ..." keeps working
   // (part of public API).
-  if (!autograd_meta_) return impl::GetAutogradMetaFactory()->undefined_tensor();
-  return autograd_meta_->grad();
+  if (!autograd_meta_accessor()) return impl::GetAutogradMetaFactory()->undefined_tensor();
+  return autograd_meta_accessor()->grad();
 }
 
 const at::Tensor& TensorImpl::fw_grad(uint64_t level, const at::Tensor& self) const {
   // See TensorImpl::grad() above for explanation about the line below
-  if (!autograd_meta_) return impl::GetAutogradMetaFactory()->undefined_tensor();
-  return autograd_meta_->fw_grad(level, self);
+  if (!autograd_meta_accessor()) return impl::GetAutogradMetaFactory()->undefined_tensor();
+  return autograd_meta_accessor()->fw_grad(level, self);
 }
 
 void TensorImpl::set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
-  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
-  autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
+  if (!autograd_meta_accessor()) autograd_meta_accessor() = impl::GetAutogradMetaFactory()->make();
+  autograd_meta_accessor()->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
 TensorImpl::TensorImpl(
@@ -214,7 +216,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
 }
 
 void TensorImpl::release_resources() {
-  autograd_meta_.reset();
+  autograd_meta_accessor().reset();
   if (storage_) {
     storage_ = {};
   }
@@ -276,8 +278,8 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
 void TensorImpl::set_requires_grad(bool requires_grad) {
-  if (!requires_grad && !autograd_meta_) return;
-  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  if (!requires_grad && !autograd_meta_accessor()) return;
+  if (!autograd_meta_accessor()) autograd_meta_accessor() = impl::GetAutogradMetaFactory()->make();
   // NB: In principle, setting requires_grad to false could result in
   // the AutogradMeta becoming equal to a default constructed state,
   // in which case we could apply the nullptr AutogradMeta optimization
@@ -287,28 +289,58 @@ void TensorImpl::set_requires_grad(bool requires_grad) {
   // information content in the other fields; for example, we may
   // have set the string name for a Variable, or there may be hooks
   // registered for it.
-  autograd_meta_->set_requires_grad(requires_grad, this);
+  autograd_meta_accessor()->set_requires_grad(requires_grad, this);
+}
+
+std::unique_ptr<c10::AutogradMetaInterface> kConstNullPtr;
+
+const std::unique_ptr<c10::AutogradMetaInterface>& TensorImpl::autograd_meta_accessor() const {
+  auto maybe_current_dynamic_layer = at::maybeCurrentDynamicLayer();
+  if (!maybe_current_dynamic_layer) {
+    return autograd_meta_; 
+  }
+  auto layer_id = maybe_current_dynamic_layer->layerId();
+  if (dynlayer_autograd_meta_.find(layer_id) != dynlayer_autograd_meta_.end()) {
+    const auto& result = dynlayer_autograd_meta_.at(layer_id);
+    return result;
+  }
+  // Not sure how to get const correctness to work here
+  return kConstNullPtr;
+}
+
+std::unique_ptr<c10::AutogradMetaInterface>& TensorImpl::autograd_meta_accessor() {
+  auto maybe_current_dynamic_layer = at::maybeCurrentDynamicLayer();
+  if (!maybe_current_dynamic_layer) {
+    return autograd_meta_; 
+  }
+  auto layer_id = maybe_current_dynamic_layer->layerId();
+  if (dynlayer_autograd_meta_.find(layer_id) != dynlayer_autograd_meta_.end()) {
+    return dynlayer_autograd_meta_[layer_id];
+  }
+  dynlayer_autograd_meta_[layer_id] = {};
+  return dynlayer_autograd_meta_[layer_id];
 }
 
 bool TensorImpl::requires_grad() const {
-  if (!autograd_meta_) return false;
-  return autograd_meta_->requires_grad();
+  if (!autograd_meta_accessor()) return false;
+  return autograd_meta_accessor()->requires_grad();
 }
 
 void TensorImpl::set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta) {
   // NB: autograd_meta may be null!  That just means it's the default
   // constructor
-  autograd_meta_ = std::move(autograd_meta);
+  autograd_meta_accessor() = std::move(autograd_meta);
 }
 
 c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   // NB: Might return null!
-  return autograd_meta_.get();
+  return autograd_meta_accessor().get();
 }
 
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
+  TORCH_INTERNAL_ASSERT(false, "In current prototype, cannot call shallow_copy_and_detach");
   auto impl = c10::make_intrusive<TensorImpl>(
       // No need to populate Storage; copy_tensor_metadata will do it for us.
       key_set_, data_type_, device_opt_);
@@ -342,6 +374,10 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl,
     bool allow_tensor_metadata_change) {
+  // [NEW!]
+  // dest_impl->autograd_meta_ = src_impl->autograd_meta_;
+  // dest_impl->dynlayer_autograd_meta_ = src_impl->dynlayer_autograd_meta_;
+
   dest_impl->storage_ = src_impl->storage_;
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
   dest_impl->storage_offset_ = src_impl->storage_offset_;

@@ -15,13 +15,24 @@ from make_functional import make_functional
 def _create_differentiable(tensor_or_tuple_of_tensors):
     if isinstance(tensor_or_tuple_of_tensors, torch.Tensor):
         tensor = tensor_or_tuple_of_tensors
-        if tensor.requires_grad:
-            return tensor
-        return tensor.detach().requires_grad_()
+        # if tensor.requires_grad:
+        #     return tensor
+        assert not tensor.requires_grad
+        return tensor.requires_grad_()
     if isinstance(tensor_or_tuple_of_tensors, tuple):
         return tuple(map(_create_differentiable, tensor_or_tuple_of_tensors))
     if isinstance(tensor_or_tuple_of_tensors, list):
         return tuple(map(_create_differentiable, tensor_or_tuple_of_tensors))
+    assert False
+
+def _undo_create_differentiable(tensor_or_tuple_of_tensors):
+    if isinstance(tensor_or_tuple_of_tensors, torch.Tensor):
+        tensor = tensor_or_tuple_of_tensors
+        return tensor.requires_grad_(False)
+    if isinstance(tensor_or_tuple_of_tensors, tuple):
+        return tuple(map(_undo_create_differentiable, tensor_or_tuple_of_tensors))
+    if isinstance(tensor_or_tuple_of_tensors, list):
+        return tuple(map(_undo_create_differentiable, tensor_or_tuple_of_tensors))
     assert False
 
 def _any_differentiable(tensor_or_tuple_of_tensors):
@@ -37,24 +48,25 @@ def _any_differentiable(tensor_or_tuple_of_tensors):
 
 def grad_with_value(f, diff_argnums=(0,)):
     def wrapper(*args):
-        should_increment_nesting = not torch._C._grad_layer_at_top()
-        if should_increment_nesting: 
-            torch._C._grad_increment_nesting()
+        torch._C._grad_increment_nesting()
         output = None
         try:
-            create_graph = _any_differentiable(args)
-            args = [_create_differentiable(arg) if i in diff_argnums else arg.detach()
+            args = [_create_differentiable(arg) if i in diff_argnums else arg
                     for i, arg in enumerate(args)]
             output = f(*args)
             assert output.dim() == 0
             diff_args = [args[i] for i in diff_argnums]
+            single_diff_arg = isinstance(diff_args[0], torch.Tensor) and len(diff_args) == 1
             # TODO: quick hack...
             if len(diff_args) == 1 and isinstance(diff_args[0], tuple):
                 diff_args = diff_args[0]
-            grad_input = torch.autograd.grad(output, diff_args, create_graph=create_graph)
+            # NB: need create_graph so that backward pass isn't run in no_grad mode
+            grad_input = torch.autograd.grad(output, diff_args, create_graph=True)
+            if single_diff_arg:
+                grad_input = grad_input[0]
         finally:
-            if should_increment_nesting:
-                torch._C._grad_decrement_nesting()
+            _undo_create_differentiable(args)
+            torch._C._grad_decrement_nesting()
         return grad_input, output
     return wrapper
 
@@ -69,15 +81,20 @@ def f(x):
     return y.sum()
 
 x = torch.tensor([0., 1., 2.])
-assert torch.allclose(grad(f)(x)[0], x.cos())
+assert torch.allclose(grad(f)(x), x.cos())
+
+g = lambda x: x.sin()
+y = torch.tensor(0.3)
+neg_sin_y = grad(grad(g))(y)
+assert torch.allclose(neg_sin_y, -y.sin())
 
 x = torch.tensor([0., 1., 2.])
-result, = vmap(grad(f))(x)
+result = vmap(grad(f))(x)
 assert torch.allclose(result, x.cos())
 
 def g(x):
     return (x ** 2).sum()
-result, = vmap(grad(g))(x)
+result = vmap(grad(g))(x)
 assert torch.allclose(result, 2 * x)
 
 def compute_loss(weight, x, t):
@@ -87,17 +104,10 @@ def compute_loss(weight, x, t):
 weight = torch.randn(16, 2)
 x = torch.randn(64, 16)
 t = torch.randn(64, 2)
-result, = vmap(partial(grad(compute_loss), weight))(x, t)
-expected = torch.stack([grad(compute_loss)(weight, x[i], t[i])[0] for i in range(64)])
+result = vmap(partial(grad(compute_loss), weight))(x, t)
+expected = [grad(compute_loss)(weight, x[i], t[i]) for i in range(64)]
+expected = torch.stack(expected)
 assert torch.allclose(result, expected)
-
-def compute_loss(weight, x):
-    y = torch.matmul(x, weight)
-    return y.sum()
-
-weight = torch.randn(16, 16)
-x = torch.randn(64, 16)
-vmap(partial(grad(compute_loss), weight))(x)
 
 
 class SampleNet(nn.Module):
@@ -118,7 +128,6 @@ class SampleNet(nn.Module):
 
     def name(self):
         return "SampleNet"
-
 
 # Create our inputs...
 vocab_size = 1000
@@ -150,7 +159,38 @@ result = vmap(partial(grad(compute_loss), weights))(data, targets)
 for r, e in zip(result, expected):
     assert torch.allclose(r, e)
 
-# NB: Much nicer when create_graph is True
-x = torch.randn([]).requires_grad_()
-result = grad(lambda x: grad(torch.sin)(x)[0])(x)[0]
-assert torch.allclose(result, -torch.sin(x))
+# Can we use regular autograd with the grad transform?
+x = torch.randn([], requires_grad=True)
+cos_x = grad(torch.sin)(x)
+result, = torch.autograd.grad(cos_x, x)
+assert torch.allclose(result, -x.sin())
+
+# Edge case...
+x = torch.randn([], requires_grad=True)
+y = torch.randn([], requires_grad=True)
+
+def silly_sin(x):
+    x = x.view([])
+    x = x.sin()
+    return x
+
+def foo(x, y):
+    z1 = grad(silly_sin)(x)
+    z2 = torch.cos(y)
+    return z1 + z2
+
+result = foo(x, y)
+grads = torch.autograd.grad(result, [x, y])
+assert torch.allclose(grads[0], -x.sin())
+assert torch.allclose(grads[1], -y.sin())
+
+exit(0)
+
+result = vmap(foo, (None, 0))(x, y)
+loss = result.sum()
+grads = torch.autograd.grad(loss, [x, y])
+# import torchviz; import graphviz
+# graph = torchviz.make_dot(loss)
+# graph.save("gvg.dot")
+# 
+# grads = torch.autograd.grad(result, [x, y], torch.ones_like(result))
