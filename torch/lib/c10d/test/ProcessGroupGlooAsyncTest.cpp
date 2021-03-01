@@ -1,5 +1,6 @@
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -243,10 +244,9 @@ void runAsyncBroadcastTest(
       const auto expected = (rootRank * numTensors + rootTensor);
       for (size_t i = 0; i < numProcesses; i++) {
         auto tensors = tests[i].getTensors();
-        for (size_t j = 0; j < tensors.size(); j++) {
-          auto& tensor = tensors[j];
-          auto data = tensor.data_ptr<float>();
-          for (auto k = 0; k < tensor.numel(); k++) {
+        for (const auto & tensor : tensors) {
+          const auto *const data = tensor.data_ptr<float>();
+          for (const auto k : c10::irange(tensor.numel())) {
             EXPECT_EQ(data[k], expected);
           }
         }
