@@ -628,7 +628,7 @@ class clean(distutils.command.clean.clean):
                         except OSError:
                             shutil.rmtree(filename, ignore_errors=True)
 
-        super().run(self)
+        super().run()
 
 
 class sdist(distutils.command.sdist.sdist):
