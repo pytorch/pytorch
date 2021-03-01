@@ -4399,6 +4399,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.assertRaises(TypeError, run_model)
 
+    def test_embedding(self):
+        class EmbedModel(torch.nn.Module):
+            def forward(self, input, emb):
+                return torch.nn.functional.embedding(input, emb, padding_idx=1)
+
+        model = EmbedModel()
+        x = torch.LongTensor([1,2,1,5])
+        embedding_matrix = torch.rand(10, 3)
+        self.run_test(model, (x, embedding_matrix))
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)

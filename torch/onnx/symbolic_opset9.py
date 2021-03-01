@@ -388,8 +388,17 @@ def expand_as(g, self, other):
     return g.op("Expand", self, shape)
 
 
+@parse_args('v', 'v', 'i', 'v', 'v')
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
-    return g.op("Gather", weight, indices)
+    # if (padding_idx >= 0) {
+    #   embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+    # }
+    weight = g.op("Gather", weight, indices)
+    if (padding_idx >= 0):
+        mask = eq(g, indices, g.op("Constant", value_t=torch.tensor(padding_idx)))
+        mask = reshape(g, mask, g.op("Constant", value_t=torch.tensor([-1, 1], dtype=torch.int64)))
+        weight = masked_fill(g, weight, mask, torch.tensor(0.))
+    return weight
 
 
 @parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
