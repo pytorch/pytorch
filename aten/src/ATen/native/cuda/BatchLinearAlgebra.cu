@@ -2230,9 +2230,11 @@ void linalg_eigh_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
 }
 
 void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
-
-  // TODO: add dispatches here for cuSOLVER
+#if defined(USE_CUSOLVER)
+  linalg_eigh_cusolver(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+#else
   linalg_eigh_magma(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+#endif
 }
 
 REGISTER_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
