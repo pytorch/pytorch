@@ -9575,6 +9575,7 @@ Example::
     >>> torch.empty_like(a)
     tensor([[0, 0, 0],
             [0, 0, 0]], device='cuda:0', dtype=torch.int32)
+
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
