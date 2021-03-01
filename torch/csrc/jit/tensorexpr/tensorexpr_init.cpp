@@ -230,10 +230,8 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<BufHandle, ExprHandle>( // NOLINT
       te,
       "BufHandle")
-      .def(py::init<
-           const std::string&,
-           const std::vector<ExprHandle>&,
-           Dtype>())
+      .def(
+          py::init<const std::string&, const std::vector<ExprHandle>&, Dtype>())
       .def(
           "load",
           [](tensorexpr::BufHandle& self,
@@ -256,11 +254,12 @@ void initTensorExprBindings(PyObject* module) {
           "buf",
           [](Placeholder& self) { return BufHandle(self.data()); },
           py::return_value_policy::reference);
-  py::class_<tensorexpr::Tensor, std::unique_ptr<tensorexpr::Tensor, py::nodelete>>(te, "Tensor")
-      .def(
-          py::init([](BufHandle& b, Stmt* s) {
-            return std::unique_ptr<Tensor, py::nodelete>(new Tensor(b.node(), s));
-          }))
+  py::class_<
+      tensorexpr::Tensor,
+      std::unique_ptr<tensorexpr::Tensor, py::nodelete>>(te, "Tensor")
+      .def(py::init([](BufHandle& b, Stmt* s) {
+        return std::unique_ptr<Tensor, py::nodelete>(new Tensor(b.node(), s));
+      }))
       .def(
           "load",
           [](tensorexpr::Tensor& self,
@@ -370,7 +369,8 @@ void initTensorExprBindings(PyObject* module) {
 
   py::class_<tensorexpr::Stmt, std::unique_ptr<Stmt, py::nodelete>>(te, "Stmt")
       .def(py::init([](const std::vector<Stmt*>& stmts) {
-        return std::unique_ptr<Stmt, py::nodelete>(tensorexpr::Block::make(stmts));
+        return std::unique_ptr<Stmt, py::nodelete>(
+            tensorexpr::Block::make(stmts));
       }))
       .def("__str__", [](const tensorexpr::Stmt& self) {
         std::stringstream ss;

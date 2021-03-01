@@ -178,9 +178,7 @@ static RegisterNNCExternalFunction nnc_conv2d(
 static RegisterNNCExternalFunction nnc_matmul(
     "nnc_aten_matmul",
     nnc_aten_matmul);
-static RegisterNNCExternalFunction nnc_mv(
-    "nnc_aten_mv",
-    nnc_aten_mv);
+static RegisterNNCExternalFunction nnc_mv("nnc_aten_mv", nnc_aten_mv);
 static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
