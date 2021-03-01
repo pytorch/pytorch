@@ -1323,20 +1323,24 @@ void initJitScriptBindings(PyObject* module) {
             auto input_args = tuple_slice(std::move(args), 1);
             auto input_kwargs = std::move(kwargs);
 
-            for (auto& overloaded_method: methods){
-              // TODO: this is pretty stupid method that is essentially a copy of
-              // createStackFromSchema. When createStackFromSchema throws a schema
-              // error, for some reason this code seg faults. So I created a function
-              // that gives a boolean instead of throwing error.
-              if (canCreateStackFromSchema(overloaded_method.function().getSchema(), input_args, input_kwargs, self._ivalue())){
+            for (auto& overloaded_method : methods) {
+              // TODO: this is pretty stupid method that is essentially a copy
+              // of createStackFromSchema. When createStackFromSchema throws a
+              // schema error, for some reason this code seg faults. So I
+              // created a function that gives a boolean instead of throwing
+              // error.
+              if (canCreateStackFromSchema(
+                      overloaded_method.function().getSchema(),
+                      input_args,
+                      input_kwargs,
+                      self._ivalue())) {
                 return invokeScriptMethodFromPython(
-                  overloaded_method, input_args, input_kwargs);
+                    overloaded_method, input_args, input_kwargs);
               }
-
             }
 
             return invokeScriptMethodFromPython(
-                 method, input_args, input_kwargs);
+                method, input_args, input_kwargs);
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)

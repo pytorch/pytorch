@@ -2174,8 +2174,10 @@ struct TORCH_API ClassType : public NamedType {
   torch::jit::Function& getMethod(const std::string& name) const;
 
   void addOverloadedMethod(torch::jit::Function* method);
-  std::vector<torch::jit::Function*> findOverloadedMethod(const std::string& name) const;
-  //std::vector<torch::jit::Function*> getOverloadedMethod(const std::string& name) const;
+  std::vector<torch::jit::Function*> findOverloadedMethod(
+      const std::string& name) const;
+  // std::vector<torch::jit::Function*> getOverloadedMethod(const std::string&
+  // name) const;
   torch::jit::Function* getMangledOverloadedMethod(
       const std::string& name) const;
 
@@ -2250,8 +2252,10 @@ struct TORCH_API ClassType : public NamedType {
   std::vector<torch::jit::Function*> methods_;
   std::vector<torch::jit::Function*> staticmethods_;
 
-  // Map of overloaded methods associated with this class that are keyed by method name
-  std::unordered_map<std::string, std::vector<torch::jit::Function*>> overloaded_methods_;
+  // Map of overloaded methods associated with this class that are keyed by
+  // method name
+  std::unordered_map<std::string, std::vector<torch::jit::Function*>>
+      overloaded_methods_;
 
   // Map of mangled name to function pointer
   std::unordered_map<std::string, torch::jit::Function*> mangled_to_function_;

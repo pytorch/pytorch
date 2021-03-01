@@ -61,83 +61,6 @@ static std::ostream& printValueRefs(
   }
   return out;
 }
-bool matchesUtility(const FunctionSchema& schema, at::ArrayRef<const Value*> inputs) {
-
-  const auto& formals = schema.arguments();
-
-  // not enough inputs
-  if (inputs.size() < formals.size()) {
-    return false;
-  }
-
-  TypeEnv type_env;
-  for (size_t i = 0; i < formals.size(); ++i) {
-    auto formal = formals[i].type();
-    const MatchTypeReturn matched_type =
-        matchTypeVariables(formal, inputs[i]->type(), type_env);
-    if (!matched_type.success()) {
-      return false;
-    }
-
-    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
-    if (resolved) {
-      formal = resolved;
-    }
-    // note: it is possible at this point that type variable matching has
-    // not resolved all type variables, e.g. if None was matched to Optional[T]
-    // we will not succeed at matching T. However None <: Optional[T] so this
-    // check can still succeed.
-
-    if (!inputs[i]->type()->isSubtypeOf(formal)) {
-      return false;
-    }
-  }
-  // too many inputs
-  if (!schema.is_vararg() && inputs.size() != formals.size()) {
-    return false;
-  }
-
-  return true;
-}
-
-bool matchesUtility(const FunctionSchema& schema, at::ArrayRef<Value*> inputs) {
-
-  const auto& formals = schema.arguments();
-
-  // not enough inputs
-  if (inputs.size() < formals.size()) {
-    return false;
-  }
-
-  TypeEnv type_env;
-  for (size_t i = 0; i < formals.size(); ++i) {
-    auto formal = formals[i].type();
-    const MatchTypeReturn matched_type =
-        matchTypeVariables(formal, inputs[i]->type(), type_env);
-    if (!matched_type.success()) {
-      return false;
-    }
-
-    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
-    if (resolved) {
-      formal = resolved;
-    }
-    // note: it is possible at this point that type variable matching has
-    // not resolved all type variables, e.g. if None was matched to Optional[T]
-    // we will not succeed at matching T. However None <: Optional[T] so this
-    // check can still succeed.
-
-    if (!inputs[i]->type()->isSubtypeOf(formal)) {
-      return false;
-    }
-  }
-  // too many inputs
-  if (!schema.is_vararg() && inputs.size() != formals.size()) {
-    return false;
-  }
-
-  return true;
-}
 
 // Can't make these two overloads directly a template, it'll be ambiguous with
 // the global printer for operator<<.
@@ -981,7 +904,43 @@ bool Node::matches(const FunctionSchema& schema) const {
   if (kind().toQualString() != schema.name()) {
     return false;
   }
-  return matchesUtility(schema, inputs());
+  at::ArrayRef<const Value*> actuals = inputs();
+  const auto& formals = schema.arguments();
+
+  // not enough inputs
+  if (actuals.size() < formals.size()) {
+    return false;
+  }
+
+  TypeEnv type_env;
+  for (size_t i = 0; i < formals.size(); ++i) {
+    auto formal = formals[i].type();
+    const MatchTypeReturn matched_type =
+        matchTypeVariables(formal, actuals[i]->type(), type_env);
+    if (!matched_type.success()) {
+      return false;
+    }
+
+    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
+    if (resolved) {
+      formal = resolved;
+    }
+    // note: it is possible at this point that type variable matching has
+    // not resolved all type variables, e.g. if None was matched to Optional[T]
+    // we will not succeed at matching T. However None <: Optional[T] so this
+    // check can still succeed.
+
+    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+      return false;
+    }
+  }
+
+  // too many inputs
+  if (!schema.is_vararg() && actuals.size() != formals.size()) {
+    return false;
+  }
+
+  return true;
 }
 
 bool Node::matches(

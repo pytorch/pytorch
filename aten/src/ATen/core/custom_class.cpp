@@ -43,28 +43,25 @@ method_map& customClassMethods() {
 }
 
 void registerCustomClassMethod(std::unique_ptr<jit::Function> fn) {
-
   auto& custom_class_methods = customClassMethods();
-  if (custom_class_methods.find(fn->name()) == custom_class_methods.end()){
+  if (custom_class_methods.find(fn->name()) == custom_class_methods.end()) {
     custom_class_methods[fn->name()] = method_list();
   }
   custom_class_methods[fn->name()].push_back(std::move(fn));
 }
 
 std::vector<c10::FunctionSchema> customClassSchemasForBCCheck() {
-    auto& custom_class_methods = customClassMethods();
-    std::vector<c10::FunctionSchema> schemas;
+  auto& custom_class_methods = customClassMethods();
+  std::vector<c10::FunctionSchema> schemas;
 
-    // for (auto & custom_class_method : custom_class_methods) {
-    //   auto methods = custom_class_method.second;
-    //   for (auto & method : methods) {
-    //     schemas.push_back(method->getSchema());
-    //   }
-    // }
+  // for (auto & custom_class_method : custom_class_methods) {
+  //   auto methods = custom_class_method.second;
+  //   for (auto & method : methods) {
+  //     schemas.push_back(method->getSchema());
+  //   }
+  // }
 
-    return schemas;
+  return schemas;
 }
-
-
 
 } // namespace torch

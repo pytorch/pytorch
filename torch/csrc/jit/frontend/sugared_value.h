@@ -460,23 +460,24 @@ struct MethodValue : public SugaredValue {
       if (auto class_type = self_->type()->cast<ClassType>()) {
         Function& method = class_type->getMethod(method_name);
         auto overloaded_methods = class_type->findOverloadedMethod(method_name);
-        if (class_type->findOverloadedMethod(method_name).size() > 1 ) {
+        if (class_type->findOverloadedMethod(method_name).size() > 1) {
           std::vector<std::string> names;
           std::vector<const FunctionSchema*> overloaded_schemas;
-          auto overloaded_methods = class_type->findOverloadedMethod(method_name);
+          auto overloaded_methods =
+              class_type->findOverloadedMethod(method_name);
           for (auto overloaded_method : overloaded_methods) {
             try {
               overloaded_method->ensure_defined();
             } catch (const RecursiveMethodCallError&) {
-                throw ErrorReport(loc)
-                    << " method '" << method.name() << "' is called recursively. "
-                    << "Recursive calls are not supported";
+              throw ErrorReport(loc)
+                  << " method '" << method.name() << "' is called recursively. "
+                  << "Recursive calls are not supported";
             }
             overloaded_schemas.push_back(&(overloaded_method->getSchema()));
             names.push_back(method_name);
-
           }
-          auto match = matchSchemas(overloaded_schemas, loc, *f.graph(), argsWithSelf, kwargs);
+          auto match = matchSchemas(
+              overloaded_schemas, loc, *f.graph(), argsWithSelf, kwargs);
           auto mangled_method_name =
               method_name + "__" + std::to_string(match.first);
 

@@ -102,10 +102,11 @@ struct TORCH_API Object {
     });
   }
 
-  const std::vector<Method> get_overloaded_methods(const std::string& basename) const {
-    return c10::fmap(type()->findOverloadedMethod(basename), [&](Function* func) {
-      return Method(_ivalue(), func);
-    });
+  const std::vector<Method> get_overloaded_methods(
+      const std::string& basename) const {
+    return c10::fmap(
+        type()->findOverloadedMethod(basename),
+        [&](Function* func) { return Method(_ivalue(), func); });
   }
 
   c10::optional<Method> find_method(const std::string& basename) const;

@@ -13,7 +13,7 @@
 namespace c10 {
 struct FunctionSchema;
 struct IValue;
-};
+}; // namespace c10
 
 namespace torch {
 namespace jit {
@@ -121,17 +121,17 @@ struct OverloadedFunction : public Function {
   }
 
   std::string pretty_print_schema() const override {
-    #ifdef __NVCC__
-    // Disable the "statement is unreachable" warning
-    #pragma diag_suppress code_is_unreachable
-    #endif
+#ifdef __NVCC__
+// Disable the "statement is unreachable" warning
+#pragma diag_suppress code_is_unreachable
+#endif
 
     TORCH_INTERNAL_ASSERT(false);
     return "";
 
-    #ifdef __NVCC__
-    #pragma diag_default code_is_unreachable
-    #endif
+#ifdef __NVCC__
+#pragma diag_default code_is_unreachable
+#endif
   }
 
   Function& setSchema(c10::FunctionSchema schema) override {

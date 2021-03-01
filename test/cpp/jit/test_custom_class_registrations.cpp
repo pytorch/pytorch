@@ -74,8 +74,7 @@ struct FooOverload : torch::CustomClassHolder {
   int64_t increment(int64_t z, int64_t t) {
     return (x + y) * z + t;
   }
-  ~FooOverload() {
-  }
+  ~FooOverload() {}
 };
 
 struct LambdaInit : torch::CustomClassHolder {
@@ -276,8 +275,12 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
 
   m.class_<FooOverload>("_FooOverload")
       .def(torch::init<int64_t, int64_t>())
-      .def("increment", (int64_t (FooOverload::*)(int64_t, int64_t))(&FooOverload::increment))
-      .def("increment", (int64_t (FooOverload::*)(int64_t))(&FooOverload::increment));
+      .def(
+          "increment",
+          (int64_t(FooOverload::*)(int64_t, int64_t))(&FooOverload::increment))
+      .def(
+          "increment",
+          (int64_t(FooOverload::*)(int64_t))(&FooOverload::increment));
 
   m.class_<LambdaInit>("_LambdaInit")
       .def(torch::init([](int64_t x, int64_t y, bool swap) {
