@@ -1,5 +1,7 @@
 import torch
-import numpy as np
+from torch.testing._internal.common_utils import TEST_NUMPY
+if TEST_NUMPY:
+    import numpy as np
 
 # From the docs, there are quite a few ways to create a tensor:
 # https://pytorch.org/docs/stable/tensors.html
@@ -26,9 +28,10 @@ reveal_type(torch.sparse_coo_tensor(torch.empty([1, 0]),
                                     torch.empty([0, 2]), [1, 2]))  # E: torch.tensor.Tensor
 
 # torch.as_tensor
-a = np.array([1, 2, 3])
-reveal_type(torch.as_tensor(a))  # E: torch.tensor.Tensor
-reveal_type(torch.as_tensor(a, device=torch.device('cuda')))  # E: torch.tensor.Tensor
+if TEST_NUMPY:
+    a = np.array([1, 2, 3])
+    reveal_type(torch.as_tensor(a))  # E: torch.tensor.Tensor
+    reveal_type(torch.as_tensor(a, device=torch.device('cuda')))  # E: torch.tensor.Tensor
 
 # torch.as_strided
 x = torch.randn(3, 3)
@@ -36,8 +39,9 @@ reveal_type(torch.as_strided(x, (2, 2), (1, 2)))  # E: torch.tensor.Tensor
 reveal_type(torch.as_strided(x, (2, 2), (1, 2), 1))  # E: torch.tensor.Tensor
 
 # torch.from_numpy
-a = np.array([1, 2, 3])
-reveal_type(torch.from_numpy(a))  # E: torch.tensor.Tensor
+if TEST_NUMPY:
+    a = np.array([1, 2, 3])
+    reveal_type(torch.from_numpy(a))  # E: torch.tensor.Tensor
 
 # torch.zeros/zeros_like
 reveal_type(torch.zeros(2, 3))  # E: torch.tensor.Tensor
@@ -100,7 +104,8 @@ reveal_type(torch.complex(real, imag))  # E: torch.tensor.Tensor
 
 # torch.polar
 abs = torch.tensor([1, 2], dtype=torch.float64)
-angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64)
+pi = torch.acos(torch.zeros(1)).item() * 2
+angle = torch.tensor([pi / 2, 5 * pi / 4], dtype=torch.float64)
 reveal_type(torch.polar(abs, angle))  # E: torch.tensor.Tensor
 
 # torch.heaviside

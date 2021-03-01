@@ -7,7 +7,6 @@ import shutil
 from typing import IO, Dict, List
 
 import pytest
-import numpy as np
 
 try:
     from mypy import api
@@ -82,13 +81,9 @@ def get_test_cases(directory):
                 )
 
 
-def _construct_format_dict():
-    return {}
-
-
 #: A dictionary with all supported format keys (as keys)
 #: and matching values
-FORMAT_DICT: Dict[str, str] = _construct_format_dict()
+FORMAT_DICT: Dict[str, str] = {}
 
 
 def _parse_reveals(file: IO[str]) -> List[str]:
@@ -100,7 +95,7 @@ def _parse_reveals(file: IO[str]) -> List[str]:
     string = file.read().replace("*", "")
 
     # Grab all `# E:`-based comments
-    comments_array = np.char.partition(string.split("\n"), sep="  # E: ")[:, 2]
+    comments_array = list(map(lambda str: str.partition("  # E: ")[2], string.split("\n")))
     comments = "/n".join(comments_array)
 
     # Only search for the `{*}` pattern within comments,
