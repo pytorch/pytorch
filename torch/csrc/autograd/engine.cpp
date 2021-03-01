@@ -225,6 +225,9 @@ Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority
 Engine::~Engine() {
+  // This code in principle is correct, but in practice causes occasional
+  // hangs at shutdown.  See https://github.com/pytorch/pytorch/issues/48888
+#if 0
   bool noBackward = true;
   for (auto& queue: device_ready_queues_) {
     noBackward =  noBackward && queue->empty();
@@ -243,6 +246,7 @@ Engine::~Engine() {
     }
 #endif
   }
+#endif
   // Otherwise threads are leaked
 }
 
