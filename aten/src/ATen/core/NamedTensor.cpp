@@ -67,16 +67,14 @@ void check_names_valid_for(size_t tensor_dim, DimnameList names) {
 namespace impl {
 
 static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
-  auto named_tensor_meta = static_cast<NamedTensorMeta*>(impl->named_tensor_meta());
-  if (named_tensor_meta == nullptr || !NamesMode::is_enabled()) {
+  if (!NamesMode::is_enabled()) {
     return nullptr;
   }
-  return named_tensor_meta;
+  return static_cast<NamedTensorMeta*>(impl->named_tensor_meta());
 }
 
 static const NamedTensorMeta* get_named_tensor_meta(const TensorImpl* impl) {
-  auto named_tensor_meta = static_cast<const NamedTensorMeta*>(impl->named_tensor_meta());
-  if (named_tensor_meta == nullptr || !NamesMode::is_enabled()) {
+  if (!NamesMode::is_enabled()) {
     return nullptr;
   }
   return static_cast<const NamedTensorMeta*>(impl->named_tensor_meta());
