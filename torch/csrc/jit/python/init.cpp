@@ -134,6 +134,7 @@ TORCH_API void runJITCPPTests();
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  auto jit = m.def_submodule("_jit");
 
   py::register_exception<JITException>(m, "JITException");
 
@@ -211,13 +212,17 @@ void initJITBindings(PyObject* module) {
           PrepareInplaceOpsForONNX)
       .def(
           "_jit_pass_onnx_node_shape_type_inference",
-          [](Node* n, int opset_version) {
-            ONNXShapeTypeInference(n, opset_version);
+          [](Node* n,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(n, params_dict, opset_version);
           })
       .def(
           "_jit_pass_onnx_graph_shape_type_inference",
-          [](std::shared_ptr<Graph>& graph, int opset_version) {
-            ONNXShapeTypeInference(graph, opset_version);
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(graph, params_dict, opset_version);
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_autocast", Autocast)
@@ -565,12 +570,8 @@ void initJITBindings(PyObject* module) {
           []() { return getInlineEverythingMode(); })
       .def(
           "_jit_try_infer_type",
-          [](py::object obj) -> TypePtr {
-            auto match = tryToInferType(std::move(obj));
-            if (match.success()) {
-              return match.type();
-            }
-            return nullptr;
+          [](py::object obj) -> InferredType {
+            return tryToInferType(std::move(obj));
           })
       .def(
           "_jit_get_trigger_value",
@@ -818,6 +819,15 @@ void initJITBindings(PyObject* module) {
             }
             return states;
           })
+      .def(
+          "differentiable_op_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.diff_graph_op_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
       .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
       .def("request_bailout", [](Code& c, size_t index) {
         c.request_bailout(index);
@@ -870,6 +880,7 @@ void initJITBindings(PyObject* module) {
              const char* data,
              size_t size) { return self.writeRecord(name, data, size); })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
@@ -878,7 +889,11 @@ void initJITBindings(PyObject* module) {
              size_t size) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
-          });
+          })
+      .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def(
+          "get_all_written_records",
+          &PyTorchStreamWriter::getAllWrittenRecords);
 
   py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
@@ -955,11 +970,12 @@ void initJITBindings(PyObject* module) {
     bool use_readinto_;
   };
 
-  py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchStreamReader, std::shared_ptr<PyTorchStreamReader>>(
+      m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto adapter = std::make_unique<BufferAdapter>(buffer);
-        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
+        return std::make_shared<PyTorchStreamReader>(std::move(adapter));
       }))
       .def(
           "get_record",
@@ -1185,6 +1201,21 @@ void initJITBindings(PyObject* module) {
           "set_result",
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)
+      .def(
+          "_set_unwrap_func",
+          // Intentionally not releasing GIL as this just does an assign
+          [](PythonFutureWrapper& self, py::function unwrapFunc) {
+            auto functionGuard =
+                std::make_shared<torch::jit::PythonFunctionGuard>(
+                    std::move(unwrapFunc));
+
+            std::function<void(py::object)> pf =
+                [functionGuard(std::move(functionGuard))](
+                    const py::object& inp) {
+                  return functionGuard->func_(inp);
+                };
+            self.unwrap_func = std::move(pf);
+          })
       .def(
           py::pickle(
               /* __getstate__ */

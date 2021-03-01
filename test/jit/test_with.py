@@ -4,7 +4,7 @@ import sys
 from typing import Any, List
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
 # Make the helper files in test/ importable
@@ -29,8 +29,6 @@ class TestWith(JitTestCase):
         Check that with statements that use the 'as' keyword to bind expressions
         to targets work as expected.
         """
-        global Context
-
         @torch.jit.script
         class Context(object):
             """
@@ -47,8 +45,11 @@ class TestWith(JitTestCase):
                 self.count.add_(0.3)
                 return self.count
 
-            def __exit__(self, type: Any, value: Any, tb: Any):
+            def __exit__(self, type: Any, value: Any, tb: Any) -> bool:
                 self.count.sub_(0.3)
+                return True
+
+        make_global(Context)
 
         def test_basic(x: torch.Tensor) -> torch.Tensor:
             """Basic test with one with-statement."""
@@ -185,8 +186,6 @@ class TestWith(JitTestCase):
         Check that with statements that do not use the 'as' keyword to bind expressions
         to targets work as expected.
         """
-        global Context
-
         @torch.jit.script
         class Context(object):
             """
@@ -205,6 +204,8 @@ class TestWith(JitTestCase):
 
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
+
+        make_global(Context)
 
         def test_basic(x: torch.Tensor) -> torch.Tensor:
             """Basic test with one with-statement."""
@@ -341,8 +342,6 @@ class TestWith(JitTestCase):
         Check that exceptions thrown in the bodies of with-statements are
         handled correctly.
         """
-        global Context
-
         @torch.jit.script
         class Context(object):
             """
@@ -361,6 +360,8 @@ class TestWith(JitTestCase):
 
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
+
+        make_global(Context)
 
         @torch.jit.script
         def method_that_raises() -> torch.Tensor:
@@ -441,7 +442,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class BadEnter(object):
             """
-            This class is has an __enter__ method with an incorrect signature.
+            This class has an __enter__ method with an incorrect signature.
             """
 
             def __init__(self):
@@ -456,7 +457,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class BadExit(object):
             """
-            This class is has an __exit__ method with an incorrect signature.
+            This class has an __exit__ method with an incorrect signature.
             """
 
             def __init__(self):
@@ -471,7 +472,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class ExitIncorrectTypes(object):
             """
-            This class is has an __exit__ method with unsupported argument types.
+            This class has an __exit__ method with unsupported argument types.
             """
 
             def __init__(self):
@@ -507,6 +508,10 @@ class TestWith(JitTestCase):
 
             return x
 
+        def test_enter_without_object():
+            with "not_object" as obj:
+                pass
+
         test_tensor = torch.randn(5, dtype=torch.double)
 
         with self.assertRaisesRegex(
@@ -520,7 +525,7 @@ class TestWith(JitTestCase):
             self.checkScript(test_bad_enter, (test_tensor, BadEnter()))
 
         with self.assertRaisesRegex(
-            RuntimeError, r"__exit__ must have four arguments and no return value"
+            RuntimeError, r"__exit__ must have four arguments"
         ):
             self.checkScript(test_bad_exit, (test_tensor, BadExit()))
 
@@ -530,6 +535,9 @@ class TestWith(JitTestCase):
             self.checkScript(
                 test_exit_incorrect_types, (test_tensor, ExitIncorrectTypes())
             )
+
+        with self.assertRaisesRegex(RuntimeError, r"must return an object"):
+            self.checkScript(test_enter_without_object, ())
 
     def test_with_no_grad(self):
         """

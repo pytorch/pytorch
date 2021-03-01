@@ -89,16 +89,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "[Undefined]";
     }
   } else if(t.kind() == TypeKind::ListType) {
-    auto prim = t.cast<ListType>()->getElementType();
+    auto prim = t.castRaw<ListType>()->getElementType();
     out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
-    auto prim = t.cast<OptionalType>()->getElementType();
+    auto prim = t.castRaw<OptionalType>()->getElementType();
     out << *prim << "?";
   } else if(t.kind() == TypeKind::FutureType) {
-    auto elem = t.cast<FutureType>()->getElementType();
+    auto elem = t.castRaw<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(t.kind() == TypeKind::RRefType) {
-    auto elem = t.cast<RRefType>()->getElementType();
+    auto elem = t.castRaw<RRefType>()->getElementType();
     out << "RRef[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
     if (tup->schema()) {
@@ -145,8 +145,8 @@ FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
-ComplexDoubleTypePtr ComplexDoubleType::get() {
-  static auto value = ComplexDoubleType::create();
+ComplexTypePtr ComplexType::get() {
+  static auto value = ComplexType::create();
   return value;
 }
 BoolTypePtr BoolType::get() {
@@ -211,6 +211,10 @@ ListTypePtr ListType::ofTensors() {
 }
 ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
+  return value;
+}
+ListTypePtr ListType::ofComplexDoubles() {
+  static auto value = ListType::create(ComplexType::get());
   return value;
 }
 ListTypePtr ListType::ofFloats() {
@@ -300,8 +304,8 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
 
   if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
     if (auto elem = unifyTypes(
-            t1->cast<FutureType>()->getElementType(),
-            t2->cast<FutureType>()->getElementType())) {
+            t1->castRaw<FutureType>()->getElementType(),
+            t2->castRaw<FutureType>()->getElementType())) {
       return FutureType::create(*elem);
     }
   }
@@ -1207,7 +1211,7 @@ void checkForwardHookInputArguments(
       hook_err_msg
    );
 
-  const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->cast<TupleType>()->elements();
+  const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->castRaw<TupleType>()->elements();
   if (forward_args.size() == 1) {
     // check for empty forward case
     TORCH_CHECK(
@@ -1309,7 +1313,7 @@ void ClassType::checkForwardPreHookSchema(
       pre_hook_err_msg
   );
   const at::ArrayRef<TypePtr> return_tuple_types =
-      return_arg.type()->cast<TupleType>()->elements();
+      return_arg.type()->castRaw<TupleType>()->elements();
   // check for edge case of Tuple[()] for when forward has no arguments
   if (forward_args.size() == 1) {
     TORCH_CHECK(
@@ -1424,6 +1428,25 @@ torch::jit::Function& ClassType::getHook(const std::string& name) const {
 
 bool ClassType::hasMethod(const std::string& name) const {
   return findMethod(name) != nullptr;
+}
+
+void ClassType::addStaticMethod(torch::jit::Function* method) {
+  TORCH_CHECK(
+      findStaticMethod(method->name()) == nullptr &&
+          findMethod(method->name()) == nullptr, "Can't redefine method: ",
+      method->name(),
+      " on class: ",
+      repr_str());
+  staticmethods_.emplace_back(method);
+}
+
+torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const {
+  for (auto method : staticmethods_) {
+    if (name == method->name()) {
+      return method;
+    }
+  }
+  return nullptr;
 }
 
 void ClassType::unsafeRemoveMethod(const std::string& name) {

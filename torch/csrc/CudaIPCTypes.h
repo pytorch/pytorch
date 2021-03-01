@@ -11,7 +11,7 @@
 #include <cstddef>
 namespace torch {
 
-TORCH_CUDA_API bool CudaIPCCollect();
+TORCH_CUDA_CU_API bool CudaIPCCollect();
 
 struct CudaIPCReceivedData final {
   explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
@@ -47,7 +47,7 @@ struct CudaIPCSentData final {
   }
 };
 
-TORCH_CUDA_API at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
+TORCH_CUDA_CU_API at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
 
 namespace {
 

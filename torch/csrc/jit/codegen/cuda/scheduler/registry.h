@@ -12,7 +12,7 @@ namespace cuda {
 //!   heuristic implementations derive from this
 //!   class and implement a schedule(Fusion*)
 //!   and a bool canSchedule(Fusion*) interface
-class TORCH_CUDA_API SchedulerEntry {
+class TORCH_CUDA_CU_API SchedulerEntry {
  public:
   //! Fusion runtime facing API,
   //!   builds a new entry with the given heuristics
@@ -64,7 +64,7 @@ class TORCH_CUDA_API SchedulerEntry {
 };
 
 //! Hash function for a scheduler entry
-class TORCH_CUDA_API SchedulerEntryHash {
+class TORCH_CUDA_CU_API SchedulerEntryHash {
  public:
   size_t operator()(const SchedulerEntry& se) const;
 };

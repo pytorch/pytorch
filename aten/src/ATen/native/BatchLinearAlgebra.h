@@ -15,12 +15,19 @@ namespace at { namespace native {
 // linear algebra operations
 
 template<class scalar_t>
-void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info);
+void lapackCholeskyInverse(char uplo, int n, scalar_t *a, int lda, int *info);
+
+template<class scalar_t, class value_t=scalar_t>
+void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *w, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, value_t *rwork, int *info);
 
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
 #endif
+
+using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, bool /*upper*/);
+
+DECLARE_DISPATCH(cholesky_inverse_fn, cholesky_inverse_stub);
 
 using eig_fn = std::tuple<Tensor, Tensor> (*)(const Tensor&, bool&);
 

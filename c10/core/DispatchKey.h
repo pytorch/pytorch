@@ -18,6 +18,8 @@ namespace c10 {
 // DispatchKeySet.  Higher bit indexes get handled by dispatching first (because
 // we "count leading zeros" when we extract the highest priority dispatch
 // key.)
+//
+// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -60,6 +62,7 @@ enum class DispatchKey : uint8_t {
   MSNPU, // unused externally, but tested at
   // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
+  MLC, // lives out of tree at https://github.com/pytorch/MLCompute
   Vulkan,
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
@@ -222,9 +225,9 @@ enum class DispatchKey : uint8_t {
   AutogradCPU,
   AutogradCUDA,
   AutogradXLA,
-  AutogradNestedTensor, // lives out of tree at
-                        // https://github.com/pytorch/nestedtensor
   AutogradXPU,
+  AutogradMLC,
+  AutogradNestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,

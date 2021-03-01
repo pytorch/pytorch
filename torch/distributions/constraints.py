@@ -64,13 +64,20 @@ class Constraint(object):
 
     A constraint object represents a region over which a variable is valid,
     e.g. within which a variable can be optimized.
+
+    Attributes:
+        is_discrete (bool): Whether constrained space is discrete.
+            Defaults to False.
+        event_dim (int): Number of rightmost dimensions that together define
+            an event. The :meth:`check` method will remove this many dimensions
+            when computing validity.
     """
     is_discrete = False  # Default to continuous.
     event_dim = 0  # Default to univariate.
 
     def check(self, value):
         """
-        Returns a byte tensor of `sample_shape + batch_shape` indicating
+        Returns a byte tensor of ``sample_shape + batch_shape`` indicating
         whether each event in value satisfies this constraint.
         """
         raise NotImplementedError
@@ -83,22 +90,42 @@ class _Dependent(Constraint):
     """
     Placeholder for variables whose support depends on other variables.
     These variables obey no simple coordinate-wise constraints.
+
+    Args:
+        is_discrete (bool): Optional value of ``.is_discrete`` in case this
+            can be computed statically. If not provided, access to the
+            ``.is_discrete`` attribute will raise a NotImplementedError.
+        event_dim (int): Optional value of ``.event_dim`` in case this
+            can be computed statically. If not provided, access to the
+            ``.event_dim`` attribute will raise a NotImplementedError.
     """
-    def __init__(self, *, is_discrete=False, event_dim=0):
-        self.is_discrete = is_discrete
-        self.event_dim = event_dim
+    def __init__(self, *, is_discrete=NotImplemented, event_dim=NotImplemented):
+        self._is_discrete = is_discrete
+        self._event_dim = event_dim
         super().__init__()
 
-    def __call__(self, *, is_discrete=None, event_dim=None):
+    @property
+    def is_discrete(self):
+        if self._is_discrete is NotImplemented:
+            raise NotImplementedError(".is_discrete cannot be determined statically")
+        return self._is_discrete
+
+    @property
+    def event_dim(self):
+        if self._event_dim is NotImplemented:
+            raise NotImplementedError(".event_dim cannot be determined statically")
+        return self._event_dim
+
+    def __call__(self, *, is_discrete=NotImplemented, event_dim=NotImplemented):
         """
         Support for syntax to customize static attributes::
 
             constraints.dependent(is_discrete=True, event_dim=1)
         """
-        if is_discrete is None:
-            is_discrete = self.is_discrete
-        if event_dim is None:
-            event_dim = self.event_dim
+        if is_discrete is NotImplemented:
+            is_discrete = self._is_discrete
+        if event_dim is NotImplemented:
+            event_dim = self._event_dim
         return _Dependent(is_discrete=is_discrete, event_dim=event_dim)
 
     def check(self, x):
@@ -120,14 +147,23 @@ class _DependentProperty(property, _Dependent):
             def __init__(self, low, high):
                 self.low = low
                 self.high = high
-            @constraints.dependent_property
+            @constraints.dependent_property(is_discrete=False, event_dim=0)
             def support(self):
                 return constraints.interval(self.low, self.high)
+
+    Args:
+        fn (callable): The function to be decorated.
+        is_discrete (bool): Optional value of ``.is_discrete`` in case this
+            can be computed statically. If not provided, access to the
+            ``.is_discrete`` attribute will raise a NotImplementedError.
+        event_dim (int): Optional value of ``.event_dim`` in case this
+            can be computed statically. If not provided, access to the
+            ``.event_dim`` attribute will raise a NotImplementedError.
     """
-    def __init__(self, fn=None, *, is_discrete=False, event_dim=0):
-        self.is_discrete = is_discrete
-        self.event_dim = event_dim
+    def __init__(self, fn=None, *, is_discrete=NotImplemented, event_dim=NotImplemented):
         super().__init__(fn)
+        self._is_discrete = is_discrete
+        self._event_dim = event_dim
 
     def __call__(self, fn):
         """
@@ -137,7 +173,7 @@ class _DependentProperty(property, _Dependent):
             def support(self):
                 ...
         """
-        return _DependentProperty(fn, is_discrete=self.is_discrete, event_dim=self.event_dim)
+        return _DependentProperty(fn, is_discrete=self._is_discrete, event_dim=self._event_dim)
 
 
 class _IndependentConstraint(Constraint):
@@ -170,6 +206,10 @@ class _IndependentConstraint(Constraint):
         result = result.reshape(result.shape[:result.dim() - self.reinterpreted_batch_ndims] + (-1,))
         result = result.all(-1)
         return result
+
+    def __repr__(self):
+        return "{}({}, {})".format(self.__class__.__name__[1:], repr(self.base_constraint),
+                                   self.reinterpreted_batch_ndims)
 
 
 class _Boolean(Constraint):

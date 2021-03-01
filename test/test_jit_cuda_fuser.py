@@ -4,8 +4,9 @@ import random
 
 import torch
 
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
+
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing import FileCheck
 
@@ -982,6 +983,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
         self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
@@ -1871,6 +1873,8 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
 
         for prob in [0.0, 0.15, 0.5, 0.85, 1.] :
+            torch.cuda.manual_seed_all(123)
+            jit_o = t_jit(x, prob, True)
             torch.cuda.manual_seed_all(123)
             jit_o = t_jit(x, prob, True)
             torch.cuda.manual_seed_all(123)

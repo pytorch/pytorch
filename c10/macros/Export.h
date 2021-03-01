@@ -100,15 +100,30 @@
 
 // NB: For now, HIP is overloaded to use the same macro, but ideally
 // HIPify should translate TORCH_CUDA_API to TORCH_HIP_API
-#if defined(TORCH_CUDA_BUILD_MAIN_LIB) || defined(TORCH_HIP_BUILD_MAIN_LIB)
-#define TORCH_CUDA_API C10_EXPORT
-#else
-#define TORCH_CUDA_API C10_IMPORT
+// JX: I removed the || defined(TORCH_HIP_BUILD_MAIN_LIB) check for TORCH_CUDA_*_API
+// since TORCH_HIP_API seems properly initialized below
+// libtorch_cuda_cu.so
+#ifdef TORCH_CUDA_CU_BUILD_MAIN_LIB
+#define TORCH_CUDA_CU_API C10_EXPORT
+#elif defined(BUILD_SPLIT_CUDA)
+#define TORCH_CUDA_CU_API C10_IMPORT
 #endif
 
-// This is in preparation for the imminent torch_cuda split
-#define TORCH_CUDA_CU_API TORCH_CUDA_API
-#define TORCH_CUDA_CPP_API TORCH_CUDA_API
+// libtorch_cuda_cpp.so
+#ifdef TORCH_CUDA_CPP_BUILD_MAIN_LIB
+#define TORCH_CUDA_CPP_API C10_EXPORT
+#elif defined(BUILD_SPLIT_CUDA)
+#define TORCH_CUDA_CPP_API C10_IMPORT
+#endif
+
+// libtorch_cuda.so (where torch_cuda_cu and torch_cuda_cpp are a part of the same api)
+#ifdef TORCH_CUDA_BUILD_MAIN_LIB
+#define TORCH_CUDA_CPP_API C10_EXPORT
+#define TORCH_CUDA_CU_API C10_EXPORT
+#elif !defined(BUILD_SPLIT_CUDA)
+#define TORCH_CUDA_CPP_API C10_IMPORT
+#define TORCH_CUDA_CU_API C10_IMPORT
+#endif
 
 #if defined(TORCH_HIP_BUILD_MAIN_LIB)
 #define TORCH_HIP_API C10_EXPORT

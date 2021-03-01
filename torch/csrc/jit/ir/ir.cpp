@@ -797,12 +797,24 @@ Value* Value::setDebugName(const std::string& name) {
         name_base = name.substr(0, last_dot_pos);
       }
     }
+
+    auto& names_suffixes = node()->owningGraph()->name_base_suffix_;
+    auto it = names_suffixes.find(name_base);
+    if (it != names_suffixes.end()) {
+      suffix = std::max(suffix, it->second + 1);
+    }
+
+    // Verify that new name is not used and find next usable name in case
+    // suffix is used.
     std::string replacement_name;
     do {
       std::stringstream ss;
       ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
+
+    names_suffixes[name_base] = suffix;
+
     old_owner_of_name->second->setDebugName(replacement_name);
   }
 

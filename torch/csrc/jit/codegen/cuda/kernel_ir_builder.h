@@ -35,7 +35,7 @@ namespace kir {
 //!   auto new_node = ir_builder.create<kir::Int>(1));
 //!   auto result = ir_builder.mulExpr(lhs, rhs);
 //!
-class TORCH_CUDA_API IrBuilder {
+class TORCH_CUDA_CU_API IrBuilder {
  public:
   explicit IrBuilder(Kernel* kernel) : kernel_(kernel) {}
 

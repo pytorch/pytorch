@@ -37,7 +37,7 @@ std::ostream& operator<<(std::ostream& os, const SegmentedEdge* edge);
 
 //! Groups together expressions which create a segmented group
 //! Can be used to produce fusions
-class TORCH_CUDA_API SegmentedGroup {
+class TORCH_CUDA_CU_API SegmentedGroup {
  public:
   SegmentedGroup() = default;
 
@@ -175,7 +175,7 @@ std::ostream& operator<<(std::ostream& os, const SegmentedGroup* group);
 
 //! Auxiliary class for managing a list of heuristics instances for the
 //!  Segmented Groups
-class TORCH_CUDA_API SegmentHeuristics {
+class TORCH_CUDA_CU_API SegmentHeuristics {
   using SchedulerEntryPtr = std::unique_ptr<SchedulerEntry>;
 
  public:
@@ -194,7 +194,7 @@ class TORCH_CUDA_API SegmentHeuristics {
 
 //! Exported Interface for representing segmented fusion graph
 //!   this class owns the segmented groups
-class TORCH_CUDA_API SegmentedFusion {
+class TORCH_CUDA_CU_API SegmentedFusion {
  public:
   explicit SegmentedFusion(const Fusion* fusion);
 
@@ -319,7 +319,7 @@ class TORCH_CUDA_API SegmentedFusion {
 //! SIAM Journal on Scientific Computing, Society for Industrial and Applied
 //! Mathematics, 2019, 41 (4), pp.A2117-A2145. ff10.1137/18M1176865ff.
 //! ffhal02306566f
-class TORCH_CUDA_API SegmentCandidateFinder {
+class TORCH_CUDA_CU_API SegmentCandidateFinder {
  public:
   // Take a copy of fusion to own
   SegmentCandidateFinder(const Fusion* fusion);
@@ -378,9 +378,9 @@ class TORCH_CUDA_API SegmentCandidateFinder {
   std::unique_ptr<SegmentedFusion> segmented_fusion_;
 };
 
-TORCH_CUDA_API std::string toString(const SegmentedGroup* group);
-TORCH_CUDA_API std::string toString(const SegmentedEdge* edge);
-TORCH_CUDA_API std::string toString(const SegmentedFusion* segmented_fusion);
+TORCH_CUDA_CU_API std::string toString(const SegmentedGroup* group);
+TORCH_CUDA_CU_API std::string toString(const SegmentedEdge* edge);
+TORCH_CUDA_CU_API std::string toString(const SegmentedFusion* segmented_fusion);
 
 } // namespace cuda
 } // namespace fuser

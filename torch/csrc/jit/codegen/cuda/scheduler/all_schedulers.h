@@ -10,7 +10,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-enum class TORCH_CUDA_API ScheduleHeuristic {
+enum class TORCH_CUDA_CU_API ScheduleHeuristic {
   PointWise,
   Reduction,
   Normalization

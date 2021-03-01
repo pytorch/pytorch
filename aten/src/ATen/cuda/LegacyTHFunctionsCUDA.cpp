@@ -39,327 +39,6 @@ namespace {
     return at::cuda::getCUDADeviceAllocator();
   }
 }
-
-Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, Scalar value) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toBool();
-            THCudaBoolTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toByte();
-            THCudaByteTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toChar();
-            THCudaCharTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toDouble();
-            THCudaDoubleTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toFloat();
-            THCudaTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toInt();
-            THCudaIntTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toLong();
-            THCudaLongTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toShort();
-            THCudaShortTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toHalf();
-            THCudaHalfTensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::BFloat16: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto value_ = value.toBFloat16();
-            THCudaBFloat16Tensor_maskedFill(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_masked_fill_ not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return self;
-}
-Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, Scalar value) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toBool();
-            THCudaBoolTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toByte();
-            THCudaByteTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toChar();
-            THCudaCharTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toDouble();
-            THCudaDoubleTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toFloat();
-            THCudaTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toInt();
-            THCudaIntTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toLong();
-            THCudaLongTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toShort();
-            THCudaShortTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toHalf();
-            THCudaHalfTensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        case ScalarType::BFloat16: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_fill_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto value_ = value.toBFloat16();
-            THCudaBFloat16Tensor_maskedFillBool(globalContext().getTHCState(), self_, mask_, value_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_masked_fill_bool_ not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return self;
-}
-Tensor & _th_masked_scatter_(Tensor & self, const Tensor & mask, const Tensor & source) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaBoolTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaByteTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaCharTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaDoubleTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaIntTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaLongTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaShortTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaHalfTensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::BFloat16: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_", false, DeviceType::CUDA, ScalarType::Byte);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaBFloat16Tensor_maskedCopy(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_masked_scatter_ not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return self;
-}
-Tensor & _th_masked_scatter_bool_(Tensor & self, const Tensor & mask, const Tensor & source) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaBoolTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaByteTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaCharTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaDoubleTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaIntTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaLongTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaShortTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaHalfTensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        case ScalarType::BFloat16: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto mask_ = checked_dense_tensor_unwrap(mask, "mask", 2, "_th_masked_scatter_bool_", false, DeviceType::CUDA, ScalarType::Bool);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 3, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaBFloat16Tensor_maskedCopyBool(globalContext().getTHCState(), self_, mask_, source_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_masked_scatter_bool_ not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return self;
-}
 Tensor & _th_index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -506,79 +185,6 @@ Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bo
     }
     return self;
 }
-Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toBool();
-            THCudaBoolTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toByte();
-            THCudaByteTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toChar();
-            THCudaCharTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toDouble();
-            THCudaDoubleTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toFloat();
-            THCudaTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toInt();
-            THCudaIntTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toLong();
-            THCudaLongTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toShort();
-            THCudaShortTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toHalf();
-            THCudaHalfTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_index_fill_ not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return self;
-}
 std::tuple<Tensor &,Tensor &> _th_mode_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool keepdim) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -698,9 +304,12 @@ std::tuple<Tensor,Tensor> _th_mode(const Tensor & self, int64_t dim, bool keepdi
     }
     return std::tuple<Tensor, Tensor>(values, indices);
 }
-std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+std::tuple<Tensor &,Tensor &> _th_sort_out_stable(Tensor & values, Tensor & indices, const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
+
+    TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+    TORCH_CHECK(!stable.value(), "stable=True is not implemented on CUDA yet.");
 
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
@@ -764,8 +373,15 @@ std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, co
     }
     return std::tuple<Tensor &, Tensor &>(values, indices);
 }
-std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending) {
+std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+  return _th_sort_out_stable(values, indices, self, /*stable=*/false, dim, descending);
+}
+std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
     // DeviceGuard omitted
+
+    TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+    TORCH_CHECK(!stable.value(), "stable=True is not implemented on CUDA yet.");
+
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto values_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
     auto values = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(values_));
@@ -816,6 +432,9 @@ std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descen
             AT_ERROR("_th_sort not supported on CUDAType for ", dispatch_scalar_type);
     }
     return std::tuple<Tensor, Tensor>(values, indices);
+}
+std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending) {
+  return _th_sort_stable(self, /*stable=*/false, dim, descending);
 }
 std::tuple<Tensor &,Tensor &> _th_topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
     // DeviceGuard omitted
@@ -1221,49 +840,6 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
             AT_ERROR("_th_gels not supported on CUDAType for ", dispatch_scalar_type);
     }
     return std::tuple<Tensor, Tensor>(res1, res2);
-}
-Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto output_ = checked_dense_tensor_unwrap(output, "output", 0, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaDoubleTensor_potri(globalContext().getTHCState(), output_, self_, upper);
-            break;
-        }
-        case ScalarType::Float: {
-            auto output_ = checked_dense_tensor_unwrap(output, "output", 0, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaTensor_potri(globalContext().getTHCState(), output_, self_, upper);
-            break;
-        }
-        default:
-            AT_ERROR("_th_potri_out not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return output;
-}
-Tensor _th_potri(const Tensor & self, bool upper) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    auto output_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
-    auto output = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(output_));
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaDoubleTensor_potri(globalContext().getTHCState(), output_, self_, upper);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaTensor_potri(globalContext().getTHCState(), output_, self_, upper);
-            break;
-        }
-        default:
-            AT_ERROR("_th_potri not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return output;
 }
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self) {
     // DeviceGuard omitted

@@ -502,6 +502,15 @@ struct TORCH_API ViewInfo {
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
                                    NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
 
+/// Handles correctly propagating CreationMeta when a new view is created from a previous view.
+/// In general, we don't want the new view to be _less_ restrictive than the previous view
+/// (it's okay to be _more_ restrictive). A CreationMeta value of DEFAULT is currently the least
+/// restrictive, as the behavior for all other CreationMeta values is to error out for in-place ops.
+/// If this changes, the logic here will need to be updated to properly handle the new semantics.
+inline CreationMeta propagate_creation_meta(CreationMeta prev_view_creation_meta, CreationMeta new_view_creation_meta) {
+  return (new_view_creation_meta == CreationMeta::DEFAULT) ? prev_view_creation_meta : new_view_creation_meta;
+}
+
 /// Unified function to handle error checking when rebase happens
 /// indirect=true means that the caller is not doing the inplace, but the inplace happened
 /// somewhere else.
@@ -657,7 +666,7 @@ inline Variable make_variable(
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
-      auto data_impl = data.getIntrusivePtr();
+      auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       if (requires_grad) {
         data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));

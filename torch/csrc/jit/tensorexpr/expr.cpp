@@ -212,15 +212,49 @@ ExprHandle fast_log(const ExprHandle& v) {
   t = mlaf(t, x2, 0.666666686534881591796875);
   t = mlaf(t, x2, 2.0);
   x = x * t + FloatImm::make(0.693147180559945286226764) * e;
-  x = IfThenElse::make(
-      v < FloatImm::make(0),
-      FloatImm::make(std::numeric_limits<float>::quiet_NaN()),
-      x);
-  x = IfThenElse::make(
-      v == FloatImm::make(0),
-      FloatImm::make(-std::numeric_limits<float>::infinity()),
-      x);
+
+  auto zero = FloatImm::make(0);
+  auto nan = FloatImm::make(std::numeric_limits<float>::quiet_NaN());
+  auto neg_inf = FloatImm::make(-std::numeric_limits<float>::infinity());
+  x = CompareSelect::make(v, zero, nan, x, kLT);
+  x = CompareSelect::make(v, zero, neg_inf, x, kEQ);
   return x;
+}
+
+ExprHandle log_vml(const ExprHandle& v) {
+  auto mlaf = [](ExprHandle x, ExprHandle y, float z) {
+    return x * y + FloatImm::make(z);
+  };
+
+  auto in = bitcast<int32_t>(v);
+  auto a = in - IntImm::make(0x3f2aaaab);
+  auto e = cast<float>(a >> IntImm::make(23));
+
+  auto x = (a & IntImm::make(0x7fffff)) + IntImm::make(0x3f2aaaab);
+  x = bitcast<float>(x) - 1.0f;
+
+  auto t = FloatImm::make(-0.12891686f);
+  t = mlaf(x, t, 0.139844373f);
+  t = mlaf(x, t, -0.121842608f);
+  t = mlaf(x, t, 0.140058696f);
+  t = mlaf(x, t, -0.16680488f);
+  t = mlaf(x, t, 0.200104058f);
+  t = mlaf(x, t, -0.249997973f);
+  t = mlaf(x, t, 0.333332151f);
+  t = mlaf(x, t, -0.5f);
+  t = x * t;
+  t = x * t + x;
+
+  auto z = e * FloatImm::make(1.42860677e-06f) + t;
+  z = e * FloatImm::make(0.693145752f) + z;
+
+  return CompareSelect::make(
+      IntImm::make(0x1000000),
+      in + IntImm::make(0x800000),
+      log(v),
+      z,
+      kGT,
+      kUnlikely);
 }
 
 ExprHandle log(const ExprHandle& v) {

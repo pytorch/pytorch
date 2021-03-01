@@ -484,7 +484,7 @@ def fractional_max_pool3d_with_indices(
                      or a tuple `(kT, kH, kW)`
         output_size: the target output size of the form :math:`oT \times oH \times oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number :math:`oH` for a cubic output
-                      :math:`oH \times oH \times oH`
+                     :math:`oH \times oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
@@ -1277,7 +1277,11 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu6, (input,), input, inplace=inplace)
-    return hardtanh(input, 0.0, 6.0, inplace)
+    if inplace:
+        result = torch._C._nn.relu6_(input)
+    else:
+        result = torch._C._nn.relu6(input)
+    return result
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
@@ -1711,9 +1715,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""hardsigmoid(input) -> Tensor
-
-    Applies the element-wise function
+    r"""Applies the element-wise function
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
@@ -4245,7 +4247,7 @@ def triplet_margin_with_distance_loss(
         return output
 
 
-def normalize(input: Tensor, p: float = 2, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
+def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
     For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
@@ -4515,13 +4517,13 @@ def multi_head_attention_forward(
     embed_dim_to_check: int,
     num_heads: int,
     in_proj_weight: Tensor,
-    in_proj_bias: Tensor,
+    in_proj_bias: Optional[Tensor],
     bias_k: Optional[Tensor],
     bias_v: Optional[Tensor],
     add_zero_attn: bool,
     dropout_p: float,
     out_proj_weight: Tensor,
-    out_proj_bias: Tensor,
+    out_proj_bias: Optional[Tensor],
     training: bool = True,
     key_padding_mask: Optional[Tensor] = None,
     need_weights: bool = True,
@@ -4623,7 +4625,11 @@ def multi_head_attention_forward(
     # allow MHA to have different sizes for the feature dimension
     assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
-    head_dim = embed_dim // num_heads
+    if isinstance(embed_dim, torch.Tensor):
+        # embed_dim can be a tensor when JIT tracing
+        head_dim = embed_dim.div(num_heads, rounding_mode='trunc')
+    else:
+        head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 

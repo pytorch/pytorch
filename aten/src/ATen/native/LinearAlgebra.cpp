@@ -1,25 +1,28 @@
 #include <ATen/ATen.h>
-#include <ATen/ExpandUtils.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/LinearAlgebra.h>
-#include <ATen/native/IndexingUtils.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
-#include <ATen/core/grad_mode.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+#include <c10/util/variant.h>
+
 #include <functional>
+#include <limits>
 #include <numeric>
 #include <vector>
-#include <limits>
-#include <ATen/NamedTensorUtils.h>
 
-#include <c10/util/variant.h>
 
 namespace at {
 namespace native {
@@ -101,14 +104,12 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
-  TORCH_CHECK(sign.scalar_type() == input.scalar_type(),
-    "sign dtype ", sign.scalar_type(), " does not match input dtype ", input.scalar_type());
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(input.dtype()));
-  TORCH_CHECK(logabsdet.scalar_type() == real_dtype,
-    "logabsdet dtype ", logabsdet.scalar_type(), " does not match the expected dtype ", real_dtype);
-  TORCH_CHECK(sign.device() == input.device() && logabsdet.device() == input.device(),
-              "Expected sign, logabsdet and input to be on the same device, but found sign on ",
-              sign.device(), ", logabsdet on ", logabsdet.device(), " and input on ", input.device(), " instead.");
+  checkSameDevice("linalg_slogdet", sign, input, "sign");
+  checkSameDevice("linalg_slogdet", logabsdet, input, "logabsdet");
+  checkLinalgCompatibleDtype("linalg_slogdet", sign, input, "sign");
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  // logabsdet is always real-valued here
+  checkLinalgCompatibleDtype("linalg_slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
 
   Tensor sign_tmp, logabsdet_tmp;
   std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
@@ -126,6 +127,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
+  NoTF32Guard disable_tf32;
   ScalarType t = input.scalar_type();
   TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
               && input.dim() >= 2,
@@ -147,16 +149,14 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
-    // until https://github.com/pytorch/pytorch/issues/45821 is resolved
-    // svd() returns conjugated V for complex-valued input
-    Tensor U, S, V_conj;
+    Tensor U, S, V;
     // TODO: replace input.svd with linalg_svd
-    std::tie(U, S, V_conj) = input.svd();
+    // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
+    std::tie(U, S, V) = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor S_pseudoinv = at::where(S > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
-    // computes V @ diag(S_pseudoinv) @ U.T.conj()
-    // TODO: replace V_conj.conj() -> V once https://github.com/pytorch/pytorch/issues/45821 is resolved
-    return at::matmul(V_conj.conj() * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+    // computes V @ diag(S_pseudoinv) @ U.conj().T
+    return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   } else {
     Tensor S, U;
     std::tie(S, U) = at::linalg_eigh(input);
@@ -177,11 +177,8 @@ Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, const Tensor& rcond, bool hermitian) {
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-              "Expected result and input to be on the same device, but found result on ",
-              result.device(), " and input on ", input.device(), " instead.");
+  checkSameDevice("linalg_pinv", result, input);
+  checkLinalgCompatibleDtype("linalg_pinv", result, input);
 
   Tensor result_tmp = at::linalg_pinv(input, rcond, hermitian);
   at::native::resize_output(result, result_tmp.sizes());
@@ -199,8 +196,9 @@ Tensor pinverse(const Tensor& self, double rcond) {
 }
 
 Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
-  TORCH_CHECK(result.scalar_type() == ScalarType::Long,
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", ScalarType::Long);
+  checkSameDevice("linalg_matrix_rank", result, self);
+  ScalarType output_type = ScalarType::Long;
+  checkLinalgCompatibleDtype("linalg_matrix_rank", result.scalar_type(), output_type);
 
   // Matrices or batch of matrices are allowed
   TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
@@ -953,7 +951,7 @@ Tensor matmul(
     tensor2_expand_size.insert(tensor2_expand_size.end(), {m2, p});
 
     const int64_t expand_batch_product =
-        prod_intlist(expand_batch_portion);
+        c10::multiply_integers(expand_batch_portion);
 
     std::vector<int64_t> tensor1_bmm_view({expand_batch_product});
     tensor1_bmm_view.insert(tensor1_bmm_view.end(), {n, m1});
@@ -1986,13 +1984,9 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
 }
 
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
-  // If ord == None or ord == ±2 then SVD is used to compute the condition number
-  // the result is always real-valued, for other cases it is complex-valued for the complex-valued input.
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
-
-  TORCH_CHECK(result.scalar_type() == real_dtype,
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_dtype);
+  checkSameDevice("linalg_cond", result, self);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
   at::native::resize_output(result, result_tmp.sizes());
@@ -2022,9 +2016,9 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
-  ScalarType real_type = toValueType(self.scalar_type());
-  TORCH_CHECK(result.scalar_type() == real_type,
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_type);
+  checkSameDevice("linalg_cond", result, self);
+  ScalarType real_dtype = toValueType(self.scalar_type());
+  checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, ord);
   at::native::resize_output(result, result_tmp.sizes());
@@ -2050,8 +2044,8 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   // self[:ind]
   std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
 
-  int64_t prod_ind_end = std::accumulate(shape_ind_end.cbegin(), shape_ind_end.cend(), int64_t{1}, std::multiplies<int64_t>());
-  int64_t prod_start_ind = std::accumulate(shape_start_ind.cbegin(), shape_start_ind.cend(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t prod_ind_end = c10::multiply_integers(shape_ind_end.cbegin(), shape_ind_end.cend());
+  int64_t prod_start_ind = c10::multiply_integers(shape_start_ind.cbegin(), shape_start_ind.cend());
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(prod_ind_end == prod_start_ind,
@@ -2075,8 +2069,8 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  checkSameDevice("tensorinv", result, self);
+  checkLinalgCompatibleDtype("tensorinv", result, self);
 
   Tensor result_tmp = at::linalg_tensorinv(self, ind);
   at::native::resize_output(result, result_tmp.sizes());
@@ -2107,8 +2101,8 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   // result_shape is self_.sizes[-(an-other.dim):]
   std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
 
-  int64_t result_product = std::accumulate(result_shape.begin(), result_shape.end(), int64_t{1}, std::multiplies<int64_t>());
-  int64_t other_product = std::accumulate(other.sizes().begin(), other.sizes().end(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t result_product = c10::multiply_integers(result_shape.begin(), result_shape.end());
+  int64_t other_product = c10::multiply_integers(other.sizes().begin(), other.sizes().end());
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(result_product == other_product,
@@ -2124,8 +2118,8 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
 }
 
 Tensor& linalg_tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  checkSameDevice("tensorsolve", result, self);
+  checkLinalgCompatibleDtype("tensorsolve", result, self);
 
   Tensor result_tmp = at::linalg_tensorsolve(self, other, dims);
   at::native::resize_output(result, result_tmp.sizes());
@@ -2224,17 +2218,17 @@ Tensor chain_matmul(TensorList matrices) {
 Calculates the Kronecker product between two Tensors.
 */
 Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto maxdim = std::max(self.dim(), other.dim());
-  auto pad_self = maxdim - self.dim();
-  auto pad_other = maxdim - other.dim();
+  int64_t maxdim = std::max(self.dim(), other.dim());
+  int64_t pad_self = maxdim - self.dim();
+  int64_t pad_other = maxdim - other.dim();
   c10::SmallVector<int64_t, 10> a_reshape(2 * maxdim);
   c10::SmallVector<int64_t, 10> b_reshape(2 * maxdim);
   c10::SmallVector<int64_t, 10> result_reshape(maxdim);
-  for (int i = 0; i < maxdim; i++) {
-    a_reshape[2 * i] = i >= pad_self ? self.sizes()[i - pad_self] : 1;
+  for (int64_t i = 0; i < maxdim; i++) {
+    a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
     a_reshape[2 * i + 1] = 1;
     b_reshape[2 * i] = 1;
-    b_reshape[2 * i + 1] = i >= pad_other ? other.sizes()[i - pad_other] : 1;
+    b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
     result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
   }
   auto self_view = at::_unsafe_view(self, a_reshape);
@@ -2242,8 +2236,14 @@ Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (!result.defined()) {
     result = at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
   } else {
-    at::mul_out(result, self_view, other_view);
-    result.resize_(result_reshape);
+    c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
+    for (int64_t i = 0; i < maxdim; i++) {
+      mul_shape[2 * i] = a_reshape[2 * i];
+      mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
+    }
+    resize_output(result, result_reshape);
+    auto result_mul = at::_unsafe_view(result, mul_shape);
+    at::mul_out(result_mul, self_view, other_view);
   }
   return result;
 }

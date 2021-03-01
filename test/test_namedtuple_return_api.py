@@ -13,8 +13,9 @@ aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.
 all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
-    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "unpack_dual", 'linalg_qr',
-    '_svd_helper', 'linalg_svd', 'linalg_slogdet',
+    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
+    '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
+    'fake_quantize_per_channel_affine_cachemask',
 }
 
 
@@ -51,6 +52,8 @@ class TestNamedTupleAPI(TestCase):
 
     def test_namedtuple_return(self):
         a = torch.randn(5, 5)
+        per_channel_scale = torch.randn(5)
+        per_channel_zp = torch.zeros(5, dtype=torch.int64)
 
         op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
         operators = [
@@ -68,14 +71,23 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
-            op(operators=['unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
+            op(operators=['fake_quantize_per_tensor_affine_cachemask'],
+               input=(0.1, 0, 0, 255), names=('output', 'mask',), hasout=False),
+            op(operators=['fake_quantize_per_channel_affine_cachemask'],
+               input=(per_channel_scale, per_channel_zp, 1, 0, 255),
+               names=('output', 'mask',), hasout=False),
+            op(operators=['_unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
         ]
 
         def get_func(f):
             "Return either torch.f or torch.linalg.f, where 'f' is a string"
+            mod = torch
             if f.startswith('linalg_'):
-                return getattr(torch.linalg, f[7:])
-            return getattr(torch, f, None)
+                mod = torch.linalg
+                f = f[7:]
+            if f.startswith('_'):
+                mod = torch._VF
+            return getattr(mod, f, None)
 
         def check_namedtuple(tup, names):
             "Check that the namedtuple 'tup' has the given names"

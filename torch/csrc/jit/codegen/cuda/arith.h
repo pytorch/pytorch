@@ -98,7 +98,7 @@ TORCH_CUDA_CU_API TensorView* broadcast(
 //!
 //! \param inp Tensor to transpose
 //! \param old2new Pairs of mapping from old to new positions.
-TORCH_CUDA_API TensorView* transpose(
+TORCH_CUDA_CU_API TensorView* transpose(
     TensorView* inp,
     const std::unordered_map<int, int>& old2new);
 
@@ -155,12 +155,12 @@ TORCH_CUDA_CU_API TensorView* sum(
     const std::vector<int>& reduction_axes,
     bool keep_dim = false);
 
-TORCH_CUDA_API TensorView* max(
+TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
     bool keep_dim = false);
 
-TORCH_CUDA_API TensorView* min(
+TORCH_CUDA_CU_API TensorView* min(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
     bool keep_dim = false);
@@ -258,11 +258,11 @@ TORCH_CUDA_CU_API TensorView* clamp(TensorView* in, Val* min_val, Val* max_val);
 //!  Name of sum_to is different from NV fuser naming,
 //!  this is to align with the operator name of at::sum_to.
 
-TORCH_CUDA_API TensorView* sum_to(
+TORCH_CUDA_CU_API TensorView* sum_to(
     TensorView* v1,
     const std::vector<Int*>& sum_to_size);
 
-TORCH_CUDA_API TensorView* sum_to(
+TORCH_CUDA_CU_API TensorView* sum_to(
     TensorView* v1,
     const std::vector<int64_t>& sum_to_size);
 

@@ -128,7 +128,7 @@ const std::vector<Method> Module::get_methods() const {
 Method::Method(const Module* owner, Function* function)
     : owner_(owner), function_(function) {}
 
-void Method::run(Stack& stack) {
+void Method::run(Stack& stack) const {
   auto observer = torch::observerConfig().getModuleObserver();
   auto instance_key = std::rand();
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
@@ -150,7 +150,7 @@ void Method::run(Stack& stack) {
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
   try {
-    stack.insert(stack.begin(), owner_->_ivalue());
+    stack.insert(stack.begin(), owner_->_ivalue()); // self
     function_->run(stack);
     if (observer) {
       observer->onExitRunMethod(instance_key);
@@ -181,7 +181,7 @@ void Method::run(Stack& stack) {
   }
 }
 
-c10::IValue Method::operator()(std::vector<c10::IValue> stack) {
+c10::IValue Method::operator()(std::vector<c10::IValue> stack) const {
   run(stack);
   TORCH_INTERNAL_ASSERT(!stack.empty());
   return stack.front();
