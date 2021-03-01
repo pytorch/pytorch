@@ -380,7 +380,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         server_store.set("key", "value")
         for (i, p) in enumerate(processes):
             # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
+            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
                                 "Process {} terminated with exit code {}. Check logs for exception stacktrace."
                                 .format(i, p.exitcode))
             p.join()
@@ -399,7 +399,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             p.start()
         for (i, p) in enumerate(processes):
             # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
+            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
                                 "Process {} terminated with exit code {}. Check logs for exception stacktrace."
                                 .format(i, p.exitcode))
             p.join()
@@ -4092,6 +4092,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             return input + self.a * self.f
 
     @requires_nccl()
+    @skip_if_not_multigpu
     def test_ddp_weight_sharing(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -4116,6 +4117,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 m.zero_grad(set_to_none=try_set_to_none)
                 m(1).sum().backward()
 
+                # Each param value is multiplied by "rank + 1" twice in forward, so the grad
+                # values produced by a particular rank should be 2. * (rank + 1).
+                # Summing these over ranks and dividing by world size gives the expected result:
                 analytic = torch.full_like(p, 2. * (world * (world + 1.) / 2.) / world, device=dev)
                 for name, p in m.named_parameters():
                     self.assertEqual(p.grad, analytic, "mismatch at " + name + ".grad for " +
