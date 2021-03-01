@@ -2,6 +2,7 @@ import dis
 import torch
 import inspect
 import operator
+import torch.nn.functional as F
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
@@ -110,6 +111,10 @@ class GraphAppendingTracer(TracerBase):
 class TraceError(ValueError):
     pass
 
+# NB: for decomposition. Approach is to decompose while tracing to make things easier.
+def cross_entropy_decomp(input, target, weight, size_average, ignore_index, reduce, reduction):
+    return F.nll_loss(F.log_softmax(input, -1), target, weight, size_average,
+                      ignore_index, reduce, reduction)
 
 class Proxy:
     """
@@ -168,6 +173,8 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
+            if orig_method == F.cross_entropy:
+                return cross_entropy_decomp(*args, **kwargs)
             return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
                                             name=self.tracer.graph._target_to_str(orig_method.__name__))
 

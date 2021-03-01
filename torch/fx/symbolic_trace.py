@@ -172,6 +172,8 @@ class Tracer(TracerBase):
                 submodule ``bar``, which contains submodule ``baz``, that module will
                 appear with the qualified name ``foo.bar.baz`` here.
         """
+        # lol
+        return False
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
     def path_of_module(self, mod : torch.nn.Module) -> str:
@@ -218,6 +220,9 @@ class Tracer(TracerBase):
             node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
             value was returned from the ``Module`` invocation.
         """
+        # Treat nothing as leaf modules
+        return forward(*args, **kwargs)
+
         module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
             return forward(*args, **kwargs)
