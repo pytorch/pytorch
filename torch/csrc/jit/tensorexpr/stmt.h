@@ -173,6 +173,9 @@ class TORCH_API Block : public StmtNode<Block> {
 
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
+      if (!s) {
+        continue;
+      }
       if (!s->get_parent()) {
         // If we get here, it's a bug, but we cannot throw an error from a
         // constructor. But IR verifier would catch this.

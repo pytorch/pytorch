@@ -121,13 +121,13 @@ void IRVerifier::visit(const Store* v) {
 
 void IRVerifier::visit(const For* v) {
   if (!v->var()) {
-    throw malformed_ir("invalid Var in For loop", v->var());
+    throw malformed_ir("nullptr Var in For loop");
   } else if (!v->start()) {
-    throw malformed_ir("invalid Start in For loop", v->start());
+    throw malformed_ir("nullptr Start in For loop");
   } else if (!v->stop()) {
-    throw malformed_ir("invalid Stop in For loop", v->stop());
+    throw malformed_ir("nullptr Stop in For loop");
   } else if (!v->body()) {
-    throw malformed_ir("invalid Body in For loop", v->body());
+    throw malformed_ir("invalid Body in For loop");
   }
   IRVisitor::visit(v);
 }
