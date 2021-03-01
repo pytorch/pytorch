@@ -9,6 +9,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/irange.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -295,6 +296,99 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
   VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
+}
+
+template <typename scalar_t>
+static void apply_syevd(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  cusolverEigMode_t jobz = compute_eigenvectors ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
+
+  int64_t n = vectors.size(-1);
+  int64_t lda = std::max<int64_t>(1, n);
+  int64_t batch_size = batchCount(vectors);
+
+  auto vectors_stride = matrixStride(vectors);
+  auto values_stride = values.size(-1);
+
+  auto vectors_data = vectors.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<value_t>();
+  auto infos_data = infos.data_ptr<int>();
+
+  // get the optimal work size and allocate workspace tensor
+#ifdef USE_CUSOLVER_64_BIT
+  size_t worksize_device; // workspaceInBytesOnDevice
+  size_t worksize_host; // workspaceInBytesOnHost
+  cusolverDnParams_t params = NULL; // use default algorithm (currently it's the only option)
+  at::cuda::solver::xsyevd_bufferSize<scalar_t>(
+      at::cuda::getCurrentCUDASolverDnHandle(),
+      params,
+      jobz,
+      uplo,
+      n,
+      vectors_data,
+      lda,
+      values_data,
+      &worksize_device,
+      &worksize_host);
+#else
+  int lwork;
+  int n_32 = cuda_int_cast(n, "n");
+  int lda_32 = cuda_int_cast(lda, "lda");
+  at::cuda::solver::syevd_bufferSize<scalar_t>(
+      at::cuda::getCurrentCUDASolverDnHandle(), jobz, uplo, n_32, vectors_data, lda_32, values_data, &lwork);
+#endif // USE_CUSOLVER_64_BIT
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
+    value_t* values_working_ptr = &values_data[i * values_stride];
+    int* info_working_ptr = &infos_data[i];
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+#ifdef USE_CUSOLVER_64_BIT
+    // allocate workspace storage on device and host
+    auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+    auto work_device_data = device_allocator.allocate(worksize_device);
+    auto& host_allocator = *at::getCPUAllocator();
+    auto work_host_data = host_allocator.allocate(worksize_host);
+    at::cuda::solver::xsyevd<scalar_t>(
+        handle,
+        params,
+        jobz,
+        uplo,
+        n,
+        vectors_working_ptr,
+        lda,
+        values_working_ptr,
+        static_cast<scalar_t*>(work_device_data.get()),
+        worksize_device,
+        static_cast<scalar_t*>(work_host_data.get()),
+        worksize_host,
+        info_working_ptr);
+#else
+    // allocate workspace storage on device
+    auto& allocator = *at::cuda::getCUDADeviceAllocator();
+    auto work_data = allocator.allocate(sizeof(scalar_t) * lwork);
+    at::cuda::solver::syevd<scalar_t>(
+        handle,
+        jobz,
+        uplo,
+        n_32,
+        vectors_working_ptr,
+        lda_32,
+        values_working_ptr,
+        static_cast<scalar_t*>(work_data.get()),
+        lwork,
+        info_working_ptr);
+#endif // USE_CUSOLVER_64_BIT
+  }
+}
+
+void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(eigenvectors.scalar_type(), "linalg_eigh_cuda", [&] {
+    apply_syevd<scalar_t>(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+  });
 }
 
 }} // namespace at::native
