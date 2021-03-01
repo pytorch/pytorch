@@ -417,16 +417,13 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
             independent of it. If ``False``, we return a Tensor of zeros as the
             jacobian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
-        vectorize (bool, optional): This feature is experimental. When computing
-            the jacobian, usually we invoke ``autograd.grad`` once per row of
-            the jacobian. If this flag is ``True``, we use vmap as the backend
-            to vectorize calls to ``autograd.grad`` so we only invoke it once
-            instead of once per row. This should lead to performance
-            improvements in many use cases, however, due to this feature
-            being incomplete, there may be performance cliffs. Please
-            use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
-            to show any performance warnings and file us issues if
-            warnings exist for your use case. Defaults to ``False``.
+        vectorize (bool, optional): This feature is experimental and may have
+            performance cliffs. When computing the jacobian, usually we invoke
+            ``autograd.grad`` once per row of the jacobian. If this flag is
+            ``True``, we use vmap as the backend to vectorize calls to
+            ``autograd.grad`` so we only invoke it once instead of once per row.
+            This should lead to performance improvements in many use cases.
+            Defaults to ``False``.
 
     Returns:
         Jacobian (Tensor or nested tuple of Tensors): if there is a single
@@ -607,16 +604,13 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
             such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
             hessian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
-        vectorize (bool, optional): This feature is experimental. When
-            computing the hessian, usually we invoke ``autograd.grad`` once
-            per row of the hessian. If this flag is ``True``, we use vmap as
-            the backend to vectorize calls to ``autograd.grad`` so we only
-            invoke it once instead of once per row. This should lead to
-            performance improvements in many use cases, however, due to this feature
-            being incomplete, there may be performance cliffs. Please
-            use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
-            to show any performance warnings and file us issues if
-            warnings exist for your use case. Defaults to ``False``.
+        vectorize (bool, optional): This feature is experimental and may have
+            performance cliffs. When computing the hessian, usually we invoke
+            ``autograd.grad`` once per row of the hessian. If this flag is
+            ``True``, we use vmap as the backend to vectorize calls to
+            ``autograd.grad`` so we only invoke it once instead of once per row.
+            This should lead to performance improvements in many use cases.
+            Defaults to ``False``.
 
     Returns:
         Hessian (Tensor or a tuple of tuple of Tensors): if there is a single input,
