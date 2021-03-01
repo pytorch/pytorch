@@ -1,4 +1,5 @@
 import collections
+import enum
 
 import torch
 import torch.nn as nn
@@ -8,6 +9,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
+    get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
 )
 
@@ -25,20 +27,53 @@ from .graph_passes import (
     create_a_shadows_b,
 )
 
-from typing import Dict, Tuple, Callable, List, Optional
+from typing import Dict, Tuple, Callable, List, Any
+
+class NSSingleResultValuesType(str, enum.Enum):
+    WEIGHT = 'weight'
+    NODE_OUTPUT = 'node_output'
+
+# TODO(future PR): see if we can use typing_extensions's TypedDict instead
+# to properly type the various keys
+# {
+#   'logger_name_1': {
+#     'model_name_a': {
+#       # one of NSSingleResultValuesType
+#       'type': 'weight',
+#       # the values of type specified above
+#       'values': [torch.Tensor(...), ...],
+#       # name of the node
+#       'node_name': 'linear1',
+#       # type of the underlying function or module
+#       'node_target_type': torch.nn.functional.linear  # or torch.nn.Linear, etc
+#     },
+#   },
+# }
+NSSingleResultType = Dict[str, Any]
+
+# {
+#   'logger_name_1': {
+#     'model_name_a': NSSingleResultType,
+#     'model_name_b': NSSingleResultType,
+#   },
+# }
+#
+NSResultsType = Dict[str, Dict[str, NSSingleResultType]]
 
 def add_weight_info_to_dict(
     model_name: str,
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
-    results: Dict[str, Dict[str, torch.Tensor]],
+    results: NSResultsType,
 ) -> None:
-    type_a_related_to_b = get_type_a_related_to_b()
+    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    type_a_related_to_b = \
+        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
-    for node, ref_node_name in nodes_and_names_to_instrument:
+    for node, ref_name in nodes_and_names_to_instrument:
 
-        if ref_node_name not in results:
-            results[ref_node_name] = {}
+        if ref_name not in results:
+            results[ref_name] = {}
 
         if node.op == 'call_function':
 
@@ -49,7 +84,12 @@ def add_weight_info_to_dict(
 
             if related_to_linear:
                 weight = get_linear_fun_weight(node, model)
-                results[ref_node_name][model_name] = weight
+                results[ref_name][model_name] = {
+                    'type': NSSingleResultValuesType.WEIGHT.value,
+                    'values': [weight],
+                    'node_name': node.name,
+                    'node_target_type': str(node.target),
+                }
 
         else:  # call_module
             # for call_module, we need to look up the modules to do the type check
@@ -64,7 +104,12 @@ def add_weight_info_to_dict(
             # TODO(future PR): other module types
             if related_to_conv2d_mod:
                 weight = get_conv_mod_weight(mod)
-                results[ref_node_name][model_name] = weight
+                results[ref_name][model_name] = {
+                    'type': NSSingleResultValuesType.WEIGHT.value,
+                    'values': [weight],
+                    'node_name': node.name,
+                    'node_target_type': str(type(mod)),
+                }
 
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
@@ -74,8 +119,10 @@ def compare_weights(
     gm_a: GraphModule,
     model_name_b: str,
     gm_b: GraphModule,
-) -> Dict[str, Dict[str, torch.Tensor]]:
-    type_a_related_to_b = get_type_a_related_to_b()
+) -> NSResultsType:
+    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    type_a_related_to_b = \
+        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
 
     # split the subgraph pairs into one data structure for each model
@@ -87,7 +134,7 @@ def compare_weights(
         nodes_and_names_to_instrument_b.append((node_start_b, match_name))
 
     # populate the results, one model at a time
-    results: Dict[str, Dict[str, torch.Tensor]] = {}
+    results: NSResultsType = {}
     add_weight_info_to_dict(
         model_name_a, gm_a, nodes_and_names_to_instrument_a, results)
     add_weight_info_to_dict(
@@ -103,7 +150,8 @@ class OutputLogger(nn.Module):
         self,
         node_name: str,
         model_name: str,
-        ref_node_name: Optional[str] = None,
+        ref_name: str,
+        node_target_type: str,
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
@@ -111,37 +159,34 @@ class OutputLogger(nn.Module):
         self.node_name = node_name
         # name of the model from which the node originated from
         self.model_name = model_name
-        # name of the reference node with a matching Logger
-        # used to link node_a_copy -> logger_a to node_c -> logger_c
-        # in a_shadows_b
-        self.ref_node_name = ref_node_name
+        # reference name, used to match loggers from separate models
+        # to each other
+        self.ref_name = ref_name
+        # type of the target of the node whose output this logger is logging
+        self.node_target_type = node_target_type
 
     def forward(self, x: torch.Tensor):
         self.stats.append(x.detach())
         return x
 
     def __repr__(self):
-        return f"OutputLogger(node_name={self.node_name}, model_name={self.model_name}, ref_node_name={self.ref_node_name})"
+        return f"OutputLogger(ref_name={self.ref_name}, model_name={self.model_name}, node_name={self.node_name})"
 
 def prepare_single_model_output(
     model_name: str,
     model: GraphModule,
-    subgraphs_to_instrument: List[Tuple[Tuple[Node, Node], str]],
+    nodes_and_names_to_instrument: List[Tuple[Node, str]],
     logger_cls: Callable,
 ) -> GraphModule:
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
-    # Note: for matching activations we always use the end nodes,
-    # such as observing the output of relu in linear-relu
-    # Note: ref_node_name is set to None in model B's loggers,
-    # and set to the corresponding model B's node in model A's loggers.
-    node_to_instrument_to_ref_node_name: Dict[Node, Optional[str]] = {}
-    for (node_start, node_end), ref_node_name in subgraphs_to_instrument:
-        node_to_instrument_to_ref_node_name[node_end] = ref_node_name
+    node_to_instrument_to_ref_name: Dict[Node, str] = {}
+    for node, ref_name in nodes_and_names_to_instrument:
+        node_to_instrument_to_ref_name[node] = ref_name
 
     model = remove_observers_add_loggers(
-        model, node_to_instrument_to_ref_node_name, logger_cls, model_name)
+        model, node_to_instrument_to_ref_name, logger_cls, model_name)
     return model
 
 # Note: this is not a user facing API
@@ -155,22 +200,25 @@ def prepare_model_outputs(
     logger_cls: Callable,
 ) -> Tuple[GraphModule, GraphModule]:
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
-    subgraphs_to_instrument_a = []
-    subgraphs_to_instrument_b = []
+    nodes_and_names_to_instrument_a = []
+    nodes_and_names_to_instrument_b = []
     for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
-        subgraphs_to_instrument_a.append((subgraph_a, match_name))
-        subgraphs_to_instrument_b.append((subgraph_b, match_name))
+        node_start_a, node_end_a = subgraph_a
+        node_start_b, node_end_b = subgraph_b
+        # Note: for matching activations we always use the end nodes,
+        # such as observing the output of relu in linear-relu
+        nodes_and_names_to_instrument_a.append((node_end_a, match_name))
+        nodes_and_names_to_instrument_b.append((node_end_b, match_name))
 
     gm_a = prepare_single_model_output(
-        name_a, gm_a, subgraphs_to_instrument_a, logger_cls)
+        name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls)
     gm_b = prepare_single_model_output(
-        name_b, gm_b, subgraphs_to_instrument_b, logger_cls)
+        name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls)
     return (gm_a, gm_b)
 
 def add_activation_info_to_dict(
-    model_name: str,
     model: GraphModule,
-    results: Dict[str, Dict[str, List[torch.Tensor]]],
+    results: NSResultsType,
     logger_cls: Callable,
 ) -> None:
     for gm_name, mod in model.named_modules():
@@ -183,10 +231,15 @@ def add_activation_info_to_dict(
             )
         )
         if is_logger:
-            key = mod.ref_node_name + '.stats'
+            key = mod.ref_name
             if key not in results:
                 results[key] = {}
-            results[key][model_name] = mod.stats
+            results[key][mod.model_name] = {
+                'type': NSSingleResultValuesType.NODE_OUTPUT.value,
+                'values': mod.stats,
+                'node_name': mod.node_name,
+                'node_target_type': mod.node_target_type,
+            }
 
 # Note: this is not a user facing API
 # TODO(future PR): wrap this in a user facing API which does not
@@ -194,39 +247,22 @@ def add_activation_info_to_dict(
 # TODO(future PR): align on naming
 # this is equivalent of just the comparison extraction part of `ns.compare_model_outputs`
 def get_matching_activations(
-    model_name_a: str,
     gm_a: GraphModule,
-    model_name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
-) -> Dict[str, Dict[str, List[torch.Tensor]]]:
+) -> NSResultsType:
     """
     Same thing as ns.get_matching_activations, but for FX models prepared with
     this module.
 
     TODO(future PR): real docblock
 
-    Output format:
-
-    {
-        'layer1.stats': {
-            'name_a': [torch.Tensor(...), ...],
-            'name_b': [torch.Tensor(...), ...],
-        },
-        ...
-    }
-
-    Note, there are three differences from the output format of Eager NS:
-    1. `name_a` and `name_b` are used instead of hardcoding names
-       to `float` and `quantized`.
-    2. Lists of Tensors are returned instead of individual Tensors, to unify
-       the return type for calibrating with 1 input vs N inputs.
-    3. `logger_cls` is included in the API for easy result extraction
+    Output format: NSResultsType
     """
-    results: Dict[str, Dict[str, List[torch.Tensor]]] = {}
+    results: NSResultsType = {}
     for gm in (gm_a, gm_b):
-        add_activation_info_to_dict(model_name_a, gm_a, results, logger_cls)
-        add_activation_info_to_dict(model_name_b, gm_b, results, logger_cls)
+        add_activation_info_to_dict(gm_a, results, logger_cls)
+        add_activation_info_to_dict(gm_b, results, logger_cls)
     return results
 
 # Note: this is not a user facing API
@@ -256,27 +292,11 @@ def prepare_model_with_stubs(
 def get_matching_activations_a_shadows_b(
     gm_a_shadows_b: GraphModule,
     logger_cls: Callable,
-) -> Dict[str, Dict[str, List[torch.Tensor]]]:
+) -> NSResultsType:
     """
     Same thing as get_matching_activations, but for an `a_shadows_b` model.
     TODO(future PR): real docblock
     """
-    results: Dict[str, Dict[str, List[torch.Tensor]]] = \
-        collections.defaultdict(dict)
-    for name, mod in gm_a_shadows_b.named_modules():
-        # TODO(future PR): better check when scripted
-        is_logger = (
-            isinstance(mod, logger_cls)  # type: ignore
-            or (
-                isinstance(mod, torch.jit.RecursiveScriptModule)
-                and mod.original_name == 'OutputLogger'
-            )
-        )
-        if is_logger:
-            # If logger_obj.ref_node_name is populated, then this logger
-            # is from model A, and ref_node_name is the name from model B.
-            if mod.ref_node_name is None:
-                results[mod.node_name + '.stats'][mod.model_name] = mod.stats
-            else:
-                results[mod.ref_node_name + '.stats'][mod.model_name] = mod.stats
+    results: NSResultsType = collections.defaultdict(dict)
+    add_activation_info_to_dict(gm_a_shadows_b, results, logger_cls)
     return dict(results)
