@@ -19,6 +19,7 @@ namespace jit {
 
 void PrepareGraphForStaticRuntime(std::shared_ptr<torch::jit::Graph> graph) {
   Inline(*graph);
+  SplitOutPrecomputeOpsForSparseNN(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
