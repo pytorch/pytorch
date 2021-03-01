@@ -32,7 +32,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_versi
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
-                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
+                                                  IS_MACOS, CudaMemoryLeakCheck,
                                                   TemporaryFileName, TEST_WITH_ROCM,
                                                   gradcheck, gradgradcheck)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
