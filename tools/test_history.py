@@ -265,7 +265,7 @@ In multiline mode, each line next includes the name of a CircleCI job,
 followed by the time of the specified test in that job at that commit.
 Example:
 
-    $ tools/test_history.py multiline --ref=594a66 --delta=0 --sha-length=8 \
+    $ tools/test_history.py multiline --ref=594a66 --sha-length=8 \\
       test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
     2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
     2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
@@ -281,7 +281,7 @@ Example:
 
 Another multiline example, this time with the --all flag:
 
-    $ tools/test_history.py multiline --all --ref=321b9 --sha-length=8 \
+    $ tools/test_history.py multiline --all --ref=321b9 --delta=12 --sha-length=8 \\
       test_qr_square_many_batched_complex_cuda
     2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
     2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
@@ -296,7 +296,7 @@ In columns mode, the name of the job isn't printed, but the order of the
 columns is guaranteed to match the order of the jobs passed on the
 command line. Example:
 
-    $ tools/test_history.py columns --ref=3cf783 --delta=0 --sha-length=8 \
+    $ tools/test_history.py columns --ref=3cf783 --sha-length=8 \\
       test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
     2021-02-10 04:18:50 3cf78395    0.644s    0.312s
     2021-02-10 03:13:34 594a66d7    0.360s  errored
@@ -333,7 +333,7 @@ indicated test was not found in that report.
         '--delta',
         type=int,
         help='minimum number of hours between commits',
-        default=12,
+        default=0,
     )
     parser.add_argument(
         '--sha-length',

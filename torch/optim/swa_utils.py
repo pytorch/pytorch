@@ -112,6 +112,7 @@ class AveragedModel(Module):
         self.n_averaged += 1
 
 
+@torch.no_grad()
 def update_bn(loader, model, device=None):
     r"""Updates BatchNorm running_mean, running_var buffers in the model.
 

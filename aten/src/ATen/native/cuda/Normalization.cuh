@@ -426,6 +426,7 @@ __global__ void batch_norm_backward_kernel(
   GradOp<input_scalar_t, stat_accscalar_t, GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>> g(mean, input, grad_output);
   Float2<input_scalar_t, stat_accscalar_t> res = reduce<Float2<input_scalar_t, stat_accscalar_t>, GradOp<input_scalar_t, stat_accscalar_t,
                                                                                    GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>>>(g, grad_output, plane);
+
   stat_accscalar_t grad_output_sum = res.v1;
   stat_accscalar_t dot_p = res.v2;
 
@@ -653,9 +654,11 @@ void batch_norm_cuda_template(Tensor& output_, Tensor& save_mean_, Tensor& save_
     dim3 blocks(input.size(1));
     tf = getNumThreads(input.size(2));
     dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
+
     batch_norm_collect_statistics_kernel<InvStd, input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
       (input, epsilon, momentum, running_mean, running_var, save_mean, save_invstd);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -745,6 +748,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   batch_norm_collect_statistics_kernel<InvStd, scalar_t, scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, epsilon, 0.0, dummy_mean, dummy_invstd, mean, invstd);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return std::make_tuple(mean_, invstd_);
 }
 
@@ -818,6 +822,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   batch_norm_reduce_statistics_kernel<scalar_t, accscalar_t, index_t> <<<grid, block, 0, stream>>>
       (mean, invstd, save_mean, save_invstd, running_mean, running_var, epsilon, momentum, counts);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return std::make_tuple(save_mean_, save_invstd_);
 }
 
@@ -910,6 +915,7 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   batch_norm_backward_elemt_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
     (input, grad_output, mean, invstd, weight, sum_dy, sum_dy_xmu, grad_input, count.data_ptr<int>(), count.numel());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return grad_input_reshaped.view(input_.sizes());
 }
 
@@ -944,6 +950,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
   batch_norm_collect_statistics_kernel<Var, input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, 0., momentum, running_mean, running_var, save_mean, save_var);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return std::make_tuple(save_mean_, save_var_);
 }
 
