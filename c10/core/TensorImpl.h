@@ -909,6 +909,51 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * Set the sizes and strides of a tensor.
+   *
+   * WARNING: This function does not check if the requested
+   * sizes/strides are in bounds for the storage that is allocated;
+   * this is the responsibility of the caller
+   */
+  void set_sizes_and_strides_dv(const at::DimVector& new_size, const at::DimVector& new_stride) {
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        new_size.size() == new_stride.size(),
+        "dimensionality of sizes (",
+        new_size.size(),
+        ") must match dimensionality of strides (",
+        new_stride.size(),
+        ")");
+    const auto new_dim = new_size.size();
+
+    sizes_and_strides_.set_sizes_dv(new_size);
+
+    if (new_dim > 0) {
+      for (size_t dim = new_dim - 1; ; dim--) {
+        if (new_stride[dim] >= 0) {
+          sizes_and_strides_.stride_at_unchecked(dim) = new_stride[dim];
+        } else {
+          // XXX: This behavior is surprising and may need to be removed to
+          // support negative strides. Some pytorch functions rely on it:
+          // for example, torch.cat (run TestTorch.test_cat_empty).
+          if (dim == new_dim - 1) {
+            sizes_and_strides_.stride_at_unchecked(dim) = 1;
+          } else {
+            // Keep stride monotonically increasing to match NumPy.
+            sizes_and_strides_.stride_at_unchecked(dim) =
+              std::max<int64_t>(sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
+              sizes_and_strides_.stride_at_unchecked(dim + 1);
+          }
+        }
+        if (dim == 0) break;
+      }
+    }
+
+    refresh_numel();
+    refresh_contiguous();
+  }
+
+  /**
    * Return the size of a tensor at some dimension.
    */
   virtual int64_t size(int64_t d) const;

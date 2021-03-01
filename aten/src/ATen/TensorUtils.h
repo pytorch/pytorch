@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/DimVector.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>
 #include <ATen/Utils.h>
@@ -156,5 +157,10 @@ TORCH_API c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape);
+TORCH_API c10::optional<DimVector> computeStrideDV(
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    DimVector newshape);
+
 } // namespace detail
 } // namespace at

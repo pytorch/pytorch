@@ -1005,6 +1005,31 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
+Tensor alias_with_sizes_and_strides_dv(
+    const Tensor& self,
+    const DimVector& sizes,
+    const DimVector& strides) {
+  Tensor self_;
+  if (self.is_quantized()) {
+    auto impl = c10::make_intrusive<QTensorImpl>(
+        Storage(self.storage()),
+        self.key_set(),
+        self.dtype(),
+        get_qtensorimpl(self)->quantizer());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(sizes, strides);
+    self_ = Tensor(std::move(impl));
+  } else {
+    auto impl = c10::make_intrusive<TensorImpl>(
+        Storage(self.storage()), self.key_set(), self.dtype());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(sizes, strides);
+    self_ = Tensor(std::move(impl));
+  }
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -2070,15 +2095,15 @@ Tensor numpy_T(const Tensor &self) {
 }
 
 Tensor view(const Tensor& self, IntArrayRef size) {
-  auto inferred_size = at::infer_size(size, self.numel());
-  auto stride = at::detail::computeStride(self.sizes(),
+  auto inferred_size = at::infer_size_dv(size, self.numel());
+  auto stride = at::detail::computeStrideDV(self.sizes(),
                                           self.strides(),
                                           inferred_size);
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
+  return alias_with_sizes_and_strides_dv(self, inferred_size, stride_value);
 }
 
 Tensor alias(const Tensor& self) {

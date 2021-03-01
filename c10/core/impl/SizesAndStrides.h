@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <ATen/DimVector.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
@@ -147,6 +148,11 @@ class C10_API SizesAndStrides {
   }
 
   void set_sizes(IntArrayRef newSizes) {
+    resize(newSizes.size());
+    std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
+  }
+
+  void set_sizes_dv(const at::DimVector& newSizes) {
     resize(newSizes.size());
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
