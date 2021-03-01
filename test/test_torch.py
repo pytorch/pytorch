@@ -3290,17 +3290,17 @@ class TestTorchDeviceType(TestCase):
         # TORCH_WARN_ONCE to TORCH_WARN
         a = np.arange(10)
         a.flags.writeable = False
-        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
             torch.from_numpy(a)
 
         # OK, got it once, now try again
-        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
             torch.from_numpy(a)
 
         # Make sure emitting two warnings, even if they pass the regex, will fail
         # the assertWarnsOnceRegex context manager which only allows a single warning
-        with self.assertRaisesRegex(AssertionError, '.*too many.*non-writeable.*'):
-            with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+        with self.assertRaisesRegex(AssertionError, '.*too many.*non-writable.*'):
+            with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
                 torch.from_numpy(a)
                 torch.from_numpy(a)
 
