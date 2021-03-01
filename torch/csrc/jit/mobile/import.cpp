@@ -146,13 +146,13 @@ BytecodeDeserializer::BytecodeDeserializer(
       reader_(std::move(reader)) {}
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
-  // HACK: first we check whether the name starts with special prefix to
-  // tell if it's a supported pytorch class type. There are two special
-  // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
-  // This is a reliable
-  // check today, but there is no guarantee that this is the case. The
-  // real solution is to merge type parsers so we can share class
-  // resolution logic.
+  // HACK: we check whether the name starts with special prefix to
+  // tell if it's a supported pytorch class type.
+  // There are two special prefixes. "__torch__" for nn module,
+  // and "torch.jit" from backend delegation.
+  // Whereas this is a reliable check today, there is no guarantee that
+  // will be always the case. The real solution is to merge type parsers
+  // (between regular and mobile JIT) so we can share class resolution logic.
   static const c10::QualifiedName torchPrefix = "__torch__";
   static const c10::QualifiedName jitPrefix = "torch.jit";
   if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
