@@ -64,7 +64,7 @@ kir::ExpressionEvaluator bindKernelInputs(
     kir::Kernel* kernel);
 
 //! Bind fusion input values to runtime values
-TORCH_CUDA_API ExpressionEvaluator
+TORCH_CUDA_CU_API ExpressionEvaluator
 bindFusionInputs(const at::ArrayRef<IValue>& aten_inputs, Fusion* fusion);
 
 struct NvrtcFunction {

@@ -25,7 +25,7 @@ import __future__
 import collections
 import functools
 import types
-from typing import Dict, Set, List, Any, Callable, Iterable
+from typing import Dict, Set, List, Any, Callable, Iterable, Type
 
 import torch
 from torch._C import (
@@ -50,7 +50,7 @@ def get_ignored_functions() -> Set[Callable]:
 
     Returns
     -------
-    Tuple[Callable]
+    Set[Callable]
         A tuple of functions that are publicly available in the torch API but cannot
         be overridden with ``__torch_function__``. Mostly this is because none of the
         arguments of these functions are tensors or tensor-likes.
@@ -102,7 +102,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.has_cuda,
         torch.has_cudnn,
         torch.has_lapack,
-        torch.cpp,
         torch.device,
         torch.dtype,
         torch.finfo,
@@ -148,6 +147,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_convolution_backward_weights,
         torch.mkldnn_max_pool2d,
         torch.mkldnn_max_pool3d,
+        torch.mkldnn_linear_backward_weights,
         torch.normal,
         torch.ones,
         torch.promote_types,
@@ -163,8 +163,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.triu_indices,
         torch.vander,
         torch.zeros,
+        torch._jit_internal.boolean_dispatch,
         torch.nn.functional.assert_int_or_pair,
-        torch.nn.functional.boolean_dispatch,
         torch.nn.functional.upsample,
         torch.nn.functional.upsample_bilinear,
         torch.nn.functional.upsample_nearest,
@@ -175,6 +175,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
+        has_torch_function,
+        handle_torch_function,
         torch.set_autocast_enabled,
         torch.is_autocast_enabled,
         torch.clear_autocast_cache,
@@ -187,8 +189,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.use_deterministic_algorithms,
         torch.set_deterministic,
         torch.unify_type_list,
-        torch.make_dual,
-        torch.unpack_dual,
+        torch.is_warn_always_enabled,
+        torch.set_warn_always,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -212,6 +214,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
+        Tensor._reduce_ex_internal,
     }
 
 
@@ -242,7 +245,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     # function signatures for native kernels that can be consumed by inspect.
     # See Issue #28233.
     Tensor = torch.Tensor
-    ret = {
+    ret: Dict[Callable, Callable] = {
         torch.abs: lambda input, out=None: -1,
         torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
@@ -356,16 +359,17 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.deg2rad: lambda input, out=None: -1,
         torch.dequantize: lambda input: -1,
         torch.det: lambda input: -1,
-        torch.linalg.det: lambda input: -1,  # alias for torch.det
+        torch.linalg.det: lambda input: -1,  # alias for torch.det  # type: ignore[attr-defined]
         torch.detach: lambda input: -1,
         torch.diag: lambda input, diagonal=0, out=None: -1,
         torch.diag_embed: lambda input, diagonal=0, out=None: -1,
         torch.diagflat: lambda input, offset=0: -1,
+        torch.diff: lambda input, n=1, dim=-1, prepend=None, append=None, out=None: -1,
         torch.diagonal: lambda input, offset=0, dim1=0, dim2=1: -1,
         torch.digamma: lambda input, out=None: -1,
         torch.dist: lambda input, other, p=2: -1,
-        torch.div: lambda input, other, out=None: -1,
-        torch.divide: lambda input, other, out=None: -1,
+        torch.div: lambda input, other, rounding_mode='true', out=None: -1,
+        torch.divide: lambda input, other, rounding_mode='true', out=None: -1,
         torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
         torch.dsmm: lambda input, mat2: -1,
@@ -517,7 +521,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.less: lambda input, other, out=None: -1,
         torch.lu: lambda A, pivot=True, get_infos=False, out=None: -1,
         torch.lu_solve: lambda b, LU_data, LU_pivots, out=None: -1,
-        torch.margin_ranking_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1,
+        torch.margin_ranking_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1,  # type: ignore[attr-defined]  # noqa: B950
         torch.masked_fill: lambda input, mask, value: -1,
         torch.masked_scatter: lambda input, mask, source: -1,
         torch.masked_select: lambda input, mask, out=None: -1,
@@ -707,6 +711,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.unfold: lambda input, kernel_size, dilation=1, padding=0, stride=1: -1,
         torch.nonzero: lambda input, as_tuple=False: -1,
         torch.norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
+        torch.linalg.norm: lambda input, ord=None, dim=None, keepdim=False, out=None, dtype=None: -1,
         torch.norm_except_dim: lambda v, pow=2, dim=0: -1,
         torch.nuclear_norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
         torch.numel: lambda input: -1,
@@ -774,7 +779,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
         torch.round: lambda input, out=None: -1,
         torch.row_stack: lambda tensors, out=None: -1,  # alias for torch.vstack
-        torch.rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
+        torch._rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
         torch.rrelu: lambda input, lower=1. / 8, upper=1. / 3, training=False, inplace=False: -1,
         torch.rsqrt: lambda input, out=None: -1,
         torch.rsub: lambda input, other, alpha=1: -1,
@@ -798,7 +803,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.softmax: lambda input, dim, dtype=None: -1,
         torch.solve: lambda input, A, out=None: -1,
         torch.linalg.solve: lambda input, other, out=None: -1,
-        torch.sort: lambda input, dim=-1, descending=False, out=None: -1,
+        torch.sort: lambda input, dim=-1, descending=False, *, stable=False, out=None: -1,
         torch.split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.sqrt: lambda input, out=None: -1,
@@ -837,6 +842,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.triangular_solve: lambda input, A, upper=True, transpose=False, unitriangular=False: -1,
         torch.tril: lambda input, diagonal=0, out=None: -1,
         torch.triplet_margin_loss: (lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False,
+
                                     size_average=None, reduce=None, reduction='mean': -1),
         torch.triu: lambda input, diagonal=0, out=None: -1,
         torch.true_divide: lambda input, other: -1,
@@ -903,6 +909,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_xpu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
+        Tensor.is_mlc.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
         Tensor.is_sparse.__get__: lambda self: -1,
@@ -1021,7 +1028,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        torch.linalg.norm: lambda self: -1
     }
 
     ret2 = {}
@@ -1123,8 +1129,8 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
     """
     # Runtime is O(num_arguments * num_unique_types)
-    overloaded_types = set()
-    overloaded_args = []
+    overloaded_types: Set[Type] = set()
+    overloaded_args: List[Any] = []
     for arg in relevant_args:
         arg_type = type(arg)
         # We only collect arguments if they have a unique type, which ensures
@@ -1147,7 +1153,6 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
             else:
                 overloaded_types = {arg_type}
                 overloaded_args = [arg]
-
     return overloaded_args
 
 

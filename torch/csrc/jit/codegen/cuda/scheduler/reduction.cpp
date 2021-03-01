@@ -178,7 +178,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   return getReductionHeuristics(fusion, evaluator, red_tv);
 }
 
-TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
+TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     ExpressionEvaluator& evaluator,
     TensorView* red_tv) {

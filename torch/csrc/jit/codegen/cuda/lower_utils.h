@@ -64,7 +64,7 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
 
 bool isTV(const Val* const);
 
-TORCH_CUDA_API bool isTVOp(const Expr*);
+TORCH_CUDA_CU_API bool isTVOp(const Expr*);
 
 bool isTVOp(const kir::Expr* expr);
 

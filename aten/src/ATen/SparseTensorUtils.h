@@ -19,7 +19,7 @@ using SparseType = Type;
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
 inline  SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
+  TORCH_INTERNAL_ASSERT(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
 

@@ -73,6 +73,9 @@ class TORCH_API Context {
   bool hasXLA() const {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
+  bool hasMLC() const {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
+  }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -196,6 +199,12 @@ class TORCH_API Context {
   void setReleaseWeightsWhenPrepacking(bool e);
   bool releaseWeightsWhenPrepacking() const;
 
+  void setDisplayVmapFallbackWarnings(bool enabled);
+  bool areVmapFallbackWarningsEnabled() const;
+
+  void setDefaultMobileCPUAllocator();
+  void unsetDefaultMobileCPUAllocator();
+
  private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
@@ -222,9 +231,12 @@ class TORCH_API Context {
   #else
   bool release_original_weights = false;
   #endif
+  bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
+
+  Allocator* prev_allocator_ptr_{nullptr};
 };
 
 TORCH_API Context& globalContext();
@@ -265,6 +277,10 @@ static inline bool hasHIP() {
 
 static inline bool hasXLA() {
   return globalContext().hasXLA();
+}
+
+static inline bool hasMLC() {
+  return globalContext().hasMLC();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.

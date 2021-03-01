@@ -512,11 +512,14 @@ const std::vector<std::string> functions = {
             result = torch.lerp(self, end, weight)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             end_size = torch._size_if_not_equal(end.size(), result.size())
+            weight_size = torch._size_if_not_equal(weight.size(), result.size())
 
             def backward(grad_output):
                 grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self_size)
                 grad_end = (grad_output * weight)._grad_sum_to_size(end_size)
-                return grad_self, grad_end, None
+                grad_weight = (grad_output * (end - self))._grad_sum_to_size(weight_size)
+                return grad_self, grad_end, grad_weight
+
             return result, backward
 
         def reshape(self,
@@ -778,6 +781,31 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return grad_output / other, None
             return self / other, backward
+
+        def div_2(self, other, *, rounding_mode: str):
+            result = torch.div(self, other, rounding_mode=rounding_mode)
+            self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
+            def backward(grad_output):
+                if rounding_mode == "true":
+                    grad_self = (grad_output / other)._grad_sum_to_size(self_size)
+                    grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other_size)
+                else:
+                    grad_self = torch.zeros_like(self)
+                    grad_other = torch.zeros_like(other)
+
+                return grad_self, grad_other, None
+
+            return result, backward
+
+        def div_3(self, other: number, *,  rounding_mode: str):
+            result = torch.div(self, other, rounding_mode=rounding_mode)
+            def backward(grad_output):
+                if rounding_mode == "true":
+                    grad_self = (grad_output / other)
+                else:
+                    grad_self = torch.zeros_like(self, memory_format=1)
+                return grad_self, None, None
+            return result, backward
 
         def max(self, other):
             result = torch.max(self, other)

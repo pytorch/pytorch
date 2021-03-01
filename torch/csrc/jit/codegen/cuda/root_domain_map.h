@@ -13,7 +13,7 @@ namespace fuser {
 namespace cuda {
 
 //! Generic interface for mapping root domains of a producer-consumer pair.
-class TORCH_CUDA_API RootDomainMap : public PolymorphicBase {
+class TORCH_CUDA_CU_API RootDomainMap : public PolymorphicBase {
  public:
   //! Return a map from a producer TensorDomain to a consumer
   //! TensorDomain
@@ -76,7 +76,7 @@ class TORCH_CUDA_API RootDomainMap : public PolymorphicBase {
 //! i.e., unable to compute the same tensors multiple times. This
 //! should not be used for transformations implementing computeAt, but
 //! should be valid otherwise.
-class TORCH_CUDA_API PairwiseRootDomainMap : public RootDomainMap {
+class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
  public:
   //! \param producer The producer tensor of a producer-consumer pair.
   //! \param consumer The consumer tensor of a producer-consumer pair.
@@ -169,7 +169,7 @@ class ComputeAtRootDomainMap;
 //! reduction outputs. Such consumer IterDomains may not be mapped to
 //! the producer reduction domain since the corresponding reduction
 //! loop must be closed before any of the consumers can appear.
-class TORCH_CUDA_API UnmappableReductionDomains : private IterVisitor {
+class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
  public:
   UnmappableReductionDomains();
   virtual ~UnmappableReductionDomains() = default;
@@ -199,7 +199,7 @@ class TORCH_CUDA_API UnmappableReductionDomains : private IterVisitor {
 //! example:
 //!    T2 [i0,i1] = T1[i2,i3] + T0[i4,i5]
 //! This will create mappings between i0, i2 and i4.
-class TORCH_CUDA_API ComputeAtRootDomainMap : public RootDomainMap {
+class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   friend class ComputeAtRootDomainMapBuilder;
   friend std::string toString(const ComputeAtRootDomainMap&);
 
@@ -319,7 +319,7 @@ std::string toString(const ComputeAtRootDomainMap& root_map);
 //! current fusion entirely. IterDomains that can be mapped each
 //! other with computeAt are grouped into the same subset in the
 //! DisjointSet.
-class TORCH_CUDA_API ComputeAtRootDomainMapBuilder : private BackwardVisitor {
+class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder : private BackwardVisitor {
  public:
   explicit ComputeAtRootDomainMapBuilder(
       ComputeAtRootDomainMap& root_map,

@@ -30,7 +30,7 @@ namespace kir {
 //!   }
 //! ```
 //!
-class TORCH_CUDA_API ExpressionEvaluator : private IrVisitor {
+class TORCH_CUDA_CU_API ExpressionEvaluator : private IrVisitor {
  public:
   //! Set a concrete value for a symbolic value
   void bind(const Val* value, Int::ScalarType concrete_value);

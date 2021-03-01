@@ -76,7 +76,12 @@ class ProcessGroup : public torch::CustomClassHolder {
   // this will be bound using pybind.
   class Work : public torch::CustomClassHolder {
    public:
-    Work(int rank = -1, OpType opType = OpType::UNKNOWN, const char* profilingTitle = nullptr);
+    Work(
+        int rank = -1,
+        OpType opType = OpType::UNKNOWN,
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt);
 
     virtual ~Work();
 
@@ -168,6 +173,10 @@ class ProcessGroup : public torch::CustomClassHolder {
 
   int getSize() const {
     return size_;
+  }
+
+  virtual const std::string getBackendName() const {
+    return "undefined";
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(

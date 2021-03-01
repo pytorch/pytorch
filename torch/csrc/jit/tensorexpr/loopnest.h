@@ -26,19 +26,18 @@ class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
   LoopNest(const std::vector<Tensor*>& output_tensors);
-
-  // A constructor for building a LoopNest from a pre-baked Stmt and meta-info
-  // TODO: Nuke intermediate_bufs_ and possibly buf_initializers from here if
-  // they can be deduced.
   LoopNest(
-      Stmt* stmt,
-      const std::unordered_set<const Buf*>& output_bufs,
-      const std::unordered_set<const Buf*>& intermediate_bufs,
-      const std::unordered_map<const Buf*, const Expr*>& buf_initializers)
-      : root_stmt_(stmt),
-        output_bufs_(output_bufs),
-        intermediate_bufs_(intermediate_bufs),
-        buf_initializers_(buf_initializers) {}
+      const std::vector<Tensor*>& output_tensors,
+      const std::vector<Tensor*>& tensors_to_compute);
+
+  // A constructor for building a LoopNest from an Stmt and a list of output
+  // buffers.
+  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs)
+      : root_stmt_(stmt), output_bufs_(output_bufs) {}
+
+  // A constructor for building a LoopNest from another loopnest. It clones the
+  // other loopnest's stmt.
+  LoopNest(const LoopNest& other);
 
   Stmt* root_stmt() const {
     return root_stmt_;
@@ -115,26 +114,21 @@ class TORCH_API LoopNest {
   // for the LLVM backend, when no reductions are involved.
   void vectorizeInnerLoops();
 
-  const std::unordered_set<const Buf*> getInputBufs() {
-    return input_bufs_;
-  }
-  const std::unordered_set<const Buf*> getOutputBufs() {
+  const std::unordered_set<const Buf*> getInputBufs() const;
+  const std::unordered_set<const Buf*> getOutputBufs() const {
     return output_bufs_;
   }
 
  private:
-  std::vector<Tensor*> findAllNeededTensors(
-      const std::vector<Tensor*>& tensors);
-  Stmt* lowerToStmt(Tensor* t);
+  void initialize(
+      const std::vector<Tensor*>& output_tensors,
+      const std::vector<Tensor*>& tensors_to_compute);
   Stmt* insertAllocFree(Stmt* stmt);
+  const std::unordered_set<const Buf*> getIntermediateBufs() const;
 
   Stmt* root_stmt_;
 
-  std::unordered_set<const Buf*> input_bufs_;
   std::unordered_set<const Buf*> output_bufs_;
-  std::unordered_set<const Buf*> intermediate_bufs_;
-  // Holds the initializer Expr of buffers that have been initialized.
-  std::unordered_map<const Buf*, const Expr*> buf_initializers_;
 };
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);
