@@ -3,6 +3,10 @@ import numpy as np
 from torch import nn
 
 from module_def import SmartModule
+from contextlib import contextmanager
+
+import time
+import copy
 
 ############################## Preparation ##########################################################
 
@@ -58,5 +62,8 @@ with torch.no_grad():
 
     [np.testing.assert_allclose(my_results, final_outputs, rtol=1e-03, atol=1e-05)]
     print('===================== Results are expected ===========================')
+
+    # measure performance
+    measure_perf(pytorch_model, my_model, dummy_input)
 
 print('End')
