@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
+import torch.utils.cpp_extension
+
 
 # these needs to be set before `common_utils`
 # infers `GRAPH_EXECUTOR`.
@@ -113,6 +115,699 @@ class TestTEFuser(JitTestCase):
             for block in n.blocks():
                 result += self.findFusionGroups(block)
         return result
+
+    def try_fx(self):
+
+        import torch
+        # Simple module for demonstration
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # self.param = torch.nn.Parameter(torch.rand(3, 4))
+                # self.linear = torch.nn.Linear(4, 5)
+
+
+            def constant_prop(a):
+                #b = 2 + 1
+                if a.requires_grad():
+                    a = b + 2
+                else:
+                    a = b - 2
+                return c
+
+            # def forward(self, inputs, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            #     hy = hx
+            #     #gates = hx
+            #     for seq_idx in range(1):
+            #         #hy, cy = cell(inputs[seq_idx], (hy, cy), wih, whh, bih, bhh)
+            #         x = inputs[seq_idx]
+            #         gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh
+            #         ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+            #         ingate = torch.sigmoid(ingate)
+            #         forgetgate = torch.sigmoid(forgetgate)
+            #         cellgate = torch.tanh(cellgate)
+            #         outgate = torch.sigmoid(outgate)
+            #         cy = (forgetgate * cx) + (ingate * cellgate)
+            #         hy = outgate * torch.tanh(cy)
+            #     return hy
+
+        module = MyModule()
+
+        from torch.fx import symbolic_trace
+        # Symbolic tracing frontend - captures the semantics of the module
+        symbolic_traced : torch.fx.GraphModule = symbolic_trace(module)
+
+        # High-level intermediate representation (IR) - Graph representation
+        print(symbolic_traced.graph)
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def run_frozen_model(self):
+
+        temp_counter = 0
+        consts = {}
+
+        def jt2ct(ty):
+            if ty.startswith("__torch__"):
+                return 'int64_t'
+            jit_to_c_type = {
+            'int' : 'int64_t',
+            'Tensor': 'at::Tensor'
+            }
+
+            return jit_to_c_type[ty]
+
+        def cname(x):
+            return "v_" + x.debugName().replace('.', '_')
+
+        def generate_header(model_name, graph):
+            nonlocal consts
+            print([x.type() for x in graph.inputs()])
+            args = [jt2ct(str(x.type())) + " " + cname(x) for x in graph.inputs()] + ["at::Tensor " + k for k in consts.keys()]
+            return jt2ct(str(list(graph.outputs())[0].type())) + " " + model_name + "(" + (", ".join(args)) + ")"
+
+        def getCOpName(node):
+            #return node.kind().replace("aten", "at::native")
+            tmp = node.kind().replace("aten", "at")
+            # TODO support inplace ops properly via _out variants
+            return tmp[:-1] if node.kind().endswith("_") else tmp
+                 
+        def processNode(node):
+            nonlocal temp_counter
+            nonlocal consts
+
+            if node.kind() == "prim::If":
+                return generate_if(node)
+
+            if node.kind() == "prim::Loop":
+                return generate_loop(node)
+
+            node_inputs = list(node.inputs())
+            if node.kind() == "prim::ListUnpack":
+                node_outputs = list(node.outputs())
+                op_str =""
+                for i in range(len(node_outputs)):
+                    op_str += "auto " + cname(node_outputs[i]) + " = " + inputs_str + "[" + str(i) + "];\n"
+                temp_counter += 1
+                return op_str
+
+            if node.kind() == 'prim::RaiseException':
+                return "throw " + cname(node_inputs[0]) + ";\n"
+
+            assert(len(list(node.outputs())) == 1)
+            out_name = cname(list(node.outputs())[0])
+
+            comp_ops = {'aten::eq' : '==',  'aten::gt': '>'}
+            if node.kind() in comp_ops:
+                return "auto " + out_name  + " = " + cname(node_inputs[0]) + " " + comp_ops[node.kind()] + " " + cname(node_inputs[1]) + ";\n"
+
+            if node.kind() == 'aten::len':
+                return "auto " + out_name  + " = " + cname(node_inputs[0]) + ".size();\n"
+
+            if node.kind() == 'aten::dim':
+                return "auto " + out_name  + " = " + cname(node_inputs[0]) + ".dim();\n"
+
+            if node.kind() == 'aten::__getitem__':
+                return "auto " + out_name  + " = " + cname(node_inputs[0]) + "[" + cname(node_inputs[1]) + "];\n"
+
+            if node.kind() == 'aten::size':
+                return "auto " + out_name  + " = " + cname(node_inputs[0]) + '.sizes();\n'
+
+            if node.kind() == "prim::Constant":
+                node_outputs = list(node.outputs())
+                if str(node_outputs[0].type()) == "Tensor":
+                    if cname(node_outputs[0]) not in consts:
+                        consts[cname(node_outputs[0])] = node_outputs[0].toIValue()
+                        return ""
+                elif str(node_outputs[0].type()) == "str":
+                   return "std::string " + out_name  + " = \"" + str(node_outputs[0].toIValue()) + '\";\n' 
+                elif node_outputs[0].type().kind() == "ListType":
+                    bt = str(node_outputs[0].type().getElementType()).replace("int", "long")
+                    return "std::vector<" + bt + "> " + out_name +  " = " + str(node_outputs[0].toIValue()).replace('[', '{').replace(']', '}') + ';\n'
+                else:
+                    return "auto " + out_name  + " = " + str(node_outputs[0].toIValue()) + ';\n'
+                
+            op_str = "auto " + out_name + " = "
+            inputs_str = ",".join([cname(i) for i in node.inputs()])            
+            op_str += getCOpName(node) + '(' + inputs_str + ')' + ';\n'
+            return op_str
+
+        def generate_if(n):
+            if_blocks = list(n.blocks())
+            cond = next(n.inputs())
+            if_str = ""
+            if_outputs = list(n.outputs())
+            # declare if outputs
+            for ov in if_outputs:
+                if_str += jt2ct(str(ov.type())) + " " + cname(ov) + ";\n"
+
+            if_str += "if (" + cname(cond) + ")\n" 
+            if_str += "{\n"
+            if_str += generate_block(if_blocks[0])
+            block_outputs = list(if_blocks[0].outputs())
+            for i in range(len(if_outputs)):
+                if_str +=  cname(if_outputs[i]) + " = " + cname(block_outputs[i]) + ";\n"
+            if_str += "}\n"
+            if_str += "else\n"
+            if_str += "{\n"
+            if_str += generate_block(if_blocks[1])
+            block_outputs = list(if_blocks[1].outputs())
+            for i in range(len(if_outputs)):
+                if_str +=  cname(if_outputs[i]) + " = " + cname(block_outputs[i]) + ";\n"
+            if_str += "}\n"
+            return if_str    
+
+        def generate_return(graph):
+            outputs = list(graph.outputs())
+            assert(len(outputs) == 1)
+            return "return " + cname(outputs[0]) + ";"
+
+        def generate_loop(n):
+            loop_block = next(n.blocks())
+            loop_inputs = list(n.inputs())
+            loop_outputs = list(n.outputs())
+            block_inputs = list(loop_block.inputs())
+            block_outputs = list(loop_block.outputs())
+            # encapsulate counter
+            LOOP_INPUT_OFFSET = 2
+            loop_body = ""
+            for i in range(len(loop_outputs)):
+                loop_body += "auto " + cname(loop_outputs[i]) + " = " + cname(loop_inputs[LOOP_INPUT_OFFSET + i]) + ";\n"
+
+            loop_body += "{\n"
+
+            # counter 
+            loop_body += "auto " + cname(block_inputs[0]) + " = 0;\n"
+            # termination cond
+            if (cname(block_outputs[0]) != cname(loop_inputs[1])):
+                loop_body += "bool " + cname(block_outputs[0]) + " = " + cname(loop_inputs[1]) + ";\n"
+
+            loop_body += "while((" + cname(block_inputs[0]) + " < " +  cname(loop_inputs[0]) + ") && " + cname(block_outputs[0]) + ")\n";
+            loop_body += "{\n"
+            block_str = generate_block(loop_block)
+            # replace block inputs
+            for i in range(len(block_inputs) - 1):
+                block_str = block_str.replace(cname(block_inputs[i + 1]), cname(loop_outputs[i]))
+
+            for i in range(len(block_outputs) - 1):
+                block_str = block_str.replace("auto "+cname(block_outputs[i + 1]), cname(loop_outputs[i]))
+
+            # cond is already replaced
+            # increment counter
+            block_str += cname(block_inputs[0]) + " = " + cname(block_inputs[0]) + " + 1;\n" 
+            loop_body += block_str
+
+            loop_body += "}\n"
+            loop_body += "}\n"
+
+            return loop_body
+
+        def generate_block(graph):
+            body_str = ""
+            for n in graph.nodes():
+                body_str += processNode(n)
+            return body_str
+
+        def generate_body(graph):
+            body_str = "{\n"
+            body_str += "bool True = true;\n"
+            body_str += "bool False = false;\n"
+            body_str += generate_block(graph)
+            
+            body_str += generate_return(graph) + "\n"
+            body_str += "}\n"
+            return body_str
+
+        def generate_cpp_source(model_name, graph):
+            # body needs to be generated first to collect consts
+            body = generate_body(graph)
+            return generate_header(model_name, graph) + body
+
+        import torchvision.models as models
+        model = torch.jit.script(models.alexnet())
+        model.eval()
+        model = torch.jit.freeze(model)
+        graph = model._c._get_method("forward").graph
+        print(graph)
+        torch._C._jit_pass_inline(graph)
+        torch._C._jit_pass_inline_fork_wait(graph)
+        torch._C._jit_pass_lint(graph)
+        torch._C._jit_pass_lower_all_tuples(graph)
+        torch._C._jit_pass_constant_propagation(graph)
+        torch._C._jit_pass_dce(graph)
+        model_jit = model
+
+        model_name = "alexnet"
+        module_name = "module1"
+
+        func = generate_cpp_source(model_name, graph)
+        print(func)
+
+
+        op_source = f"""
+#include <torch/script.h>
+{func}
+TORCH_LIBRARY({module_name}, m) {{
+    m.def("{model_name}", &{model_name});
+}}
+        """
+
+        print(op_source)
+        torch.utils.cpp_extension.load_inline(
+            name=model_name,
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
+
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        mod = getattr(torch.ops, module_name)
+        model = getattr(mod, model_name)
+
+        x = torch.randn(1, 3, 224, 224)
+
+        args =  [1, x] + [val for (k, val) in consts.items()]
+        print("allclose = ", torch.allclose(model_jit(x), model(*args)))
+
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def get_frozen_tensor(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self._parm1 = torch.nn.Parameter(torch.ones(2, 2))
+
+            def forward(self, x):
+                return self._parm1 * x
+
+        model = torch.jit.script(MyModule())
+
+        # import torchvision.models as models
+        # model = torch.jit.script(models.alexnet())
+        
+        model.eval()
+        model = torch.jit.freeze(model)
+        graph = model._c._get_method("forward").graph
+        print(type(model._c).__name__)
+        torch._C._jit_pass_inline(graph)
+        torch._C._jit_pass_inline_fork_wait(graph)
+        torch._C._jit_pass_lint(graph)
+        torch._C._jit_pass_lower_all_tuples(graph)
+        torch._C._jit_pass_constant_propagation(graph)
+        torch._C._jit_pass_dce(graph)
+        #print(graph)
+        const_node = next(graph.nodes())
+        outputs = list(const_node.outputs())
+        a = outputs[0].toIValue()
+        print(outputs[0].type())
+        print(a)
+
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_pass_module(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self):
+                return torch.empty(2)
+
+
+        jitted = torch.jit.script(MyModule())
+
+        cpp_module = jitted._c
+
+        model_name = "test_take_model"
+        module_name = 'module1'
+
+        func = f"""
+            at::Tensor {model_name} (torch::jit::Module& m) {{
+                return at::empty(2);
+            }}
+        """
+
+        op_source = f"""
+        #include <torch/script.h>
+        {func}
+        TORCH_LIBRARY({module_name}, m) {{
+            m.def("{model_name}", &{model_name});
+        }}
+        """
+
+        print(op_source)
+
+        # scripted_f = torch.jit.script(test_fuse)
+
+        torch.utils.cpp_extension.load_inline(
+            name=model_name,
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
+
+        mod = getattr(torch.ops, module_name)
+        model = getattr(mod, model_name)
+
+        print(model())
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+        
+    def test_pass_module(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self):
+                return torch.empty(2)
+
+
+        jitted = torch.jit.script(MyModule())
+
+        cpp_module = jitted._c
+
+        model_name = "test_take_model"
+        module_name = 'module1'
+
+        func = f"""
+            at::Tensor {model_name} (torch::jit::Module& m) {{
+                return at::empty(2);
+            }}
+        """
+
+        op_source = f"""
+        #include <torch/script.h>
+        {func}
+        TORCH_LIBRARY({module_name}, m) {{
+            m.def("{model_name}", &{model_name});
+        }}
+        """
+
+        print(op_source)
+
+        # scripted_f = torch.jit.script(test_fuse)
+
+        torch.utils.cpp_extension.load_inline(
+            name=model_name,
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
+
+        mod = getattr(torch.ops, module_name)
+        model = getattr(mod, model_name)
+
+        print(model())
+        
+
+    def test_fully_compiled_model(self):
+
+
+        temp_counter = 0
+
+        def cname(x):
+            return "v_" + x.debugName().replace('.', '_')
+        def generate_header(model_name, graph):
+
+            jit_to_c_type = {
+            'int' : 'int64_t',
+            'Tensor': 'at::Tensor'
+            }
+
+            print([x.type() for x in graph.inputs()])
+            args = [jit_to_c_type[str(x.type())] + " " + cname(x) for x in graph.inputs()]
+            return jit_to_c_type[str(list(graph.outputs())[0].type())] + " " + model_name + "(" + (", ".join(args)) + ")"
+
+
+        def getCOpName(node):
+            #return node.kind().replace("aten", "at::native")
+            return node.kind().replace("aten", "at")
+
+        def processNode(node):
+
+            nonlocal temp_counter
+            # TODO: if
+            if node.kind() == "prim::If":
+                raise("Not yet implemented")
+
+            if node.kind() == "prim::Loop":
+                return generate_loop(node)
+
+
+            inputs_str = ",".join([cname(i) for i in node.inputs()])
+
+            if node.kind() == "prim::ListUnpack":
+                node_outputs = list(node.outputs())
+                #temp_name = "t_" + str(temp_counter)
+                #op_str = "auto " + temp_name + " = aten::chunk(" + inputs_str + ");\n"
+                op_str =""
+                for i in range(len(node_outputs)):
+                    op_str += "auto " + cname(node_outputs[i]) + " = " + inputs_str + "[" + str(i) + "];\n"
+                temp_counter += 1
+                return op_str
+
+            assert(len(list(node.outputs())) == 1)
+            out_name = cname(list(node.outputs())[0])
+
+            if node.kind() == 'aten::__getitem__':
+                node_inputs = list(node.inputs())
+                return "auto " + out_name  + " = " + cname(node_inputs[0]) + "[" + cname(node_inputs[1]) + "];\n"
+
+            if node.kind() == 'aten::size':
+                return "auto " + out_name  + " = " + inputs_str + '.sizes();\n'
+
+            if node.kind() == "prim::Constant":
+                return "auto " + out_name  + " = " + str(list(node.outputs())[0].toIValue()) + ';'
+                
+            op_str = "auto " + out_name + " = "
+
+            
+            op_str += getCOpName(node) + '(' + inputs_str + ')' + ';'
+            return op_str
+
+        def generate_if(n):
+            if_blocks = list(n.blocks())
+            cond = next(n.inputs())
+            if_str = ""
+            if_outputs = list(n.outputs())
+            # declare if outputs
+            for ov in n.outputs():
+                if_str += jit_to_c_type[str(ov.type())] + " " + cname(ov) + ";\n"
+
+            if_str = "if (" + cname(cond) + ")\n" 
+            if_str += "{\n"
+            if_str += generate_block(if_blocks[0])
+            block_outputs = list(if_blocks[0].outputs())
+            for i in range(len(if_outputs)):
+                if_str +=  "auto " + cname(if_outputs[i]) + " = " + cname(block_outputs[i]) + ";\n"
+            if_str += "}\n"
+            if_str += "else\n"
+            if_str += "{\n"
+            if_str += generate_block(if_blocks[1])
+            block_outputs = list(if_blocks[1].outputs())
+            for i in range(len(if_outputs)):
+                if_str +=  "auto " + cname(if_outputs[i]) + " = " + cname(block_outputs[i]) + ";\n"
+            if_str += "}\n"
+            return if_str    
+
+        def generate_return(graph):
+            outputs = list(graph.outputs())
+            assert(len(outputs) == 1)
+            return "return " + cname(outputs[0]) + ";"
+
+        def generate_loop(n):
+            loop_block = next(n.blocks())
+            loop_inputs = list(n.inputs())
+            loop_outputs = list(n.outputs())
+            block_inputs = list(loop_block.inputs())
+            block_outputs = list(loop_block.outputs())
+            # encapsulate counter
+            LOOP_INPUT_OFFSET = 2
+            loop_body = ""
+            for i in range(len(loop_outputs)):
+                loop_body += "auto " + cname(loop_outputs[i]) + " = " + cname(loop_inputs[LOOP_INPUT_OFFSET + i]) + ";\n"
+
+            loop_body += "{\n"
+
+            # counter 
+            loop_body += "auto " + cname(block_inputs[0]) + " = 0;\n"
+            # termination cond
+            if (cname(block_outputs[0]) != cname(loop_inputs[1])):
+                loop_body += "bool " + cname(block_outputs[0]) + " = " + cname(loop_inputs[1]) + ";\n"
+            #loop_body += "std::cerr << \"before loop!!! \" << " + cname(block_outputs[0]) + "<< std::endl;\n"
+            loop_body += "while((" + cname(block_inputs[0]) + " < " +  cname(loop_inputs[0]) + ") && " + cname(block_outputs[0]) + ")\n";
+            loop_body += "{\n"
+            #loop_body += "std::cerr << \"running \" << " + cname(block_inputs[0]) + "<< std::endl;\n" 
+            block_str = generate_block(loop_block)
+            # replace block inputs
+            for i in range(len(block_inputs) - 1):
+                block_str = block_str.replace(cname(block_inputs[i + 1]), cname(loop_outputs[i]))
+
+            for i in range(len(block_outputs) - 1):
+                block_str = block_str.replace("auto "+cname(block_outputs[i + 1]), cname(loop_outputs[i]))
+
+            # cond is already replaced
+            # increment counter
+            block_str += cname(block_inputs[0]) + " = " + cname(block_inputs[0]) + " + 1;\n" 
+            loop_body += block_str
+
+            loop_body += "}\n"
+            loop_body += "}\n"
+
+            return loop_body
+
+
+        def generate_block(graph):
+            body_str = ""
+            for n in graph.nodes():
+                body_str += processNode(n)
+            return body_str
+
+        def generate_body(graph):
+            body_str = "{\n"
+            body_str += "bool True = true;\n"
+            body_str += "bool False = false;\n"
+            body_str += generate_block(graph)
+            
+            body_str += generate_return(graph) + "\n"
+            body_str += "}\n"
+            return body_str
+
+        def generate_cpp_source(model_name, graph):
+            return  generate_header(model_name, graph) + generate_body(graph)
+
+
+        #@torch.jit.script
+        # def test_fma(a, b, c):
+            # while a[0] != 5.0:
+            #     a = a * b + c
+            # return a
+        @torch.jit.script
+        def cell(inputs, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            hy = hx
+            #gates = hx
+            for seq_idx in range(inputs.size()[0]):
+                #hy, cy = cell(inputs[seq_idx], (hy, cy), wih, whh, bih, bhh)
+                x = inputs[seq_idx]
+                gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh
+                ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+                ingate = torch.sigmoid(ingate)
+                forgetgate = torch.sigmoid(forgetgate)
+                cellgate = torch.tanh(cellgate)
+                outgate = torch.sigmoid(outgate)
+                cy = (forgetgate * cx) + (ingate * cellgate)
+                hy = outgate * torch.tanh(cy)
+            return hy
+            #return gates
+
+
+        miniBatch = 64
+        inputSize = 512
+        hiddenSize = 512
+        seqLength = 100
+        numLayers = 2
+
+
+        # lstm = torch.nn.LSTM(inputSize, hiddenSize, numLayers, dropout=0.5)
+        # print(len(lstm.all_weights))
+        # return
+        x = torch.randn(seqLength, miniBatch, inputSize)
+        hx = torch.randn(miniBatch, hiddenSize)
+        cx = torch.randn(miniBatch, hiddenSize)
+
+        wih = torch.randn(4*hiddenSize, inputSize)
+        whh = torch.randn(4*hiddenSize, hiddenSize)
+        bih = torch.randn(4*hiddenSize)
+        bhh = torch.randn(4*hiddenSize)
+
+        model_name = "model1"
+        module_name = "module1"
+        fma_graph = cell.graph
+        print(str(fma_graph))
+        func = generate_cpp_source(model_name, fma_graph)
+        print(func)
+
+        op_source = f"""
+#include <torch/script.h>
+{func}
+TORCH_LIBRARY({module_name}, m) {{
+    m.def("{model_name}", &{model_name});
+}}
+        """
+
+        print(op_source)
+
+        # scripted_f = torch.jit.script(test_fuse)
+
+        torch.utils.cpp_extension.load_inline(
+            name=model_name,
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
+
+        torch._C._jit_set_texpr_fuser_enabled(False)
+
+        mod = getattr(torch.ops, module_name)
+        model = getattr(mod, model_name)
+
+        cpp_res = model(x, hx, cx, wih, whh, bih, bhh)
+        jit_res = cell(x, hx, cx, wih, whh, bih, bhh)
+        print(torch.allclose(cpp_res, jit_res))
+
+        def time_model(m, inputs, n):
+            from time import perf_counter_ns
+            t1_start = perf_counter_ns()  
+    
+            for i in range(n): 
+                m(*inputs)
+            
+            # Stop the stopwatch / counter 
+            t1_stop = perf_counter_ns() 
+            return (t1_stop - t1_start) / (n * 1.)
+
+        
+
+
+
+        WARMUP = 10
+        time_model(cell, (x, hx, cx, wih, whh, bih, bhh), WARMUP)
+        time_model(model, (x, hx, cx, wih, whh, bih, bhh), WARMUP)
+        N = 100
+        
+        print("jit = ", time_model(cell, (x, hx, cx, wih, whh, bih, bhh), N), "ns")
+        print("cpp = ", time_model(model, (x, hx, cx, wih, whh, bih, bhh), N), "ns")
+
+        # print(model(a, a, a))
+
+        # test a custom op
+            ## custom op adds two tensors
+        # get IR
+        # generate c++ for each 
+
+        pass
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_typecheck(self):
+        a = torch.ones(1)
+
+        def fused_kernel(a, b):
+            return (a + b) * 2.
+
+        scripted = self.checkScript(fused_kernel, (a, a))
+        graph = scripted.graph_for(a, a)
+        # double check we fused
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        # we use a bigger tensor now (size 2)
+        # if we won't trigger a recompilation
+        # we will still create a tensor up to (size 1)
+        # if the type check fails
+        a = torch.ones(2)
+        # shape changed if we don't trigger recompilation
+        # we would compute the wrong result silently
+        self.assertEqual(scripted(a, a), fused_kernel(a, a))
 
     def _test_fused_abs(self, device='cpu'):
         def func(x):

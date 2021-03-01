@@ -491,6 +491,9 @@ void initPythonIRBindings(PyObject* module_) {
             ss << n;
             return ss.str();
           })
+      .def("blocks", [](Node& n) {
+        return py::make_iterator(n.blocks().begin(), n.blocks().end());
+      })
       .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
