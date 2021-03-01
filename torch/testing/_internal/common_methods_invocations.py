@@ -430,11 +430,9 @@ def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
         torch.randn(2, 0, 0, dtype=dtype, device=device),  # 'batched_0x0'
         torch.randn(2, S, S, dtype=dtype, device=device),  # 'batched_SxS'
     )
-    out = []
     for a in test_inputs:
         a.requires_grad = requires_grad
-        out.append(SampleInput(a))
-    return out
+        yield SampleInput(a)
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     input = SampleInput((make_tensor((S, S), device, dtype,
@@ -543,12 +541,10 @@ def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
 
     batches = [(), (0, ), (2, ), (2, 3)]
     ns = [0, 5]
-    out = []
     for batch, n in product(batches, ns):
         a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
         a.requires_grad = requires_grad
-        out.append(SampleInput(a))
-    return out
+        yield SampleInput(a)
 
 def np_sinc_with_fp16_as_fp32(x):
     # Wraps numpy's sinc function so that fp16 values are promoted to fp32
@@ -570,10 +566,10 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
         ((), (1, 3, 2)),
     )
 
-    return tuple(SampleInput((make_tensor(size, device, dtype,
-                                          low=None, high=None,
-                                          requires_grad=requires_grad), shape))
-                 for size, shape in test_cases)
+    return (SampleInput((make_tensor(size, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad), shape))
+            for size, shape in test_cases)
 
 def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None):
     a = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
@@ -585,10 +581,8 @@ def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None):
     if rounding_mode is not None:
         kwargs = dict(rounding_mode=rounding_mode)
 
-    return [
-        SampleInput((a, b), kwargs=kwargs),
-        SampleInput((a,), args=(2,)),
-    ]
+    yield SampleInput((a, b), kwargs=kwargs)
+    yield SampleInput((a,), args=(2,))
 
 def sample_inputs_stack(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
@@ -648,7 +642,6 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad):
         ((S, S, S), 1, None, None),
         ((S, S, S), 1, (S, 1, S), (S, 1, S)),)
 
-    sample_inputs = []
     for size, dim, size_prepend, size_append in test_cases:
         args = (make_tensor(size, device, dtype,
                             low=None, high=None,
@@ -659,9 +652,7 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad):
                 make_tensor(size_append, device, dtype,
                             low=None, high=None,
                             requires_grad=requires_grad) if size_append else None)
-        sample_inputs += [SampleInput(args)]
-
-    return tuple(sample_inputs)
+        yield SampleInput(args)
 
 def sample_inputs_index_select(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S, S), device, dtype,
@@ -689,8 +680,6 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad):
         apply_grad(res)
         return res
 
-    samples = []
-
     # Test cases for small 3d tensors.
     # Imitates legacy tests from test/test_torch.py
     self = small_3d_unique(dtype, device)
@@ -698,29 +687,24 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad):
     flag = [True, False]
     for dim, descending, stable in product(dims, flag, flag):
         # default schema without stable sort
-        samples.append(SampleInput((self, dim, descending)))
+        yield SampleInput((self, dim, descending))
         # schema with stable sort, no CUDA support yet
         if torch.device(device).type == 'cpu':
-            samples.append(
-                SampleInput(self, kwargs=dict(dim=dim, descending=descending, stable=stable))
-            )
+            yield SampleInput(self, kwargs=dict(dim=dim, descending=descending, stable=stable))
 
     # Test cases for scalar tensor
     scalar = torch.tensor(1, dtype=dtype, device=device)
     apply_grad(scalar)
-    samples.append(SampleInput((scalar)))
-    samples.append(SampleInput((scalar, 0)))
-    samples.append(SampleInput((scalar, 0, True)))
+    yield SampleInput((scalar))
+    yield SampleInput((scalar, 0))
+    yield SampleInput((scalar, 0, True))
     # no CUDA support for stable sort yet
     if not device.startswith('cuda'):
-        samples.append(SampleInput(scalar, kwargs=dict(stable=True)))
-        samples.append(SampleInput(scalar, kwargs=dict(dim=0, stable=True)))
-        samples.append(SampleInput(scalar, kwargs=dict(dim=0, descending=True, stable=True)))
-
-    return samples
+        yield SampleInput(scalar, kwargs=dict(stable=True))
+        yield SampleInput(scalar, kwargs=dict(dim=0, stable=True))
+        yield SampleInput(scalar, kwargs=dict(dim=0, descending=True, stable=True))
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
-    samples = []
     t = make_tensor((S, S, S), device, dtype,
                     low=None, high=None,
                     requires_grad=requires_grad)
@@ -735,10 +719,9 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
     idx_nonctg.copy_(idx)
     for d in range(t.dim()):
         for tensor in [t, t01, t02, t12]:
-            samples.append(SampleInput((tensor, d, idx, fill_val)))
-            samples.append(SampleInput((tensor, d, -idx - 1, fill_val)))
-            samples.append(SampleInput((tensor, d, idx_nonctg, fill_val)))
-    return samples
+            yield SampleInput((tensor, d, idx, fill_val))
+            yield SampleInput((tensor, d, -idx - 1, fill_val))
+            yield SampleInput((tensor, d, idx_nonctg, fill_val))
 
 def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad):
     inputs = []
@@ -768,22 +751,19 @@ def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_gr
         ((), (0,),),
         ((), (0, True,),),
     )
-    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=args,))
-                  for input_tensor, args in args_for_reduction_with_dim)
-    return inputs
+    return (SampleInput(make_tensor(input_tensor, device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        args=args,)
+            for input_tensor, args in args_for_reduction_with_dim)
 
 def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad):
-    inputs = []
-    inputs.append(SampleInput(make_tensor((S, S, S), device, dtype,
-                                          low=None, high=None,
-                                          requires_grad=requires_grad),))
-    inputs.append(SampleInput(make_tensor((), device, dtype,
-                                          low=None, high=None,
-                                          requires_grad=requires_grad),))
-    return inputs
+    yield SampleInput(make_tensor((S, S, S), device, dtype,
+                                  low=None, high=None,
+                                  requires_grad=requires_grad),)
+    yield SampleInput(make_tensor((), device, dtype,
+                                  low=None, high=None,
+                                  requires_grad=requires_grad),)
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((4, 3, 2, 1), device, dtype,
