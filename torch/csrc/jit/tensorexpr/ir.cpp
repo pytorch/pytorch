@@ -89,6 +89,19 @@ ExprHandle Load::make(
   return Load::make(buf.dtype(), buf, indices, mask);
 }
 
+ExprHandle Load::make(
+    Dtype dtype,
+    const BufHandle& buf,
+    const std::vector<ExprHandle>& indices) {
+  return Load::make(dtype, buf, indices, IntImm::make(1));
+}
+
+ExprHandle Load::make(
+    const BufHandle& buf,
+    const std::vector<ExprHandle>& indices) {
+  return Load::make(buf.dtype(), buf, indices);
+}
+
 Store::Store(
     const Buf* buf,
     std::vector<const Expr*> indices,
