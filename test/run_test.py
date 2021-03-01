@@ -101,7 +101,6 @@ TESTS = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
-    'test_typing',
     'test_jit_py3',
     'test_determination',
     'test_futures',
@@ -162,6 +161,7 @@ USE_PYTEST_LIST = [
     'distributions/test_constraints',
     'distributions/test_transforms',
     'distributions/test_utils',
+    'test_typing',
 ]
 
 WINDOWS_BLOCKLIST = [
