@@ -1690,7 +1690,6 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_device_not_equal(self):
-
         def compare_device(x: torch.device):
             return x != torch.device("cuda:0")
 
