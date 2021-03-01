@@ -340,7 +340,6 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
-  TORCH_INTERNAL_ASSERT(false, "In current prototype, cannot call shallow_copy_and_detach");
   auto impl = c10::make_intrusive<TensorImpl>(
       // No need to populate Storage; copy_tensor_metadata will do it for us.
       key_set_, data_type_, device_opt_);
@@ -349,6 +348,18 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+
+  // "detach" = don't copy meta for the current dyn layer
+  const auto dynlayer = at::maybeCurrentDynamicLayer();
+  for (auto it = dynlayer_autograd_meta_.begin(); it != dynlayer_autograd_meta_.end(); it++) {
+    if (dynlayer && dynlayer->layerId() != it->first) {
+      impl.get()->dynlayer_autograd_meta_[it->first] = it->second->shallow_copy();
+    }
+  }
+  if (dynlayer) {
+    impl.get()->autograd_meta_ = autograd_meta_->shallow_copy();
+  }
+
   impl->refresh_numel();
   impl->refresh_contiguous();
   return impl;
@@ -365,6 +376,18 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::move(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+
+  // "detach" = don't copy meta for the current dyn layer
+  const auto dynlayer = at::maybeCurrentDynamicLayer();
+  for (auto it = dynlayer_autograd_meta_.begin(); it != dynlayer_autograd_meta_.end(); it++) {
+    if (dynlayer && dynlayer->layerId() != it->first) {
+      impl.get()->dynlayer_autograd_meta_[it->first] = it->second->shallow_copy();
+    }
+  }
+  if (dynlayer) {
+    impl.get()->autograd_meta_ = autograd_meta_->shallow_copy();
+  }
+
   impl->refresh_numel();
   impl->refresh_contiguous();
   return impl;

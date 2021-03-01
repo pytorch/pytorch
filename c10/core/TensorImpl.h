@@ -142,6 +142,7 @@ struct C10_API AutogradMetaInterface {
   virtual const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const = 0;
   virtual void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) = 0;
   virtual ~AutogradMetaInterface();
+  virtual std::unique_ptr<AutogradMetaInterface> shallow_copy() const = 0;
 };
 
 namespace impl {

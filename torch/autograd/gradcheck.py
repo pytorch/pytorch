@@ -481,7 +481,7 @@ def gradcheck(
         if out_is_complex and not reentrant_with_imag_grad_out:
             return not_reentrant_error(' (calculated using complex valued grad output)')
 
-        if check_batched_grad:
+        if False:
             assert reentrant, ('Batched gradient checking makes the assumption that '
                                'backward is reentrant. This assertion should never '
                                'be triggered: we expect gradcheck to have early '

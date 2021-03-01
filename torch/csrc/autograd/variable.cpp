@@ -26,7 +26,6 @@
 namespace torch {
 namespace autograd {
 
-
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
   c10::optional<ViewInfo> backward_info,
   c10::optional<ViewInfo> forward_info,
@@ -342,7 +341,6 @@ at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
 
 Tensor VariableHooks::variable_data(const Tensor& self) const {
   TORCH_CHECK(self.defined(), "cannot call variable_data() on undefined tensor");
-  TORCH_INTERNAL_ASSERT(false, "In current prototype, we cannot call variable_data()");
   auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/0,
     /*allow_tensor_metadata_change=*/false);
@@ -352,7 +350,6 @@ Tensor VariableHooks::variable_data(const Tensor& self) const {
 
 Tensor VariableHooks::tensor_data(const Tensor& self) const {
   TORCH_CHECK(self.defined(), "cannot call tensor_data() on undefined tensor");
-  TORCH_INTERNAL_ASSERT(false, "In current prototype, we cannot call tensor_data()");
   auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/self.unsafeGetTensorImpl()->version_counter(),
     /*allow_tensor_metadata_change=*/self.unsafeGetTensorImpl()->allow_tensor_metadata_change());

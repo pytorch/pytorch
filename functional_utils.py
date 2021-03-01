@@ -61,7 +61,9 @@ def grad_with_value(f, diff_argnums=(0,)):
             if len(diff_args) == 1 and isinstance(diff_args[0], tuple):
                 diff_args = diff_args[0]
             # NB: need create_graph so that backward pass isn't run in no_grad mode
-            grad_input = torch.autograd.grad(output, diff_args, create_graph=True)
+            grad_input = torch.autograd.grad(
+                output, diff_args,
+                create_graph=True, retain_graph=True)
             if single_diff_arg:
                 grad_input = grad_input[0]
         finally:
@@ -165,7 +167,7 @@ cos_x = grad(torch.sin)(x)
 result, = torch.autograd.grad(cos_x, x)
 assert torch.allclose(result, -x.sin())
 
-# Edge case...
+# Test that views work
 x = torch.randn([], requires_grad=True)
 y = torch.randn([], requires_grad=True)
 
@@ -184,11 +186,44 @@ grads = torch.autograd.grad(result, [x, y])
 assert torch.allclose(grads[0], -x.sin())
 assert torch.allclose(grads[1], -y.sin())
 
-exit(0)
+# Test in-place
+def foo(x):
+    x = x.clone()
+    x.sin_()
+    return x
+
+result = grad(foo)(x)
+assert torch.allclose(result, x.cos())
+
+# Test simple view + in-place
+def foo(x):
+    x = x.clone()
+    x.view([]).sin_()
+    return x
+
+result = grad(foo)(x)
+assert torch.allclose(result, x.cos())
+
+# Weird case
+x = torch.randn([], requires_grad=True)
+y = torch.randn(3, requires_grad=True)
+
+def silly_sin(x):
+    x = x.view([])
+    x = x.sin()
+    return x
+
+def foo(x, y):
+    z1 = grad(silly_sin)(x)
+    z2 = torch.cos(y)
+    return z1 + z2
 
 result = vmap(foo, (None, 0))(x, y)
 loss = result.sum()
 grads = torch.autograd.grad(loss, [x, y])
+assert torch.allclose(grads[0], 3 * -x.sin())
+assert torch.allclose(grads[1], -y.sin())
+
 # import torchviz; import graphviz
 # graph = torchviz.make_dot(loss)
 # graph.save("gvg.dot")
