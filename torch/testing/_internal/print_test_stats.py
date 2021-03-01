@@ -697,7 +697,15 @@ class TestFile:
         if suite_name not in self.test_suites:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
-            raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
+            # This behaviour is expected for test_cpp_extensions_aot, distributed/test_distributed_fork, 
+            # and distributed/test_distributed_spawn. In these cases, we just lump the duplicate tests together--
+            # which is admittedly inaccurate for test_cpp_extensions_aot, though this is negligible as the test is short.
+            # For other unexpected cases, we should raise a warning.
+            if self.name != 'test_cpp_extensions_aot' and \
+               self.name != 'distributed/test_distributed_fork' and \
+               self.name != 'distributed/test_distributed_spawn' and \
+               self.name != 'cpp':  # Also allow this cpp one as it run twice in caffe2 ort jobs
+                raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
         self.test_suites[suite_name].append(test_case)
         self.total_time += test_case.time
 
@@ -767,8 +775,8 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
                         "message": json.dumps(build_message(test_case)),
                         "line_escape": False,
                     }
-                    for filename, test_file in reports.items()
-                    for suitename, test_suite in test_file.test_suites.items()
+                    for test_file in reports.values()
+                    for test_suite in test_file.test_suites.values()
                     for test_case in test_suite.test_cases.values()
                 ]
             ),
@@ -788,19 +796,21 @@ def assemble_s3_object(
         'files' : {
             name: {
                 'total_seconds': test_file.total_time,
+                'filename': test_file.name,
                 'suites': {
                     name: {
                         'total_seconds': suite.total_time,
-                        'filename': suite.filename,
                         'cases': {
-                            case.name: {
+                            name: {
                                 'seconds': case.time,
-                                'status': case.status,
+                                'status': 'skipped' if case.skipped else 
+                                          'errored' if case.errored else 
+                                          'failed' if case.failed else None
                             }
-                            for case in suite.test_cases
+                            for name, case in suite.test_cases.items()
                         },
                     }
-                    for name, suite in test_file.items()
+                    for name, suite in test_file.test_suites.items()
                 }
             }
             for name, test_file in reports.items()
@@ -902,6 +912,13 @@ def positive_float(value: str) -> float:
     return parsed
 
 
+def reports_has_no_tests(reports: Dict[str, TestFile]) -> bool:
+    for test_file in reports.values():
+        for test_suite in test_file.test_suites.values():
+            if len(test_suite.test_cases) > 0:
+                return False
+    return True
+
 if __name__ == '__main__':
     import argparse
     import sys
@@ -960,8 +977,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     reports_by_file = parse_reports(args.folder)
-    if len(reports_by_file) == 0:
-        print(f"No test reports found in {args.folder}")
+    if reports_has_no_tests(reports_by_file):
+        print(f"No tests in reports found in {args.folder}")
         sys.exit(0)
 
     send_report_to_scribe(reports_by_file)
