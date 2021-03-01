@@ -20,7 +20,6 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
     def __init__(self,
                  datapipe: IterDataPipe,
-                 *,
                  sampler: Type[Sampler] = SequentialSampler,
                  sampler_args: Optional[Tuple] = None,
                  sampler_kwargs: Optional[Dict] = None

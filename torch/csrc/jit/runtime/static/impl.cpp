@@ -380,6 +380,11 @@ c10::IValue StaticRuntime::run(
     }
     return c10::ivalue::Tuple::create(std::move(outputs));
   }
+
+#ifndef NDEBUG
+  check_for_memory_leak(false);
+#endif
+
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
 }
@@ -395,7 +400,6 @@ void StaticRuntime::benchmark(
 
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Setting up took " << results.setup_time << " ms" << std::endl;
 
   for (size_t i = 0; i < nodes_.size(); i++) {
     const Node* node = nodes_[i].get_node();
@@ -422,6 +426,14 @@ void StaticRuntime::benchmark(
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
+  std::cout << "StaticRuntime setup time: " << results.setup_time << " ms"
+            << std::endl;
+  std::cout << "Memory allocation time: " << results.memory_alloc_time
+            << " ms\n";
+  std::cout << "Memory deallocation time: " << results.memory_dealloc_time
+            << " ms" << std::endl;
+  std::cout << "Outputs deallocation time: " << results.output_dealloc_time
+            << " ms" << std::endl;
 
   if (planner_) {
     std::cout << "Total memory managed: " << planner_->total_managed()
@@ -463,7 +475,6 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   IndividualMetrics results;
-  results.total_time = 0.0;
   results.time_per_node.resize(nodes_.size(), 0);
 
   // setup time
@@ -488,26 +499,61 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // main runs
-  for (size_t i = 0; i < stack.size(); i++) {
-    Input(i) = stack[i];
-  }
-  for (int i = 0; i < main_runs; i++) {
+  for (int k = 0; k < main_runs; k++) {
+    for (size_t i = 0; i < stack.size(); i++) {
+      Input(i) = stack[i];
+    }
+    timer.Start();
     if (planner_) {
       planner_->allocate();
     }
-    for (size_t j = 0; j < nodes_.size(); j++) {
+    float millis = timer.MilliSeconds();
+    results.memory_alloc_time += millis;
+
+    for (size_t i = 0; i < nodes_.size(); i++) {
       timer.Start();
-      nodes_[j].run();
-      float millis = timer.MilliSeconds();
-      results.time_per_node[j] += millis;
+      nodes_[i].run();
+      millis = timer.MilliSeconds();
+      results.time_per_node[i] += millis;
     }
+    timer.Start();
     if (opts_.cleanup_activations) {
       if (!planner_) {
         std::unordered_map<Value*, std::vector<Value*>> shared;
         planner_ = std::make_unique<MemoryPlanner>(this, shared);
       }
       planner_->deallocate();
+      // clean up owning refs of input tensors
+      for (IValue& ival : inputs_) {
+        ival = IValue();
+      }
     }
+    millis = timer.MilliSeconds();
+    results.memory_dealloc_time += millis;
+
+    timer.Start();
+    // no need to keep references of outputs in static runtime anymore
+    c10::IValue output;
+    if (num_outputs() > 1) {
+      std::vector<c10::IValue> outputs;
+      outputs.reserve(num_outputs());
+      for (auto i = 0; i < num_outputs(); ++i) {
+        // use move here. Otherwise, clean up outputs_[i] explicitly
+        outputs.emplace_back(std::move(*outputs_[i]));
+      }
+      output = c10::ivalue::Tuple::create(std::move(outputs));
+    }
+
+#ifndef NDEBUG
+    check_for_memory_leak(false);
+#endif
+
+    // use move here. Otherwise, clean up outputs_[0] explicitly
+    output = std::move(*outputs_[0]);
+    // release outputs explicitly to measure the time it takes
+    output = IValue();
+    millis = timer.MilliSeconds();
+    results.output_dealloc_time += millis;
   }
 
   // post processing
@@ -519,11 +565,52 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     results.instances_per_node_type[kind]++;
     results.total_time += results.time_per_node[i];
   }
+  results.memory_alloc_time /= static_cast<float>(main_runs);
+  results.memory_dealloc_time /= static_cast<float>(main_runs);
+  results.output_dealloc_time /= static_cast<float>(main_runs);
   for (const auto& p : results.time_per_node_type) {
     const std::string& kind = p.first;
     results.percent_per_node_type[kind] = p.second / results.total_time * 100;
   }
   return results;
+}
+
+void StaticRuntime::check_for_memory_leak(bool output_returned) {
+  if (!opts_.cleanup_activations) {
+    return;
+  }
+
+  // check for inputs
+  for (size_t i = 0; i < inputs_.size(); i++) {
+    TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
+  }
+
+  std::unordered_set<const IValue*> output_ivalues(
+      outputs_.begin(), outputs_.end());
+  for (size_t n = 0; n < nodes_.size(); n++) {
+    auto& node = nodes_[n];
+    for (size_t i = 0; i < node.outputs().size(); i++) {
+      const IValue* ival = &node.Output(i);
+      const std::string error_msg = "Output " + c10::to_string(i) +
+          " of node " + c10::to_string(n) + " was not cleaned up";
+      if (output_ivalues.count(ival) == 0) {
+        // check for intermediates
+        if (!ival->isNone()) {
+          TORCH_CHECK(ival->isTensor(), error_msg);
+          const auto& t = ival->toTensor();
+          if (t.defined()) {
+            const auto* storage_impl = t.storage().unsafeGetStorageImpl();
+            TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+          }
+        }
+      } else {
+        // check for outputs
+        if (output_returned) {
+          TORCH_CHECK(ival->isNone(), error_msg);
+        }
+      }
+    }
+  }
 }
 
 MemoryPlanner::MemoryPlanner(
@@ -667,7 +754,7 @@ void MemoryPlanner::allocate() {
     void* src = static_cast<void*>(start + offset);
 
     for (auto& impl : impls) {
-      impl->set_data_ptr(at::DataPtr(src, src, nullptr, impl->device()));
+      impl->set_data_ptr_noswap(at::DataPtr(src, src, nullptr, impl->device()));
       impl->set_nbytes(tensor_size);
     }
 

@@ -8,20 +8,24 @@ add_library(torchbind_test SHARED
 )
 target_link_libraries(torchbind_test torch)
 
-add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend.cpp)
+add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend_lib.cpp)
 target_link_libraries(jitbackend_test torch)
+
+add_library(backend_with_compiler SHARED ${JIT_TEST_ROOT}/test_backend_compiler_lib.cpp)
+target_link_libraries(backend_with_compiler torch)
 
 if(INSTALL_TEST)
   install(TARGETS torchbind_test DESTINATION lib)
   install(TARGETS jitbackend_test DESTINATION lib)
+  install(TARGETS backend_with_compiler DESTINATION lib)
 endif()
-
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
+  ${JIT_TEST_ROOT}/test_backend.cpp
   ${JIT_TEST_ROOT}/test_class_import.cpp
   ${JIT_TEST_ROOT}/test_class_parser.cpp
   ${JIT_TEST_ROOT}/test_class_type.cpp
@@ -74,7 +78,7 @@ if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
 endif()
 
-set(JIT_TEST_DEPENDENCIES torch gtest)
+set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test backend_with_compiler)
 
 if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)
@@ -82,6 +86,11 @@ endif(MSVC)
 
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
+
+if(LINUX)
+  #Update to target_link_options when CMake version can be upgraded
+  target_link_libraries(test_jit PRIVATE "-Wl,--no-as-needed,$<TARGET_FILE:jitbackend_test>,$<TARGET_FILE:backend_with_compiler>,--as-needed")
+endif()
 
 if(USE_CUDA)
   target_link_libraries(test_jit PRIVATE

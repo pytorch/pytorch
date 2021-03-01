@@ -18,6 +18,7 @@ import torch.distributed as dist
 from typing import Dict, Optional
 
 TESTS = [
+    'test_public_bindings',
     'test_type_hints',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
@@ -60,6 +61,7 @@ TESTS = [
     'test_optim',
     'test_pytree',
     'test_mobile_optimizer',
+    'test_set_default_mobile_cpu_allocator',
     'test_xnnpack_integration',
     'test_vulkan',
     'test_sparse',
