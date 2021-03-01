@@ -234,7 +234,12 @@ void initTensorExprBindings(PyObject* module) {
            const std::string&,
            const std::vector<ExprHandle>&,
            Dtype>())
-           ;
+      .def(
+          "load",
+          [](tensorexpr::BufHandle& self,
+             const std::vector<tensorexpr::ExprHandle>& v) {
+            return Load::make(self, v);
+          });
 
   py::class_<tensorexpr::Placeholder>(te, "Placeholder")
       .def(py::init<
@@ -251,12 +256,11 @@ void initTensorExprBindings(PyObject* module) {
           "buf",
           [](Placeholder& self) { return BufHandle(self.data()); },
           py::return_value_policy::reference);
-  py::class_<tensorexpr::Tensor>(te, "Tensor")
+  py::class_<tensorexpr::Tensor, std::unique_ptr<tensorexpr::Tensor, py::nodelete>>(te, "Tensor")
       .def(
           py::init([](BufHandle& b, Stmt* s) {
-            return std::unique_ptr<Tensor>(new Tensor(b.node(), s));
-          }),
-          py::return_value_policy::reference)
+            return std::unique_ptr<Tensor, py::nodelete>(new Tensor(b.node(), s));
+          }))
       .def(
           "load",
           [](tensorexpr::Tensor& self,
@@ -352,7 +356,22 @@ void initTensorExprBindings(PyObject* module) {
       },
       py::return_value_policy::reference);
 
-  py::class_<tensorexpr::Stmt>(te, "Stmt")
+  te.def(
+      "Reduce",
+      [](const std::string& func_name,
+         const std::vector<tensorexpr::DimArg>& dim_args,
+         const tensorexpr::Reducer& reducer,
+         const tensorexpr::BufHandle& buffer,
+         const std::vector<tensorexpr::DimArg>& reduce_args) {
+        return tensorexpr::Reduce(
+            func_name, dim_args, reducer, buffer, reduce_args);
+      },
+      py::return_value_policy::reference);
+
+  py::class_<tensorexpr::Stmt, std::unique_ptr<Stmt, py::nodelete>>(te, "Stmt")
+      .def(py::init([](const std::vector<Stmt*>& stmts) {
+        return std::unique_ptr<Stmt, py::nodelete>(tensorexpr::Block::make(stmts));
+      }))
       .def("__str__", [](const tensorexpr::Stmt& self) {
         std::stringstream ss;
         ss << self;
@@ -427,6 +446,12 @@ void initTensorExprBindings(PyObject* module) {
           "vectorize",
           [](const tensorexpr::LoopNest& self, tensorexpr::For* f) {
             self.vectorize(f);
+          },
+          py::return_value_policy::reference)
+      .def(
+          "inline_intermediate_bufs",
+          [](tensorexpr::LoopNest& self, bool allow_duplicated_work) {
+            self.inlineIntermediateBufs(allow_duplicated_work);
           },
           py::return_value_policy::reference)
       .def(
