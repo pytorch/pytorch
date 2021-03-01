@@ -160,7 +160,6 @@ class TestTEFuser(JitTestCase):
         # High-level intermediate representation (IR) - Graph representation
         print(symbolic_traced.graph)
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def run_frozen_model(self):
 
         temp_counter = 0
@@ -389,7 +388,6 @@ TORCH_LIBRARY({module_name}, m) {{
         print("allclose = ", torch.allclose(model_jit(x), model(*args)))
 
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def get_frozen_tensor(self):
 
         class MyModule(torch.nn.Module):
@@ -423,7 +421,6 @@ TORCH_LIBRARY({module_name}, m) {{
         print(a)
 
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_pass_module(self):
 
         class MyModule(torch.nn.Module):
@@ -471,7 +468,6 @@ TORCH_LIBRARY({module_name}, m) {{
 
         print(model())
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
         
     def test_pass_module(self):
 
@@ -788,7 +784,6 @@ TORCH_LIBRARY({module_name}, m) {{
 
         pass
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_typecheck(self):
         a = torch.ones(1)
 
