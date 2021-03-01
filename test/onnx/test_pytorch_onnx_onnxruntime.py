@@ -3553,6 +3553,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor([4, 5, 8, 9])
         self.run_test(RepeatModel(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_repeat_interleave(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, x):

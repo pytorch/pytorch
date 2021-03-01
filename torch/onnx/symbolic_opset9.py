@@ -1954,7 +1954,7 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
-def repeat_interleave(g, self, repeats, dim):
+def repeat_interleave(g, self, repeats, dim=None):
     input = self
     # if dim = 0 flatten
     if sym_help._is_none(dim):
