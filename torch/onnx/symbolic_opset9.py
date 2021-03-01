@@ -605,7 +605,10 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
 
     size = sym_help._get_tensor_dim_size(self, dim)
     if size is None:
-        return sym_help._onnx_opset_unsupported_detailed('split', 9, 11, 'Unknown dimension size not supported')
+        if _outputs is not None:
+            size = _outputs
+        else:
+            return sym_help._onnx_opset_unsupported_detailed('split', 9, 11, 'Unknown dimension size not supported')
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
@@ -1962,14 +1965,17 @@ def repeat_interleave(g, self, repeats, dim):
     repeats_dim = sym_help._get_tensor_rank(repeats)
     repeats_sizes = sym_help._get_tensor_sizes(repeats)
     input_sizes = sym_help._get_tensor_sizes(input)
+    for idx, input_size in enumerate(input_sizes):
+        if input_size is None:
+            input_sizes[idx] = -1
 
     # cases where repeats is a single number
     if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)):
         input = unsqueeze(g, input, dim + 1)
         input_sizes_temp = input_sizes.copy()
         input_sizes_temp.insert(dim + 1, sym_help._maybe_get_scalar(repeats))
-        input = expand(g, input, torch.tensor(input_sizes_temp), None)
-        input_sizes[dim] *= 2
+        input = expand(g, input, g.op("Constant", value_t=torch.LongTensor(input_sizes_temp)), None)
+        input_sizes[dim] *= sym_help._maybe_get_scalar(repeats)
         input = reshape(g, input, g.op("Constant", value_t=torch.tensor(input_sizes)))
     elif repeats_dim == 1:
         assert repeats_sizes[0] == input_sizes[dim]
