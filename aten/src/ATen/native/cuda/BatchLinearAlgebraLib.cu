@@ -385,6 +385,63 @@ static void apply_syevd(Tensor& values, Tensor& vectors, Tensor& infos, bool upp
   }
 }
 
+template <typename scalar_t>
+static void apply_syevj(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  cusolverEigMode_t jobz = compute_eigenvectors ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
+
+  int n = cuda_int_cast(vectors.size(-1), "n");
+  int lda = std::max<int>(1, n);
+  auto batch_size = batchCount(vectors);
+
+  auto vectors_stride = matrixStride(vectors);
+  auto values_stride = values.size(-1);
+
+  auto vectors_data = vectors.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<value_t>();
+  auto infos_data = infos.data_ptr<int>();
+
+  // syevj_params controls the numerical accuracy of syevj
+  // by default the tolerance is set to machine accuracy
+  // the maximum number of iteration of Jacobi method by default is 100
+  // cuSOLVER documentations says: "15 sweeps are good enough to converge to machine accuracy"
+  // LAPACK has SVD routine based on similar Jacobi algorithm (gesvj) and there a maximum of 30 iterations is set
+  // Let's use the default values for now
+  syevjInfo_t syevj_params;
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateSyevjInfo(&syevj_params));
+
+  // get the optimal work size and allocate workspace tensor
+  int lwork;
+  at::cuda::solver::syevj_bufferSize<scalar_t>(
+      at::cuda::getCurrentCUDASolverDnHandle(), jobz, uplo, n, vectors_data, lda, values_data, &lwork, syevj_params);
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
+    value_t* values_working_ptr = &values_data[i * values_stride];
+    int* info_working_ptr = &infos_data[i];
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+    // allocate workspace storage on device
+    auto& allocator = *at::cuda::getCUDADeviceAllocator();
+    auto work_data = allocator.allocate(sizeof(scalar_t) * lwork);
+    at::cuda::solver::syevj<scalar_t>(
+        handle,
+        jobz,
+        uplo,
+        n,
+        vectors_working_ptr,
+        lda,
+        values_working_ptr,
+        static_cast<scalar_t*>(work_data.get()),
+        lwork,
+        info_working_ptr,
+        syevj_params);
+  }
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroySyevjInfo(syevj_params));
+}
+
 void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(eigenvectors.scalar_type(), "linalg_eigh_cuda", [&] {
     apply_syevd<scalar_t>(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
