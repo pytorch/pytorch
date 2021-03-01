@@ -199,18 +199,33 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "get_index",
           &::c10d::GradBucket::getIndex,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+.. warning::
+    Since the buckets are rebuilt after the first iteration, should not rely on the indices at the beginning of training.
+
+Returns:
+    The index of a bucket that stores gradients of a few contiguous layers.
+    All the gradients are bucketized.
+)")
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
           py::call_guard<py::gil_scoped_release>(),
           R"(
-            ``get_tensors`` returns a list of ``torch.Tensor``. Each tensor in
-            the list refers to the replica on each device. There will be multiple
-            replicas only in the case of single process multiple device mode. In
-            the single process single device mode, this list would consist of only
-            a single tensor.
-           )")
+Returns:
+    A list of ``torch.Tensor``. Each tensor in the list refers to the replica on each device.
+    Since DDP communication hook only supports single process single device mode at this time,
+    only exactly one tensor is stored in this bucket.
+)")
+      .def(
+          "get_per_parameter_tensors",
+          &::c10d::GradBucket::getPerParameterTensors,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Returns:
+    A list of ``torch.Tensor``. Each tensor in the list corresponds to a parameter.
+)")
       .def(
           "get_offsets",
           &::c10d::GradBucket::getOffsets,
@@ -1244,7 +1259,7 @@ Arguments:
                 Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
            )");
 
-  py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
+py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
       .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
       .def_readwrite("rank", &c10::DDPLoggingData::rank)
