@@ -504,6 +504,11 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
                 t.device(), " and ", notSkippedTensor->device());
   }
 
+  TORCH_CHECK(
+      out.device() == notSkippedTensor->device(),
+      "All input tensors and out must be on the same device, but inputs are on ",
+      notSkippedTensor->device(), " and out is on ", out.device());
+
   c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
 
   std::vector<int64_t> size(notSkippedTensor->sizes().vec());

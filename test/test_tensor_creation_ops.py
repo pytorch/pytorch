@@ -702,6 +702,10 @@ class TestTensorCreation(TestCase):
                                     "input tensors must be on the same device"):
             torch.cat((cpu, cuda0))
 
+        with self.assertRaisesRegex(RuntimeError,
+                                    "All input tensors and out must be on the same device"):
+            torch.cat((cpu, cpu), out=cuda0)
+
     # TODO: reconcile with other cat tests
     # TODO: Compare with a NumPy reference instead of CPU
     @onlyCUDA
