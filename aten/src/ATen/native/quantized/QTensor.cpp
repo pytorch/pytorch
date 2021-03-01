@@ -43,8 +43,12 @@ Tensor quantize_per_channel_cpu(
   auto quantizer = make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
   return quantizer->quantize(self);
 }
+Tensor dequantize_cpu(const Tensor& self) {
+  TORCH_CHECK(!self.is_quantized());
+  return self.to(at::kFloat);
+}
 
-Tensor dequantize_quant(const Tensor& self) {
+Tensor dequantize_quantized_cpu(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 

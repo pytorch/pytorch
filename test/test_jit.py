@@ -756,17 +756,40 @@ class TestJit(JitTestCase):
     def test_debug_flush_compilation_cache(self):
         def foo(x):
             return x + 2
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+
+            def forward(self, t):
+                return t + 2
+
+        m = torch.jit.script(Mod())
         x = torch.rand(1, 10)
+
         with enable_profiling_mode_for_profiling_tests():
             jitted = self.checkScript(foo, (x,))
             # shouldn't throw
             states = jitted.get_debug_state()
+
             # after flushing there shouldn't be
             # no opt plan
-
             jitted._debug_flush_compilation_cache()
             with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
                 states = jitted.get_debug_state() # noqa
+
+            NUM_RUNS = 1
+            with num_profiled_runs(NUM_RUNS):
+                m(x)
+                m(x)
+                fwd = m._c._get_method("forward")
+                states = m.get_debug_state()
+
+                # after flushing there shouldn't be
+                # no opt plan
+                fwd._debug_flush_compilation_cache()
+                with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
+                    states = m.get_debug_state() # noqa
 
     def test_numel(self):
         @torch.jit.script
@@ -1061,6 +1084,35 @@ class TestJit(JitTestCase):
             for unk_config in configurations[i + 1:]:
                 self.assertFalse(fn.has_trace_for(*unk_config))
         self.assertEqual(fn.hits, 0)
+
+    def test_torch_sum(self):
+        def fn(x):
+            return torch.sum(x)
+
+        def fn1(x, dim: int):
+            return torch.sum(x, dim)
+
+        x = torch.randn(3, 4)
+        self.checkScript(fn, (x, ))
+        self.checkScript(fn1, (x, 1, ))
+        self.checkScript(fn1, (x, 0, ))
+
+    def test_list_sum(self):
+        def fn(x: List[int]) -> int:
+            return sum(x)
+
+        def fn1(x: List[float]):
+            return sum(x)
+
+        def fn2(x: List[bool]):
+            return sum(x)
+
+        self.checkScript(fn, ([1, 2, 3], ))
+        self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
+        self.checkScript(fn1, ([1, 2.8, 3], ))
+        self.checkScript(fn2, ([True, False, False], ))
+        self.checkScript(fn2, ([False, False, False], ))
+        self.checkScript(fn2, ([0, 1, 1, 0], ))
 
     def test_cse(self):
         x = torch.tensor([0.4, 0.3], requires_grad=True)
@@ -10611,11 +10663,6 @@ dedent """
 
     def test_builtin_args_fails(self):
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected at most'):
-            @torch.jit.script
-            def f0(a):
-                torch.sum(a, a, a, a)
-
         with self.assertRaisesRegex(RuntimeError, 'Argument self not provided'):
             @torch.jit.script
             def f1(a):
@@ -10645,11 +10692,6 @@ dedent """
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
-
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
-            @torch.jit.script
-            def f7(a):
-                torch.sum([4])
 
     def test_builtin_args(self):
 
@@ -13087,6 +13129,31 @@ dedent """
             a *= b
             return a, b
         self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
+    def test_ignored_props(self):
+        class A(nn.Module):
+            __jit_ignored_attributes__ = ["ignored", "ignored_return_val"]
+
+            def __init__(self):
+                super().__init__()
+
+            @property
+            def ignored(self):
+                raise ValueError("shouldn't be called")
+
+            @property
+            def ignored_return_val(self):
+                return 1
+
+            @torch.jit.ignore
+            def call(self):
+                return self.ignored_return_val
+
+        f = torch.jit.script(A())
+        # jank way to test if there is no error
+        self.assertTrue(isinstance(f, torch.jit.ScriptModule))
+        self.assertTrue(isinstance(f.call(), property))
+
 
     def test_pass(self):
         def foo(x):
