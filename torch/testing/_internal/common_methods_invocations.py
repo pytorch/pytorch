@@ -3523,8 +3523,6 @@ def method_tests():
          'scalar_variable'),
         ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.bool).bernoulli_(), 10),
          'scalar_broadcast_rhs'),
-        ('masked_scatter', (M,), (torch.BoolTensor(M, M).bernoulli_(), (M, M)),
-         'broadcast_lhs'),
         ('maximum', (S, S), ((S, S),)),
         ('minimum', (S, S), ((S, S),)),
         ('fmax', (S, S), ((S, S),)),
