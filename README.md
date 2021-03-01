@@ -17,7 +17,7 @@ You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to 
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
-- [Releases and Contributing](#releases-and-contributing)
+- [Releases and Contributing](#releases-and-contributing).
 - [The Team](#the-team)
 
 | System | 3.6 | 3.7 | 3.8 |
