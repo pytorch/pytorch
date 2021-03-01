@@ -167,7 +167,9 @@ class AOT_NNC_Compiler {
       interm_bufs.insert(b);
     }
 
-    LoopNest l(root_stmt, {output_buf}, {input_buf}, interm_bufs);
+    LoopNest l(root_stmt, {output_buf});
+    std::cerr << "Original stmt!\n";
+    std::cerr << *l.root_stmt() << "\n";
     l.inlineIntermediateBufs(true);
     l.simplify();
     l.prepareForCodegen();
@@ -231,7 +233,7 @@ class AOT_NNC_Compiler {
     auto dur =
         std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
             .count();
-    std::cerr << "Time: " << (float)dur / N << "ms/iter\n";
+    std::cerr << "NNC Time: " << (float)dur / N << " ms/iter\n";
     return output_tensor;
   }
 
@@ -259,7 +261,7 @@ class AOT_NNC_Compiler {
     auto dur =
         std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
             .count();
-    std::cerr << "Time: " << (float)dur / N << "ms/iter\n";
+    std::cerr << "JIT Time: " << (float)dur / N << " ms/iter\n";
     return output_tensor;
   }
 
