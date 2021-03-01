@@ -471,7 +471,8 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
                         max_threads_per_block,                         \
                         min_blocks_per_sm>                             \
    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(    \
-       aInfo, bInfo, static_cast<TYPE>(totalElements), op);
+       aInfo, bInfo, static_cast<TYPE>(totalElements), op);            \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
   switch (B) {                              \
