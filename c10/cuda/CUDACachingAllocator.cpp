@@ -1084,7 +1084,7 @@ class THCCachingAllocator {
     }
     Block* block = get_allocated_block(ptr, true /* remove */);
     if (!block) {
-      AT_ERROR("invalid device pointer: ", ptr);
+      TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     device_allocator[block->device]->free(block);
   }
@@ -1118,7 +1118,7 @@ class THCCachingAllocator {
   {
     Block* block = get_allocated_block(ptr);
     if (!block) {
-      AT_ERROR("invalid device pointer: ", ptr);
+      TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     return device_allocator[block->device]->getBaseAllocation(block, outSize);
   }
