@@ -4392,7 +4392,7 @@ Keyword arguments:
     {out}
     dtype (torch.dtype, optional) : the desired data type of returned tensor. Default: if None,
     and start and end are real values, uses a global default (see torch.get_default_tensor_type())
-    else sets it to the complex default type.
+    else uses the complex type corresponding to the global default type.
     {layout}
     {device}
     {requires_grad}
@@ -4763,7 +4763,7 @@ Keyword arguments:
     {out}
     dtype (torch.dtype, optional) : the desired data type of returned tensor. Default: if None,
     and start and end are real values, uses a global default (see torch.get_default_tensor_type())
-    else sets it to the complex default type.
+    else uses the complex type corresponding to the global default type.
     {layout}
     {device}
     {requires_grad}

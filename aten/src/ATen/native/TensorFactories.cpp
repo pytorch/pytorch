@@ -466,7 +466,9 @@ TensorOptions linspace_logspace_infer_options(
     auto result_dtype = c10::typeMetaToScalarType(options.dtype());
     if (!at::isComplexType(result_dtype)) {
       TORCH_WARN(
-          "As either `start` or `stop` is complex, return type will be the default complex type.");
+          "As either `start` or `stop` is complex, return type will be the complex dtype corresponding to default dtype.",
+          "In future, this may throw an error when a non-complex dtype arg is passed as input along ",
+          "with complex valued start or end value.");
       result_options = result_options.dtype(c10::get_default_complex_dtype());
     }
   }
