@@ -7,6 +7,11 @@ from .importer import Importer, sys_importer, ObjMismatchError, ObjNotFoundError
 
 
 class PackagePickler(_Pickler):
+    """Package-aware pickler.
+
+    This behaves the same as a normal pickler, except it uses an `Importer`
+    to find objects and modules to save.
+    """
     dispatch = _Pickler.dispatch.copy()
 
     def __init__(self, importer: Importer, *args, **kwargs):
