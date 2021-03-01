@@ -55,6 +55,7 @@ def convert_dict_to_ordered_dict(qconfig_dict: Any) -> Dict[str, Dict[Any, Any]]
     _convert_to_ordered_dict('object_type', qconfig_dict)
     _convert_to_ordered_dict('module_name_regex', qconfig_dict)
     _convert_to_ordered_dict('module_name', qconfig_dict)
+    return qconfig_dict
 
 def get_object_type_qconfig(
         qconfig_dict: Any,
