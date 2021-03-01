@@ -4036,7 +4036,8 @@ class TestAutograd(TestCase):
         b.data = a
         self.assertTrue(b_id_saved == id(b))
 
-    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    # Shutdown logic has been disabled, per https://github.com/pytorch/pytorch/issues/48888
+    @unittest.expectedFailure
     def test_thread_shutdown(self):
         code = """import torch
 from torch.autograd import Function
