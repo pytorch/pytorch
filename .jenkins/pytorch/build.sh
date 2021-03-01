@@ -318,7 +318,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   assert_git_not_dirty
 fi
 
-# Test that source package is configurable
+# Test building via the sdist source tarball
 if [[ "${BUILD_ENVIRONMENT}" == *asan* ]]; then
   python setup.py sdist
   pushd /tmp
