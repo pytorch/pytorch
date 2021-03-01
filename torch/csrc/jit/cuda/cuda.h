@@ -17,7 +17,6 @@ class CUDAStream final : public CustomClassHolder {
       c10::optional<c10::Device> device = c10::nullopt,
       int64_t priority = 0) {
     constexpr int64_t PRIORITY_INDEX = 0;
-
     c10::DeviceIndex device_index =
         device.has_value() ? device->index() : c10::cuda::current_device();
     stream_ = std::make_unique<c10::cuda::CUDAStream>(
