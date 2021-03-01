@@ -946,14 +946,9 @@ struct CodeImpl {
           // I can't really think of a way we can avoid this step. Maybe messing with the
           // method names and do table lookup?
           if (class_type->findOverloadedMethod(node->s(attr::name)).size() > 1) {
-            for (auto & method : class_type->findOverloadedMethod(node->s(attr::name))) {
-              if (auto overloaded_method = dynamic_cast<OverloadedFunction*>(method)) {
-                if (overloaded_method->matches(node->inputs())) {
-                  emitCall(method, node->inputs());
-                  break;
-                }
-              }
-            }
+            auto overloaded_method =
+                class_type->getMangledOverloadedMethod(node->s(attr::name));
+            emitCall(overloaded_method, node->inputs());
           } else {
             emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
           }

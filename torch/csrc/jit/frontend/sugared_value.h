@@ -477,8 +477,11 @@ struct MethodValue : public SugaredValue {
 
           }
           auto match = matchSchemas(overloaded_schemas, loc, *f.graph(), argsWithSelf, kwargs);
+          auto mangled_method_name =
+              method_name + "__" + std::to_string(match.first);
+
           Value* output =
-              f.graph()->insertMethodCall(method_name, match.second);
+              f.graph()->insertMethodCall(mangled_method_name, match.second);
           output->node()->setSourceRange(loc);
           return std::make_shared<SimpleValue>(output);
 

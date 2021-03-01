@@ -9,7 +9,6 @@
 #include <pybind11/pytypes.h>
 #include <functional>
 #include <utility>
-#include "c10/util/ArrayRef.h"
 
 namespace c10 {
 struct FunctionSchema;
@@ -18,18 +17,6 @@ struct IValue;
 
 namespace torch {
 namespace jit {
-
-struct Value;
-struct tuple_slice;
-
-bool matchesUtility(const c10::FunctionSchema& schema, at::ArrayRef<Value*> inputs);
-Stack createStackForSchema(const c10::FunctionSchema& schema,
-    const tuple_slice& args,
-    const pybind11::kwargs& kwargs,
-    c10::optional<c10::IValue> self);
-
-template<typename T>
-using ArrayRef = at::ArrayRef<T>;
 
 struct OverloadedFunction : public Function {
   OverloadedFunction(
@@ -58,10 +45,6 @@ struct OverloadedFunction : public Function {
 
   void run(Stack&& stack) override {
     callable_(stack);
-  }
-
-  bool matches(ArrayRef<Value*> inputs) {
-    return matchesUtility(getSchema(), inputs);
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
@@ -94,27 +77,35 @@ struct OverloadedFunction : public Function {
   }
 
   std::shared_ptr<Graph> graph() const override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on Function::isGraphFunction()");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "OverloadedFunction had a graph requested "
+        "from it. This probably indicates that the JIT calling context needs a "
+        "special case on Function::isGraphFunction()");
   }
 
   std::shared_ptr<Graph> optimized_graph() const override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on Function::isGraphFunction()");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "OverloadedFunction had a graph requested "
+        "from it. This probably indicates that the JIT calling context needs a "
+        "special case on Function::isGraphFunction()");
   }
 
   void clear_execution_info() override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on Function::isGraphFunction()");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "OverloadedFunction had a graph requested "
+        "from it. This probably indicates that the JIT calling context needs a "
+        "special case on Function::isGraphFunction()");
   }
 
   GraphExecutor& get_executor() override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a GraphExecutor requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on Function::isGraphFunction()");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "OverloadedFunction had a GraphExecutor requested "
+        "from it. This probably indicates that the JIT calling context needs a "
+        "special case on Function::isGraphFunction()");
   }
 
   const c10::FunctionSchema& getSchema() const override {
