@@ -317,15 +317,3 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   popd
   assert_git_not_dirty
 fi
-
-# Test building via the sdist source tarball
-if [[ "${BUILD_ENVIRONMENT}" == *asan* ]]; then
-  python setup.py sdist
-  pushd /tmp
-  mkdir tmp
-  tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/*.tar.gz"
-  cd torch-*
-  python setup.py build --cmake-only
-  cd ..
-  popd tmp
-fi
