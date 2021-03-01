@@ -215,7 +215,6 @@ def prepare_model_outputs(
     return (gm_a, gm_b)
 
 def add_activation_info_to_dict(
-    model_name: str,
     model: GraphModule,
     results: NSResultsType,
     logger_cls: Callable,
@@ -233,7 +232,7 @@ def add_activation_info_to_dict(
             key = mod.ref_name
             if key not in results:
                 results[key] = {}
-            results[key][model_name] = {
+            results[key][mod.model_name] = {
                 'type': NSSingleResultValuesType.NODE_OUTPUT.value,
                 'values': mod.stats,
                 'node_name': mod.node_name,
@@ -246,9 +245,7 @@ def add_activation_info_to_dict(
 # TODO(future PR): align on naming
 # this is equivalent of just the comparison extraction part of `ns.compare_model_outputs`
 def get_matching_activations(
-    model_name_a: str,
     gm_a: GraphModule,
-    model_name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
 ) -> NSResultsType:
@@ -262,8 +259,8 @@ def get_matching_activations(
     """
     results: NSResultsType = {}
     for gm in (gm_a, gm_b):
-        add_activation_info_to_dict(model_name_a, gm_a, results, logger_cls)
-        add_activation_info_to_dict(model_name_b, gm_b, results, logger_cls)
+        add_activation_info_to_dict(gm_a, results, logger_cls)
+        add_activation_info_to_dict(gm_b, results, logger_cls)
     return results
 
 # Note: this is not a user facing API
