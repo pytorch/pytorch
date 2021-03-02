@@ -158,14 +158,32 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   if (!non_trivial_pred_found_) {
     loop_replacement_map_.insert({fl, inlined_loop});
   } else {
-    kir::ExpressionEvaluator eval;
-    const auto result = eval.evaluate(fl->iter_domain()->rawExtent());
-    // No need to generate the else part if the extent is 1
-    if (!(result.has_value() && result.value() == 1)) {
+    if (!canOmitElseClause(fl)) {
       unroll_ite->elseBody().push_back(inlined_loop);
     }
     loop_replacement_map_.insert({fl, unroll_ite});
   }
+}
+
+bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
+  kir::ExpressionEvaluator eval;
+  std::vector<kir::ForLoop*> loops({fl});
+  while (loops.size() > 0) {
+    auto loop = loops.back();
+    loops.pop_back();
+    auto id = loop->iter_domain();
+    if (id->isThread() || id->parallelType() == ParallelType::Vectorize) {
+      continue;
+    }
+    const auto result = eval.evaluate(id->rawExtent());
+    if (!(result.has_value() && result.value() == 1)) {
+      return false;
+    }
+    for (auto loop : ir_utils::filterByType<kir::ForLoop>(fl->body().exprs())) {
+      loops.push_back(loop);
+    }
+  }
+  return true;
 }
 
 // Generate the loop nest structure and place it in lowered_exprs

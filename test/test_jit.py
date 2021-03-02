@@ -10826,59 +10826,6 @@ dedent """
         self.assertEqual(w.grad, w_ref.grad)
         self.assertEqual(b.grad, b_ref.grad)
 
-    def test_linear_grad(self):
-        with enable_profiling_mode_for_profiling_tests():
-            def t(x: torch.Tensor, w: torch.Tensor, b: Optional[torch.Tensor]):
-                return torch.nn.functional.linear(x, w, b)
-
-            x_init = torch.randn(4, 2)
-            w_init = torch.randn(3, 2)
-            b_init = torch.randn(3)
-            grad = torch.randn(4, 3)
-
-            with disable_autodiff_subgraph_inlining():
-                # script module
-                jit_t = torch.jit.script(t)
-
-                x = x_init.detach().clone().requires_grad_()
-                w = w_init.detach().clone().requires_grad_()
-                b = b_init.detach().clone().requires_grad_()
-                x_ref = x_init.detach().clone().requires_grad_()
-                w_ref = w_init.detach().clone().requires_grad_()
-                b_ref = b_init.detach().clone().requires_grad_()
-
-                # profiling/optimization runs
-                jit_o = jit_t(x, w, b)
-                jit_o.backward(grad)
-                jit_o = jit_t(x, w, b)
-                jit_o.backward(grad)
-
-                x.grad.zero_()
-                w.grad.zero_()
-                b.grad.zero_()
-                jit_o = jit_t(x, w, b)
-                jit_o.backward(grad)
-                o = t(x_ref, w_ref, b_ref)
-                o.backward(grad)
-
-                self.assertEqual(jit_o, o)
-                self.assertEqual(x.grad, x_ref.grad)
-                self.assertEqual(w.grad, w_ref.grad)
-                self.assertEqual(b.grad, b_ref.grad)
-
-                x.grad.zero_()
-                w.grad.zero_()
-                x_ref.grad.zero_()
-                w_ref.grad.zero_()
-                jit_o = jit_t(x, w, None)
-                jit_o.backward(grad)
-                o = t(x_ref, w_ref, None)
-                o.backward(grad)
-
-                self.assertEqual(jit_o, o)
-                self.assertEqual(x.grad, x_ref.grad)
-                self.assertEqual(w.grad, w_ref.grad)
-
     def test_layer_norm_grad(self):
         with enable_profiling_mode_for_profiling_tests():
             class MyLayerNorm(torch.nn.Module):

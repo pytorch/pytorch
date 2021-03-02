@@ -13162,7 +13162,8 @@ TEST(NVFuserTest, FusionVectorizationRFactor_CUDA) {
   testValidate(&fusion, cg_outputs, aten_inputs, {t3}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSizeOneLoop_CUDA) {
+// Unswitched loops with extent one may omit else clause.
+TEST(NVFuserTest, FusionSizeOneLoop1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13225,6 +13226,49 @@ TEST(NVFuserTest, FusionSizeOneLoop_CUDA) {
   auto t6 = (t0.unsqueeze(-1) + t1).unsqueeze(0) + t2;
 
   testValidate(&fusion, cg_outputs, aten_inputs, {t6}, __LINE__, __FILE__);
+}
+
+// The unswitched loop has extent one but inner loops don't. The else
+// part should not be omitted.
+TEST(NVFuserTest, FusionSizeOneLoop2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int x = 15;
+  auto tv0 = makeConcreteTensor({x});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  fusion.addOutput(tv1);
+
+  tv1->split(-1, 4);
+  tv1->split(-2, 1);
+
+  tv1->axis(-2)->parallelize(ParallelType::Unswitch);
+
+  // Make sure the size-one unswitched loop does not omit the else clause.
+  GpuLower gpulw(&fusion);
+  for (const auto& kir_node : gpulw.kernel()->irNodes()) {
+    if (auto fl = dynamic_cast<kir::ForLoop*>(kir_node.get())) {
+      if (fl->iter_domain()->parallelType() != ParallelType::Unswitch) {
+        continue;
+      }
+      if (auto pred = dynamic_cast<kir::IfThenElse*>(fl->parentScope())) {
+        TORCH_CHECK(pred->hasElse());
+      }
+    }
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({x}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+  auto t1 = t0 + 1;
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {t1}, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionValidateParallelize1_CUDA) {
