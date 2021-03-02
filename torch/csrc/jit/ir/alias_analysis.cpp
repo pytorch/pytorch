@@ -568,6 +568,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ChunkSizes:
     case prim::Closure:
     case prim::CreateObject:
+    case prim::ConstantMKLDNNTensor:
     case prim::tolist:
       return analyzeCreator(node);
     case prim::TupleConstruct:
@@ -589,6 +590,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeExtractor(node);
     case prim::unchecked_cast:
       return makePointerTo(node->output(), node->input());
+    case prim::ConvertToMKLDNN:
+      return makePointerTo(node->outputs().at(1), node->input());
     case prim::ConstantChunk:
       return analyzeChunk(node);
     case prim::BroadcastingChunk:

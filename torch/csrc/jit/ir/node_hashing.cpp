@@ -227,6 +227,13 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (lhs->kind() != rhs->kind())
     return false;
 
+  // mkldnn tensors dont define equality, and we dont want to CSE bc they do
+  // internal layout changes
+  if (lhs->kind() == prim::ConstantMKLDNNTensor ||
+      rhs->kind() == prim::ConstantMKLDNNTensor) {
+    return false;
+  }
+
   // Check whether the output types are the same.
   auto lhs_outputs = lhs->outputs();
   auto rhs_outputs = rhs->outputs();
