@@ -2063,11 +2063,14 @@ class SimpleCustomBatch(object):
     def is_pinned(self):
         return self.inp.is_pinned() and self.tgt.is_pinned()
 
-# foo is used to fix https://github.com/pytorch/pytorch/issues/50661
-# Needed to workaround limitations when  `__main__` is not importable my spawned module
-foo = __import__(os.path.splitext(os.path.basename(__file__))[0])
+# Workaround for https://github.com/pytorch/pytorch/issues/50661
+# Classes from  `__main__` can not be correctly unpickled from spawned module
+# See https://docs.python.org/3/library/multiprocessing.html#multiprocessing-programming
+self_module = __import__(os.path.splitext(os.path.basename(__file__))[0])
+
 def collate_wrapper(batch):
-    return foo.SimpleCustomBatch(batch)
+    return self_module.SimpleCustomBatch(batch)
+
 
 def collate_into_packed_sequence(batch):
     data = torch.stack([sample[0] for sample in batch], 1)
@@ -2097,7 +2100,7 @@ class TestCustomPinFn(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_custom_batch_pin(self):
         test_cases = [
-            (collate_wrapper, foo.SimpleCustomBatch),
+            (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
@@ -2111,7 +2114,7 @@ class TestCustomPinFn(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_custom_batch_pin_worker(self):
         test_cases = [
-            (collate_wrapper, foo.SimpleCustomBatch),
+            (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
