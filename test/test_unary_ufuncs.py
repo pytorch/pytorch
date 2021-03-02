@@ -494,7 +494,7 @@ class TestUnaryUfuncs(TestCase):
             self._test_out_arg(op, input, out, expected)
 
     @onlyCUDA
-    @ops(unary_ufuncs, dtypes=OpDTypes.basic)
+    @ops(unary_ufuncs)
     def test_out_mismatched_device(self, device, dtype, op):
         input_cuda = make_tensor((3,), dtype=dtype, device=device,
                                  low=op.domain[0], high=op.domain[1])
