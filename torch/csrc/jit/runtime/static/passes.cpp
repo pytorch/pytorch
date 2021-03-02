@@ -112,6 +112,23 @@ void ClipRangesGatherRangesLengthsToOffsets(
   fuse.runOnGraph(graph);
 }
 
+void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
+  // TODO:: check restrictions for inputs; outputs not used elsewhere
+  // fuse without lengths-to-offsets
+  std::string pattern = R"IR(
+    graph(%a, %b, %c):
+        %y0 : Tensor = fb::clip_ranges(%b, %c)
+        %y1 : Tensor, %y2 : Tensor = fb::gather_ranges(%a, %y0)
+        return (%y2, %y1))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %b, %c):
+        %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather(%a, %b, %c)
+        return (%y1, %y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+}
+
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -150,9 +167,14 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   ConcatAddMulReplaceNaNClip(graph);
   CastedBatchOneHotLengths(graph);
   ConcatBatchMatMulBatchGather(graph);
+
   ClipRangesGatherRangesLengthsToOffsets(graph);
   ClipRangesGatherSigridHash(graph);
   ClipRangesGatherRangesSigridHash(graph);
+
+  // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
+  // clip_ranges+gather_ranges
+  ClipRangesGather(graph);
 #endif
 }
 

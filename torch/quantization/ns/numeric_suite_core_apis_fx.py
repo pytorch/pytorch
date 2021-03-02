@@ -53,8 +53,8 @@ NSSingleResultType = Dict[str, Any]
 
 # {
 #   'logger_name_1': {
-#     'model_name_a': [torch.Tensor(...), ...],
-#     'model_name_b': [torch.Tensor(...), ...],
+#     'model_name_a': NSSingleResultType,
+#     'model_name_b': NSSingleResultType,
 #   },
 # }
 #
@@ -175,17 +175,15 @@ class OutputLogger(nn.Module):
 def prepare_single_model_output(
     model_name: str,
     model: GraphModule,
-    subgraphs_to_instrument: List[Tuple[Tuple[Node, Node], str]],
+    nodes_and_names_to_instrument: List[Tuple[Node, str]],
     logger_cls: Callable,
 ) -> GraphModule:
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
-    # Note: for matching activations we always use the end nodes,
-    # such as observing the output of relu in linear-relu
     node_to_instrument_to_ref_name: Dict[Node, str] = {}
-    for (node_start, node_end), ref_name in subgraphs_to_instrument:
-        node_to_instrument_to_ref_name[node_end] = ref_name
+    for node, ref_name in nodes_and_names_to_instrument:
+        node_to_instrument_to_ref_name[node] = ref_name
 
     model = remove_observers_add_loggers(
         model, node_to_instrument_to_ref_name, logger_cls, model_name)
@@ -202,20 +200,23 @@ def prepare_model_outputs(
     logger_cls: Callable,
 ) -> Tuple[GraphModule, GraphModule]:
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
-    subgraphs_to_instrument_a = []
-    subgraphs_to_instrument_b = []
+    nodes_and_names_to_instrument_a = []
+    nodes_and_names_to_instrument_b = []
     for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
-        subgraphs_to_instrument_a.append((subgraph_a, match_name))
-        subgraphs_to_instrument_b.append((subgraph_b, match_name))
+        node_start_a, node_end_a = subgraph_a
+        node_start_b, node_end_b = subgraph_b
+        # Note: for matching activations we always use the end nodes,
+        # such as observing the output of relu in linear-relu
+        nodes_and_names_to_instrument_a.append((node_end_a, match_name))
+        nodes_and_names_to_instrument_b.append((node_end_b, match_name))
 
     gm_a = prepare_single_model_output(
-        name_a, gm_a, subgraphs_to_instrument_a, logger_cls)
+        name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls)
     gm_b = prepare_single_model_output(
-        name_b, gm_b, subgraphs_to_instrument_b, logger_cls)
+        name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls)
     return (gm_a, gm_b)
 
 def add_activation_info_to_dict(
-    model_name: str,
     model: GraphModule,
     results: NSResultsType,
     logger_cls: Callable,
@@ -233,7 +234,7 @@ def add_activation_info_to_dict(
             key = mod.ref_name
             if key not in results:
                 results[key] = {}
-            results[key][model_name] = {
+            results[key][mod.model_name] = {
                 'type': NSSingleResultValuesType.NODE_OUTPUT.value,
                 'values': mod.stats,
                 'node_name': mod.node_name,
@@ -246,9 +247,7 @@ def add_activation_info_to_dict(
 # TODO(future PR): align on naming
 # this is equivalent of just the comparison extraction part of `ns.compare_model_outputs`
 def get_matching_activations(
-    model_name_a: str,
     gm_a: GraphModule,
-    model_name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
 ) -> NSResultsType:
@@ -258,27 +257,12 @@ def get_matching_activations(
 
     TODO(future PR): real docblock
 
-    Output format:
-
-    {
-        'layer1.stats': {
-            'name_a': [torch.Tensor(...), ...],
-            'name_b': [torch.Tensor(...), ...],
-        },
-        ...
-    }
-
-    Note, there are three differences from the output format of Eager NS:
-    1. `name_a` and `name_b` are used instead of hardcoding names
-       to `float` and `quantized`.
-    2. Lists of Tensors are returned instead of individual Tensors, to unify
-       the return type for calibrating with 1 input vs N inputs.
-    3. `logger_cls` is included in the API for easy result extraction
+    Output format: NSResultsType
     """
     results: NSResultsType = {}
     for gm in (gm_a, gm_b):
-        add_activation_info_to_dict(model_name_a, gm_a, results, logger_cls)
-        add_activation_info_to_dict(model_name_b, gm_b, results, logger_cls)
+        add_activation_info_to_dict(gm_a, results, logger_cls)
+        add_activation_info_to_dict(gm_b, results, logger_cls)
     return results
 
 # Note: this is not a user facing API
@@ -314,20 +298,5 @@ def get_matching_activations_a_shadows_b(
     TODO(future PR): real docblock
     """
     results: NSResultsType = collections.defaultdict(dict)
-    for name, mod in gm_a_shadows_b.named_modules():
-        # TODO(future PR): better check when scripted
-        is_logger = (
-            isinstance(mod, logger_cls)  # type: ignore
-            or (
-                isinstance(mod, torch.jit.RecursiveScriptModule)
-                and mod.original_name == 'OutputLogger'
-            )
-        )
-        if is_logger:
-            results[mod.ref_name][mod.model_name] = {
-                'type': NSSingleResultValuesType.NODE_OUTPUT.value,
-                'values': mod.stats,
-                'node_name': mod.node_name,
-                'node_target_type': mod.node_target_type,
-            }
+    add_activation_info_to_dict(gm_a_shadows_b, results, logger_cls)
     return dict(results)

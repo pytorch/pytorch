@@ -544,7 +544,7 @@ Tensor cudnn_convolution_bias_relu(
       dilation,
       groups,
       false, // benchmark
-      true, // deterministic
+      false, // deterministic
       true // allow_tf32
   );
 
