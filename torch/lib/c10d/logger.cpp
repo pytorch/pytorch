@@ -24,9 +24,6 @@ std::once_flag kDistDebugLoggingLevelSetFlag;
 
 const char * parseDistDebugLevel() {
   static std::string debugLevel = parse_env(kDistDebugEnvVar);
-  std::call_once(kDistDebugLoggingLevelSetFlag, []() {
-    LOG(INFO) << "TORCH_DISTRIBUTED_DEBUG level parsed as " << debugLevel;
-  });
 
   if (debugLevel.compare("N/A") == 0) {
     return kDistDebugOffLogLevel;
@@ -43,6 +40,11 @@ const char * parseDistDebugLevel() {
         kDistDebugOffLogLevel
       )
     );
+
+    std::call_once(kDistDebugLoggingLevelSetFlag, []() {
+      LOG(INFO) << "TORCH_DISTRIBUTED_DEBUG level parsed as " << debugLevel;
+    });
+
     return levelStr;
   }
 }
