@@ -2,6 +2,7 @@
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/torch.h>
 
 // Tests go in torch::jit
@@ -100,6 +101,12 @@ TEST(BackendTest, TestCompiler) {
       "backend_with_compiler_demo", m, compile_spec, any_dict_ty);
   auto res = lm.forward(inputs);
   AT_ASSERT(res.toTensor().equal(ref.toTensor()));
+
+  std::stringstream ss;
+  lm._save_for_mobile(ss);
+  auto mlm = _load_for_mobile(ss);
+  auto mres = mlm.forward(inputs);
+  AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
 TEST(BackendTest, TestCompilerNotSupport) {
