@@ -14921,6 +14921,14 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
             param + param
 
+class TestFunctionalPickle(TestCase):
+
+    # issue gh-38137
+    def test_pickle_softsign(self):
+        # Make sure it does not throw an exception
+        s = pickle.dumps(F.softsign)
+
+
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
 if __name__ == '__main__':
