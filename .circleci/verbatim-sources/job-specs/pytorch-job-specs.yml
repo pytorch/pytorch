@@ -223,7 +223,7 @@ jobs:
     - store_test_results:
         path: test-reports
     - store_artifacts:
-        path: test
+        path: test/*coverage*
 
   pytorch_windows_build:
     <<: *pytorch_windows_params
