@@ -1565,7 +1565,7 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_conv_to_mkldnn(self):
         with set_default_dtype(torch.float):
-            for input_is_mkldnn, module, trace in product([True, False], [nn.Conv2d, nn.Conv3d], [False, True]):
+            for module, trace in product([nn.Conv2d, nn.Conv3d], [False, True]):
                 mod = module(3, 32, kernel_size=3, stride=2).eval()
                 inps = [4, 3, 4]
                 if module == nn.Conv2d:
@@ -1585,25 +1585,14 @@ class TestFrozenOptimizations(JitTestCase):
                 FileCheck().check("conv").run(scripted_mod.graph)
                 # successfully no-ops with non-const inputs
                 self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
-                FileCheck().check_not("ConvertToMKLDNN").run(scripted_mod.graph)
+                FileCheck().check_not("to_mkldnn").run(scripted_mod.graph)
 
                 scripted_mod = torch.jit.freeze(scripted_mod)
                 self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
-                FileCheck().check("ConvertToMKLDNN").check("aten::conv").check("ConvertFromMKLDNN").run(scripted_mod.graph)
+                FileCheck().check("to_mkldnn").check("aten::conv").check("to_dense").run(scripted_mod.graph)
 
-                if input_is_mkldnn:
-                    inp = inp.to_mkldnn()
-                    mod.weight = torch.nn.Parameter(mod.weight.to_mkldnn())
-                    mod.bias = mod.bias if mod.bias is None else torch.nn.Parameter(mod.bias.to_mkldnn())
-
-                for _ in range(2):
-                    # aten::equal not defined for mkldnn tensors
-                    def to_dense(inp):
-                        return inp.to_dense() if inp.is_mkldnn else inp
-
-                    out_eager, out_scripted = mod(inp), scripted_mod(inp)
-                    self.assertEqual(out_eager.is_mkldnn, out_scripted.is_mkldnn)
-                    self.assertEqual(to_dense(inp), to_dense(inp))
+                self.assertEqual(mod(inp), scripted_mod(inp))
+                self.assertEqual(mod(inp), scripted_mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_linear_to_mkldnn(self):
@@ -1611,7 +1600,7 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             # make sure mkldnn handles broadcast rules
             inp_shapes = [[20], [20, 20], [1, 20, 20]]
-            for input_is_mkldnn, inp_shape in product([True, False], inp_shapes):
+            for inp_shape in inp_shapes:
                 mod = nn.Linear(20, 30).eval()
                 scripted_mod = torch.jit.script(mod)
                 inp = torch.rand(inp_shape)
@@ -1624,21 +1613,47 @@ class TestFrozenOptimizations(JitTestCase):
 
                 scripted_mod = torch.jit.freeze(scripted_mod)
                 self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
-                FileCheck().check("ConvertToMKLDNN").check("aten::linear").check("ConvertFromMKLDNN").run(scripted_mod.graph)
+                FileCheck().check("to_mkldnn").check("aten::linear").check("to_dense").run(scripted_mod.graph)
 
-                if input_is_mkldnn:
-                    inp = inp.to_mkldnn()
-                    mod.weight = torch.nn.Parameter(mod.weight.to_mkldnn())
-                    mod.bias = mod.bias if mod.bias is None else torch.nn.Parameter(mod.bias.to_mkldnn())
+                self.assertEqual(mod(inp), scripted_mod(inp))
+                self.assertEqual(mod(inp), scripted_mod(inp))
 
-                for _ in range(2):
-                    # aten::equal not defined for mkldnn tensors
-                    def to_dense(inp):
-                        return inp.to_dense() if inp.is_mkldnn else inp
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_collapse_adjacent_conversions(self):
 
-                    out_eager, out_scripted = mod(inp), scripted_mod(inp)
-                    self.assertEqual(out_eager.is_mkldnn, out_scripted.is_mkldnn)
-                    self.assertEqual(to_dense(inp), to_dense(inp))
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(nn.Linear(20, 20), nn.Linear(20, 20)).eval()
+            scripted_mod = torch.jit.script(mod)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            FileCheck().check("to_mkldnn").check("aten::linear").check("aten::linear").check("to_dense").run(scripted_mod.graph)
+            FileCheck().check_count("to_mkldnn", 1, exactly=True).run(scripted_mod.graph)
+
+            inp = torch.rand([20, 20])
+            self.assertEqual(scripted_mod(inp), mod(inp))
+            self.assertEqual(scripted_mod(inp), mod(inp))
+
+            # testing unsupported behavior
+            class Add(nn.Module):
+                def __init__(self, tensor):
+                    super().__init__()
+                    self.tensor = tensor
+
+                def forward(self, x):
+                    return x + self.tensor
+
+            def test_unsupported(module, preserved_attrs=None):
+                mod = torch.jit.freeze(torch.jit.script(module.eval()), preserved_attrs)
+                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                FileCheck().check("to_mkldnn").check("linear").check("to_dense").check("add").run(mod.graph)
+
+            lin = nn.Linear(20, 20)
+            # Scalar-Tensor not supported
+            test_unsupported(nn.Sequential(lin, Add(.5)))
+            # # 0-dim not supported
+            test_unsupported(nn.Sequential(lin, Add(torch.tensor(.5))))
+            # tensor of unknown dtype (getAttr node here) not supported
+            test_unsupported(nn.Sequential(lin, Add(torch.tensor([20]))), ['1'])
 
     @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
     def test_conv_to_mkldnn_no_mkldnn(self):
