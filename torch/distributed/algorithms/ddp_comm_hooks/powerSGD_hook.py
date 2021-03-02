@@ -153,7 +153,7 @@ class PowerSGDState(object):
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
-        if bucket.get_index() == 0:
+        if bucket.is_the_last_bucket_to_allreduce():
             self.iter += 1
 
         if self.iter == self.start_powerSGD_iter:
