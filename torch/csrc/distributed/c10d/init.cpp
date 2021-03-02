@@ -227,6 +227,15 @@ Returns:
     A list of ``torch.Tensor``. Each tensor in the list corresponds to a parameter.
 )")
       .def(
+          "is_the_last_bucket_to_allreduce",
+          &::c10d::GradBucket::isTheLastBucketToAllreduce,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Returns:
+    Whether this bucket is the last bucket to allreduce in an iteration.
+    This also means that this bucket corresponds to the first few layers in the forward pass.
+)")
+      .def(
           "get_offsets",
           &::c10d::GradBucket::getOffsets,
           py::call_guard<py::gil_scoped_release>())

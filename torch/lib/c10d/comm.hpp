@@ -52,6 +52,11 @@ class GradBucket {
   // Each tensor in the list that getPerParameterTensors corresponds to a parameter.
   std::vector<at::Tensor> getPerParameterTensors() const;
 
+  // Returns whther this bucket is the last bucket to allreduce in an iteration.
+  bool isTheLastBucketToAllreduce() const {
+    return index_ == 0;
+  }
+
   // Returns the start index of each variable in tensors_[0].
   const std::vector<size_t>& getOffsets() const {
     return offsets_;
