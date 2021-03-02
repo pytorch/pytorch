@@ -100,6 +100,17 @@ Node* createConstantMKLDNNTensorOp(Graph* g, Tensor mkldnn_tensor) {
   return op;
 }
 
+bool supportedMKLDNNWeight(const Tensor& weight) {
+  if (!weight.device().is_cpu()) {
+    return false;
+  }
+  // only supported mkldnn dtype for conv
+  if (weight.dtype() != c10::ScalarType::Float) {
+    return false;
+  }
+  return true;
+}
+
 void computeOpInMKLDNN(Node* n) {
   auto graph = n->owningGraph();
 
@@ -127,6 +138,19 @@ bool nonConstantParameters(Node* n) {
   return false;
 }
 
+bool frozenMkldnnCompatibleLinearNode(Node* n) {
+  if (nonConstantParameters(n)) {
+    return false;
+  }
+
+  if (n->kind() != aten::linear) {
+    return false;
+  }
+
+  auto weight = constant_as<Tensor>(n->namedInput("weight")).value();
+  return supportedMKLDNNWeight(weight);
+}
+
 bool frozenMkldnnCompatibleConvNode(Node* n) {
   if (nonConstantParameters(n)) {
     return false;
@@ -138,66 +162,89 @@ bool frozenMkldnnCompatibleConvNode(Node* n) {
   }
 
   auto weight = constant_as<Tensor>(n->namedInput("weight")).value();
-  if (!weight.device().is_cpu()) {
-    return false;
+  return supportedMKLDNNWeight(weight);
+}
+
+void replaceInputWithMKLDNNTensor(
+    Node* n,
+    std::string name,
+    const at::Tensor& mkldnn_tensor) {
+  Value* input = n->namedInput(name);
+  auto mkldnn_tensor_value =
+      createConstantMKLDNNTensorOp(n->owningGraph(), mkldnn_tensor)
+          ->insertBefore(n)
+          ->output();
+  mkldnn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
+  n->replaceInputWith(input, mkldnn_tensor_value);
+}
+
+void replaceInputWithMKLDNNTensor(Node* n, std::string name) {
+  Value* input = n->namedInput(name);
+  auto mkldnn_tensor = constant_as<Tensor>(input)->to_mkldnn();
+  replaceInputWithMKLDNNTensor(n, name, mkldnn_tensor);
+}
+
+void convertFrozenConvToMKLDNN(Node* conv) {
+  auto conv_w_mkldnn =
+      constant_as<Tensor>(conv->namedInput("weight")).value().to_mkldnn();
+  std::vector<int64_t> padding =
+      toIValue(conv->namedInput("padding"))->toIntVector();
+  std::vector<int64_t> stride =
+      toIValue(conv->namedInput("stride"))->toIntVector();
+  std::vector<int64_t> dilation =
+      toIValue(conv->namedInput("dilation"))->toIntVector();
+  auto groups = constant_as<int64_t>(conv->namedInput("groups")).value();
+
+  if (conv->kind() == aten::conv2d) {
+    conv_w_mkldnn = mkldnn_reorder_conv2d_weight(
+        conv_w_mkldnn, padding, stride, dilation, groups);
+  } else if (conv->kind() == aten::conv3d) {
+    conv_w_mkldnn = mkldnn_reorder_conv3d_weight(
+        conv_w_mkldnn, padding, stride, dilation, groups);
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
   }
-  // only supported mkldnn dtype for conv
-  if (weight.dtype() != c10::ScalarType::Float) {
-    return false;
+  replaceInputWithMKLDNNTensor(conv, "weight", conv_w_mkldnn);
+
+  if (conv->namedInput("bias")->type() != NoneType::get()) {
+    replaceInputWithMKLDNNTensor(conv, "bias");
   }
-  return true;
+  computeOpInMKLDNN(conv);
+}
+
+void convertFrozenLinearToMKLDNN(Node* linear) {
+  TORCH_INTERNAL_ASSERT(linear->kind() == aten::linear);
+  replaceInputWithMKLDNNTensor(linear, "weight");
+  if (linear->namedInput("bias")->type() != NoneType::get()) {
+    replaceInputWithMKLDNNTensor(linear, "bias");
+  }
+  computeOpInMKLDNN(linear);
 }
 
 void ConvertFrozenConvParamsToMKLDNN(Block* b) {
-  auto g = b->owningGraph();
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
       ConvertFrozenConvParamsToMKLDNN(block);
     }
 
     if (frozenMkldnnCompatibleConvNode(n)) {
-      auto conv = n;
-      auto conv_w_mkldnn =
-          constant_as<Tensor>(conv->namedInput("weight")).value().to_mkldnn();
-      std::vector<int64_t> padding =
-          toIValue(conv->namedInput("padding"))->toIntVector();
-      std::vector<int64_t> stride =
-          toIValue(conv->namedInput("stride"))->toIntVector();
-      std::vector<int64_t> dilation =
-          toIValue(conv->namedInput("dilation"))->toIntVector();
-      auto groups = constant_as<int64_t>(conv->namedInput("groups")).value();
+      convertFrozenConvToMKLDNN(n);
+    }
 
-      if (n->kind() == aten::conv2d) {
-        conv_w_mkldnn = mkldnn_reorder_conv2d_weight(
-            conv_w_mkldnn, padding, stride, dilation, groups);
-      } else if (n->kind() == aten::conv3d) {
-        conv_w_mkldnn = mkldnn_reorder_conv3d_weight(
-            conv_w_mkldnn, padding, stride, dilation, groups);
-      } else {
-        TORCH_INTERNAL_ASSERT(false);
-      }
+    if (frozenMkldnnCompatibleLinearNode(n)) {
+      convertFrozenLinearToMKLDNN(n);
+    }
+  }
+}
 
-      WithInsertPoint guard(conv);
-      auto conv_w_mkldnn_value = createConstantMKLDNNTensorOp(g, conv_w_mkldnn)
-                                     ->insertBefore(conv)
-                                     ->output();
-      auto conv_w_value = conv->namedInput("weight");
-      conv_w_mkldnn_value->setDebugName(conv_w_value->debugName() + "_mkldnn");
-      conv->replaceInputWith(conv_w_value, conv_w_mkldnn_value);
+void ConvertFrozenOpsToMKLDNN(Block* b) {
+  for (Node* n : b->nodes()) {
+    for (Block* block : n->blocks()) {
+      ConvertFrozenOpsToMKLDNN(block);
+    }
 
-      if (conv->namedInput("bias")->type() != NoneType::get()) {
-        auto conv_bias_mkldnn =
-            constant_as<Tensor>(conv->namedInput("bias"))->to_mkldnn();
-        auto conv_bias_mkldnn_value =
-            createConstantMKLDNNTensorOp(g, conv_bias_mkldnn)
-                ->insertBefore(conv)
-                ->output();
-        auto conv_bias_value = conv->namedInput("bias");
-        conv_bias_mkldnn_value->setDebugName(
-            conv_bias_value->debugName() + "_mkldnn");
-        conv->replaceInputWith(conv_bias_value, conv_bias_mkldnn_value);
-      }
-      computeOpInMKLDNN(conv);
+    if (frozenMkldnnCompatibleConvNode(n)) {
+      convertFrozenConvToMKLDNN(n);
     }
   }
 }
