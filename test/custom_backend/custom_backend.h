@@ -13,7 +13,7 @@ class CustomBackend : public torch::jit::PyTorchBackendInterface {
   virtual ~CustomBackend() = default;
 
   bool is_available() override {
-    return isAvailable;
+    return true;
   }
 
   c10::impl::GenericDict compile(
