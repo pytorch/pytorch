@@ -2987,6 +2987,19 @@ bool any_variable_defined(variable_list& variables) {
   return false;
 }
 
+std::tuple<Tensor, Tensor> polar_backward(
+    const Tensor& grad,
+    const Tensor& result) {
+  Tensor grad_abs, grad_angle;
+  if (grad.defined()) {
+    auto grad_conj = grad.conj();
+    grad_abs = at::real(grad_conj * at::sgn(result));
+    auto result_mul_1_j = result * Scalar(c10::complex<double>{0.0, 1.0});
+    grad_angle = at::real(grad_conj * result_mul_1_j);
+  }
+  return std::make_tuple(grad_abs, grad_angle);
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
