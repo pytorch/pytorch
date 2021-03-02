@@ -399,7 +399,8 @@ std::unordered_map<const Value*, std::vector<const Value*>> FindShared(
     // get values that are live during the lifetime of v
     std::set<const Value*> live;
     for (const auto* sv : shared.at(v)) {
-      auto l = alive_during.count(sv) ? alive_during.at(sv) : std::set<const Value*>{};
+      const auto& l = alive_during.count(sv) ? alive_during.at(sv)
+                                             : std::set<const Value*>{};
       live.insert(l.begin(), l.end());
     }
     live.insert(always_alive.begin(), always_alive.end());
@@ -831,11 +832,15 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
       if (output_ivalues.count(ival) == 0) {
         // check for intermediates
         if (!ival->isNone()) {
-          TORCH_CHECK(ival->isTensor(), error_msg);
-          const auto& t = ival->toTensor();
-          if (t.defined()) {
-            const auto* storage_impl = t.storage().unsafeGetStorageImpl();
-            TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+          TORCH_CHECK(
+              ival->isTensor() || canOptimizeConstruct(node.get_node()),
+              error_msg);
+          if (ival->isTensor()) {
+            const auto& t = ival->toTensor();
+            if (t.defined()) {
+              const auto* storage_impl = t.storage().unsafeGetStorageImpl();
+              TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+            }
           }
         }
       } else {
@@ -863,9 +868,15 @@ MemoryPlanner::MemoryPlanner(
         // Types are stored in the underlying TorchScript IR
         const Value* out_v = pnode.get_node()->outputs()[i];
         IValue& out = pnode.Output(i);
-        if (out_variants && out_v->type()->cast<TensorType>() &&
-            !external_values.count(out_v)) {
-          managed_values.insert(out_v);
+        const auto& type = out_v->type();
+        if (out_variants && !external_values.count(out_v)) {
+          if (type->cast<TensorType>()) {
+            managed_values.insert(out_v);
+          } else if (canOptimizeConstruct(pnode.get_node())) {
+            // We "leak" containers of this type
+          } else {
+            unmanaged_value_set.insert(&out);
+          }
         } else {
           unmanaged_value_set.insert(&out);
         }

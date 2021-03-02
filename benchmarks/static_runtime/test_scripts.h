@@ -7,6 +7,18 @@ const auto list_construct_script = R"JIT(
     return [a, b]
 )JIT";
 
+const auto list_construct_script_2 = R"JIT(
+  def forward(self, a, b):
+    c = a + a
+    return [c, c]
+)JIT";
+
+const auto list_construct_script_3 = R"JIT(
+  def forward(self, a, b):
+    c = a + a
+    return [c, c.flatten()]
+)JIT";
+
 const auto list_unpack_script = R"JIT(
   def forward(self, a, b):
     c = [a, b]
@@ -15,9 +27,22 @@ const auto list_unpack_script = R"JIT(
     return z
 )JIT";
 
+const auto list_unpack_script_2 = R"JIT(
+  def forward(self, a, b):
+    c = [a, b]
+    x, y = c
+    z = (x, y)
+    return z
+)JIT";
+
 const auto tuple_construct_script = R"JIT(
   def forward(self, a, b):
     return (a, b)
+)JIT";
+
+const auto tuple_construct_script_2 = R"JIT(
+  def forward(self, a, b):
+    return (a.flatten(), b)
 )JIT";
 
 const auto add_script = R"JIT(

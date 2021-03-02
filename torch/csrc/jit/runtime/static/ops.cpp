@@ -162,6 +162,80 @@ bool canRunNatively(Node* n) {
   return true;
 }
 
+// returns true if the producers of the inputs
+// to this operations are out of place.
+// This means the IValues will not change run to run
+bool inputsCanRunOutOfPlace(Node* n) {
+  for (auto* input : n->inputs()) {
+    if (!canRunOutOfPlace(input->node())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool canOptimizeConstruct(Node* n) {
+  const auto& type = n->output()->type();
+  if (type->kind() == TypeKind::ListType) {
+    const auto& list_type = type->expectRef<ListType>();
+    bool is_tensor_list =
+        list_type.getElementType()->kind() == TypeKind::TensorType;
+    return is_tensor_list && inputsCanRunOutOfPlace(n);
+  } else if (type->kind() == TypeKind::TupleType) {
+    const auto& tuple_type = type->expectRef<TupleType>();
+    auto types = tuple_type.containedTypes();
+    const auto& iter =
+        std::find_if(types.begin(), types.end(), [](const TypePtr& elem) {
+          return elem->kind() == TypeKind::TensorType;
+        });
+    bool is_tensor_tuple = iter != types.end();
+    return is_tensor_tuple && inputsCanRunOutOfPlace(n);
+  }
+  return false;
+}
+
+REGISTER_OPERATOR_FUNCTOR(
+    prim::ListConstruct,
+    prim_ListConstruct,
+    [](Node* n) -> SROperator {
+      const auto& type = n->output()->type()->expectRef<ListType>();
+      bool can_optimize = canOptimizeConstruct(n);
+      return [can_optimize, &type](ProcessedNode* p_node) {
+        const auto& out_l = p_node->Output(0);
+        if (!out_l.isNone() && can_optimize) {
+          return;
+        }
+        const size_t size = p_node->inputs().size();
+        c10::List<IValue> vals(type.getElementType());
+        vals.reserve(size);
+        for (size_t i = 0; i < size; i++) {
+          vals.push_back(p_node->Input(i));
+        }
+        p_node->Output(0) = vals;
+      };
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    prim::TupleConstruct,
+    prim_TupleConstruct,
+    [](Node* n) -> SROperator {
+      bool can_optimize = canOptimizeConstruct(n);
+      return [can_optimize](ProcessedNode* p_node) {
+        const auto& out_l = p_node->Output(0);
+        if (!out_l.isNone() && can_optimize) {
+          return;
+        }
+        // prepare inputs
+        const size_t size = p_node->inputs().size();
+        std::vector<IValue> vals;
+        vals.reserve(size);
+        for (size_t i = 0; i < size; i++) {
+          vals.push_back(p_node->Input(i));
+        }
+        p_node->Output(0) = c10::ivalue::Tuple::create(vals);
+      };
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     auto& in0_t = p_node->Input(0).toTensor();
