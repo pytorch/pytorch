@@ -492,25 +492,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
                   << (*it)->debugName() << "'. This changes graph semantics."
                   << std::endl;
 
-        Node* newNode = nullptr;
-        if (input->type()->kind() == TypeKind::ListType) {
-          // Create an aten::list to clone the list in graph inputs
-          newNode = node->owningGraph()->create(aten::list, 1);
-          newNode->output()->setType(input->type());
-          newNode->addInput(input);
-          b->prependNode(newNode);
-        } else {
-          // Create an aten::clone to clone the tensor in graph inputs
-          newNode = node->owningGraph()->create(aten::clone, 1);
-          newNode->output()->setType(input->type());
-          newNode->addInput(input);
-
-          auto* noneNode = node->owningGraph()->create(prim::Constant);
-          noneNode->output()->setType(NoneType::get());
-          newNode->addInput(noneNode->output());
-          b->prependNode(newNode);
-          noneNode->insertBefore(newNode);
-        }
+        Node* newNode = addDummyCloneToBlock(b, input);
         TORCH_INTERNAL_ASSERT(nullptr != newNode);
         node->replaceInput(index, newNode->output());
         input->replaceAllUsesAfterNodeWith(node, newNode->output());
