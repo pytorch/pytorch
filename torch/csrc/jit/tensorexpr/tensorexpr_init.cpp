@@ -123,12 +123,9 @@ void initTensorExprBindings(PyObject* module) {
       .def("load", [](Placeholder& self, const std::vector<ExprHandle>& v) {
         return self.load(v);
       });
-  py::class_<Tensor>(te, "Tensor")
-      .def(
-          py::init([](BufHandle& b, Stmt* s) {
-            return std::make_unique<Tensor>(b.node(), s);
-          }),
-          py::return_value_policy::reference)
+  py::class_<Tensor, std::unique_ptr<Tensor, py::nodelete>>(te, "Tensor")
+      .def(py::init(
+          [](BufHandle& b, Stmt* s) { return new Tensor(b.node(), s); }))
       .def(
           "load",
           [](Tensor& self, const std::vector<ExprHandle>& v) {
@@ -213,19 +210,23 @@ void initTensorExprBindings(PyObject* module) {
       },
       py::return_value_policy::reference);
 
-  py::class_<Stmt>(te, "Stmt").def("__str__", [](const Stmt& self) {
-    std::stringstream ss;
-    ss << self;
-    return ss.str();
-  });
-  py::class_<For, Stmt>(te, "For")
+  py::class_<Stmt, std::unique_ptr<Stmt, py::nodelete>>(te, "Stmt")
+      .def("__str__", [](const Stmt& self) {
+        std::stringstream ss;
+        ss << self;
+        return ss.str();
+      });
+  py::class_<For, Stmt, std::unique_ptr<For, py::nodelete>>(te, "For")
       .def(
           "index_var",
           [](const For& self) { return VarHandle(self.var()); },
           py::return_value_policy::reference)
       .def("body", &For::body, py::return_value_policy::reference);
 
-  py::class_<tensorexpr::Block, Stmt>(te, "Block")
+  py::class_<
+      tensorexpr::Block,
+      Stmt,
+      std::unique_ptr<tensorexpr::Block, py::nodelete>>(te, "Block")
       .def(
           "stmts",
           &tensorexpr::Block::stmts,
