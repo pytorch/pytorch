@@ -76,9 +76,11 @@ class QuantizeHandler(ABC):
 @register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
+@register_quant_pattern(operator.truediv)
 @register_quant_pattern(torch.add)
 @register_quant_pattern(torch.sub)
 @register_quant_pattern(torch.mul)
+@register_quant_pattern(torch.div)
 @register_quant_pattern(torch.bmm)
 @register_quant_pattern((torch.nn.ReLU, operator.add))
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
@@ -142,6 +144,8 @@ class BinaryOp(QuantizeHandler):
             torch.bmm: float16_dtypes,
             torch.sub: float16_dtypes,
             operator.sub: float16_dtypes,
+            torch.div: float16_dtypes,
+            operator.truediv: float16_dtypes,
         }
 
         qconfig = quantizer.qconfig_map[node.name]
