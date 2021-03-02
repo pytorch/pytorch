@@ -402,7 +402,7 @@ class {module_name}(torch.nn.Module):
         1. It has children that are used
         2. Its forward is called directly via a ``call_module`` node
         3. It has a non-Module attribute that is used from a 
-           ``get_attr`` node
+        ``get_attr`` node
 
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.

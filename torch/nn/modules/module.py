@@ -466,7 +466,7 @@ class Module:
         module_path, _, param_name = target.rpartition(".")
 
         mod: Optional[torch.nn.Module] = self.get_submodule(module_path)
-        
+
         if not mod:
             return None
 
@@ -503,7 +503,7 @@ class Module:
         module_path, _, buffer_name = target.rpartition(".")
 
         mod: Optional[torch.nn.Module] = self.get_submodule(module_path)
-        
+
         if not mod:
             return None
 

@@ -943,7 +943,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         - Checks Nodes have correct ownership (owned by this graph)
         - Checks Nodes appear in topological order
         - If this Graph has an owning GraphModule, checks that targets 
-          exist in that GraphModule
+        exist in that GraphModule
         """
 
         # Check topo order
