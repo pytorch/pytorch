@@ -129,6 +129,10 @@ class TORCH_API Tensor {
     return at::isComplexType(this->scalar_type());
   }
 
+  bool is_floating_point() const {
+        return at::isFloatingType(this->scalar_type());
+  }
+
   int64_t size(int64_t dim) const {
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
     dim = c10::maybe_wrap_dim(dim, this->dim(), false);
@@ -363,6 +367,9 @@ class TORCH_API Tensor {
 
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const;
+
+  /// Returns if a `Tensor` is mlc tensor.
+  bool is_mlc() const;
 
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;
