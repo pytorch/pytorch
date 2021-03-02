@@ -55,6 +55,7 @@ class TORCH_API TensorExprKernel {
   };
 
   void compile();
+  void genInputDebugNames();
 
   void runKernel(Stack& stack);
 
@@ -141,7 +142,7 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeValue(const torch::jit::Value* v);
 
-  Stmt* generateStmt(BackendType backendType);
+  Stmt* transformLoops(BackendType backendType, Stmt* st);
   std::vector<CodeGen::BufferArg> prepareBufferArgs();
 
   std::string getCodeGenName(BackendType backendType);
@@ -226,6 +227,7 @@ class TORCH_API TensorExprKernel {
   std::vector<Tensor*> tensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
+  std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;
   KernelArena kernelArena_;

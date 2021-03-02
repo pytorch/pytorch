@@ -964,10 +964,10 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   // Handle __torch_function__ dispatch
   std::vector<py::handle> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
-  for (size_t i = 0; i < args.size(); ++i) {
-    is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
+  for (const auto & arg : args) {
+    is_tensor_and_append_overloaded(arg.ptr(), &overloaded_args);
     is_tensor_list_and_append_overloaded(
-        args[i].ptr(),
+        arg.ptr(),
         &overloaded_args,
         static_cast<int>(total_arg_num),
         false /* throw_error */);
@@ -987,14 +987,6 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
         false /* throw_error */);
   }
   if (overloaded_args.size() > 0) {
-    std::vector<py::object> overloaded_types;
-    overloaded_types.reserve(overloaded_args.size());
-    for (auto& oarg : overloaded_args) {
-      overloaded_types.push_back(
-          py::reinterpret_borrow<py::object>((PyObject*)Py_TYPE(oarg.ptr())));
-    }
-    py::tuple py_types = py::cast(overloaded_types);
-
     return pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
             overloaded_args,
