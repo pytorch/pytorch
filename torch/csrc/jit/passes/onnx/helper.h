@@ -42,10 +42,9 @@ TORCH_API Node* addNodeToBlock(
 TORCH_API Value* addInputToBlock(Block* block);
 
 TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
-TORCH_API int32_t ATenTypeToONNXType(c10::optional<at::ScalarType> aten_type);
 
 TORCH_API ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType(
-    at::ScalarType at_type);
+    c10::optional<at::ScalarType> at_type);
 
 Node* createONNXUnsqueeze(
     Graph* graph,

@@ -85,39 +85,6 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
   return c10::optional<at::ScalarType>{};
 }
 
-int32_t ATenTypeToONNXType(c10::optional<at::ScalarType> aten_type) {
-  if (aten_type == at::ScalarType::Undefined) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED;
-  } else if (aten_type == at::kFloat) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT;
-  } else if (aten_type == at::kByte) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_UINT8;
-  } else if (aten_type == at::kChar) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_INT8;
-  } else if (aten_type == at::kShort) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_INT16;
-  } else if (aten_type == at::kInt) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
-  } else if (aten_type == at::kLong) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
-  } else if (aten_type == at::kBool) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
-  } else if (aten_type == at::kHalf) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16;
-  } else if (aten_type == at::kDouble) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE;
-  } else if (aten_type == at::kComplexFloat) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX64;
-  } else if (aten_type == at::kComplexDouble) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128;
-  } else if (aten_type == at::kBFloat16) {
-    return ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16;
-  } else {
-    TORCH_CHECK("unexpected ONNX type");
-  }
-  return ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT;
-}
-
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
   auto new_node = block->appendNode(block->owningGraph()->create(kind));
   for (auto input : inputs) {
@@ -131,7 +98,7 @@ Value* addInputToBlock(Block* block) {
 }
 
 ::ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType(
-    at::ScalarType at_type) {
+    c10::optional<at::ScalarType> at_type) {
   switch (at_type) {
     case at::kDouble:
       return ::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE;

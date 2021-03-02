@@ -354,7 +354,7 @@ void PrepareCopyForONNX(Node* node) {
     auto* cast = graph->create(::c10::onnx::Cast, 1);
     cast->addInput(node->input(1));
     auto aten_type = node->input(0)->type()->cast<TensorType>()->scalarType();
-    auto onnx_type = ATenTypeToONNXType(aten_type);
+    auto onnx_type = ATenTypeToOnnxType(aten_type);
     cast->i_(attr::to, onnx_type);
     auto input1 = graph->insertNode(cast)->output();
     auto expanded_value =
