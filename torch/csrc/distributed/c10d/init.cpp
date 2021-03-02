@@ -234,19 +234,7 @@ Returns:
 Returns:
     Whether this bucket is the last bucket to allreduce in an iteration.
     This also means that this bucket corresponds to the first few layers in the forward pass.
-)")
-      .def(
-          "get_offsets",
-          &::c10d::GradBucket::getOffsets,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_lengths",
-          &::c10d::GradBucket::getLengths,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_sizes_list",
-          &::c10d::GradBucket::getSizesVec,
-          py::call_guard<py::gil_scoped_release>());
+)");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
 An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
