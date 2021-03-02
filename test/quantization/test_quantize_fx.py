@@ -2241,6 +2241,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_binary_op_float16_impl(operator.sub, operator.isub)
         self._test_binary_op_float16_impl(torch.sub, None)
 
+    def test_div(self):
+        self._test_binary_op_float16_impl(operator.truediv, operator.itruediv)
+        self._test_binary_op_float16_impl(torch.div, None)
+
     @skipIfNoFBGEMM
     def test_mul(self):
         self._test_binary_op_int8_impl(
