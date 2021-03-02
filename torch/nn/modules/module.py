@@ -463,19 +463,12 @@ class Module:
                 will also be returned if the target string resolves
                 to something that is not an ``nn.Parameter``.
         """
-        atoms: List[str] = target.split(".")
-        module_atoms, param_name = atoms[:-1], atoms[-1]
-        mod: torch.nn.Module = self
+        module_path, _, param_name = target.rpartition(".")
 
-        for item in module_atoms:
-
-            if not hasattr(mod, item):
-                return None
-
-            mod = getattr(mod, item)
-
-            if not isinstance(mod, torch.nn.Module):
-                return None
+        mod: Optional[torch.nn.Module] = self.get_submodule(module_path)
+        
+        if not mod:
+            return None
 
         if not hasattr(mod, param_name):
             return None
@@ -507,19 +500,12 @@ class Module:
                 will also be returned if the target string resolves
                 to something that is not a buffer.
         """
-        atoms: List[str] = target.split(".")
-        module_atoms, buffer_name = atoms[:-1], atoms[-1]
-        mod: torch.nn.Module = self
+        module_path, _, buffer_name = target.rpartition(".")
 
-        for item in module_atoms:
-
-            if not hasattr(mod, item):
-                return None
-
-            mod = getattr(mod, item)
-
-            if not isinstance(mod, torch.nn.Module):
-                return None
+        mod: Optional[torch.nn.Module] = self.get_submodule(module_path)
+        
+        if not mod:
+            return None
 
         for name, buffer in mod.named_buffers():
             if name == buffer_name:
