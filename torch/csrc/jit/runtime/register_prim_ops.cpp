@@ -442,8 +442,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.float(float a) -> complex"),
+         TORCH_SELECTIVE_SCHEMA("aten::Complex.float(float a) -> complex"),
          [](Stack* stack) {
            double a;
            pop(stack, a);
