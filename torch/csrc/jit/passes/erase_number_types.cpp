@@ -42,6 +42,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case aten::Complex:
       case aten::Int:
       case aten::FloatImplicit:
+      case aten::ComplexImplicit:
       case aten::IntImplicit:
       case aten::ScalarImplicit:
       case prim::NumToTensor: {

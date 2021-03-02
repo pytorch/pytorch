@@ -1,5 +1,5 @@
 
-_magic_methods = ['__subclasscheck__', '__hex__', '__rmul__',
+_magic_methods = ['__subclasscheck__', '__hex__', '__rmul__', '__complex__',
                   '__float__', '__idiv__', '__setattr__', '__div__', '__invert__',
                   '__nonzero__', '__rshift__',
                   '__eq__', '__pos__', '__round__',

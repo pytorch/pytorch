@@ -232,6 +232,7 @@ def _get_global_builtins():
     }
 
     magic_methods = [
+        ('complex', '__complex__')
         ('float', '__float__'),
         ('int', '__int__'),
         ('bool', '__bool__'),

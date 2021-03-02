@@ -51,7 +51,7 @@ class TestComplex(JitTestCase):
         # write more tests for complex(int, int), complex(int, float),
         # complex(float, float), complex(str), complex(float, int)
         def fn1(a: int):
-            return a + complex(-2, 3.4)
+            return a + 2j + complex(-2, 3.4) + 2j
 
         def fn(a: int):
             # uses buildConstant
@@ -65,4 +65,5 @@ class TestComplex(JitTestCase):
         self.assertEqual(scripted(t), fn(t))
 
         scripted = torch.jit.script(fn1)
+        print(scripted(t), fn1(t))
         self.assertEqual(scripted(t), fn1(t))

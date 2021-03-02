@@ -598,8 +598,10 @@ class ShapePropagator {
       case aten::Bool:
       case aten::Int:
       case aten::Float:
+      case aten::Complex:
       case aten::ScalarImplicit:
       case aten::FloatImplicit:
+      case aten::ComplexImplicit:
       case aten::IntImplicit:
         return; // correct num type is already set
       case prim::NumToTensor: {

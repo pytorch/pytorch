@@ -3687,8 +3687,7 @@ struct to_ir {
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
     else if (c.isComplex())
-      return materializeConstant(
-          c.asComplex(), *graph, c.range(), c_constants);
+      return materializeConstant(c.asComplex(), *graph, c.range(), c_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);

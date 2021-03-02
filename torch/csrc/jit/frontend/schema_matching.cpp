@@ -107,6 +107,8 @@ Value* tryConvertToType(
     if (value_isa_tensor) {
       if (concrete_float) {
         value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
+      } else if (concrete_complex) {
+        value = graph.insert(aten::ComplexImplicit, {value}, {}, loc);
       } else if (concrete_int) {
         value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
@@ -115,6 +117,8 @@ Value* tryConvertToType(
     } else if (value_equals_number) {
       if (concrete_float) {
         value = graph.insert(aten::Float, {value}, {}, loc);
+      } else if (concrete_complex) {
+        value = graph.insert(aten::Complex, {value}, {}, loc);
       } else if (concrete_int) {
         value = graph.insert(aten::Int, {value}, {}, loc);
       }

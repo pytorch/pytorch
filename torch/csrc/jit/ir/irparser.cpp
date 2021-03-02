@@ -190,15 +190,11 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
 
 /** \brief Parse attribute and add it to the node N.
  *
- * The function determines the attribute type (string, int, float, complex, list of
- * strings, list of ints, list of floats, list of complex, and a list of tensors (currently only
- * for empty lists)).
- * An attribute looks like the following:
- *   AttrName=AttrValue
- *  Where AttrValue can be a list or a scalar literal, e.g.:
- *   size = 27
- *   name = "Bob"
- *   coefs = [1.2, 3.4, 0.6]
+ * The function determines the attribute type (string, int, float, complex, list
+ * of strings, list of ints, list of floats, list of complex, and a list of
+ * tensors (currently only for empty lists)). An attribute looks like the
+ * following: AttrName=AttrValue Where AttrValue can be a list or a scalar
+ * literal, e.g.: size = 27 name = "Bob" coefs = [1.2, 3.4, 0.6]
  */
 void IRParser::parseAttr(Node* n) {
   std::string attrname = L.expect(TK_IDENT).text();

@@ -613,17 +613,17 @@ void listSetItem(Stack* stack);
       },                                                              \
       aliasAnalysisFromSchema())
 
-#define DEFINE_UNARY_COMPLEX_OP(aten_op, op, result)                    \
-  OperatorGenerator(                                                  \
+#define DEFINE_UNARY_COMPLEX_OP(aten_op, op, result)                      \
+  OperatorGenerator(                                                      \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".complex(complex a) -> " #result), \
-      [](Stack* stack) {                                              \
-        c10::complex<double> a;                                       \
-        pop(stack, a);                                                \
-        push(stack, op);                                              \
-      },                                                              \
+      [](Stack* stack) {                                                  \
+        c10::complex<double> a;                                           \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+      },                                                                  \
       aliasAnalysisFromSchema())
 
-#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result) \
+#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                           \
       DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \
       OperatorGenerator(                                                  \
@@ -664,7 +664,13 @@ void listSetItem(Stack* stack);
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 // define implementations for primitive number ops
-#define DEFINE_UNARY_OP_WITH_COMPLEX(aten_op, op, int_result, float_result, complex_result, complex_result_cast) \
+#define DEFINE_UNARY_OP_WITH_COMPLEX(                                     \
+    aten_op,                                                              \
+    op,                                                                   \
+    int_result,                                                           \
+    float_result,                                                         \
+    complex_result,                                                       \
+    complex_result_cast)                                                  \
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                           \
       DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \
       DEFINE_UNARY_COMPLEX_OP(aten_op, op, complex_result),               \
@@ -677,8 +683,8 @@ void listSetItem(Stack* stack);
               double a = x.toDouble();                                    \
               push(stack, static_cast<float_result>(op));                 \
             } else if (x.isComplexDouble()) {                             \
-              c10::complex<double> a = x.toComplexDouble();                             \
-              push(stack, static_cast<complex_result_cast>(op));               \
+              c10::complex<double> a = x.toComplexDouble();               \
+              push(stack, static_cast<complex_result_cast>(op));          \
             } else {                                                      \
               int64_t a = x.toInt();                                      \
               push(stack, static_cast<int_result>(op));                   \
