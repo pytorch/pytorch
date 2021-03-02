@@ -369,7 +369,7 @@ void PrepareCopyForONNX(Node* node) {
       index_put->node()->setSourceRange(node->sourceRange());
       index_put->copyMetadata(node->output());
       node->output()->replaceAllUsesWith(index_put);
-  
+
       PrepareIndexPutForONNX(index_put->node());
     }
   }
