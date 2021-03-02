@@ -5913,13 +5913,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.assertRaises(TypeError, run_model)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_embedding(self):
         class EmbedModel(torch.nn.Module):
             def forward(self, input, emb):
                 return torch.nn.functional.embedding(input, emb, padding_idx=1)
 
         model = EmbedModel()
-        x = torch.LongTensor([1,2,1,5])
+        x = torch.randint(4, (4, ))
+        x[2] = x[0] = 1
         embedding_matrix = torch.rand(10, 3)
         self.run_test(model, (x, embedding_matrix))
 
