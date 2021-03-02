@@ -18,21 +18,25 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
   return indices.at(0)->dtype();
 }
 
+void castIndicesToInts(std::vector<const Expr*>& indices) {
+  // Cast all indices to Int
+  // TODO: Should we use int64 here?
+  auto index_dtype = ScalarType::Int;
+  for (auto& index : indices) {
+    const Dtype& dt = index->dtype();
+    if (is_integral(dt.scalar_type()) && dt.scalar_type() != index_dtype) {
+      index = new Cast(Dtype(index_dtype, dt.lanes()), index);
+    }
+  }
+}
+
 Load::Load(
     Dtype dtype,
     const Buf* buf,
     const std::vector<const Expr*>& indices,
     const Expr* mask)
     : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
-  // Cast all indices to Int
-  // TODO: Should we use int64 here?
-  auto index_dtype = ScalarType::Int;
-  for (size_t i = 0; i < indices_.size(); i++) {
-    const Dtype& dt = indices_[i]->dtype();
-    if (is_integral(dt.scalar_type()) && dt.scalar_type() != index_dtype) {
-      indices_[i] = new Cast(Dtype(index_dtype, dt.lanes()), indices_[i]);
-    }
-  }
+  castIndicesToInts(indices_);
 }
 
 Load::Load(
@@ -80,15 +84,7 @@ Store::Store(
     const Expr* value,
     const Expr* mask)
     : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
-  // Cast all indices to Int
-  // TODO: Should we use int64 here?
-  auto index_dtype = ScalarType::Int;
-  for (size_t i = 0; i < indices_.size(); i++) {
-    const Dtype& dt = indices_[i]->dtype();
-    if (is_integral(dt.scalar_type()) && dt.scalar_type() != index_dtype) {
-      indices_[i] = new Cast(Dtype(index_dtype, dt.lanes()), indices_[i]);
-    }
-  }
+  castIndicesToInts(indices_);
 }
 
 Store* Store::make(
