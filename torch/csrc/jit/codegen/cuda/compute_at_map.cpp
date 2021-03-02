@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/codegen/cuda/lower_compute_at_map.h>
+#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
@@ -107,6 +107,13 @@ std::deque<T*> deduplicateDeque(const std::deque<T*>& deque) {
   return deduped;
 }
 
+void assertLowered(bool lowered) {
+  TORCH_INTERNAL_ASSERT(
+      lowered,
+      "Tried to accessed lowered values of compute at map,",
+      " however a valid lowering was not set when compute at map was created.");
+}
+
 } // namespace
 
 void ComputeAtMap::mapIds(IterDomain* id0, IterDomain* id1) {
@@ -209,10 +216,7 @@ void ComputeAtMap::mapIds(IterDomain* id0, IterDomain* id1) {
   }
 }
 
-void ComputeAtMap::build() {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  TORCH_INTERNAL_ASSERT(fusion != nullptr);
-
+void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
   // Consumers can only show up once in an expression, keep track of all of them
   std::vector<TensorView*> consumer_tvs;
 
@@ -353,13 +357,16 @@ void ComputeAtMap::build() {
     }
   }
 
-  convertToKir();
+  if (gpu_lower != nullptr) {
+    convertToKir(fusion, gpu_lower);
+  }
 }
 
-void ComputeAtMap::convertToKir() {
-  Fusion* fusion = FusionGuard::getCurFusion();
+void ComputeAtMap::convertToKir(Fusion* fusion, GpuLower* gpu_lower) {
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
-  auto gpu_lower = GpuLower::current();
+  TORCH_INTERNAL_ASSERT(gpu_lower != nullptr);
+
+  has_lowered_kir_ = true;
 
   std::unordered_map<
       std::shared_ptr<std::deque<IterDomain*>>,
@@ -430,6 +437,7 @@ bool ComputeAtMap::areMapped(IterDomain* id0, IterDomain* id1) const {
 }
 
 bool ComputeAtMap::areMapped(kir::IterDomain* id0, kir::IterDomain* id1) const {
+  assertLowered(has_lowered_kir_);
   if (id0 == id1) {
     return true;
   }
@@ -451,6 +459,7 @@ IterDomain* ComputeAtMap::getConcreteMappedID(IterDomain* id) const {
 }
 
 kir::IterDomain* ComputeAtMap::getConcreteMappedID(kir::IterDomain* id) const {
+  assertLowered(has_lowered_kir_);
   auto it = kir_concrete_id_map_.find(id);
   if (it != kir_concrete_id_map_.end()) {
     return it->second;
@@ -459,6 +468,7 @@ kir::IterDomain* ComputeAtMap::getConcreteMappedID(kir::IterDomain* id) const {
 }
 
 IterDomain* ComputeAtMap::toFusion(kir::IterDomain* kir) const {
+  assertLowered(has_lowered_kir_);
   auto kir_2_fusion_it = kir_2_fusion_.find(kir);
   TORCH_INTERNAL_ASSERT(
       kir_2_fusion_it != kir_2_fusion_.end(),

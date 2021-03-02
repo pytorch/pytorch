@@ -4,6 +4,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
+#include <unordered_map>
 #include <vector>
 
 namespace torch {
@@ -163,6 +164,21 @@ class TORCH_CUDA_CU_API TransformReplay {
   static TensorDomain* fullSelfReplay(
       const TensorDomain* new_self_root,
       const TensorDomain* self);
+};
+
+class TORCH_CUDA_CU_API TransformPropagator {
+ private:
+  bool replayPasC(TensorView* producer_tv, TensorView* consumer_tv = nullptr);
+  bool replayCasP(TensorView* consumer_tv, TensorView* producer_tv = nullptr);
+
+  TransformPropagator(TensorView* from);
+
+ private:
+  std::unordered_map<TensorView*, unsigned int> replayed_pos;
+  TensorView* starting_tv = nullptr;
+
+ public:
+  static void from(TensorView* tv);
 };
 
 } // namespace cuda
