@@ -401,6 +401,11 @@ struct DDPLoggingData {
   int64_t avg_backward_compute_time = 0;
   int64_t avg_backward_comm_time = 0;
   int64_t avg_backward_compute_comm_overlap_time = 0;
+  // Performance stats for the current iteration.
+  int64_t forward_compute_time = 0;
+  int64_t backward_compute_time = 0;
+  int64_t backward_comm_time = 0;
+  int64_t backward_compute_comm_overlap_time = 0;
 };
 
 C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
