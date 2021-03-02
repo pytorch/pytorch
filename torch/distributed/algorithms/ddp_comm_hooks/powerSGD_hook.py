@@ -162,7 +162,9 @@ class PowerSGDState(object):
             )
 
 
-def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
+def powerSGD_hook(
+    state: PowerSGDState, bucket: dist._GradBucket
+) -> torch.futures.Future:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -444,7 +446,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     )
 
 
-def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
+def batched_powerSGD_hook(
+    state: PowerSGDState, bucket: dist._GradBucket
+) -> torch.futures.Future:
     r"""
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
