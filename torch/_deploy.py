@@ -1,12 +1,9 @@
 import io
 import torch
-import importlib
 from torch.package._package_pickler import create_pickler
-from torch.package.package_importer import _UnpicklerWrapper
+from torch.package._package_unpickler import PackageUnpickler
 from torch.package import sys_importer, OrderedImporter, PackageImporter, Importer
 from torch.serialization import _maybe_decode_ascii
-from typing import Callable
-from types import ModuleType
 
 def _save_storages(importer, obj):
     serialized_storages = []
@@ -50,17 +47,13 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages):
         return serialized_storages[data[0]]
 
 
-    import_module : Callable[[str], ModuleType] = importlib.import_module
+    importer: Importer
     if zip_reader is not None:
-        importer = _get_package(zip_reader)
+        importer = OrderedImporter(_get_package(zip_reader), sys_importer)
+    else:
+        importer = sys_importer
 
-        def import_module(name: str):
-            try:
-                return importer.import_module(name)
-            except ModuleNotFoundError:
-                return importlib.import_module(name)
-
-    unpickler = _UnpicklerWrapper(import_module, io.BytesIO(obj_bytes))
+    unpickler = PackageUnpickler(importer, io.BytesIO(obj_bytes))
     unpickler.persistent_load = persistent_load
     result = _deploy_objects[id] = unpickler.load()
     return result
