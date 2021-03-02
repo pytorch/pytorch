@@ -210,6 +210,10 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
+  std::cout << "Field::::" << field << std::endl;
+  if (field == "string_view") {
+      return std::make_shared<BuiltinFunction>(Symbol::aten(field), c10::nullopt);
+  }
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
@@ -1055,8 +1059,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
-#ifndef USE_ROCM
     std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
+    std::cout << "Obj Name::::" << obj_name << std::endl;
+#ifndef USE_ROCM
+    //std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
     if (obj_name.compare("torch.cuda") == 0) {
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }

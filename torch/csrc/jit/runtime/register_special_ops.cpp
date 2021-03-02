@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/jit/string_view/stringview.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
@@ -415,6 +416,14 @@ RegisterOperators reg({
           double val;
           pop(stack, tensor, val);
           push(stack, at::fill_(tensor, val));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::string_view(string str) -> __torch__.torch.classes.string.string_view",
+        [](Stack* stack) {
+          auto s = pop(stack).toStringRef();
+          auto st = make_custom_class<torch::jit::basic_string_view>(s);
+          push(stack, IValue(st));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
