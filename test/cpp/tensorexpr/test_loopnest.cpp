@@ -3743,5 +3743,63 @@ TEST(LoopNest, InlineFromLoad) {
       oss.str());
 }
 
+Tensor* colReduce(int M, int N) {
+  Placeholder a("a", kInt, {M, N});
+  return Reduce(
+      "b",
+      {{N, "n"}},
+      Sum(),
+      [&](const VarHandle& n, const VarHandle& m) { return a.load(m, n); },
+      {{M, "m"}});
+}
+
+void splitTailReorder(Tensor* b) {
+  constexpr int kVectorWidth = 8;
+  For *outer, *inner, *tail;
+  LoopNest nest({b});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.splitWithTail(loops[0], kVectorWidth, &outer, &inner, &tail);
+  loops = nest.getLoopStmtsFor(b);
+  nest.reorderAxis(loops[1], loops[2]);
+}
+
+void splitMaskReorder(Tensor* b) {
+  constexpr int kVectorWidth = 8;
+  For *outer, *inner;
+  LoopNest nest({b});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.splitWithMask(loops[0], kVectorWidth, &outer, &inner);
+  loops = nest.getLoopStmtsFor(b);
+  nest.reorderAxis(loops[1], loops[2]);
+  std::clog << *nest.root_stmt() << "\n";
+}
+
+TEST(LoopNest, ColReduceSplitEvenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 128;
+  Tensor* b = colReduce(M, N);
+  splitTailReorder(b);
+}
+
+TEST(LoopNest, ColReduceSplitUnevenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 100;
+  Tensor* b = colReduce(M, N);
+  splitTailReorder(b);
+}
+
+TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 128;
+  Tensor* b = colReduce(M, N);
+  splitMaskReorder(b);
+}
+
+TEST(LoopNest, ColReduceSplitMaskUnevenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 100;
+  Tensor* b = colReduce(M, N);
+  splitMaskReorder(b);
+}
 } // namespace jit
 } // namespace torch
