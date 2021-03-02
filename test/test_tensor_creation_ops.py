@@ -694,7 +694,7 @@ class TestTensorCreation(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "input tensors must be on the same device"):
             torch.cat((cuda0, cuda1))
-        
+
         with self.assertRaisesRegex(RuntimeError,
                                     "all input tensors and out must be on the same device"):
             torch.cat((cuda0, cuda0), out=cuda1)
@@ -711,7 +711,7 @@ class TestTensorCreation(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "input tensors must be on the same device"):
             torch.cat((cpu, cuda))
-        
+
         with self.assertRaisesRegex(RuntimeError,
                                     "input tensors must be on the same device"):
             torch.cat((cpu, cuda), out=out_cuda)
@@ -719,7 +719,7 @@ class TestTensorCreation(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "all input tensors and out must be on the same device"):
             torch.cat((cpu, cpu), out=out_cuda)
-        
+
         with self.assertRaisesRegex(RuntimeError,
                                     "all input tensors and out must be on the same device"):
             torch.cat((cuda, cuda), out=out_cpu)
@@ -739,7 +739,7 @@ class TestTensorCreation(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "all input tensors and out must be on the same device"):
             torch.stack((cpu, cpu), out=out_cuda)
-        
+
         with self.assertRaisesRegex(RuntimeError,
                                     "all input tensors and out must be on the same device"):
             torch.stack((cuda, cuda), out=out_cpu)
