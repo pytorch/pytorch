@@ -11,6 +11,7 @@ import torch
 import torch.utils.benchmark as benchmark_utils
 from .utils import load_dlmc_dataset
 from scipy.sparse import isspmatrix
+import os
 
 
 def scipy_matmul(mat1, mat2):
@@ -83,7 +84,7 @@ if __name__ == '__main__':
 
     dataset_path = args.path
     dataset_name = args.dataset
-    dataset_path = f"{dataset_path}/{dataset_name}"
+    dataset_path = os.path.join(dataset_path, dataset_name)
     device = 'cuda' if args.with_cuda else 'cpu'
 
     tasks = get_tasks(args.operation, args.backward_test, device)
