@@ -484,7 +484,7 @@ def fractional_max_pool3d_with_indices(
                      or a tuple `(kT, kH, kW)`
         output_size: the target output size of the form :math:`oT \times oH \times oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number :math:`oH` for a cubic output
-                      :math:`oH \times oH \times oH`
+                     :math:`oH \times oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
@@ -1277,7 +1277,11 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu6, (input,), input, inplace=inplace)
-    return hardtanh(input, 0.0, 6.0, inplace)
+    if inplace:
+        result = torch._C._nn.relu6_(input)
+    else:
+        result = torch._C._nn.relu6(input)
+    return result
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
@@ -1711,9 +1715,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""hardsigmoid(input) -> Tensor
-
-    Applies the element-wise function
+    r"""Applies the element-wise function
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
