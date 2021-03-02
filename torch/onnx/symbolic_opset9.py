@@ -2918,3 +2918,18 @@ def __range_length(g, lo, hi, step):
     sub = g.op("Sub", hi, lo)
     div = g.op("Ceil", true_divide(g, sub, step))
     return g.op("Cast", div, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+
+def linear(g, input, weight, bias):
+    rank = sym_help._get_tensor_rank(input)
+    weight = t(g, weight)
+    if rank == 2 and bias is not None:
+        alpha = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        beta = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        output = addmm(g, bias, input, weight, alpha, beta)
+    else:
+        output = matmul(g, input, weight)
+        if bias is not None:
+            output = add(g, bias, output)
+
+    return output
