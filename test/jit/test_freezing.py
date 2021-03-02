@@ -14,6 +14,13 @@ import unittest
 
 import io
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
@@ -1699,6 +1706,20 @@ class TestFrozenOptimizations(JitTestCase):
             inp = torch.rand([20, 20])
             self.assertEqual(scripted_mod(inp), mod(inp))
             self.assertEqual(scripted_mod(inp), mod(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @skipIfNoTorchVision
+    def test_maxpool_mkldnn(self):
+        with set_default_dtype(torch.float):
+            model = torchvision.models.resnet18()
+            sub_model = torch.nn.Sequential(model.conv1, model.bn1, model.relu, model.maxpool)
+            mod = torch.jit.freeze(torch.jit.script(sub_model.eval()))
+            N, C, H, W, = 10, 3, 224, 224
+            inp = torch.randn(N, C, H, W)
+            self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+            FileCheck().check("max_pool").check("to_dense").run(mod.graph)
+            FileCheck().check_count("to_dense", 1, exactly=True).run(mod.graph)
+            self.assertEqual(mod(inp), sub_model(inp))
 
     @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
     def test_conv_to_mkldnn_no_mkldnn(self):
