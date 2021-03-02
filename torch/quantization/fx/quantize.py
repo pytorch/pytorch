@@ -29,7 +29,11 @@ from ..quantize import (
 from ..utils import (
     get_combined_dict,
     get_swapped_custom_module_class,
+    activation_is_quantized,
+    weight_is_quantized,
     activation_is_statically_quantized,
+    activation_dtype,
+    weight_dtype,
 )
 
 from .pattern_utils import (
@@ -166,7 +170,8 @@ def insert_observer_for_output_of_the_node(
     # don't need to insert observer for output if activation does not
     # need to be statically quantized
     assert modules is not None
-    if activation_is_statically_quantized(qconfig):
+    # TODO: Add warnings in the quantize handlers that does not support fp16 quantization
+    if activation_is_quantized(qconfig):
         if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) \
                 and model.training:
             # we only insert fake quantize module in qat
@@ -201,8 +206,7 @@ def insert_observer_for_output_of_the_node(
             # propagate observed property from input
             if is_observed(node.args[0]):
                 observed_node_names_set.add(node.name)
-        elif ((isinstance(quantize_handler, Add) or
-                isinstance(quantize_handler, Mul)) and
+        elif (isinstance(quantize_handler, BinaryOp) and
               quantize_handler.num_node_args == 1):
             assert matched_nodes is not None
             input_node = matched_nodes[-1]  # first node in the sequence
@@ -217,6 +221,14 @@ def insert_observer_for_output_of_the_node(
             if (input_is_observed(input_node.args[0]) or
                     input_is_observed(input_node.args[1])):
                 observed_node_names_set.add(node.name)
+
+            if activation_dtype(qconfig) == torch.float16:
+                # observer for outputs
+                new_observer = qconfig.activation()
+                insert_observer(
+                    node, new_observer, model,
+                    activation_post_process_map, env, observed_graph,
+                    load_arg, observed_node_names_set)
         elif isinstance(quantize_handler,
                         StandaloneModuleQuantizeHandler):
             assert node.op == "call_module"
@@ -419,6 +431,7 @@ class Quantizer:
         self.patterns = get_combined_dict(
             get_default_quant_patterns(), additional_quant_patterns)
 
+        convert_dict_to_ordered_dict(qconfig_dict)
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
@@ -429,7 +442,6 @@ class Quantizer:
 
         self.modules = dict(model.named_modules())
 
-        convert_dict_to_ordered_dict(qconfig_dict)
         # map from node name to qconfig, used in _find_matches
         self._generate_qconfig_map(model, model.graph, qconfig_dict, node_name_to_scope)
 
@@ -786,13 +798,8 @@ class Quantizer:
             assert isinstance(node.target, str)
             observer_module = self.modules[node.target]
             prev_node = node.args[0]
-            if observer_module.dtype == torch.float16:
-                # activations are not quantized for
-                # fp16 dynamic quantization
-                # copy the activaiton_post_process node here
-                # since we may need it when we insert prepack
-                # op for weight of linear, this will be removed
-                # later in a separate pass
+            if observer_module.dtype == torch.float32:
+                # copy the observer for fp32 dtype
                 env[node.name] = self.quantized_graph.node_copy(
                     node, load_non_quantized)
             elif isinstance(prev_node, Node) and prev_node.name in quant_env:
@@ -934,6 +941,7 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
         quantized_root = quantized
         quantized_graph = quantized.graph
+
         for node in quantized_graph.nodes:
             prepack_node = folded_nodes.get(node.name, None)
             if prepack_node is node:
@@ -1083,11 +1091,14 @@ class Quantizer:
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
                 is_activation = not (is_weight or is_bias)
+                # bias needs to be quantized if activation is fp16 and weight is fp16
+                # this is the case for glow
                 should_add_handler = qconfig is not None and (
                     (is_activation and
-                        activation_is_statically_quantized(qconfig)) or
-                    (is_weight and weight_is_statically_quantized(qconfig))
-                )
+                     activation_is_quantized(qconfig)) or
+                    (is_weight and weight_is_quantized(qconfig)) or
+                    (is_bias and activation_dtype(qconfig) == torch.float16)
+                    and weight_dtype(qconfig) == torch.float16)
 
                 if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \
