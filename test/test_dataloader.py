@@ -2101,6 +2101,7 @@ class SimpleCustomBatch(object):
         return self.inp.is_pinned() and self.tgt.is_pinned()
 
 # foo is used to fix https://github.com/pytorch/pytorch/issues/50661
+# Needed to workaround limitations when  `__main__` is not importable my spawned module
 foo = __import__(os.path.splitext(os.path.basename(__file__))[0])
 def collate_wrapper(batch):
     return foo.SimpleCustomBatch(batch)
