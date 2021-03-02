@@ -44,7 +44,7 @@ TORCH_API Value* addInputToBlock(Block* block);
 TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 
 TORCH_API ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType(
-    c10::optional<at::ScalarType> at_type);
+    at::ScalarType at_type);
 
 Node* createONNXUnsqueeze(
     Graph* graph,

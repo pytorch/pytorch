@@ -98,7 +98,7 @@ Value* addInputToBlock(Block* block) {
 }
 
 ::ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType(
-    c10::optional<at::ScalarType> at_type) {
+    at::ScalarType at_type) {
   switch (at_type) {
     case at::kDouble:
       return ::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE;
