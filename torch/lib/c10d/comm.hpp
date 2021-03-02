@@ -22,9 +22,9 @@ class GradBucket {
   explicit GradBucket(
       size_t index,
       const std::vector<at::Tensor>& tensors,
-      const std::vector<size_t>& offsets = {},
-      const std::vector<size_t>& lengths = {},
-      const std::vector<c10::IntArrayRef>& sizes_vec = {})
+      const std::vector<size_t>& offsets,
+      const std::vector<size_t>& lengths,
+      const std::vector<c10::IntArrayRef>& sizes_vec)
       : index_(index),
         tensors_(tensors),
         offsets_(offsets),
