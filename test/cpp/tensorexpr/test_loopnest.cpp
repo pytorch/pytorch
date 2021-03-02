@@ -3612,8 +3612,8 @@ TEST(LoopNest, DeadStoreElimination) {
   KernelScope kernel_scope;
   VarHandle y("y", kInt);
   VarHandle x("x_tail", kInt);
-  BufHandle f("f", {26, 5}, kFloat);
-  BufHandle g("g", {26, 5}, kFloat);
+  BufHandle f("f", {26, 5}, kInt);
+  BufHandle g("g", {26, 5}, kInt);
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(
@@ -3664,9 +3664,9 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  BufHandle f("f", {26 * 5}, kFloat);
-  BufHandle g("g", {26 * 5}, kFloat);
-  BufHandle h("h", {26, 5}, kFloat);
+  BufHandle f("f", {26 * 5}, kInt);
+  BufHandle g("g", {26 * 5}, kInt);
+  BufHandle h("h", {26, 5}, kInt);
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(x, 0, 26 * 5, Store::make(f, {x}, x));
