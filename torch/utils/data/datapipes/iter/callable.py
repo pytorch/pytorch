@@ -18,6 +18,7 @@ T_co = TypeVar('T_co', covariant=True)
 def default_fn(data):
     return data
 
+
 @functional_datapipe('map')
 class MapIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`MapIterDataPipe`.
@@ -75,6 +76,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             self.fn = dill_function  # type: ignore
 
 
+@functional_datapipe('collate')
 class CollateIterDataPipe(MapIterDataPipe):
     r""" :class:`CollateIterDataPipe`.
 
@@ -121,6 +123,7 @@ class CollateIterDataPipe(MapIterDataPipe):
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
 
+@functional_datapipe('transforms')
 class TransformsIterDataPipe(MapIterDataPipe):
     r""" :class:`TransformsIterDataPipe`.
 
