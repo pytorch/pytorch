@@ -380,7 +380,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         server_store.set("key", "value")
         for (i, p) in enumerate(processes):
             # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
+            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
                                 "Process {} terminated with exit code {}. Check logs for exception stacktrace."
                                 .format(i, p.exitcode))
             p.join()
@@ -399,7 +399,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             p.start()
         for (i, p) in enumerate(processes):
             # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, 
+            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
                                 "Process {} terminated with exit code {}. Check logs for exception stacktrace."
                                 .format(i, p.exitcode))
             p.join()
@@ -2311,6 +2311,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.is_multi_device_module, True)
         else:
             model, ddp_model, input, target = self._prepare_single_device_module(
                 process_group,
@@ -2319,6 +2321,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
+            self.assertEqual(ddp_logging_data.is_multi_device_module, False)
 
         def step_model(model, input, target):
             model.train()

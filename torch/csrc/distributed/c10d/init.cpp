@@ -1284,7 +1284,8 @@ Arguments:
       .def_readwrite("forward_compute_time", &c10::DDPLoggingData::forward_compute_time)
       .def_readwrite("backward_compute_time", &c10::DDPLoggingData::backward_compute_time)
       .def_readwrite("backward_comm_time", &c10::DDPLoggingData::backward_comm_time)
-      .def_readwrite("backward_compute_comm_overlap_time", &c10::DDPLoggingData::backward_compute_comm_overlap_time);
+      .def_readwrite("backward_compute_comm_overlap_time", &c10::DDPLoggingData::backward_compute_comm_overlap_time)
+      .def_readwrite("is_multi_device_module", &c10::DDPLoggingData::is_multi_device_module);
 
   module.def(
       "_compute_bucket_assignment_by_size",
