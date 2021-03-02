@@ -28,10 +28,23 @@ const char * parseDistDebugLevel() {
     LOG(INFO) << "TORCH_DISTRIBUTED_DEBUG level parsed as " << debugLevel;
   });
 
-  if (!debugLevel.compare(("N/A"))) {
+  if (debugLevel.compare("N/A") == 0) {
     return kDistDebugOffLogLevel;
   } else {
-    return debugLevel.c_str();
+    const char * levelStr = debugLevel.c_str();
+    TORCH_CHECK(
+      strncmp(levelStr, kDistDebugDetailLogLevel, strlen(kDistDebugDetailLogLevel)) == 0
+      || strncmp(levelStr, kDistDebugInfoLogLevel, strlen(kDistDebugInfoLogLevel)) == 0
+      || strncmp(levelStr, kDistDebugOffLogLevel, strlen(kDistDebugOffLogLevel)) == 0,
+      c10::str(
+        "Expected environment variable TORCH_DISTRIBUTED_DEBUG to be one of ",
+        kDistDebugDetailLogLevel,
+        kDistDebugInfoLogLevel,
+        kDistDebugOffLogLevel
+      );
+    )
+    // TORCH_CHECK(debug)
+    // return debugLevel.c_str();
   }
 }
 
@@ -280,7 +293,7 @@ void Logger::set_runtime_stats_and_log() {
         reducer_->cpu_timer_.backward_compute_end_time);
   }
   // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG is enabled.
-  if (!(strncmp(parseDistDebugLevel(), kDistDebugDetailLogLevel, 6))) {
+  if (!(strncmp(parseDistDebugLevel(), kDistDebugDetailLogLevel, strlen(kDistDebugDetailLogLevel)))) {
     LOG(INFO) << *this;
   }
 
