@@ -1409,6 +1409,17 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
 
     return samples
 
+def sample_inputs_polar(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput((_make_tensor_helper((S, S), low=0), _make_tensor_helper((S, S)))),
+        SampleInput((_make_tensor_helper((), low=0), _make_tensor_helper(()))),
+    )
+
+    return samples
+
 # Foreach pointwise ops
 foreach_pointwise_op_db: List[OpInfo] = [
     ForeachFuncInfo('_foreach_addcmul',
@@ -1740,8 +1751,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.cfloat]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_fn_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_method_grad',
@@ -2243,8 +2252,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    skips=(
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.bfloat16]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
@@ -2284,8 +2291,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    skips=(
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.bfloat16]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
@@ -2444,11 +2449,7 @@ op_db: List[OpInfo] = [
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    safe_casts_outputs=True,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   skips=(
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
-                   )),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('sinc',
                    ref=np_sinc_with_fp16_as_fp32,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2464,8 +2465,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/49133
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                 dtypes=[torch.cfloat]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                    )),
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
@@ -2481,15 +2480,18 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
-                                active_if=IS_WINDOWS),
                        # Reference: https://github.com/pytorch/pytorch/issues/48641
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.int8]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    UnaryUfuncInfo('signbit',
+                   ref=np.signbit,
+                   dtypes=all_types_and(torch.bfloat16, torch.half),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
+                   supports_autograd=False),
     OpInfo('std',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -2735,6 +2737,10 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('polar',
+           dtypes=floating_types(),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_polar),
     OpInfo('pinverse',
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
@@ -3005,10 +3011,11 @@ if TEST_SCIPY:
                        domain=(0, 1),
                        decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                       torch.float16: 5e-1}),),
-                       dtypes=floating_types_and(torch.half),
-                       dtypesIfCPU=floating_types_and(torch.bfloat16),
-                       dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-                       sample_inputs_func=sample_inputs_logit),
+                       dtypes=all_types_and(torch.half),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       sample_inputs_func=sample_inputs_logit,
+                       safe_casts_outputs=True),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
