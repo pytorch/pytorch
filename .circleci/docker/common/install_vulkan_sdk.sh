@@ -19,6 +19,6 @@ curl --silent --show-error --location --fail --retry 3 \
 tar -C "$_vulkansdk_dir" -xzf "$_tmp_vulkansdk_targz" --strip-components 1
 
 echo "hello from install_vulkan_sdk.sh"
-source "$_vulkansdk_dir/${VULKAN_SDK_VERSION}/setup-env.sh"
+source "$_vulkansdk_dir/setup-env.sh"
 
 rm "$_tmp_vulkansdk_targz"
