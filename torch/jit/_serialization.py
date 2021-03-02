@@ -33,7 +33,7 @@ def save(m, f, _extra_files=None):
         during loading.  This is different from :func:`torch.load`'s semantics
         and may change in the future.
 
-    Arguments:
+    Args:
         m: A :class:`ScriptModule` to save.
         f: A file-like object (has to implement write and flush) or a string
            containing a file name.
@@ -94,7 +94,7 @@ def load(f, map_location=None, _extra_files=None):
     because the run time system doesn't have certain devices), an exception is
     raised.
 
-    Arguments:
+    Args:
         f: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
         map_location (string or torch.device): A simplified version of
@@ -158,7 +158,7 @@ def load(f, map_location=None, _extra_files=None):
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, str) or isinstance(f, pathlib.Path):
-        cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
+        cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files)
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
             cu, f.read(), map_location, _extra_files

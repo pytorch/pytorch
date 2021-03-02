@@ -212,7 +212,7 @@ auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::v
   extract_vars(node->is_variable_input_, input_vars, args...);
 
   bool is_executable =  GradMode::is_enabled() && any_variable_requires_grad(input_vars);
-  auto next_edges = collect_next_edges(input_vars);
+  auto next_edges = (is_executable ? collect_next_edges(input_vars) : edge_list());
   node->set_ctx_grad_fn(node);
   node->set_next_edges(std::move(next_edges));
   node->clear_input_metadata();
@@ -273,12 +273,12 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   auto outputs = T::backward(&ctx_, backward_inputs);
 
   int num_forward_inputs = is_variable_input_.size();
-  int num_outputs = outputs.size();
+  auto num_outputs = outputs.size();
   // Returning too many results is ok, but only as long as they're all undefined.
   // Truncate the result vector in that case.
   if (num_outputs > num_forward_inputs) {
     bool all_undef = true;
-    for (int i = num_forward_inputs; i < num_outputs; ++i) {
+    for (size_t i = num_forward_inputs; i < num_outputs; ++i) {
       all_undef &= (!outputs[i].defined());
     }
     if (all_undef) {

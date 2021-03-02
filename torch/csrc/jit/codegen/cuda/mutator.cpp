@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
@@ -7,6 +8,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 void OptOutMutator::mutate(Fusion* fusion) {
   std::vector<Expr*> orig_exprs = fusion->exprs();
@@ -198,6 +200,7 @@ Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
   return ite;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -111,24 +111,24 @@ public:
   uint64_t pack() const noexcept {
     // Are you here because this static assert failed?  Make sure you ensure
     // that the bitmasking code below is updated accordingly!
-    static_assert(sizeof(DeviceType) == 2, "DeviceType is not 16-bit");
-    static_assert(sizeof(DeviceIndex) == 2, "DeviceIndex is not 16-bit");
+    static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
+    static_assert(sizeof(DeviceIndex) == 1, "DeviceIndex is not 8-bit");
     static_assert(sizeof(StreamId) == 4, "DeviceIndex is not 32-bit");
     // Concat these together into a 64-bit integer
     // See Note [Hazard when concatenating signed integers]
     uint64_t bits =
-        static_cast<uint64_t>(static_cast<uint16_t>(device_type())) << 48
-      | static_cast<uint64_t>(static_cast<uint16_t>(device_index())) << 32
+        static_cast<uint64_t>(static_cast<uint8_t>(device_type())) << 48
+      | static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 32
       | static_cast<uint64_t>(static_cast<uint32_t>(id()));
     return bits;
   }
 
   static Stream unpack(uint64_t bits) {
-    auto stream_id = static_cast<StreamId>(bits) & 0xFFFFFFFFull;
+    const auto stream_id = static_cast<StreamId>(bits & 0xFFFFFFFFull);
     bits >>= 32;
-    auto device_index = static_cast<DeviceIndex>(bits) & 0xFFFFull;
+    const auto device_index = static_cast<DeviceIndex>(bits & 0xFFFFull);
     bits >>= 16;
-    auto device_type = static_cast<DeviceType>(bits);
+    const auto device_type = static_cast<DeviceType>(bits);
     TORCH_CHECK(isValidDeviceType(device_type));
     // Unfortunately, we can't check if the StreamId is valid here; it
     // will be checked upon first use.

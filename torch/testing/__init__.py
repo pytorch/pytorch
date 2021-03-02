@@ -6,6 +6,8 @@ import torch
 import random
 import math
 from typing import cast, List, Optional, Tuple, Union
+from .check_kernel_launches import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
+import operator
 
 FileCheck = torch._C.FileCheck
 
@@ -24,9 +26,13 @@ def is_integral(dtype: torch.dtype) -> bool:
     dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
     return dtype in dtypes and not dtype.is_floating_point
 
+def is_quantized(dtype: torch.dtype) -> bool:
+    return dtype in (torch.quint8, torch.qint8, torch.qint32, torch.quint4x2)
+
 # Helper function that maps a flattened index back into the given shape
 # TODO: consider adding torch.unravel_index
 def _unravel_index(flat_index, shape):
+    flat_index = operator.index(flat_index)
     res = []
 
     # Short-circuits on zero dim tensors
@@ -34,8 +40,8 @@ def _unravel_index(flat_index, shape):
         return 0
 
     for size in shape[::-1]:
-        res.append(int(flat_index % size))
-        flat_index = int(flat_index // size)
+        res.append(flat_index % size)
+        flat_index = flat_index // size
 
     if len(res) == 1:
         return res[0]
@@ -70,7 +76,11 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     debug_msg : Optional[str]
     # Integer (including bool) comparisons are identity comparisons
     # when rtol is zero and atol is less than one
-    if (is_integral(a.dtype) and rtol == 0 and atol < 1) or a.dtype is torch.bool:
+    if (
+        (is_integral(a.dtype) and rtol == 0 and atol < 1)
+        or a.dtype is torch.bool
+        or is_quantized(a.dtype)
+    ):
         if (a == b).all().item():
             return (True, None)
 
@@ -204,7 +214,8 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=
     if not isinstance(expected, torch.Tensor):
         expected = torch.tensor(expected, dtype=actual.dtype)
     if expected.shape != actual.shape:
-        expected = expected.expand_as(actual)
+        raise AssertionError("expected tensor shape {0} doesn't match with actual tensor "
+                             "shape {1}!".format(expected.shape, actual.shape))
     if rtol is None or atol is None:
         if rtol is not None or atol is not None:
             raise ValueError("rtol and atol must both be specified or both be unspecified")

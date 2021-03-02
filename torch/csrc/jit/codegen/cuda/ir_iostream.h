@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -10,13 +9,14 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 //! Define pretty printing functions for IR nodes
 //!
 //! This class is intended for debug printing, so it attempts
 //! to handle invalid states as well.
 //!
-class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
+class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
  public:
   explicit IrPrinter(std::ostream& os) : os_(os) {}
 
@@ -107,12 +107,36 @@ class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
   int indent_size_ = 0;
 };
 
-TORCH_CUDA_API std::ostream& operator<<(
+TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& os,
     const Statement* stmt);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion* f);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion& f);
 
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream& os, Fusion* f);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream& os, Fusion& f);
+
+// TODO(kir): catch accidental << printing of Kernel IR nodes
+// (use kir::toString(node) instead)
+std::ostream& operator<<(std::ostream& os, const kir::Bool*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Float*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Half*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Int*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::NamedScalar*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::TensorIndex*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::IterDomain*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::TensorDomain*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::TensorView*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::UnaryOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::BinaryOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::TernaryOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::ReductionOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::BroadcastOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::GridReduction*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::ForLoop*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::IfThenElse*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Allocate*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Sync*) = delete;
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

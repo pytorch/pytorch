@@ -1,4 +1,11 @@
+#include <ATen/AccumulateType.h>
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/CPUApplyUtils.h>
 #include <ATen/native/group_norm.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <c10/util/accumulate.h>
 
 #include <array>
 #include <functional>
@@ -6,12 +13,6 @@
 #include <tuple>
 #include <vector>
 
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
@@ -29,18 +30,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
   GroupNormKernel(
-      X.device().type(),
-      X,
-      gamma,
-      beta,
-      N,
-      C,
-      HxW,
-      group,
-      eps,
-      &Y,
-      &mean,
-      &rstd);
+      X.device().type(), X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
   return std::make_tuple(Y, mean, rstd);
 }
 
@@ -78,9 +68,9 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
       C,
       HxW,
       group,
-      &dX,
-      &dgamma,
-      &dbeta);
+      dX,
+      dgamma,
+      dbeta);
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
@@ -117,15 +107,15 @@ Tensor group_norm(
       input.sizes());
 
   const auto input_shape = input.sizes();
-  const int64_t HxW = std::accumulate(
-      input_shape.cbegin() + 2,
-      input_shape.cend(),
-      1LL,
-      std::multiplies<int64_t>());
+  const int64_t HxW =
+      c10::multiply_integers(input_shape.cbegin() + 2, input_shape.cend());
 
+  const Tensor kEmpty;
   const auto& X = input.is_contiguous() ? input : input.contiguous();
-  const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();
-  const auto& beta = bias.is_contiguous() ? bias : bias.contiguous();
+  const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
+  const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
+  TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
+  TORCH_CHECK(!beta.defined() || beta.numel() == C);
   return std::get<0>(
       at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
 }
@@ -133,21 +123,34 @@ Tensor group_norm(
 DEFINE_DISPATCH(GroupNormKernel);
 DEFINE_DISPATCH(GroupNormBackwardKernel);
 
+// Ported from pytorch/xla repo
 std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
-    const at::Tensor& input, const at::Tensor& weight,
-    const at::Tensor& bias, int64_t N, int64_t C, int64_t HxW,
-    int64_t group, double eps) {
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps) {
   auto input_shape = input.sizes();
   at::Tensor input_reshaped = input.view({1, N * group, N ? -1 : 1});
   auto outputs = at::native_batch_norm(
-      input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
-      /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
+      input_reshaped,
+      /*weight=*/{},
+      /*bias=*/{},
+      /*running_mean=*/{},
+      /*running_var=*/{},
+      /*training=*/true,
+      /*momentum=*/0,
+      eps);
   at::Tensor out = std::get<0>(outputs);
   out = out.view(input_shape);
   std::vector<int64_t> affine_param_shape(input.dim(), 1);
   affine_param_shape[1] = C;
   if (weight.defined() && bias.defined()) {
-    out = bias.view(affine_param_shape).addcmul(out, weight.view(affine_param_shape), 1);
+    out = bias.view(affine_param_shape)
+              .addcmul(out, weight.view(affine_param_shape), 1);
   } else if (weight.defined()) {
     out = out.mul(weight.view(affine_param_shape));
   } else if (bias.defined()) {

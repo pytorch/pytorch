@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/exit_transforms.h>
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -119,7 +120,7 @@ struct ExitTransformer {
 
   static bool isGraphOrClosureBlock(Block* block) {
     return block->owningNode() == nullptr ||
-        owningNodeKind(block) == prim::Function;
+        owningNodeKind(block) == prim::Closure;
   }
 
   static void removeOutputs(Block* b) {
@@ -273,8 +274,8 @@ struct ExitTransformer {
       return constructWontExitPair();
     }
 
-    // for the block that is not exitting, its' exit values will not get
-    // used so we create uninitialized values of the same type as the other
+    // The exit values of the block that is not exiting will not get
+    // used, so we create uninitialized values of the same type as the other
     // block.
     if (then_status == ExitStatus::WONT || then_status == ExitStatus::THROWS) {
       std::vector<Value*> exit_vals =
@@ -425,7 +426,7 @@ struct ExitTransformer {
         case prim::With: {
           exit_pair = transformWith(node);
         } break;
-        case prim::Function: {
+        case prim::Closure: {
           // exits of closure declaration stay local to the closure
           transformExits(node->blocks().at(0));
         } break;
@@ -674,7 +675,7 @@ class DepthFirstGraphNodeIterator {
           // If either of the then or else blocks have nodes, the current block
           // and iterator position need to be saved on the stack to resume
           // processing later.
-          block_stack_.push_back({current_.first, current_.second});
+          block_stack_.emplace_back(current_.first, current_.second);
         }
 
         if (!then_block_empty && else_block_empty) {
@@ -690,7 +691,7 @@ class DepthFirstGraphNodeIterator {
         } else if (!then_block_empty && !else_block_empty) {
           // Set current_ to {then_block, then_block.begin()} and push the
           // else_block to the stack so that it will be processed after.
-          block_stack_.push_back({else_block, else_block->nodes().begin()});
+          block_stack_.emplace_back(else_block, else_block->nodes().begin());
           current_.first = then_block;
           current_.second = then_block->nodes().begin();
         }
@@ -704,7 +705,7 @@ class DepthFirstGraphNodeIterator {
           // If body_block is not empty, push the current block onto the stack
           // to resume processing it later and set current_ to {body_block,
           // body_block.begin()}.
-          block_stack_.push_back({current_.first, current_.second});
+          block_stack_.emplace_back(current_.first, current_.second);
 
           current_.first = body_block;
           current_.second = body_block->nodes().begin();

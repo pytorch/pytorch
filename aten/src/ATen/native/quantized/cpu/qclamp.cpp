@@ -15,6 +15,8 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qclamp_stub);
+DEFINE_DISPATCH(qclamp_min_stub);
+DEFINE_DISPATCH(qclamp_max_stub);
 
 namespace {
 
@@ -45,6 +47,10 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
     max_q,
     0, // flags
     &clamp_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(clamp_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK Clamp operator");
 
@@ -84,14 +90,26 @@ Tensor quantized_clamp_impl(
   Tensor qy;
   if (min && max) {
 #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+        qx.scalar_type() == kQUInt8) {
       return qnnpack_clamp(qx, *min, *max);
     }
 #endif
     qclamp_stub(qx.device().type(), qx, *min, *max, qy);
   } else {
-    TORCH_CHECK(
-        false, "Both min and max should be specified for quantized clamp!");
+#ifdef USE_PYTORCH_QNNPACK
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+      TORCH_CHECK(
+          false, "Both min and max should be specified for quantized clamp!");
+    }
+#endif
+    if (max) {
+      qclamp_max_stub(qx.device().type(), qx, *max, qy);
+    } else if (min) {
+      qclamp_min_stub(qx.device().type(), qx, *min, qy);
+    } else {
+      TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
+    }
   }
   return qy;
 }

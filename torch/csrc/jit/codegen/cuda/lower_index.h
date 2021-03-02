@@ -12,8 +12,9 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
-class TORCH_CUDA_API IndexLowering : public OptInDispatch {
+class TORCH_CUDA_CU_API IndexLowering : public OptInDispatch {
  public:
   static std::vector<Expr*> getIndexedExprs(
       Fusion* fusion,
@@ -67,6 +68,7 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   kir::IrBuilder ir_builder_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

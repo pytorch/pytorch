@@ -23,11 +23,12 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-pip install pytest scipy hypothesis
-
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
+
+pip install pytest scipy hypothesis # these may not be necessary
+pip install pytest-cov # installing since `coverage run -m pytest ..` doesn't work
 
 # realpath might not be available on MacOS
 script_path=$(python -c "import os; import sys; print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")
@@ -38,6 +39,10 @@ test_paths=(
 
 args=()
 args+=("-v")
+args+=("--cov")
+args+=("--cov-report")
+args+=("xml:test/coverage.xml")
+args+=("--cov-append")
 if [[ $PARALLEL == 1 ]]; then
   args+=("-n")
   args+=("3")
@@ -51,6 +56,10 @@ pytest "${args[@]}" \
   --ignore "$top_dir/test/onnx/test_custom_ops.py" \
   --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
   --ignore "$top_dir/test/onnx/test_utility_funs.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py" \
   "${test_paths[@]}"
 
 # onnxruntime only support py3
@@ -62,14 +71,17 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ]]; then
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime" \
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
-    "$top_dir/test/onnx/test_utility_funs.py"
+    "$top_dir/test/onnx/test_utility_funs.py" \
+    "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
+    "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py"
 fi
 if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
   # Update the loop for new opsets
-  for i in $(seq 10 12); do
+  for i in $(seq 10 13); do
     pytest "${args[@]}" \
       "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
   done
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset12_onnx_shape_inference"
 fi
+
+# Our CI expects both coverage.xml and .coverage to be within test/
+mv .coverage test/.coverage

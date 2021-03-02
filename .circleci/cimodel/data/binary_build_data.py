@@ -30,12 +30,12 @@ def get_processor_arch_name(gpu_version):
         "cu" + gpu_version.strip("cuda") if gpu_version.startswith("cuda") else gpu_version
     )
 
-
 LINUX_PACKAGE_VARIANTS = OrderedDict(
     manywheel=[
         "3.6m",
         "3.7m",
         "3.8m",
+        "3.9m"
     ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
@@ -50,6 +50,14 @@ CONFIG_TREE_DATA = OrderedDict(
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
             "3.7",
+        ],
+    )),
+    macos_arm64=([None], OrderedDict(
+        wheel=[
+            "3.8",
+        ],
+        conda=[
+            "3.8",
         ],
     )),
     # Skip CUDA-9.2 builds on Windows

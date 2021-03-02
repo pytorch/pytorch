@@ -49,9 +49,10 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         the same ``Future``, and will be invoked in the same order as they were
         added. The callback must take one argument, which is the reference to
         this ``Future``. The callback function can use the ``Future.wait()`` API
-        to get the value.
+        to get the value. Note that if this ``Future`` is already completed, the
+        given callback will be run immediately inline.
 
-        Arguments:
+        Args:
             callback(``Callable``): a ``Callable`` that takes this ``Future`` as
                                     the only argument.
 
@@ -81,13 +82,51 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return cast(Future[S], super().then(callback))
 
+    # Have to use string annotations because  PEP-0563 is not available in 3.6
+    def _add_done_callback(self, callback):  # type: (Callable[[Future[T]], None]) -> None
+        r"""
+        Append the given callback function to this ``Future``, which will be run
+        when the ``Future`` is completed.  Multiple callbacks can be added to
+        the same ``Future``, and will be invoked in the same order as they were
+        added. The callback must take one argument, which is the reference to
+        this ``Future``. The callback function can use the ``Future.wait()`` API
+        to get the value. Note that if this ``Future`` is already completed, the
+        given callback will be run inline.
+
+        We recommend that you use the ``then`` API as it provides a way to synchronize
+        after your callback has completed. ``add_done_callback`` can be cheaper if your
+        callback does not return anything. But both ``then`` and ``add_done_callback``
+        use the same callback registration API under the hood, and thus the order of
+        their callbacks will be maintained even if their calls are interleaved.
+
+        Args:
+            callback(``Future``): a ``Callable`` that takes in one argument,
+            which is the reference to this ``Future``.
+
+        Example::
+            >>> import torch
+            >>>
+            >>> def callback(fut):
+            >>>     print(f"This will run after the future has finished.")
+            >>>     print(fut.wait())
+            >>>
+            >>> fut = torch.futures.Future()
+            >>> fut.add_done_callback(callback)
+            >>> fut.set_result(5)
+            >>>
+            >>> # Outputs are:
+            >>> This will run after the future has finished.
+            >>> 5
+        """
+        super().add_done_callback(callback)
+
     def set_result(self, result: T) -> None:
         r"""
         Set the result for this ``Future``, which will mark this ``Future`` as
         completed and trigger all attached callbacks. Note that a ``Future``
         cannot be marked completed twice.
 
-        Arguments:
+        Args:
             result (object): the result object of this ``Future``.
 
         Example::
@@ -111,6 +150,35 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         super().set_result(result)
 
+    def set_exception(self, result: T) -> None:
+        r"""
+        Set an exception for this ``Future``, which will mark this ``Future`` as
+        completed with an error and trigger all attached callbacks. Note that
+        when calling wait()/value() on this ``Future``, the exception set here
+        will be raised inline.
+
+        Args:
+            result (BaseException): the exception for this ``Future``.
+
+        Example::
+            >>> import torch
+            >>>
+            >>> fut = torch.futures.Future()
+            >>> fut.set_exception(ValueError("foo"))
+            >>> fut.wait()
+            >>>
+            >>> # Output:
+            >>> # This will run after the future has finished.
+            >>> ValueError: foo
+        """
+        assert isinstance(result, Exception), f"{result} is of type {type(result)}, not an Exception."
+
+        def raise_error(fut_result):
+            raise fut_result
+
+        super()._set_unwrap_func(raise_error)
+        self.set_result(result)  # type: ignore
+
 
 def collect_all(futures: List[Future]) -> Future[List[Future]]:
     r"""
@@ -118,7 +186,7 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
     combined :class:`~torch.futures.Future` that is completed when all of the
     sub-futures are completed.
 
-    Arguments:
+    Args:
         futures (list): a list of :class:`~torch.futures.Future` objects.
 
     Returns:
@@ -151,7 +219,7 @@ def wait_all(futures: List[Future]) -> List:
     Waits for all provided futures to be complete, and returns
     the list of completed values.
 
-    Arguments:
+    Args:
         futures (list): a list of :class:`~torch.futures.Future` object.
 
     Returns:

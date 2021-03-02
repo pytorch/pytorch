@@ -1,7 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/ResizeCommon.h>
+#include <ATen/TensorUtils.h>
 #include <TH/THTensor.hpp>
+
 
 namespace at { namespace native {
 
@@ -13,7 +16,7 @@ namespace at { namespace native {
 // Issues a warning if the output tensor has one or more elements and
 //   needs resizing
 // NOTE: In the future the warning will become an error
-void resize_output(Tensor& output, IntArrayRef shape);
+TORCH_API void resize_output(Tensor& output, IntArrayRef shape);
 
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
@@ -42,7 +45,8 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) 
 inline TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
-    c10::optional<IntArrayRef> stride) {
+    c10::optional<IntArrayRef> stride,
+    bool resize_storage = true) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
@@ -51,20 +55,14 @@ inline TensorImpl* resize_impl_cpu_(
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
     // NB: storage size can be different from numel.
-    for (size_t dim = 0; dim < size.size(); ++dim) {
-      // FIXME: Don't rely on storage_size being negative because this
-      // may not be true for some edge cases.
-      if (size[dim] == 0) {
-        storage_size = 0;
-        break;
-      }
-      storage_size += (size[dim] - 1) * stride.value()[dim];
-    }
+    storage_size = storage_size_for(size, *stride);
   } else {
     self->set_sizes_contiguous(size);
     storage_size = self->numel();
   }
-  maybe_resize_storage_cpu(self, storage_size);
+  if (resize_storage) {
+    maybe_resize_storage_cpu(self, storage_size);
+  }
 
   return self;
 }
@@ -73,7 +71,7 @@ static inline void checkInBoundsForStorage(
     IntArrayRef size,
     IntArrayRef stride,
     int64_t storage_offset,
-    const caffe2::TypeMeta& data_type,
+    const caffe2::TypeMeta data_type,
     const Storage& new_storage) {
   int64_t storage_size_bytes =
       detail::computeStorageNbytes(size, stride, data_type.itemsize());

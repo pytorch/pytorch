@@ -320,6 +320,7 @@ struct CanEmitInline {
         // by the later BailOut in createBailoutBlock and its jf_index
         // will become invalid.
         v->node()->kind() != prim::TensorExprGroup &&
+        v->node()->kind() != prim::StaticSubgraph &&
         v->node()->kind() != prim::CudaFusionGroup &&
         v->node()->kind() != prim::FusionGroup &&
         v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
@@ -433,7 +434,9 @@ Ttarget safe_narrow_cast(Tsource v) {
   Ttarget res = static_cast<Ttarget>(v);
   // Casting it back to check whether it overflew.
   if (static_cast<Tsource>(res) != v) {
-    throw std::runtime_error("safe_narrow_cast<>() failed due to overflow");
+    TORCH_WARN(
+        "ATTENTION: your model computation is overflowing, safe_narrow_cast<>() failed");
+    return v;
   }
   return res;
 }
@@ -548,7 +551,7 @@ struct CodeImpl {
     instructions_.emplace_back(
         op,
         safe_narrow_cast<int32_t, int64_t>(X),
-        safe_narrow_cast<int16_t, int64_t>(N));
+        safe_narrow_cast<uint16_t, uint64_t>(N));
     instructions_source_.emplace_back(current_node_);
 
     // check that we didn't accidentally emit nodes out of topological order
@@ -704,7 +707,7 @@ struct CodeImpl {
   void emitCall(Function* func, at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
-    function_table_.emplace_back(std::move(func));
+    function_table_.emplace_back(func);
   }
 
   void emitNodeAtBlockLevel(Node* node) {
@@ -741,8 +744,9 @@ struct CodeImpl {
 
     // Emit the expected type.
     size_t types_start = type_table_.size();
+    auto types = node->tys(attr::types);
     for (size_t i = 0; i < num_inputs; i++) {
-      emitType(node->outputs()[i]->type());
+      emitType(types[i]);
     }
     insertInstruction(TYPECHECK, types_start, num_inputs);
   }
@@ -786,9 +790,9 @@ struct CodeImpl {
     insertInstruction(PROFILE_OP, profile_function_table_.size());
     if (node->cast<ProfileOp>()) {
       profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
-    } else if (node->cast<ProfileOptionalOp>()) {
+    } else if (node->cast<ProfileIValueOp>()) {
       profile_function_table_.push_back(
-          node->cast<ProfileOptionalOp>()->getCallback());
+          node->cast<ProfileIValueOp>()->getCallback());
     } else {
       TORCH_INTERNAL_ASSERT(false);
     }
@@ -840,7 +844,7 @@ struct CodeImpl {
 
   void emitTupleConstruct(Node* node) {
     bool named =
-        node->output()->type()->expect<TupleType>()->name().has_value();
+        node->output()->type()->expectRef<TupleType>().name().has_value();
     if (named) {
       emitContainerConstruct(NAMED_TUPLE_CONSTRUCT, node);
     } else {
@@ -885,6 +889,10 @@ struct CodeImpl {
   }
 
   void emitWarn(Node* node) {
+    if (FLAGS_torch_jit_disable_warning_prints) {
+      return;
+    }
+
     emitLoadInputs(node->inputs());
     int32_t idx = -1;
     if (node->hasAttribute(attr::warn_id)) {
@@ -927,7 +935,7 @@ struct CodeImpl {
         break;
       case prim::CallFunction:
         emitCall(
-            node->inputs().at(0)->type()->expect<FunctionType>()->function(),
+            node->inputs().at(0)->type()->expectRef<FunctionType>().function(),
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
@@ -943,7 +951,7 @@ struct CodeImpl {
       case prim::BailOut:
         emitBailOut(node);
         break;
-      case prim::profile_optional:
+      case prim::profile_ivalue:
       case prim::profile:
         emitProfile(node);
         break;
@@ -1029,7 +1037,8 @@ struct CodeImpl {
 
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code& code) {
+  InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
+      : taskLauncher_(std::move(taskLauncher)) {
     enterFrame(code, 0);
   }
 
@@ -1055,6 +1064,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // including any inputs to this function
   int64_t stack_start_ = -1;
   c10::intrusive_ptr<Future> future_;
+  TaskLauncher taskLauncher_;
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
@@ -1333,11 +1343,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 Callback(
                     c10::intrusive_ptr<InterpreterStateImpl> state,
                     Stack stack)
-                    : state_(std::move(state)), stack_(std::move(stack)) {
+                    : stateImpl_(std::move(state)),
+                      state_(stateImpl_),
+                      stack_(std::move(stack)) {
                   dist_autograd_context_id_ = getDistAutogradContextId();
+                  state_ = InterpreterState(stateImpl_);
                 }
                 void operator()() {
-                  at::launch(InterpreterContinuation(
+                  stateImpl_->taskLauncher_(InterpreterContinuation(
                       state_,
                       std::move(stack_),
                       dist_autograd_context_id_,
@@ -1345,6 +1358,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 }
 
                private:
+                c10::intrusive_ptr<InterpreterStateImpl> stateImpl_;
                 InterpreterState state_;
                 Stack stack_;
                 int64_t dist_autograd_context_id_;
@@ -1401,13 +1415,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
-              auto t = input.toTensor();
+              auto& t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
-              if (t.defined() &&
-                  (!frames.back().symbols2dims.bindSymbolicShapes(
-                       t.sizes(), expected_type->symbolic_sizes()) ||
-                   !expected_type->matchTensor(t))) {
+              if (t.defined() && !expected_type->matchTensor(t)) {
                 push(stack, false);
                 break;
               }
@@ -1425,7 +1436,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               // so it's safe to pass this guard check
               push(stack, true);
             } else {
-              auto t = stack.back().toTensor();
+              auto& t = stack.back().toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X];
               auto expected_type = expected->cast<TensorType>();
               if (t.defined() &&
@@ -1481,7 +1492,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case LIST_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<ListType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<ListType>();
             listConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
@@ -1509,14 +1521,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterState forked_interpreter(
                 forked_fn->get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code);
+                    .code,
+                taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
                 getDistAutogradContextId());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
-            at::launch(std::move(continuation));
+            taskLauncher_(std::move(continuation));
             ++frame.pc;
           } break;
           case WARN: {
@@ -1598,12 +1611,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
+    bool pre_sampled = false;
     if (!frame.record_function && at::hasCallbacks() &&
-        at::isRecordFunctionEnabled()) {
+        at::shouldRunRecordFunction(&pre_sampled)) {
       auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION);
-      if (rec_fn->active) {
-        if (rec_fn->needs_inputs) {
+          at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
+      if (rec_fn->isActive()) {
+        if (rec_fn->needsInputs()) {
           rec_fn->before(
               frame.function->function_name_,
               last(stack, frame.function->n_inputs));
@@ -1631,8 +1645,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       Node* node = frame.function->instructions_source_[pc];
       if (node->callstack()) {
         for (const auto& p : (*node->callstack())->vec()) {
-          entries.emplace_back(StackEntry{previous_fn_name, p.second});
-          previous_fn_name = p.first->name();
+          entries.emplace_back(StackEntry{previous_fn_name, std::get<1>(p)});
+          previous_fn_name = std::get<0>(p)->name();
         }
       }
       entries.emplace_back(StackEntry{previous_fn_name, node->sourceRange()});
@@ -1738,8 +1752,10 @@ size_t Code::register_size() const {
   return pImpl->register_size_;
 }
 
-InterpreterState::InterpreterState(const Code& code)
-    : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
+InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
+    : pImpl(c10::make_intrusive<InterpreterStateImpl>(
+          code,
+          std::move(taskLauncher))) {}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {

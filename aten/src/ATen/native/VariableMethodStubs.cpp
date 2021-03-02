@@ -8,7 +8,7 @@
 namespace at {
 namespace native {
 
-void backward(const Tensor& self, const Tensor& gradient, c10::optional<bool> keep_graph, bool create_graph) {
+void _backward(const Tensor& self, TensorList inputs, const Tensor& gradient, c10::optional<bool> keep_graph, bool create_graph) {
   AT_ERROR("backward is not implemented for Tensor");
 }
 
@@ -38,6 +38,10 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
 
 void retain_grad(Tensor& self) {
   AT_ERROR("retain_grad is not implemented for Tensor");
+}
+
+Tensor _fw_primal(const Tensor& self, int64_t level) {
+  AT_ERROR("_fw_primal is not implemented for Tensor");
 }
 
 } // namespace native

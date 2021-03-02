@@ -13,7 +13,7 @@ from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
 from torch._utils_internal import get_source_lines_and_file
 from torch.types import Storage
-from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union
+from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union, IO
 import copyreg
 import pickle
 import pathlib
@@ -192,7 +192,7 @@ def storage_to_tensor_type(storage):
 
 def _is_path(name_or_buffer):
     return isinstance(name_or_buffer, str) or \
-        (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
+        isinstance(name_or_buffer, pathlib.Path)
 
 
 class _opener(object):
@@ -330,7 +330,7 @@ def _check_dill_version(pickle_module) -> None:
                 pickle_module.__version__
             ))
 
-def save(obj, f: Union[str, os.PathLike, BinaryIO],
+def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
     """Saves an object to a disk file.
 
@@ -481,16 +481,14 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
     for key in sorted(serialized_storages.keys()):
         name = f'data/{key}'
         storage = serialized_storages[key]
-        if storage.device.type == 'cpu':
-            # If it's on the CPU we can directly copy it into the zip file
-            num_bytes = storage.size() * storage.element_size()
-            zip_file.write_record(name, storage.data_ptr(), num_bytes)
-        else:
-            # Copy to a buffer, then serialize that
-            buf = io.BytesIO()
-            storage._write_file(buf, _should_read_directly(buf))
-            buf_value = buf.getvalue()
-            zip_file.write_record(name, buf_value, len(buf_value))
+        # given that we copy things around anyway, we might use storage.cpu()
+        # this means to that to get tensors serialized, you need to implement
+        # .cpu() on the underlying Storage
+        if storage.device.type != 'cpu':
+            storage = storage.cpu()
+        # Now that it is on the CPU we can directly copy it into the zip file
+        num_bytes = storage.size() * storage.element_size()
+        zip_file.write_record(name, storage.data_ptr(), num_bytes)
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
@@ -526,7 +524,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     deserialization methods using :func:`torch.serialization.register_package`.
 
     Args:
-        f: a file-like object (has to implement :meth:`read`, :meth`readline`, :meth`tell`, and :meth`seek`),
+        f: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
             or a string or os.PathLike object containing a file name
         map_location: a function, :class:`torch.device`, string or a dict specifying how to remap storage
             locations
@@ -568,7 +566,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
         # Load tensor from io.BytesIO object
         >>> with open('tensor.pt', 'rb') as f:
-                buffer = io.BytesIO(f.read())
+        ...     buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')

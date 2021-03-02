@@ -23,7 +23,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         torch::List<int64_t> dilation,
         int64_t groups,
         bool transpose) {
-  TORCH_CHECK(!transpose, "FBGEMM doesn't support transpose packing yet!");
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ",
@@ -75,7 +74,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
                            : std::vector<int>{kernel_d, kernel_h, kernel_w},
           std::vector<int>(stride.begin(), stride.end()),
           std::vector<int>(padding.begin(), padding.end()),
-          std::vector<int>(dilation.begin(), dilation.end()));
+          std::vector<int>(dilation.begin(), dilation.end()),
+          std::vector<int>(output_padding.begin(), output_padding.end()),
+          transpose);
 
   const auto qtype = weight.qscheme();
   std::vector<int32_t> zero_points;
@@ -84,8 +85,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   } else if (qtype == c10::kPerChannelAffine) {
     int64_t axis = weight.q_per_channel_axis();
     TORCH_CHECK(
-        axis == 0,
-        "Only per output channel quantization is supported for the weights");
+        !transpose,
+        "Per Channel Quantization is currently disabled for transposed conv");
     zero_points.resize(output_channels);
     for (int i = 0; i < output_channels; ++i) {
       zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
@@ -96,11 +97,14 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
 
   // FBGEMM expects weights to be in channels last
   // TODO: Change this when ChannelsLast3d is ready.
-  const at::Tensor weight_nhwc = kSpatialDim == 2
-      ? weight.contiguous(c10::MemoryFormat::ChannelsLast)
-      : at::native::fbgemm_utils::ConvertToChannelsLast3dTensor(weight);
+  // FBGEMM needs G OC/G kDim0 ... kDimN IC/G
+  // for both conv and conv transpose
+  // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
+  // (or for ConvTranspose {in_c, out_c/groups, kH, kW})
+  const at::Tensor weight_nhwc =
+      at::native::fbgemm_utils::ConvertConvWeightsToChannelLastTensor<kSpatialDim>(weight, groups, transpose);
   const int8_t* weight_data_int8 =
-      reinterpret_cast<int8_t*>(weight_nhwc.data_ptr<c10::qint8>());
+          reinterpret_cast<int8_t*>(weight_nhwc.data_ptr<c10::qint8>());
   std::vector<int32_t> col_offsets(output_channels);
   // compute column offsets (Similar to
   // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets
@@ -166,6 +170,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   return ret_ptr;
 }
 
+template struct PackedConvWeight<2>;
+template struct PackedConvWeight<3>;
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -270,6 +276,18 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   return ret_ptr;
 }
 
+template
+c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightsQnnp<
+    2>::
+    prepack(
+        at::Tensor weight,
+        c10::optional<at::Tensor> bias_in,
+        torch::List<int64_t> stride,
+        torch::List<int64_t> padding,
+        torch::List<int64_t> output_padding,
+        torch::List<int64_t> dilation,
+        int64_t groups,
+        bool transpose);
 #endif // USE_PYTORCH_QNNPACK
 
 namespace at {
@@ -320,7 +338,6 @@ class QConvPackWeightInt8 final {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      TORCH_CHECK(!transpose, "FBGEMM doesn't support transpose packing yet!");
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
           transpose);
@@ -422,6 +439,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // ConvTranspose
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_deconv));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_prepack"), TORCH_FN(QConvPackWeightInt8<3>::run_deconv));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
@@ -430,6 +448,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   // ConvTranspose
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_deconv));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose3d_prepack"), TORCH_FN(QConvPackWeightInt8<3>::run_deconv));
 }
 
 } // namespace

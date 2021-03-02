@@ -7,8 +7,8 @@ static methods.
 import torch
 import random
 import os
-from collections import namedtuple
-from torch._six import queue
+import queue
+from dataclasses import dataclass
 from torch._utils import ExceptionWrapper
 from typing import Union
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
@@ -110,10 +110,14 @@ def get_worker_info():
 
 
 r"""Dummy class used to signal the end of an IterableDataset"""
-_IterableDatasetStopIteration = namedtuple('_IterableDatasetStopIteration', ['worker_id'])
+@dataclass(frozen=True)
+class _IterableDatasetStopIteration(object):
+    worker_id: int
 
 r"""Dummy class used to resume the fetching when worker reuse is enabled"""
-_ResumeIteration = namedtuple('_ResumeIteration', [])
+@dataclass(frozen=True)
+class _ResumeIteration(object):
+    pass
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, seed, init_fn, worker_id,
@@ -173,7 +177,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 continue
             if isinstance(r, _ResumeIteration):
                 # Acknowledge the main process
-                data_queue.put(r)
+                data_queue.put((r, None))
                 iteration_end = False
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(

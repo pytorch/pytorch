@@ -61,7 +61,7 @@ struct AnnotatedSchema final {
 // Concurrent writes to OperatorEntry are protected by the GLOBAL Dispatcher
 // lock (this is important because some methods in OperatorEntry access
 // dispatcher state)
-class CAFFE2_API OperatorEntry final {
+class TORCH_API OperatorEntry final {
 public:
   explicit OperatorEntry(OperatorName&& operator_name);
 
@@ -148,32 +148,28 @@ public:
 
   const DispatchKeyExtractor& dispatchKeyExtractor() const { return dispatchKeyExtractor_; }
 
-  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func);
-
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
   void assertSignatureIsCorrect() {
-    TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == *cpp_signature_),
-        "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
-        CppSignature::make<FuncType>().name(),
-        " but the operator was registered with ",
-        cpp_signature_->name(),
-        " (",
-        (schema_.has_value() ? schema_->debug : "unknown debug info"),
-        ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
-    );
+    if (C10_UNLIKELY(cpp_signature_.has_value() && (CppSignature::make<FuncType>() != cpp_signature_->signature))) {
+      reportSignatureError(CppSignature::make<FuncType>().name());
+    }
   }
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
   const KernelFunction& lookup(DispatchKey k) const {
     const auto& kernel = dispatchTable_[static_cast<uint8_t>(k)];
-    if (C10_UNLIKELY(!kernel.isValid())) {
-      reportError(k);
+    // A valid kernel *always* has a boxed kernel and *may* have an
+    // unboxed kernel. However, we typically do unboxed calls in at::
+    // APIs, where the kernel 1) will very likely be valid and 2)
+    // should have an unboxed kernel. Checking the unboxed kernel
+    // first will allow us to avoid touching the boxed kernel at all
+    // in the common case.
+    if (C10_UNLIKELY(!kernel.isValidUnboxed())) {
+      if (!kernel.isValid()) {
+        reportError(k);
+      }
     }
     return kernel;
   }
@@ -187,12 +183,6 @@ private:
 
   std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
-
-  // This manuallyBoxedKernel_ member is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete manuallyBoxedKernel_ once all operators work with the templated boxing logic
-  c10::optional<KernelFunction::InternalBoxedKernelFunction*> manuallyBoxedKernel_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.
@@ -227,20 +217,26 @@ private:
   // currently not high-pri.
   ska::flat_hash_map<DispatchKey, std::list<AnnotatedKernel>> kernels_;
 
-  std::list<AnnotatedKernel> catchAllKernel_;
   AnnotatedKernel missingKernel_;
   static const AnnotatedKernel ambiguousAutogradOtherKernel_;
 
-  // signature_hash_ is set to the hash of the function signature if any of
+  // cpp_signature_ stores function signature if any of
   // the kernels was created in a way that allowed us to know the function
   // signature (i.e. by supplying an unboxed C++ kernel function).
-  // If this is set, it will be used in unboxed function calls
+  // If this is set, it will be used to check that future kernel
+  // registrations match and it will be used in unboxed function calls
   // to verify their arguments against the known function signature.
-  c10::optional<CppSignature> cpp_signature_;
+  struct CppSignatureWithDebug {
+    CppSignature signature;
+    std::string debug;
+    c10::optional<DispatchKey> dispatch_key;
+  };
+  c10::optional<CppSignatureWithDebug> cpp_signature_;
 
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
 
+  [[noreturn]] void reportSignatureError(std::string name) const;
   const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
   std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(
     const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
@@ -254,7 +250,7 @@ private:
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
 
   // Returns true if kernel_ has entry for any key in ks.
-  bool hasKernelForDispatchKeySet(DispatchKeySet ks) const;
+  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
   // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
   c10::optional<const AnnotatedKernel*> getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };

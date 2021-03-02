@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
-#include <torch/csrc/jit/tensorexpr/cuda_half_support.h>
+#include <torch/csrc/jit/tensorexpr/half_support.h>
 
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
@@ -68,10 +69,12 @@ static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-static void getMajorMinor(
+// query codegen output arch and target
+static void codegenOutputQuery(
     const cudaDeviceProp* const prop,
     int& major,
-    int& minor) {
+    int& minor,
+    bool& compile_to_sass) {
   using CudaVersion = std::pair<int, int>;
   CudaVersion nvrtc_version;
   AT_CUDA_NVRTC_CHECK(
@@ -89,12 +92,18 @@ static void getMajorMinor(
     max_dev_version = CudaVersion(7, 2);
   } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
     max_dev_version = CudaVersion(7, 5);
+  } else if (nvrtc_version.first == 11 && nvrtc_version.second == 0) {
+    // 11.0 supports 3-8.0
+    max_dev_version = CudaVersion(8, 0);
   }
   if (dev_version > max_dev_version) {
     dev_version = max_dev_version;
   }
   major = dev_version.first;
   minor = dev_version.second;
+
+  // if we are clamping major/minor, sass is not compatible
+  compile_to_sass = (major == prop->major) && (minor == prop->minor);
 }
 
 std::string cudaDtypeCppString(const Dtype& dtype) {
@@ -283,8 +292,12 @@ void CudaPrinter::visit(const Intrinsics* v) {
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
   }
-  if (v->op_type() == IntrinsicsOp::kFabs && is_integral(returnType)) {
-    func_name = "abs";
+  if (v->op_type() == IntrinsicsOp::kAbs && !is_integral(returnType)) {
+    // since kAbs's func_name is `abs`, prefix `f` for floating point
+    func_name = "f" + func_name;
+  }
+  if (v->op_type() == IntrinsicsOp::kIsNan) {
+    func_name = "isnan";
   }
 
   os() << func_name << "(";
@@ -295,6 +308,10 @@ void CudaPrinter::visit(const Intrinsics* v) {
     os() << *v->param(i);
   }
   os() << ")";
+}
+
+void CudaPrinter::visit(const ExternalCall* v) {
+  throw unimplemented_lowering(v);
 }
 
 void CudaPrinter::visit(const Load* v) {
@@ -546,6 +563,7 @@ class PrioritizeLoad : public IRMutator {
     const Var* load_new_var = new Var("v", v->dtype());
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
+
     return load_new_var;
   }
 
@@ -657,12 +675,14 @@ class PrioritizeLoad : public IRMutator {
 };
 
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
-  // We are using a global counter here to make sure difference instances
-  // within CudaCodeGen have different names.
-  static int64_t counter = 0;
-  ++counter;
-  int64_t value = counter;
-  return func_prefix + "_" + std::to_string(value);
+  int64_t counter = 0;
+  std::string name = func_prefix;
+  while (taken_func_names.count(name)) {
+    name = func_prefix + "_" + std::to_string(counter++);
+  }
+
+  taken_func_names.insert(name);
+  return name;
 }
 
 bool GPUMetaVarRewriter::isFullExtent() {
@@ -919,13 +939,13 @@ void CudaCodeGen::Initialize() {
   // Check whether the statement uses the Half type, if so add the
   // half_support_literal.
   Stmt* stmt_v = stmt();
-  CudaHalfChecker halfChecker;
-  stmt_v = stmt_v->accept_mutator(&halfChecker);
+  HalfChecker halfChecker(buffer_args());
+  stmt_v->accept(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
 
-  std::string func_name = GetUniqueFuncName("func");
+  std::string func_name = GetUniqueFuncName(kernel_func_name());
   os() << "extern \"C\" __global__" << std::endl;
 #ifdef USE_ROCM
   // CUDA has a default limit of threads per block (=flat work group size)
@@ -986,6 +1006,11 @@ void CudaCodeGen::Initialize() {
 
   PrioritizeLoad prioritize_load;
   stmt_v = stmt_v->accept_mutator(&prioritize_load);
+
+  // The registerizer might insert half-type scalars, we don't want this.
+  HalfRewriter hsFix;
+  stmt_v = stmt_v->accept_mutator(&hsFix);
+
   stmt_v = IRSimplifier::simplify(stmt_v);
   set_stmt(stmt_v);
 
@@ -1134,6 +1159,18 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   }
 }
 
+at::Tensor CudaCodeGen::empty_strided(
+    c10::IntArrayRef size,
+    c10::IntArrayRef stride,
+    c10::optional<c10::ScalarType> dtype_opt,
+    c10::optional<c10::Layout> layout_opt,
+    c10::optional<c10::Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  c10::DeviceGuard device_guard(device_opt.value());
+  return at::native::empty_strided_cuda(
+      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
@@ -1157,7 +1194,8 @@ void CudaCodeGen::CompileToNVRTC(
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-  getMajorMinor(prop, major, minor);
+  bool compile_to_sass = false;
+  codegenOutputQuery(prop, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
   nvrtcProgram program;
@@ -1167,7 +1205,19 @@ void CudaCodeGen::CompileToNVRTC(
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {};
 #else
-  const std::string compute = "--gpu-architecture=compute_" +
+  const std::string compute = std::string("--gpu-architecture=") +
+#if CUDA_VERSION >= 11010
+      // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+      // which gives better backwards compatibility to work on older driver,
+      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // toolkit);
+      // Meanwhile, for forward compatibility (future device with
+      // `compile_to_sass==false`), since SASS are not necessarily compatible,
+      // we fallback to PTX instead.
+      (compile_to_sass ? "sm_" : "compute_") +
+#else
+      "compute_" +
+#endif
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
@@ -1190,10 +1240,23 @@ void CudaCodeGen::CompileToNVRTC(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
   std::vector<char> ptx;
+#if CUDA_VERSION >= 11010
+  // compile_to_sass determines whether we are generating SASS or PTX, hence
+  // the different API.
+  const auto getSize = compile_to_sass
+      ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+      : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  const auto getFunc = compile_to_sass
+      ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+      : at::globalContext().getNVRTC().nvrtcGetPTX;
+#else
+  const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
+#endif
+  AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
   ptx.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
+  AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
 
   CUmodule module;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));

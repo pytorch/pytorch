@@ -214,7 +214,8 @@ TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
     std::function<std::string(const Variable&)> var_name_lookup_fn,
     bool strict = true,
     bool force_outplace = false,
-    Module* self = nullptr);
+    Module* self = nullptr,
+    const std::vector<std::string>& argument_names = {});
 
 TORCH_API void abandon();
 
@@ -258,6 +259,10 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const List<c10::optional<at::Tensor>>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
     const ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
@@ -271,6 +276,7 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<std::string>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Device value);
+TORCH_API void addInputs(Node* n, const char* name, c10::Stream stream);
 TORCH_API void addInputs(Node* n, const char* name, at::Layout value);
 TORCH_API void addInputs(Node* n, const char* name, at::ScalarType value);
 TORCH_API void addInputs(

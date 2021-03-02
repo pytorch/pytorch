@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -18,6 +17,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
   name_ = src->name_;
@@ -234,6 +234,7 @@ bool Expr::sameAs(const Expr* const other) const {
   return true;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

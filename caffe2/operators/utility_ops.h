@@ -367,13 +367,16 @@ class WeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
-    CAFFE_ENFORCE_GT(X0.numel(), 0);
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
     const int size = X0.numel();
     // Note: removed Aliasing check, since Output already has
     // caching capability
     auto* Y = Output(0, X0.sizes(), at::dtype<T>());
     T* Y_data = Y->template mutable_data<T>();
+    if (X0.numel() == 0) {
+      return true;
+    }
+    CAFFE_ENFORCE_GT(X0.numel(), 0);
     if (input_size == 2) {
       math::Scale<float, T>(
           size,
@@ -546,6 +549,9 @@ class ScatterWeightedSumOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
 
+    if (X0.numel() == 0) {
+      return true;
+    }
     CAFFE_ENFORCE_GT(X0.numel(), 0);
     CAFFE_ENFORCE_GT(X0.dim(), 0, "X0 has to be at least the vector");
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
@@ -916,6 +922,45 @@ class LengthsToRangesOp : public Operator<Context> {
     }
     return true;
   }
+};
+
+template <class Context>
+class LengthsToOffsetsOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  template <class... Args>
+  explicit LengthsToOffsetsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        include_last_offset_(this->template GetSingleArgument<bool>(
+            "include_last_offset",
+            false)) {}
+
+  bool RunOnDevice() override {
+    auto& input = Input(0);
+    auto* output = Output(0);
+    auto* input_data = input.template data<int32_t>();
+
+    CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
+    auto size = input.numel();
+
+    output->Resize(size + (include_last_offset_ ? 1 : 0));
+    auto* output_data = output->template mutable_data<int32_t>();
+
+    int32_t offset = 0;
+    for (int i = 0; i < size; ++i) {
+      auto len = input_data[i];
+      output_data[i] = offset;
+      offset += len;
+    }
+    if (include_last_offset_) {
+      output_data[size] = offset;
+    }
+    return true;
+  }
+
+ private:
+  bool include_last_offset_;
 };
 
 template <class Context>

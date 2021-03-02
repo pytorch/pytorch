@@ -22,7 +22,15 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
     throw python_error();
   }
 
-  auto module = py::handle(autograd_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
+
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_autograd", "distributed autograd bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   auto distAutogradContext =
       shared_ptr_class_<DistAutogradContext>(module, "DistAutogradContext")

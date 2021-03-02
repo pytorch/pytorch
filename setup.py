@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_KINETO=0
+#     disables usage of libkineto library for profiling
+#
 #   USE_NUMPY=0
 #     disables the NumPy build
 #
@@ -165,7 +168,8 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-
+# This future is needed to print Python2 EOL message
+from __future__ import print_function
 import sys
 if sys.version_info < (3,):
     print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -175,17 +179,14 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 6, 1)
-python_min_version_str = '.'.join((str(num) for num in python_min_version))
-python_max_version = (3, 9, 0)
-python_max_version_str = '.'.join((str(num) for num in python_max_version))
-if sys.version_info < python_min_version or sys.version_info >= python_max_version:
-    print("You are using Python {}. Python >={},<{} is required.".format(platform.python_version(),
-                                                                         python_min_version_str,
-                                                                         python_max_version_str))
+python_min_version = (3, 6, 2)
+python_min_version_str = '.'.join(map(str, python_min_version))
+if sys.version_info < python_min_version:
+    print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
+                                                                     python_min_version_str))
     sys.exit(-1)
 
-from setuptools import setup, Extension, distutils, find_packages
+from setuptools import setup, Extension, find_packages
 from collections import defaultdict
 from distutils import core
 from distutils.core import Distribution
@@ -196,6 +197,7 @@ import distutils.command.clean
 import distutils.sysconfig
 import filecmp
 import shutil
+import subprocess
 import os
 import json
 import glob
@@ -309,7 +311,6 @@ def build_deps():
                             'benchmark', 'CMakeLists.txt'))
 
     check_pydep('yaml', 'pyyaml')
-    check_pydep('typing', 'typing')
 
     build_caffe2(version=version,
                  cmake_python_library=cmake_python_library,
@@ -326,8 +327,16 @@ def build_deps():
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
-    sym_files = ['tools/shared/_utils_internal.py']
-    orig_files = ['torch/_utils_internal.py']
+    sym_files = [
+        'tools/shared/_utils_internal.py',
+        'torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h',
+        'torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h',
+    ]
+    orig_files = [
+        'torch/_utils_internal.py',
+        'third_party/valgrind-headers/callgrind.h',
+        'third_party/valgrind-headers/valgrind.h',
+    ]
     for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if os.path.exists(sym_file):
@@ -344,9 +353,8 @@ def build_deps():
 
 # the list of runtime dependencies required by this built package
 install_requires = [
-    'future',
     'typing_extensions',
-    'dataclasses; python_version < "3.8"'
+    'dataclasses; python_version < "3.7"'
 ]
 
 missing_pydep = '''
@@ -363,6 +371,42 @@ def check_pydep(importname, module):
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+
+    # Copy libiomp5.dylib inside the wheel package on OS X
+    def _embed_libiomp(self):
+        if not IS_DARWIN:
+            return
+        lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
+        libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
+        if not os.path.exists(libtorch_cpu_path):
+            return
+        # Parse libtorch_cpu load commands
+        otool_cmds = subprocess.check_output(['otool', '-l', libtorch_cpu_path]).decode('utf-8').split('\n')
+        rpaths, libs = [], []
+        for idx, line in enumerate(otool_cmds):
+            if line.strip() == 'cmd LC_LOAD_DYLIB':
+                lib_name = otool_cmds[idx + 2].strip()
+                assert lib_name.startswith('name ')
+                libs.append(lib_name.split(' ', 1)[1].rsplit('(', 1)[0][:-1])
+
+            if line.strip() == 'cmd LC_RPATH':
+                rpath = otool_cmds[idx + 2].strip()
+                assert rpath.startswith('path ')
+                rpaths.append(rpath.split(' ', 1)[1].rsplit('(', 1)[0][:-1])
+
+        omp_lib_name = 'libiomp5.dylib'
+        if os.path.join('@rpath', omp_lib_name) not in libs:
+            return
+
+        # Copy libiomp5 from rpath locations
+        for rpath in rpaths:
+            source_lib = os.path.join(rpath, omp_lib_name)
+            if not os.path.exists(source_lib):
+                continue
+            target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
+            self.copy_file(source_lib, target_lib)
+            break
+
     def run(self):
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
         # accurate report on what is used and what is not.
@@ -403,7 +447,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Building without distributed package')
 
-        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
         if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
@@ -411,6 +455,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
+
+        self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:
@@ -505,6 +551,50 @@ class build_ext(setuptools.command.build_ext.build_ext):
         if contents != new_contents:
             with open('compile_commands.json', 'w') as f:
                 f.write(new_contents)
+
+class concat_license_files():
+    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
+
+    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
+    from all the licenses found in ./third_party/. We concatenate them so there
+    is a single license file in the sdist and wheels with all of the necessary
+    licensing info.
+    """
+    def __init__(self):
+        self.f1 = 'LICENSE'
+        self.f2 = 'third_party/LICENSES_BUNDLED.txt'
+
+    def __enter__(self):
+        """Concatenate files"""
+        with open(self.f1, 'r') as f1:
+            self.bsd_text = f1.read()
+
+        with open(self.f1, 'a') as f1:
+            with open(self.f2, 'r') as f2:
+                self.bundled_text = f2.read()
+                f1.write('\n\n')
+                f1.write(self.bundled_text)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        """Restore content of f1"""
+        with open(self.f1, 'w') as f:
+            f.write(self.bsd_text)
+
+
+try:
+    from wheel.bdist_wheel import bdist_wheel
+except ImportError:
+    # This is useful when wheel is not installed and bdist_wheel is not
+    # specified on the command line. If it _is_ specified, parsing the command
+    # line will fail before wheel_concatenate is needed
+    wheel_concatenate = None
+else:
+    # Need to create the proper LICENSE.txt for the wheel
+    class wheel_concatenate(bdist_wheel):
+        """ check submodules on sdist to prevent incomplete tarballs """
+        def run(self):
+            with concat_license_files():
+                super().run()
 
 
 class install(setuptools.command.install.install):
@@ -624,13 +714,13 @@ def configure_extension_build():
             extra_link_args += ['-g']
 
 
-    def make_relative_rpath(path):
+    def make_relative_rpath_args(path):
         if IS_DARWIN:
-            return '-Wl,-rpath,@loader_path/' + path
+            return ['-Wl,-rpath,@loader_path/' + path]
         elif IS_WINDOWS:
-            return ''
+            return []
         else:
-            return '-Wl,-rpath,$ORIGIN/' + path
+            return ['-Wl,-rpath,$ORIGIN/' + path]
 
     ################################################################################
     # Declare extensions and package
@@ -645,7 +735,7 @@ def configure_extension_build():
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
-                  extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')])
+                  extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
 
     if not IS_WINDOWS:
@@ -678,6 +768,7 @@ def configure_extension_build():
         'build_ext': build_ext,
         'clean': clean,
         'install': install,
+        'bdist_wheel': wheel_concatenate,
     }
 
     entry_points = {
@@ -734,6 +825,7 @@ if __name__ == '__main__':
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
+    version_range_max = max(sys.version_info[1], 8) + 1
     setup(
         name=package_name,
         version=version,
@@ -845,6 +937,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/serialization/*.h',
                 'include/torch/csrc/jit/python/*.h',
                 'include/torch/csrc/jit/testing/*.h',
+                'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/pybind11/*.h',
@@ -868,6 +961,9 @@ if __name__ == '__main__':
                 'share/cmake/Gloo/*.cmake',
                 'share/cmake/Tensorpipe/*.cmake',
                 'share/cmake/Torch/*.cmake',
+                'utils/benchmark/utils/*.cpp',
+                'utils/benchmark/utils/valgrind_wrapper/*.cpp',
+                'utils/benchmark/utils/valgrind_wrapper/*.h',
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
@@ -877,7 +973,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>={},<{}'.format(python_min_version_str, python_max_version_str),
+        python_requires='>={}'.format(python_min_version_str),
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -893,7 +989,7 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], python_max_version[1])],
+        ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
         license='BSD-3',
         keywords='pytorch machine learning',
     )

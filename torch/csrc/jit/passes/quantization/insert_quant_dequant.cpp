@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
+
 #include <c10/core/QScheme.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -330,6 +331,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   // Create and insert quantized embedding op.
   Value* none = g->insertConstant(IValue());
   Value* zero = g->insertConstant(IValue(0));
+  bool pruned_wt = false;
+  auto pruned_const = g->insertConstant(pruned_wt);
 
   if (is_aten_op) {
     TORCH_CHECK(
@@ -340,6 +343,10 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     for (auto i = 1; i < inputs_size - 1; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
+    // The sparse field in the float operator denotes sparse gradients.
+    // For inference this stands for pruned weights. We currently don't support
+    // pruning in graph mode API so we set the field to 0 for inference.
+    qembedding_bag_inputs[5] = pruned_const;
   } else {
     TORCH_CHECK(
         inputs_size == 11,
@@ -348,16 +355,13 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs.push_back(embedding_bag_inputs[3]); // offsets
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[6]); // scale_grad_by_freq
-    qembedding_bag_inputs.push_back(zero); // zero
-    qembedding_bag_inputs.push_back(embedding_bag_inputs[8]); // sparse
+    qembedding_bag_inputs.push_back(zero); // mode
+    qembedding_bag_inputs.push_back(pruned_const); // pruned_weights
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[9]); // per_sample_weights
   }
 
-  if (op_name == "embedding_bag_4bit") {
-    // 4-bit op has an extra input compressed_indices_mapping
-    qembedding_bag_inputs.push_back(none);
-  }
+  qembedding_bag_inputs.push_back(none); // compressed_indices_mapping
   qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 1]);
 
   Node* qembedding_bag =
@@ -475,7 +479,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
           matched_choose_qparam, matched_quantize, matched_dequantize));
     }
   }
-  for (const auto nodes : nodes_to_rewrite) {
+  for (const auto& nodes : nodes_to_rewrite) {
     auto quant_node = std::get<1>(nodes);
     auto dequant_node = std::get<2>(nodes);
     // get input of quantize call.
@@ -984,7 +988,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       v->debugName(),
       " exists.");
   QParamVector qparams;
-  c10::QScheme qscheme;
+  c10::QScheme qscheme = c10::kPerTensorAffine;
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");
@@ -1119,10 +1123,11 @@ void InsertQuantDeQuantHelper::propagateQParams(
         "q_zero_point");
     Node* dtype = insertQParam(
         graph, quantized_input, prim::dtype, IntType::get(), "dtype");
-    quant_inputs = {original_output,
-                    scale->output(),
-                    zero_point->output(),
-                    dtype->output()};
+    quant_inputs = {
+        original_output,
+        scale->output(),
+        zero_point->output(),
+        dtype->output()};
   }
   Node* quant = insertQuant(
       graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");

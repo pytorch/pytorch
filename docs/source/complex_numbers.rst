@@ -15,8 +15,8 @@ than operations on float tensors mimicking them. Operations involving complex nu
 to use vectorized assembly instructions and specialized kernels (e.g. LAPACK, cuBlas).
 
 .. note::
-     Spectral operations (e.g., :func:`torch.fft`, :func:`torch.stft` etc.) currently don't use complex tensors but
-     the API will be soon updated to use complex tensors.
+     Spectral operations in the `torch.fft module <https://pytorch.org/docs/stable/fft.html#torch-fft>`_ support
+     native complex tensors.
 
 .. warning ::
      Complex tensors is a beta feature and subject to change.
@@ -107,12 +107,8 @@ The angle and absolute values of a complex tensor can be computed using :func:`t
 Linear Algebra
 --------------
 
-Currently, there is very minimal linear algebra operation support for complex tensors.
-We currently support :func:`torch.mv`, :func:`torch.svd`, :func:`torch.qr`, and :func:`torch.inverse`
-(the latter three are only supported on CPU). However we are working to add support for more
-functions soon: :func:`torch.matmul`, :func:`torch.solve`, :func:`torch.eig`,
-:func:`torch.symeig`. If any of these would help your use case, please
-`search <https://github.com/pytorch/pytorch/issues?q=is%3Aissue+is%3Aopen+complex>`_
+Many linear algebra operations, like :func:`torch.matmul`, :func:`torch.svd`, :func:`torch.solve` etc., support complex numbers.
+If you'd like to request an operation we don't currently support, please `search <https://github.com/pytorch/pytorch/issues?q=is%3Aissue+is%3Aopen+complex>`_
 if an issue has already been filed and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
 
 
@@ -131,12 +127,12 @@ Complex tensors can be serialized, allowing data to be saved as complex values.
 Autograd
 --------
 
-PyTorch supports autograd for complex tensors. The autograd APIs can be
-used for both holomorphic and non-holomorphic functions. For holomorphic functions,
-you get the regular complex gradient. For :math:`C → R` real-valued loss functions,
-`grad.conj()` gives a descent direction. For more details, check out the note :ref:`complex_autograd-doc`.
+PyTorch supports autograd for complex tensors. The gradient computed is the Conjugate Wirtinger derivative,
+the negative of which is precisely the direction of steepest descent used in Gradient Descent algorithm. Thus,
+all the existing optimizers work out of the box with complex parameters. For more details,
+check out the note :ref:`complex_autograd-doc`.
 
-We do not support the following subsystems:
+We do not fully support the following subsystems:
 
 * Quantization
 

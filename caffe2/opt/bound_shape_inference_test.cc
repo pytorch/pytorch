@@ -270,6 +270,30 @@ TEST(BoundShapeInference, LengthsRangeFill) {
       TensorProto_DataType_INT32);
 }
 
+
+TEST(BoundShapeInference, ConstantFill) {
+  NetDef net;
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("ConstantFill", "", {"X"}, {"Y"}, {}));
+  ShapeInfoMap shape_map;
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  shape_map.emplace(
+      "X",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH,
+           TensorBoundShape_DimType_CONSTANT},
+          {20, 1024}));
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Y",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {20, 1024},
+      TensorProto_DataType_FLOAT);
+}
+
 // https://github.com/pytorch/pytorch/issues/40861
 TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
   NetDef net;

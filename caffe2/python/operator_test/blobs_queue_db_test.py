@@ -3,7 +3,6 @@
 
 
 
-import unittest
 import numpy as np
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2

@@ -15,6 +15,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
+from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -306,6 +307,7 @@ class TestOptim(TestCase):
             )
 
     @skipIfRocm
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
             return
@@ -334,21 +336,21 @@ class TestOptim(TestCase):
             ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
         ]
 
-        kIterations = 1001
+        kIterations = 11
         device = 'cuda'
 
         for optimizers, params in optimizer_pairs_with_flags:
             res = []
             for opt in optimizers:
-                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]], 
+                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]],
                                       dtype=torch.float64, device=device, requires_grad=True)
                 bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
-                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]], 
+                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]],
                                        dtype=torch.float64, device=device, requires_grad=True)
                 bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
-                model = torch.nn.Sequential(torch.nn.Linear(2, 3), 
+                model = torch.nn.Sequential(torch.nn.Linear(2, 3),
                                             torch.nn.Sigmoid(),
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
@@ -363,7 +365,7 @@ class TestOptim(TestCase):
 
                 optimizer = opt(model.parameters(), **params)
 
-                for _ in range(kIterations): 
+                for _ in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
@@ -379,7 +381,7 @@ class TestOptim(TestCase):
             for p1, p2 in zip(res[0], res[1]):
                 self.assertEqual(p1, p2)
 
-
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
             self._test_basic_cases(
@@ -425,6 +427,7 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
             self._test_basic_cases(
@@ -459,6 +462,7 @@ class TestOptim(TestCase):
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_adadelta(self):
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
@@ -535,6 +539,7 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
+    @skipCUDAVersionIn([(11, 2)])  # test does not pass for CUDA 11.2
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
             self._test_basic_cases(
@@ -878,7 +883,7 @@ class TestLRScheduler(TestCase):
         # lr = 0.0005   if epoch >= 9
         epochs = 10
         single_targets = [0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
 
@@ -897,7 +902,7 @@ class TestLRScheduler(TestCase):
         # lr = 0.00005   if 9 <= epoch
         epochs = 10
         single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 1
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_get_last_lr(scheduler, targets, epochs)
 
@@ -908,7 +913,7 @@ class TestLRScheduler(TestCase):
         # lr = 0.00005   if epoch >= 9
         epochs = 10
         single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(scheduler, targets, epochs)
 
@@ -919,14 +924,14 @@ class TestLRScheduler(TestCase):
         # lr = 0.00005   if epoch >= 9
         epochs = 10
         single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_with_epoch(scheduler, targets, epochs)
 
     def test_exp_lr(self):
         epochs = 10
         single_targets = [0.05 * (0.9 ** x) for x in range(epochs)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         self._test(scheduler, targets, epochs)
 
@@ -936,7 +941,7 @@ class TestLRScheduler(TestCase):
         single_targets = [eta_min + (0.05 - eta_min) *
                           (1 + math.cos(math.pi * x / epochs)) / 2
                           for x in range(epochs)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(scheduler, targets, epochs)
 
@@ -1058,7 +1063,7 @@ class TestLRScheduler(TestCase):
         single_targets += [0.005 * (0.9 ** x) for x in range(3, 6)]
         single_targets += [0.0005 * (0.9 ** x) for x in range(6, 9)]
         single_targets += [0.00005 * (0.9 ** x) for x in range(9, 12)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
@@ -1070,7 +1075,7 @@ class TestLRScheduler(TestCase):
         single_targets += [0.005 * (0.9 ** x) for x in range(2, 5)]
         single_targets += [0.0005 * (0.9 ** x) for x in range(5, 9)]
         single_targets += [0.00005 * (0.9 ** x) for x in range(9, 11)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers[0] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
@@ -1082,7 +1087,7 @@ class TestLRScheduler(TestCase):
                           (1 + math.cos(math.pi * x / epochs)) / 2
                           for x in range(epochs)]
         single_targets = [x * 0.1 ** (i // 3) for i, x in enumerate(single_targets)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=3)
@@ -1096,7 +1101,7 @@ class TestLRScheduler(TestCase):
                           for x in range(epochs)]
         multipliers = [1] * 2 + [0.1] * 3 + [0.01] * 4 + [0.001]
         single_targets = [x * y for x, y in zip(single_targets, multipliers)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
@@ -1110,7 +1115,7 @@ class TestLRScheduler(TestCase):
                           for x in range(epochs)]
         multipliers = [0.1 ** i for i in range(epochs)]
         single_targets = [x * y for x, y in zip(single_targets, multipliers)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
@@ -1222,8 +1227,8 @@ class TestLRScheduler(TestCase):
         diff_lr = max_lr - base_lr
         gamma = 0.9
         xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
-        lr_target = list(map(lambda x: base_lr + x[1] * diff_lr * gamma**x[0], enumerate(xs)))
-        momentum_target = list(map(lambda x: max_lr - x[1] * diff_lr * gamma**x[0], enumerate(xs)))
+        lr_target = [base_lr + x * diff_lr * gamma**i for i, x in enumerate(xs)]
+        momentum_target = [max_lr - x * diff_lr * gamma**i for i, x in enumerate(xs)]
         lr_targets = [lr_target, lr_target]
         momentum_targets = [momentum_target, momentum_target]
         scheduler = CyclicLR(self.opt, base_lr=base_lr,
@@ -1234,10 +1239,10 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_triangular_mode(self):
         lr_target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
-        lr_target_2 = list(map(lambda x: x + 1, lr_target_1))
+        lr_target_2 = [x + 1 for x in lr_target_1]
         lr_targets = [lr_target_1, lr_target_2]
         momentum_target_1 = [5, 4, 3, 2, 1, 2, 3, 4, 5, 4, 3]
-        momentum_target_2 = list(map(lambda x: x + 1, momentum_target_1))
+        momentum_target_2 = [x + 1 for x in momentum_target_1]
         momentum_targets = [momentum_target_1, momentum_target_2]
         scheduler = CyclicLR(self.opt, base_lr=[1, 2], max_lr=[5, 6], step_size_up=4,
                              cycle_momentum=True, base_momentum=[1, 2], max_momentum=[5, 6],
@@ -1247,11 +1252,11 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_triangular2_mode(self):
         lr_target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 1.5, 2.0, 2.5, 3.0, 2.5, 2.0, 1.5, 1,
                        1.25, 1.50, 1.75, 2.00, 1.75]
-        lr_target_2 = list(map(lambda x: x + 2, lr_target_1))
+        lr_target_2 = [x + 2 for x in lr_target_1]
         lr_targets = [lr_target_1, lr_target_2]
         momentum_target_1 = [5.0, 4.0, 3.0, 2.0, 1.0, 2.0, 3.0, 4.0, 5.0, 4.5, 4.0, 3.5,
                              3.0, 3.5, 4.0, 4.5, 5.0, 4.75, 4.5, 4.25, 4.0, 4.25]
-        momentum_target_2 = list(map(lambda x: x + 2, momentum_target_1))
+        momentum_target_2 = [x + 2 for x in momentum_target_1]
         momentum_targets = [momentum_target_1, momentum_target_2]
         scheduler = CyclicLR(self.opt, base_lr=[1, 3], max_lr=[5, 7], step_size_up=4,
                              cycle_momentum=True, base_momentum=[1, 3], max_momentum=[5, 7],
@@ -1267,11 +1272,11 @@ class TestLRScheduler(TestCase):
 
         gamma = 0.9
         xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
-        lr_target_1 = list(map(lambda x: base_lr_1 + x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
-        lr_target_2 = list(map(lambda x: base_lr_2 + x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        lr_target_1 = [base_lr_1 + x * diff_lr_1 * gamma**i for i, x in enumerate(xs)]
+        lr_target_2 = [base_lr_2 + x * diff_lr_2 * gamma**i for i, x in enumerate(xs)]
         lr_targets = [lr_target_1, lr_target_2]
-        momentum_target_1 = list(map(lambda x: max_lr_1 - x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
-        momentum_target_2 = list(map(lambda x: max_lr_2 - x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        momentum_target_1 = [max_lr_1 - x * diff_lr_1 * gamma**i for i, x in enumerate(xs)]
+        momentum_target_2 = [max_lr_2 - x * diff_lr_2 * gamma**i for i, x in enumerate(xs)]
         momentum_targets = [momentum_target_1, momentum_target_2]
         scheduler = CyclicLR(self.opt, base_lr=[base_lr_1, base_lr_2],
                              max_lr=[max_lr_1, max_lr_2], step_size_up=4,
@@ -1388,6 +1393,18 @@ class TestLRScheduler(TestCase):
         momentum_targets = [momentum_target, momentum_target]
         scheduler = OneCycleLR(self.opt, max_lr=25, final_div_factor=2, base_momentum=1, max_momentum=22,
                                total_steps=10, anneal_strategy='linear')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
+
+    def test_onecycle_lr_linear_annealing_three_phases(self):
+        lr_target = [1, 9, 17, 25, 17, 9, 1, 0.75, 0.5, 0.25]
+        momentum_target = [22, 15, 8, 1, 8, 15, 22, 22, 22, 22]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = OneCycleLR(self.opt, max_lr=25, div_factor=25,
+                               base_momentum=1, max_momentum=22,
+                               total_steps=10, anneal_strategy='linear',
+                               pct_start=0.4, final_div_factor=4,
+                               three_phase=True)
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
 
     def test_onecycle_lr_cosine_annealing(self):

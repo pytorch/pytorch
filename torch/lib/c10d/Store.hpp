@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 
+#include <torch/custom_class.h>
+
 namespace c10d {
 
-class Store {
+class Store : public torch::CustomClassHolder {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(300);
@@ -25,6 +27,13 @@ class Store {
   virtual void set(
       const std::string& key,
       const std::vector<uint8_t>& value) = 0;
+
+  virtual std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) {
+    TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+  }
 
   virtual std::vector<uint8_t> get(const std::string& key) = 0;
 

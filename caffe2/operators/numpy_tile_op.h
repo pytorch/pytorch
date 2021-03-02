@@ -92,7 +92,7 @@ class NumpyTileOp : public Operator<Context> {
 
  private:
   void DoTile(
-      const TypeMeta& meta,
+      const TypeMeta meta,
       int item_size,
       int outer_dim,
       int inner_dim,

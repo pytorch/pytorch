@@ -44,7 +44,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
         assert len(modules) == len(devices)
     else:
         devices = [None] * len(modules)
-    devices = list(map(lambda x: _get_device_index(x, True), devices))
+    devices = [_get_device_index(x, True) for x in devices]
     lock = threading.Lock()
     results = {}
     grad_enabled, autocast_enabled = torch.is_grad_enabled(), torch.is_autocast_enabled()

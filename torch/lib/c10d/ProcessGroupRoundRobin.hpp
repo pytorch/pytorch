@@ -6,6 +6,8 @@
 
 namespace c10d {
 
+constexpr const char* ROUND_ROBIN_BACKEND_NAME = "round_robin";
+
 // ProcessGroupRoundRobin implements simple load balancing.
 //
 // It is constructed with multiple processes groups. Each call is dispatched to
@@ -21,87 +23,91 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
   explicit ProcessGroupRoundRobin(
       int rank,
       int size,
-      std::vector<std::shared_ptr<ProcessGroup>> processGroups);
+      std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups);
 
   ~ProcessGroupRoundRobin() override;
 
-  std::shared_ptr<ProcessGroup::Work> broadcast(
+  const std::string getBackendName() const override {
+      return std::string(ROUND_ROBIN_BACKEND_NAME);
+  }
+
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> gather(
+  c10::intrusive_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const GatherOptions& opts = GatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> alltoall_base(
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier(
+  c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
  private:
-  std::vector<std::shared_ptr<ProcessGroup>> processGroups_;
-  std::vector<std::shared_ptr<ProcessGroup>>::const_iterator iterator_;
+  std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups_;
+  std::vector<c10::intrusive_ptr<ProcessGroup>>::const_iterator iterator_;
 
   // Returns the next ProcessGroup to use.
-  const std::shared_ptr<ProcessGroup>& next();
+  const c10::intrusive_ptr<ProcessGroup>& next();
 };
 
 } // namespace c10d

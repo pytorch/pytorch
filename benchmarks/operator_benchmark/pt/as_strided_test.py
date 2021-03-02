@@ -1,5 +1,6 @@
 import operator_benchmark as op_bench
 import torch
+from typing import List
 
 
 """Microbenchmarks for as_strided operator"""
@@ -32,15 +33,19 @@ as_strided_configs_long = op_bench.cross_product_configs(
 
 class As_stridedBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, size, stride, storage_offset, device):
-        self.input_one = torch.rand(M, N, device=device)
-        self.size = size
-        self.stride = stride
-        self.storage_offset = storage_offset
+        self.inputs = {
+            "input_one": torch.rand(M, N, device=device),
+            "size": size,
+            "stride": stride,
+            "storage_offset": storage_offset
+        }
         self.set_module_name('as_strided')
 
-    def forward(self):
+    def forward(
+        self, input_one, size: List[int], stride: List[int], storage_offset: int
+    ):
         return torch.as_strided(
-            self.input_one, self.size, self.stride, self.storage_offset)
+            input_one, size, stride, storage_offset)
 
 
 op_bench.generate_pt_test(as_strided_configs_short + as_strided_configs_long,

@@ -1,8 +1,9 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
@@ -14,6 +15,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // TODO(kir): revisit this
 thread_local GpuLower* active_gpu_lower = nullptr;
@@ -113,8 +115,14 @@ void GpuLower::lower() {
   const auto unrolled_loops =
       UnrollPass::runPass(fusion_, lowered_exprs, preds);
 
+  // Reuse memory locations if:
+  // TensorView is dynamic shared memory
+  // TensorViews have the same size
+  // Output TensorView is modified using Input TensorView
+  const auto reuse_mem_exprs = reuseMemoryAllocations(fusion_, unrolled_loops);
+
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
-  const auto sync_exprs = insertThreadSynchronization(fusion_, unrolled_loops);
+  const auto sync_exprs = insertThreadSynchronization(fusion_, reuse_mem_exprs);
 
   const auto indexed_loops =
       IndexLowering::getIndexedExprs(fusion_, sync_exprs);
@@ -140,7 +148,7 @@ Kernel* GpuLower::kernel() const {
 //
 // TODO(kir): this is a interim solution for easing the Kernel IR splitting
 //
-class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
+class TORCH_CUDA_CU_API GpuLower::KernelIrMapper : private OptInConstDispatch {
  public:
   explicit KernelIrMapper(GpuLower* gpu_lower)
       : gpu_lower_(gpu_lower), ir_builder_(gpu_lower->kernel()) {}
@@ -171,13 +179,13 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
   void lowerDefinition(Val* lowered_value, const Expr* def) {
     switch (def->type()) {
       case ExprType::UnaryOp: {
-        const auto op = def->as<fuser::UnaryOp>();
+        const auto op = def->as<UnaryOp>();
         ir_builder_.create<kir::UnaryOp>(
             op->getUnaryOpType(), lowered_value, lower(op->in()));
         break;
       }
       case ExprType::BinaryOp: {
-        const auto op = def->as<fuser::BinaryOp>();
+        const auto op = def->as<BinaryOp>();
         ir_builder_.create<kir::BinaryOp>(
             op->getBinaryOpType(),
             lowered_value,
@@ -186,7 +194,7 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
         break;
       }
       case ExprType::TernaryOp: {
-        const auto op = def->as<fuser::TernaryOp>();
+        const auto op = def->as<TernaryOp>();
         ir_builder_.create<kir::TernaryOp>(
             op->getTernaryOpType(),
             lowered_value,
@@ -275,6 +283,7 @@ GpuLower* GpuLower::current() {
   return active_gpu_lower;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

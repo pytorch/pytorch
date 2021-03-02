@@ -18,7 +18,7 @@ using int64_tValue = int64_t;
 
 struct IndexBase {
  public:
-  IndexBase(int64_tValue maxElements, const TypeMeta& type)
+  IndexBase(int64_tValue maxElements, const TypeMeta type)
       : maxElements_{maxElements}, meta_(type), frozen_{false} {}
 
   void Freeze() {
@@ -35,7 +35,7 @@ struct IndexBase {
 
   virtual ~IndexBase() {}
 
-  const TypeMeta& Type() const {
+  const TypeMeta Type() const {
     return meta_;
   }
 

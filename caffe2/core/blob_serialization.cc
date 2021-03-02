@@ -26,17 +26,6 @@ C10_DEFINE_bool(
     false,
     "Serialize BOOL, UINT8, INT8, UINT16, INT16, INT64, FLOAT16 tensors using byte_data field instead of int32");
 
-#ifdef _MSC_VER
-// It's MSVC, so we just have to guess ... and allow an override
-#ifdef FOLLY_ENDIAN_BE
-constexpr auto kIsLittleEndian = false;
-#else
-constexpr auto kIsLittleEndian = true;
-#endif
-#else
-constexpr auto kIsLittleEndian = __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__;
-#endif
-
 namespace caffe2 {
 /**
  * @brief StringSerializer is the serializer for String.
@@ -365,9 +354,17 @@ void TensorSerializer::Serialize(
     } break;
     case TensorProto_DataType_ZERO_COLLISION_HASH: {
       CAFFE_ENFORCE(
-          false,
-          "Serialization for zero collision hash type is supported by specialized serializer ZeroCollisionIdHashSerializer");
+        false,
+        "Serialization for zero collision hash type is supported by "
+        "specialized serializer ZeroCollisionIdHashSerializer");
     } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Serialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferSerialier");
+    } break;
+
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
@@ -420,7 +417,7 @@ void DeserializeBlob(const BlobProto& blob_proto, Blob* result) {
 
 // === Local helper functions ===
 // Get dimensions from Tensor proto
-static std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
+std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
   std::vector<int64_t> dims;
   dims.reserve(proto.dims().size());
   for (const int64_t d : proto.dims()) {
@@ -430,7 +427,7 @@ static std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
 }
 
 // Get number of elements from Tensor proto
-static int64_t NumelFromTensorProto(const TensorProto& tensor_proto) {
+int64_t NumelFromTensorProto(const TensorProto& tensor_proto) {
   int64_t numel = 1;
   for (const int64_t d : tensor_proto.dims()) {
     numel *= d;
@@ -439,7 +436,7 @@ static int64_t NumelFromTensorProto(const TensorProto& tensor_proto) {
 }
 
 // Get data type from Tensor proto
-static TypeMeta GetDataType(const TensorProto& tensor_proto) {
+TypeMeta GetDataType(const TensorProto& tensor_proto) {
   TypeMeta dtype;
   if (tensor_proto.data_type() != TensorProto_DataType_UNDEFINED) {
     dtype = DataTypeToTypeMeta(tensor_proto.data_type());
@@ -459,7 +456,7 @@ static at::TensorOptions TensorOptionsFromProto(
       .device(OptionToDevice(tensor_proto.device_detail()));
 }
 
-static std::unique_ptr<BaseContext> ContextFromProto(
+std::unique_ptr<BaseContext> ContextFromProto(
     const TensorProto& tensor_proto) {
   auto device = OptionToDevice(tensor_proto.device_detail());
   return CreateContext(device);
@@ -573,6 +570,16 @@ void TensorDeserializer::DeserializeToTensor(
       tensor->numel());
   auto chunkSize = chunkEnd - chunkBegin;
 
+  if (!tensor_proto.has_data_type()) {
+    // If the data_type field is not set, this either means it was not present
+    // in the serialized data, or it was set to an enum value that we don't know
+    // about.  This likely means that the serialized data was written by a
+    // different version of the software using a new data type value that we
+    // don't understand.
+    throw std::runtime_error(
+        "Cannot deserialize tensor: unrecognized data type");
+  }
+
   switch (tensor_proto.data_type()) {
     case TensorProto_DataType_FLOAT:
       detail::CopyFromProtoAsIs(
@@ -664,8 +671,15 @@ void TensorDeserializer::DeserializeToTensor(
     } break;
     case TensorProto_DataType_ZERO_COLLISION_HASH: {
       CAFFE_ENFORCE(
-          false,
-          "Deserialization for zero collision hash type is supported by specialized deserializer ZeroCollisionIdHashDeserializer");
+        false,
+        "Deserialization for zero collision hash type is supported by "
+        "specialized deserializer ZeroCollisionIdHashDeserializer");
+    } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Deserialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferDeserialier");
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
   }

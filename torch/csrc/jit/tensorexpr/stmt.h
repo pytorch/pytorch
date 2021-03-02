@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <list>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -163,6 +164,13 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_;
   }
 
+  void clear() {
+    for (auto* s : stmts_) {
+      set_parent(s, nullptr);
+    }
+    stmts_.clear();
+  }
+
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
       if (s->get_parent()) {
@@ -242,6 +250,14 @@ class TORCH_API Block : public StmtNode<Block> {
     }
 
     return nullptr;
+  }
+
+  // returns the immediate child containing statement s.
+  const Stmt* getEnclosedRoot(const Stmt* s) const {
+    while (s && s->get_parent() != this) {
+      s = s->get_parent();
+    }
+    return s;
   }
 
  private:
@@ -701,6 +717,63 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
 class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
  public:
   SyncThreads() {}
+};
+
+/*
+ * ExternalCall statement represents a call to an external function that would
+ * compute the contents of the output buffer. An ExternalCall statement consists
+ * of:
+ *   1) output buffer - the buffer that'll be initialized by the call
+ *   2) external function name - a key from the NNC function registry to lookup
+ *      the actual function to call
+ *   3) buffer arguments - the input buffers used by the function
+ *   4) non-buffer arguments - scalar arguments to pass to the function
+ *
+ * An example:
+ *   A = nnc_conv2d(buf_args={Input, Weight, Bias}, args={1})
+ * Here 'A' is the output buffer, "nnc_conv2d" is the function name, the buffer
+ * arguments are 'Input', 'Weight', and 'Bias', and there is a single non-buffer
+ * argument - 1.
+ *
+ * The semantics of the scalar arguments is defined solely by the implementation
+ * of the external function.
+ */
+class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
+ public:
+  static ExternalCall* make(
+      BufHandle buf,
+      const std::string& func_name,
+      const std::vector<BufHandle>& buf_args,
+      const std::vector<ExprHandle>& args);
+
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  std::string func_name() const {
+    return func_name_;
+  }
+
+  std::vector<const Buf*> buf_args() const {
+    return buf_args_;
+  }
+
+  std::vector<const Expr*> args() const {
+    return args_;
+  }
+
+  ExternalCall(
+      const Buf* buf,
+      const std::string& func_name,
+      const std::vector<const Buf*>& buf_args,
+      const std::vector<const Expr*>& args)
+      : buf_(buf), func_name_(func_name), buf_args_(buf_args), args_(args) {}
+
+ private:
+  const Buf* buf_;
+  std::string func_name_;
+  std::vector<const Buf*> buf_args_;
+  std::vector<const Expr*> args_;
 };
 
 } // namespace tensorexpr
