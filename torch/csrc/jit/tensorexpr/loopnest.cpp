@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -25,12 +26,22 @@ namespace tensorexpr {
 
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
-      output_bufs_(other.output_bufs_) {}
+      output_bufs_(other.output_bufs_) {
+  verify(root_stmt_);
+}
+
+LoopNest::LoopNest(
+    Stmt* stmt,
+    const std::unordered_set<const Buf*>& output_bufs)
+    : root_stmt_(stmt), output_bufs_(output_bufs) {
+  verify(root_stmt_);
+}
 
 LoopNest::LoopNest(
     const std::vector<Tensor*>& output_tensors,
     const std::vector<Tensor*>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
+  verify(root_stmt_);
 }
 
 LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
@@ -39,6 +50,7 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   std::vector<Tensor*> tensors_to_compute =
       findAllNeededTensors(output_tensors);
   initialize(output_tensors, tensors_to_compute);
+  verify(root_stmt_);
 }
 
 class FunctionCallUseCount : public IRVisitor {
