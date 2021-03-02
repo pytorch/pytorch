@@ -81,8 +81,6 @@ c10::optional<AutocastScope> parseAutocast(Value* value) {
 void castTensorInputs(Node* node, Symbol cast_op) {
   const auto graph = node->owningGraph();
 
-  WithInsertPoint insert_point(node);
-
   std::unordered_set<Value*> casted_inputs;
   for (auto input : node->inputs()) {
     if (input->type()->kind() == TensorType::Kind) {
@@ -90,10 +88,34 @@ void castTensorInputs(Node* node, Symbol cast_op) {
     }
   }
 
+  WithInsertPoint insert_point(node);
+
   for (auto input : casted_inputs) {
     const auto new_input = graph->insert(cast_op, {input});
     node->replaceInputWith(input, new_input);
   }
+}
+
+bool hasExplicitDtypeArgument(Node* node) {
+  const auto& actual_args = node->inputs();
+  const auto& formal_args = node->schema().arguments();
+  TORCH_INTERNAL_ASSERT(actual_args.size() == formal_args.size());
+
+  // Try to identify the `dtype` optional paramater
+  Value* dtype_arg = nullptr;
+  for (size_t i = 0; i < formal_args.size(); ++i) {
+    const auto& formal = formal_args[i];
+    if (auto type = formal.type()->cast<OptionalType>()) {
+      if (formal.name() == "dtype" &&
+          type->getElementType()->kind() == TypeKind::IntType) {
+        dtype_arg = actual_args[i];
+        break;
+      }
+    }
+  }
+
+  // Have we found a `dtype` argument and it is set to `None`?
+  return dtype_arg && dtype_arg->type()->kind() != TypeKind::NoneType;
 }
 
 void castInputsToWidestType(Node* node) {
@@ -105,7 +127,7 @@ void castInputsToWidestType(Node* node) {
   for (auto input : node->inputs()) {
     if (auto tensor_type = input->type()->cast<TensorType>()) {
       const auto dtype = tensor_type->scalarType();
-      if (!dtype.has_value() || *dtype != at::ScalarType::Half) {
+      if (!dtype.has_value() || *dtype == at::ScalarType::Float) {
         castTensorInputs(node, aten::autocast_to_fp32);
         return;
       }
@@ -238,6 +260,20 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::renorm:
         if (current_state() && !node->schema().is_mutable()) {
           castTensorInputs(node, aten::autocast_to_fp32);
+        }
+        break;
+
+      // CastPolicy::fp32_set_opt_dtype
+      case aten::prod:
+      case aten::softmax:
+      case aten::log_softmax:
+      case aten::cumprod:
+      case aten::cumsum:
+      case aten::sum:
+        if (current_state() && !node->schema().is_mutable()) {
+          if (!hasExplicitDtypeArgument(node)) {
+            castTensorInputs(node, aten::autocast_to_fp32);
+          }
         }
         break;
 

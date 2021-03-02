@@ -128,9 +128,7 @@ conservatively inject a promotion even when it may not be needed.
 
 Also related to the lack of concrete dtype availability, a few specialized
 autocast policies are not yet supported with JIT scripting:
-- [CastPolicy::fp32_set_opt_dtype][4]
 - [CastPolicy::fp32_append_dtype][5]
-- Any overload-specific policy 
 
 #### Mixing eager mode and scripting autocast
 

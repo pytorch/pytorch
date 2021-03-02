@@ -1,6 +1,7 @@
 
 import torch
 from torch.cuda.amp import autocast
+from typing import Optional
 
 import unittest
 from test_jit import JitTestCase
@@ -125,6 +126,36 @@ class TestAutocast(JitTestCase):
                 return torch.addcmul(a, a, b, value=0.1)
         result = fn(self.a_fp32.double(), self.b_fp32.double())
         self.assertEqual(result.dtype, torch.float64)
+
+    def test_fp32_set_opt_dtype_policy(self):
+        @torch.jit.script
+        def fn(a, b, c, d, dtype: Optional[int]):
+            with autocast(enabled=True):
+                x = torch.softmax(a, 0)
+                y = torch.softmax(b, 0, None)
+                z = torch.softmax(c, 0, torch.float64)
+                w = torch.softmax(d, 0, dtype)
+            return x, y, z, w
+        x, y, z, w = fn(self.a_fp16, self.b_fp16, self.c_fp16, self.d_fp16, None)
+        self.assertEqual(x.dtype, torch.float32)
+        self.assertEqual(y.dtype, torch.float32)
+        self.assertEqual(z.dtype, torch.float64)
+        self.assertEqual(w.dtype, torch.float16)
+
+    def test_fp32_set_opt_dtype_policy_fp64(self):
+        @torch.jit.script
+        def fn(a, b, c, d, dtype: Optional[int]):
+            with autocast(enabled=True):
+                x = torch.softmax(a, 0)
+                y = torch.softmax(b, 0, None)
+                z = torch.softmax(c, 0, torch.float64)
+                w = torch.softmax(d, 0, dtype)
+            return x, y, z, w
+        x, y, z, w = fn(self.a_fp32.double(), self.b_fp32.double(), self.c_fp32.double(), self.d_fp32.double(), None)
+        self.assertEqual(x.dtype, torch.float64)
+        self.assertEqual(y.dtype, torch.float64)
+        self.assertEqual(z.dtype, torch.float64)
+        self.assertEqual(w.dtype, torch.float64)
 
     def test_control_flow(self):
         @torch.jit.script
