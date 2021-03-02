@@ -156,8 +156,8 @@ class DistributedDataParallel(Module):
         ``DistributedDataParallel`` can be used in conjunction with
         :class:`torch.distributed.optim.ZeroRedundancyOptimizer` to reduce
         per-rank optimizer states memory footprint. Please refer to
-        `Shard Optimizer States With ZeroRedundancyOptimizer <https://pytorch.org/tutorials/recipes/zero_redundancy_optimizer.html>`__
-        as a tutorial.
+        `ZeroRedundancyOptimizer recipe <https://pytorch.org/tutorials/recipes/zero_redundancy_optimizer.html>`__
+        for more details.
 
     .. note:: ``nccl`` backend is currently the fastest and highly recommended
         backend when using GPUs. This applies to both single-node and
