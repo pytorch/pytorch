@@ -52,11 +52,10 @@ _float_vals = (0.,
                -math.pi + .00001, math.pi - .00001,
                -math.pi, math.pi,
                -math.pi - .00001, math.pi + .00001)
-_large_float_vals = (-501, 501,
-                     -1001.2, 1001.2,
-                     -13437.7, 13437.7,
-                     -4988429.2, 4988429.2,
-                     -1e20, 1e20)
+_large_float16_vals = (-501, 501,
+                       -1001.2, 1001.2,
+                       -13437.7, 13437.7)
+_large_float_vals = _large_float16_vals + (-4988429.2, 4988429.2, -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
 _medium_length = 812
 _large_size = (1029, 917)
@@ -146,7 +145,11 @@ def generate_numeric_tensors_hard(device, dtype, *,
         return ()
 
     if dtype.is_floating_point:
-        vals = _large_float_vals
+        if dtype is torch.float16:
+            # float16 has smaller range.
+            vals = _large_float16_vals
+        else:
+            vals = _large_float_vals
     elif dtype.is_complex:
         vals = tuple(complex(x, y) for x, y in chain(product(_large_float_vals, _large_float_vals),
                                                      product(_float_vals, _large_float_vals),
@@ -1516,49 +1519,6 @@ class TestUnaryUfuncs(TestCase):
         a.sign_()
         self.assertEqual(a, a_target, msg='sign_ device={} dtype={}'.format(device, dtype))
 
-    @dtypes(*(torch.testing.torch.testing.get_all_fp_dtypes()))
-    def test_signbit_float(self, device, dtype):
-        t = torch.randn(5, 5, device=device)
-
-        if dtype == torch.bfloat16:
-            t_bf16 = torch.tensor([1, 0, -1], device=device, dtype=dtype)
-            self.assertEqual(torch.signbit(t_bf16), torch.tensor([False, False, True]))
-        else:
-            self.compare_with_numpy(torch.signbit, np.signbit, t)
-
-        t_target = torch.signbit(t)
-        out = torch.empty_like(t, device=device, dtype=torch.bool)
-        torch.signbit(t, out=out)
-        self.assertEqual(out, t_target)
-
-        t_sp = (0, float('inf'), -float('inf'), float('nan'))
-        if dtype == torch.bfloat16:
-            t_sp_df16 = torch.tensor(t_sp, device=device, dtype=dtype)
-            self.assertEqual(torch.signbit(t_sp_df16), torch.tensor([False, False, True, False]))
-        else:
-            self.compare_with_numpy(torch.signbit, np.signbit, t_sp, device, dtype)
-
-    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
-    def test_signbit_int_and_bool(self, device, dtype):
-        t = torch.randint(-5, 5, (5, 5), device=device)
-        self.compare_with_numpy(torch.signbit, np.signbit, t)
-
-        t_target = torch.signbit(t)
-        out = torch.empty_like(t, device=device, dtype=torch.bool)
-        torch.signbit(t, out=out)
-        self.assertEqual(out, t_target)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_signbit_complex(self, device, dtype):
-        vals = (complex(0, -1), complex(-1, 2))
-        t = torch.tensor(vals, device=device, dtype=dtype)
-        out = torch.empty_like(t).real.bool()
-
-        with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
-            torch.signbit(t)
-        with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
-            torch.signbit(t, out=out)
-
     @dtypes(torch.cfloat, torch.cdouble)
     def test_sgn(self, device, dtype):
         x = torch.randn(100, dtype=dtype)
@@ -1571,15 +1531,6 @@ class TestUnaryUfuncs(TestCase):
         torch.sgn(x, out=x_out)
         self.assertEqual(x_out.angle(), angle)
         self.assertEqual(x_out.abs(), torch.ones_like(x).real)
-
-    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
-    def test_signbit_non_boolean_output(self, device, dtype):
-        # test non-boolean tensors as the `out=` parameters
-        # boolean outputs are tested in the above testcases
-        t = torch.randn(5, 5)
-        out = torch.empty_like(t, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
-            torch.signbit(t, out=out)
 
     # This function tests that a nan value is returned for input values not in domain
     @dtypes(torch.float32, torch.float64)
@@ -1726,7 +1677,6 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
     _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                        refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                        ref_backend='scipy'),
