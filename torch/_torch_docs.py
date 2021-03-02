@@ -4403,8 +4403,8 @@ Args:
 Keyword arguments:
     {out}
     dtype (torch.dtype, optional): the data type to perform the computation in.
-    Defaults to float when both :attr:`start` and :attr:`end` are real,
-    and complex float when either is complex.
+        Defaults to float when both :attr:`start` and :attr:`end` are real,
+        and complex float when either is complex.
     {layout}
     {device}
     {requires_grad}
@@ -4774,8 +4774,8 @@ Args:
 Keyword arguments:
     {out}
     dtype (torch.dtype, optional): the data type to perform the computation in.
-    Defaults to float when both :attr:`start` and :attr:`end` are real,
-    and complex float when either is complex.
+        Defaults to float when both :attr:`start` and :attr:`end` are real,
+        and complex float when either is complex.
     {layout}
     {device}
     {requires_grad}
