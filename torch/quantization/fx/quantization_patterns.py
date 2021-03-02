@@ -74,8 +74,10 @@ class QuantizeHandler(ABC):
         return NotImplemented
 
 @register_quant_pattern(operator.add)
+@register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
 @register_quant_pattern(torch.add)
+@register_quant_pattern(torch.sub)
 @register_quant_pattern(torch.mul)
 @register_quant_pattern(torch.bmm)
 @register_quant_pattern((torch.nn.ReLU, operator.add))
@@ -138,6 +140,8 @@ class BinaryOp(QuantizeHandler):
             operator.mul: all_bop_dtypes,
             torch.mul: all_bop_dtypes,
             torch.bmm: float16_dtypes,
+            torch.sub: float16_dtypes,
+            operator.sub: float16_dtypes,
         }
 
         qconfig = quantizer.qconfig_map[node.name]
