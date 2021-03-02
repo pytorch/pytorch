@@ -797,7 +797,7 @@ RegisterOperators reg(
      DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
-     DEFINE_UNARY_OP(aten::neg, -a, int, float),
+     DEFINE_UNARY_OP_WITH_COMPLEX(aten::neg, -a, int, float, complex, c10::complex<double>),
      DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and

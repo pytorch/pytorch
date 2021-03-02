@@ -510,10 +510,12 @@ std::ostream& IValue::repr(
     }
     case IValue::Tag::ComplexDouble: {
       auto d = v.toComplexDouble();
-      IValue real(d.real()), imag(d.imag());
+      IValue real(d.real()), imag(std::abs(d.imag()));
       auto sign = "";
       if (d.imag() >= 0) {
         sign = "+";
+      } else {
+        sign = "-";
       }
       return out << real << sign << imag << "j";
     }

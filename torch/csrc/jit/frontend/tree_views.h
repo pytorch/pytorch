@@ -896,7 +896,7 @@ struct Const : public Expr {
     char* dummy;
     return torch::jit::strtod_c(subtree(0)->stringValue().c_str(), &dummy);
   }
-  c10::complex<double> asComplexDouble() const {
+  c10::complex<double> asComplex() const {
     char* dummy;
     auto str = subtree(0)->stringValue();
     auto imag =

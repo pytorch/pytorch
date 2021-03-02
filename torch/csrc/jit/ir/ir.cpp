@@ -1781,8 +1781,6 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
     elem_ty = 1;
   } else if (ptr == BoolType::get()) {
     elem_ty = 2;
-  } else if (ptr == ComplexType::get()) {
-    elem_ty = 3;
   } else {
     TORCH_CHECK(
         false,
