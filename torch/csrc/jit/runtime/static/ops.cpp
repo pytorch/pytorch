@@ -117,15 +117,10 @@ bool canRunOutOfPlace(Node* n) {
       SRViewOperatorRegistry()->Has(op_name);
 }
 
-// The inputs/outputs of view ops do not participate in memory reuse
+// Same as "canRunOutOfPlace" but excluds view operations
 bool canReuseInputsOutputs(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
-  return !SRViewOperatorRegistry()->Has(op_name);
-}
-
-bool isViewOp(Node* n) {
-  auto op_name = std::string(n->kind().toQualString());
-  return SRViewOperatorRegistry()->Has(op_name);
+  return SROperatorRegistry()->Has(op_name);
 }
 
 bool canReuseInputs(Node* n) {
@@ -630,27 +625,30 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
     });
 
 // The out variant takes precedence over native
-REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    auto& self = p_node->Input(0).toTensor(); // self
-    auto dim = p_node->Input(1).toInt(); // dim
-    int64_t start = 0;
-    if (p_node->Input(2).isScalar()) {
-      start = p_node->Input(2).toInt();
-    } else {
-      auto& t = p_node->Input(2).toTensor();
-      start = t.item<int64_t>();
-    }
-    auto length = p_node->Input(3).toInt(); // length
+REGISTER_OPERATOR_FUNCTOR(
+    aten::narrow_copy,
+    aten_narrow_copy,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto& self = p_node->Input(0).toTensor(); // self
+        auto dim = p_node->Input(1).toInt(); // dim
+        int64_t start = 0;
+        if (p_node->Input(2).isScalar()) {
+          start = p_node->Input(2).toInt();
+        } else {
+          auto& t = p_node->Input(2).toTensor();
+          start = t.item<int64_t>();
+        }
+        auto length = p_node->Input(3).toInt(); // length
 
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = create_empty_from(self);
-    }
-    auto& output = p_node->Output(0).toTensor();
-    fastResizeToZero(output);
-    at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
-  };
-});
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = create_empty_from(self);
+        }
+        auto& output = p_node->Output(0).toTensor();
+        fastResizeToZero(output);
+        at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
+      };
+    });
 REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
@@ -667,7 +665,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
 
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
-REGISTER_VIEW_OPERATOR_FUNCTOR(
+REGISTER_OPERATOR_FUNCTOR(
     aten::reshape,
     aten_reshape,
     [](Node* n) -> SROperator {
@@ -683,7 +681,7 @@ REGISTER_VIEW_OPERATOR_FUNCTOR(
       };
     });
 
-REGISTER_VIEW_OPERATOR_FUNCTOR(
+REGISTER_OPERATOR_FUNCTOR(
     aten::flatten,
     aten_flatten,
     [](Node* n) -> SROperator {
