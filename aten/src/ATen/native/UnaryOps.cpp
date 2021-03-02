@@ -452,6 +452,13 @@ Tensor& nan_to_num_out(
       self.scalar_type());
 
   if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    // Manually check for device as `copy_` allows cross-device copies.
+    TORCH_CHECK(
+        self.device() == result.device(),
+        "torch.nan_to_num(): Expected all tensors to be on the same device but input is on ",
+        self.device(),
+        " out is on ",
+        result.device())
     result.resize_as_(self);
     result.copy_(self);
     return result;

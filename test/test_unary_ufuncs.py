@@ -177,7 +177,7 @@ def generate_numeric_tensors_extremal(device, dtype, *,
 
 
 # TODO: port test_unary_out_op_mem_overlap
-# TODO: add out= tests (different devices, dtypes, mismatched sizes,
+# TODO: add out= tests (dtypes, mismatched sizes,
 #                       correct sizes, 0 size, broadcasted out)
 # TODO: add test for inplace variants erroring on broadcasted inputs
 class TestUnaryUfuncs(TestCase):
@@ -492,6 +492,30 @@ class TestUnaryUfuncs(TestCase):
         for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
             out = torch.empty_like(input, dtype=out_dtype)
             self._test_out_arg(op, input, out, expected)
+
+    @onlyCUDA
+    @ops(unary_ufuncs, dtypes=OpDTypes.basic)
+    def test_out_mismatched_device(self, device, dtype, op):
+        input_cuda = make_tensor((3,), dtype=dtype, device=device,
+                                 low=op.domain[0], high=op.domain[1])
+        input_cpu = input_cuda.cpu()
+
+        out_dtype = dtype
+        if op.safe_casts_outputs and not (dtype.is_floating_point or dtype.is_complex):
+            out_dtype = torch.get_default_dtype()
+
+        out_cuda = torch.empty_like(input_cuda, dtype=out_dtype)
+        out_cpu = torch.empty_like(input_cpu, dtype=out_dtype)
+
+        # Input Device: CUDA, Output Device: CPU
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Expected all tensors to be on the same device"):
+            op(input_cuda, out=out_cpu)
+
+        # Input Device: CPU, Output Device: CUDA
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Expected all tensors to be on the same device"):
+            op(input_cpu, out=out_cuda)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
