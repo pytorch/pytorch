@@ -23,8 +23,6 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMP
                                                   IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ROCM, TEST_WITH_TSAN, IS_SANDCASTLE)
 
-from mp_functions import SimpleCustomBatch
-
 try:
     import psutil
     HAS_PSUTIL = True
@@ -2088,9 +2086,24 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
 
-def collate_wrapper(batch):
-    return SimpleCustomBatch(batch)
+class SimpleCustomBatch(object):
+    def __init__(self, data):
+        transposed_data = list(zip(*data))
+        self.inp = torch.stack(transposed_data[0], 0)
+        self.tgt = torch.stack(transposed_data[1], 0)
 
+    def pin_memory(self):
+        self.inp = self.inp.pin_memory()
+        self.tgt = self.tgt.pin_memory()
+        return self
+
+    def is_pinned(self):
+        return self.inp.is_pinned() and self.tgt.is_pinned()
+
+# foo is used to fix https://github.com/pytorch/pytorch/issues/50661
+foo = __import__(os.path.splitext(os.path.basename(__file__))[0])
+def collate_wrapper(batch):
+    return foo.SimpleCustomBatch(batch)
 
 def collate_into_packed_sequence(batch):
     data = torch.stack([sample[0] for sample in batch], 1)
@@ -2121,7 +2134,7 @@ class TestCustomPinFn(TestCase):
     @skipIfRocm
     def test_custom_batch_pin(self):
         test_cases = [
-            (collate_wrapper, SimpleCustomBatch),
+            (collate_wrapper, foo.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
@@ -2136,7 +2149,7 @@ class TestCustomPinFn(TestCase):
     @skipIfRocm
     def test_custom_batch_pin_worker(self):
         test_cases = [
-            (collate_wrapper, SimpleCustomBatch),
+            (collate_wrapper, foo.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
