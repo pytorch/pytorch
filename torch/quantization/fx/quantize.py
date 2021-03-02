@@ -318,6 +318,32 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
                     return True
     return False
 
+def node_arg_is_getattr_ndim(node: Node, arg: Any) -> bool:
+    if type(arg) == Node:
+        is_getattr_with_ndim = arg.target is getattr and arg.args[1] == 'ndim'
+        if is_getattr_with_ndim:
+            return True
+    return False
+
+def should_ignore_match(node: Node, pattern: Pattern, value: Any) -> bool:
+    """
+    There are cases when a match of a node against a pattern makes sense
+    locally, but does not make sense with the added context of surrounding
+    nodes.  For example:
+    * we need to match a + b to the add op
+    * if both a and b are not Tensors, we need to ignore that match
+
+    There might be a better place for this logic in the long term
+
+    TODO(befor land): better docblock
+    """
+    # TODO(before land): handle patterns with length > 1
+    if value == BinaryOp:
+        for arg in node.args:
+            if node_arg_is_getattr_ndim(node, arg):
+                return True
+    return False
+
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
@@ -1039,6 +1065,9 @@ class Quantizer:
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
+                        should_ignore = should_ignore_match(node, pattern, value)
+                        if should_ignore:
+                            continue
                         matched: List[Any] = []
                         record_match(pattern, node, matched)
                         for n in matched:
@@ -1101,6 +1130,13 @@ class Quantizer:
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
                 is_activation = not (is_weight or is_bias)
+                # TODO(before land): handle recursion depth > 1
+                # TODO(before land): do not add a dequant just to fetch x.ndim during convert
+                is_getattr_ndim = node_arg_is_getattr_ndim(node, arg)
+                if type(arg) == Node:
+                    for inner_arg in arg.args:
+                        inner_is_getattr_ndim = node_arg_is_getattr_ndim(arg, inner_arg)
+                        is_getattr_ndim = is_getattr_ndim or inner_is_getattr_ndim
                 # bias needs to be quantized if activation is fp16 and weight is fp16
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (
@@ -1108,7 +1144,8 @@ class Quantizer:
                      activation_is_quantized(qconfig)) or
                     (is_weight and weight_is_quantized(qconfig)) or
                     (is_bias and activation_dtype(qconfig) == torch.float16)
-                    and weight_dtype(qconfig) == torch.float16)
+                    and weight_dtype(qconfig) == torch.float16) and \
+                    (not is_getattr_ndim)
 
                 if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \
