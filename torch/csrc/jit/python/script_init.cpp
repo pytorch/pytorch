@@ -106,7 +106,6 @@ struct PythonResolver : public Resolver {
     }
 
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
-
     if (!py::cast<bool>(isClass)) {
       return nullptr;
     }

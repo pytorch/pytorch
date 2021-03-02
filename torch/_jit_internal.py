@@ -906,6 +906,7 @@ def _qualified_name(obj):
     else:
         raise RuntimeError("Could not get name of python class object")
 
+
     if name == '<lambda>':
         name = '_lambda'  # make name a valid identifier
 

@@ -698,6 +698,38 @@ class TestMkldnn(TestCase):
         torch.mul(mx, value, out=mkldnn_out)
         self.assertEqual(out, mkldnn_out.to_dense())
 
+    def test_0_dimension_tensor(self):
+        x = torch.rand([20, 20, 1, 1], dtype=torch.float)
+        y = torch.rand([20, 20, 0, 1], dtype=torch.float)
+
+        # unary ops work without modification
+        out_relu = torch.relu(y)
+        out_relu_mkldnn = torch.relu(y.to_mkldnn()).to_dense()
+        self.assertEqual(out_relu, out_relu_mkldnn)
+
+        out_mul = x * y
+        out_mul_mkldnn = (x.to_mkldnn() * y.to_mkldnn()).to_dense()
+        self.assertEqual(out_mul, out_mul_mkldnn)
+
+        out_add = x + y
+        out_add_mkldnn = (x.to_mkldnn() + y.to_mkldnn()).to_dense()
+        self.assertEqual(out_add, out_add_mkldnn)
+
+        x.requires_grad_(True)
+        y.requires_grad_(True)
+        with self.assertRaisesRegex(RuntimeError, "0-dimension Tensor in training"):
+            x.to_mkldnn() + y.to_mkldnn()
+
+        with self.assertRaisesRegex(RuntimeError, "must match"):
+            torch.rand([5]).to_mkldnn() + torch.rand([0]).to_mkldnn()
+
+        C = 7
+        m = torch.nn.Conv2d(C, C, 3)
+        x = torch.randn(0, C, C, 8, dtype=torch.float)
+        out_eager = m(x)
+        out_mkldnn = mkldnn_utils.to_mkldnn(m)(x)
+        self.assertEqual(out_eager, out_mkldnn)
+
     def test_view(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
         self.assertRaisesRegex(RuntimeError,

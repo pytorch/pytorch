@@ -925,45 +925,6 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   return tt;
 }
 
-std::shared_ptr<PythonClassValue> createPythonClassValue(
-    const py::object& obj,
-    Function& m,
-    const SourceRange& loc) {
-  py::str qualifiedName =
-      py::module::import("torch._jit_internal").attr("_qualified_name")(obj);
-  auto pyCu = get_python_cu();
-  auto qualname = c10::QualifiedName(qualifiedName);
-
-  if (auto classType = pyCu->get_class(qualname)) {
-    return std::make_shared<PythonClassValue>(classType, obj);
-  } else {
-    // If we can't get the source code for the type, it's implemented in C and
-    // probably part of the standard library, so give up and leave it as a
-    // call to Python
-    bool can_compile_class =
-        py::cast<bool>(py::module::import("torch._jit_internal")
-                           .attr("can_compile_class")(obj));
-    if (can_compile_class) {
-      // Register class
-      auto rcb = py::module::import("torch._jit_internal")
-                     .attr("createResolutionCallbackForClassMethods")(obj);
-      py::module::import("torch.jit._script")
-          .attr("_recursive_compile_class")(obj, loc);
-
-      // Return class
-      auto newClassType = pyCu->get_class(qualname);
-      AT_ASSERT(
-          newClassType,
-          "Class '",
-          qualifiedName,
-          "' should have been compiled but was not");
-      return std::make_shared<PythonClassValue>(newClassType, obj);
-    }
-  }
-
-  return nullptr;
-}
-
 bool isEnumClass(py::object obj) {
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
@@ -1180,8 +1141,36 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   py::bool_ is_class = py::module::import("inspect").attr("isclass")(obj);
   if (py::cast<bool>(is_class)) {
-    if (auto pcv = createPythonClassValue(obj, m, loc)) {
-      return pcv;
+    py::str qualifiedName =
+        py::module::import("torch._jit_internal").attr("_qualified_name")(obj);
+    auto pyCu = get_python_cu();
+    auto qualname = c10::QualifiedName(qualifiedName);
+
+    if (auto classType = pyCu->get_class(qualname)) {
+      return std::make_shared<PythonClassValue>(classType, obj);
+    } else {
+      // If we can't get the source code for the type, it's implemented in C and
+      // probably part of the standard library, so give up and leave it as a
+      // call to Python
+      bool can_compile_class =
+          py::cast<bool>(py::module::import("torch._jit_internal")
+                             .attr("can_compile_class")(obj));
+      if (can_compile_class) {
+        // Register class
+        auto rcb = py::module::import("torch._jit_internal")
+                       .attr("createResolutionCallbackForClassMethods")(obj);
+        py::module::import("torch.jit._script")
+            .attr("_recursive_compile_class")(obj, loc);
+
+        // Return class
+        auto newClassType = pyCu->get_class(qualname);
+        AT_ASSERT(
+            newClassType,
+            "Class '",
+            qualifiedName,
+            "' should have been compiled but was not");
+        return std::make_shared<PythonClassValue>(newClassType, obj);
+      }
     }
   }
 

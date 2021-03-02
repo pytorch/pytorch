@@ -2050,7 +2050,7 @@ struct TORCH_API ClassType : public NamedType {
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
   // Get a list of all properties.
-  const std::vector<Property> properties() const {
+  const std::vector<Property>& properties() const {
     return properties_;
   }
 

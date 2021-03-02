@@ -179,6 +179,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       auto cu = classType->compilation_unit();
       auto userObj = c10::ivalue::Object::create(
           c10::StrongTypePtr(cu, classType), numAttrs);
+
       // 2. copy all the contained types
       for (size_t slot = 0; slot < numAttrs; slot++) {
         const auto& attrType = classType->getAttribute(slot);
@@ -196,7 +197,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         try {
           const auto& contained = py::getattr(obj, attrName.c_str());
           userObj->setSlot(slot, toIValue(contained, attrType));
-
         } catch (std::exception& e) {
           throw py::cast_error(c10::str(
               "Could not cast attribute '",
@@ -207,7 +207,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
               e.what()));
         }
       }
-
       return userObj;
     }
     case TypeKind::InterfaceType: {

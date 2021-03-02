@@ -694,7 +694,6 @@ def infer_methods_to_compile(nn_module):
         if name in ignored_properties:
             continue
         item = getattr(nn_module, name, None)
-
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
             exported.append(name)
 

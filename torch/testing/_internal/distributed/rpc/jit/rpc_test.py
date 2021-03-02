@@ -334,6 +334,7 @@ class FutureTypingTest:
         res = script_use_future()
         self.assertEqual(res, expected_res)
 
+
 @torch.jit.script
 class MyScriptClass:
     def __init__(self, a: int):

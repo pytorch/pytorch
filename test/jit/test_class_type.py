@@ -967,7 +967,6 @@ class TestClassType(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'missing attribute i'):
             test_fn(torch.rand(3, 4))
 
-
     def test_unused_method(self):
         """
         Test unused methods on scripted classes.

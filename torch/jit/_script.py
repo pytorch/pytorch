@@ -15,6 +15,7 @@ import pickle
 import warnings
 from typing import Any, Dict
 
+
 import torch
 import torch._jit_internal as _jit_internal
 from torch.utils import set_module
@@ -887,7 +888,6 @@ else:
         def __init__(self, arg=None):
             super().__init__()
 
-
 def call_prepare_scriptable_func_impl(obj, memo):
     if not isinstance(obj, torch.nn.Module):
         return obj
@@ -922,11 +922,9 @@ def call_prepare_scriptable_func_impl(obj, memo):
 
     return obj
 
-
 def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
-
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
