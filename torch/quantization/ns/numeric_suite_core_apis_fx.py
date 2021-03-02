@@ -127,20 +127,12 @@ def _add_weight_info_to_dict(
                 }
 
 
-def compare_weights(
+def _compare_weights_impl(
     model_name_a: str,
-    model_a: nn.Module,
+    gm_a: GraphModule,
     model_name_b: str,
-    model_b: nn.Module,
+    gm_b: GraphModule,
 ) -> NSResultsType:
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
-    type_a_related_to_b = \
-        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
-
-    tracer_a, tracer_b = NSTracer(), NSTracer()
-    gm_a = GraphModule(model_a, tracer_a.trace(model_a))
-    gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
 
     # split the subgraph pairs into one data structure for each model
@@ -159,6 +151,22 @@ def compare_weights(
         model_name_b, gm_b, nodes_and_names_to_instrument_b, results)
 
     return results
+
+
+def compare_weights(
+    model_name_a: str,
+    model_a: nn.Module,
+    model_name_b: str,
+    model_b: nn.Module,
+) -> NSResultsType:
+    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    type_a_related_to_b = \
+        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+    tracer_a, tracer_b = NSTracer(), NSTracer()
+    gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    return _compare_weights_impl(model_name_a, gm_a, model_name_b, gm_b)
 
 
 class OutputLogger(nn.Module):
@@ -209,17 +217,13 @@ def _prepare_single_model_output(
     return model
 
 
-def prepare_model_outputs(
+def _prepare_model_outputs_impl(
     name_a: str,
-    model_a: nn.Module,
+    gm_a: GraphModule,
     name_b: str,
-    model_b: nn.Module,
+    gm_b: GraphModule,
     logger_cls: Callable,
 ) -> Tuple[nn.Module, nn.Module]:
-    tracer_a, tracer_b = NSTracer(), NSTracer()
-    gm_a = GraphModule(model_a, tracer_a.trace(model_a))
-    gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
     nodes_and_names_to_instrument_a = []
     nodes_and_names_to_instrument_b = []
@@ -236,6 +240,19 @@ def prepare_model_outputs(
     new_model_b = _prepare_single_model_output(
         name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls)
     return (new_model_a, new_model_b)
+
+
+def prepare_model_outputs(
+    name_a: str,
+    model_a: nn.Module,
+    name_b: str,
+    model_b: nn.Module,
+    logger_cls: Callable,
+) -> Tuple[nn.Module, nn.Module]:
+    tracer_a, tracer_b = NSTracer(), NSTracer()
+    gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    return _prepare_model_outputs_impl(name_a, gm_a, name_b, gm_b, logger_cls)
 
 
 def add_activation_info_to_dict(
@@ -285,6 +302,19 @@ def get_matching_activations(
     return results
 
 
+def _prepare_model_with_stubs_impl(
+    name_a: str,
+    gm_a: GraphModule,
+    name_b: str,
+    gm_b: GraphModule,
+    logger_cls: Callable,
+) -> nn.Module:
+    matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
+    gm_a_shadows_b = create_a_shadows_b(
+        name_a, gm_a, name_b, gm_b, matched_subgraph_pairs, logger_cls)
+    return gm_a_shadows_b
+
+
 def prepare_model_with_stubs(
     name_a: str,
     model_a: nn.Module,
@@ -299,11 +329,7 @@ def prepare_model_with_stubs(
     tracer_a, tracer_b = NSTracer(), NSTracer()
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-
-    matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
-    gm_a_shadows_b = create_a_shadows_b(
-        name_a, gm_a, name_b, gm_b, matched_subgraph_pairs, logger_cls)
-    return gm_a_shadows_b
+    return _prepare_model_with_stubs_impl(name_a, gm_a, name_b, gm_b, logger_cls)
 
 
 # TODO(future PR): align on naming
