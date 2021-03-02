@@ -1350,6 +1350,18 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
 
     return samples
 
+
+def sample_inputs_polar(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput((_make_tensor_helper((S, S), low=0), _make_tensor_helper((S, S)))),
+        SampleInput((_make_tensor_helper((), low=0), _make_tensor_helper(()))),
+    )
+
+    return samples
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -1672,9 +1684,9 @@ op_db: List[OpInfo] = [
                    ref=np.radians,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
                                                   torch.float16: 7e-1}),),
-                   dtypes=floating_types_and(torch.half, torch.bfloat16),
-                   dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/51283#issuecomment-770614273
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -1735,7 +1747,14 @@ op_db: List[OpInfo] = [
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
                    dtypesIfCPU=floating_types_and(torch.bfloat16, torch.float16),
                    dtypesIfCUDA=floating_types_and(torch.float16),
+<<<<<<< HEAD
                    assert_autodiffed=True),
+=======
+                   assert_autodiffed=True,
+                   # Reference for disabling extremals
+                   # https://github.com/pytorch/pytorch/issues/51948
+                   handles_extremals=False),
+>>>>>>> d38269326322cec5500dae68a02d86e156d026b2
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
                      ref=np.fft.fft,
@@ -2073,9 +2092,9 @@ op_db: List[OpInfo] = [
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
                                                   torch.float16: 7e-1}),),
-                   dtypes=floating_types_and(torch.half, torch.bfloat16),
-                   dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/51283#issuecomment-770614273
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
@@ -2393,6 +2412,10 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('polar',
+           dtypes=floating_types(),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_polar),
     OpInfo('pinverse',
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
@@ -2663,10 +2686,11 @@ if TEST_SCIPY:
                        domain=(0, 1),
                        decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                       torch.float16: 5e-1}),),
-                       dtypes=floating_types_and(torch.half),
-                       dtypesIfCPU=floating_types_and(torch.bfloat16),
-                       dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-                       sample_inputs_func=sample_inputs_logit),
+                       dtypes=all_types_and(torch.half),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       sample_inputs_func=sample_inputs_logit,
+                       safe_casts_outputs=True),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),

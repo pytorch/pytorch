@@ -16,6 +16,12 @@ namespace jit {
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
+  // type_equal doesnt distinguish between mkldnn/pytorch cpu tensors,
+  // and we dont want to coalesce mkldnn tensors bc they do layout
+  // transformations based on usage
+  if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
+    return false;
+  }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
