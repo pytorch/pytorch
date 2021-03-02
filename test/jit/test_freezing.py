@@ -1680,6 +1680,25 @@ class TestFrozenOptimizations(JitTestCase):
             with self.assertRaisesRegex(RuntimeError, ""):
                 torch.rand([20, 20]).to_mkldnn() + torch.rand([20]).to_mkldnn()
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_mkldnn_inplace_removal(self):
+        class AddMul(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                return x.add_(self.tensor).div_(self.tensor) - 4
+
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(nn.Linear(20, 20), AddMul(torch.rand([20]))).eval()
+            scripted_mod = torch.jit.script(mod)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            FileCheck().check("aten::to_mkldnn").check_not("aten::add_").check("aten::div_").run(scripted_mod.graph)
+            inp = torch.rand([20, 20])
+            self.assertEqual(scripted_mod(inp), mod(inp))
+            self.assertEqual(scripted_mod(inp), mod(inp))
 
     @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
     def test_conv_to_mkldnn_no_mkldnn(self):
