@@ -144,5 +144,6 @@ def _test_reveal(path: str, reveal: str, expected_reveal: str, lineno: int) -> N
     if reveal not in expected_reveal:
         raise AssertionError(_REVEAL_MSG.format(lineno, expected_reveal, reveal))
 
+
 if __name__ == '__main__':
     pytest.main([__file__])
