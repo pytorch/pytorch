@@ -465,14 +465,10 @@ class MKLDNNSubgraphSlicer {
       return c10::nullopt;
     }
 
-    // TODO: subgraph utils doesnt handle merging a consumer into a producer
-    // so we merge the producer into the consumer even though it's inefficient
-    consumer = SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
-        consumer, prim::MKLDNNGroup, aliasDb_);
-
     SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
-        producer, consumer, aliasDb_);
-    return consumer;
+        consumer, producer, aliasDb_);
+
+    return producer;
   }
 
   Block* block_;
