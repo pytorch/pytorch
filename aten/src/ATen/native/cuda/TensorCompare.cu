@@ -69,7 +69,7 @@ void assert_async_cuda(const Tensor& self) {
   TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
   TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");
   auto stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, self.dtype(), "assert_async_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "assert_async_cuda", [&] {
     assert_async_cuda_kernel<scalar_t><<<1, 1, 0, stream>>>(self.data_ptr<scalar_t>());
   });
 }
