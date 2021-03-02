@@ -106,7 +106,7 @@ void initTensorExprBindings(PyObject* module) {
 #undef EXPRHANDLE_CTOR
 
   py::class_<VarHandle, ExprHandle>(te, "VarHandle")
-      .def(py::init<const std::string&, tensorexpr::Dtype>());
+      .def(py::init<const std::string&, Dtype>());
   py::class_<BufHandle, ExprHandle>( // NOLINT
       te,
       "BufHandle")
@@ -114,8 +114,8 @@ void initTensorExprBindings(PyObject* module) {
           py::init<const std::string&, const std::vector<ExprHandle>&, Dtype>())
       .def(
           "load",
-          [](tensorexpr::BufHandle& self,
-             const std::vector<tensorexpr::ExprHandle>& v) {
+          [](BufHandle& self,
+             const std::vector<ExprHandle>& v) {
             return Load::make(self, v);
           });
 
@@ -242,14 +242,17 @@ void initTensorExprBindings(PyObject* module) {
         ss << self;
         return ss.str();
       });
-  py::class_<For, Stmt>(te, "For")
+  py::class_<For, Stmt, std::unique_ptr<For, py::nodelete>>(te, "For")
       .def(
           "index_var",
           [](const For& self) { return VarHandle(self.var()); },
           py::return_value_policy::reference)
       .def("body", &For::body, py::return_value_policy::reference);
 
-  py::class_<tensorexpr::Block, Stmt>(te, "Block")
+  py::class_<
+      tensorexpr::Block,
+      Stmt,
+      std::unique_ptr<tensorexpr::Block, py::nodelete>>(te, "Block")
       .def(
           "stmts",
           &tensorexpr::Block::stmts,
@@ -306,12 +309,6 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "vectorize",
           [](const LoopNest& self, For* f) { self.vectorize(f); },
-          py::return_value_policy::reference)
-      .def(
-          "inline_intermediate_bufs",
-          [](tensorexpr::LoopNest& self, bool allow_duplicated_work) {
-            self.inlineIntermediateBufs(allow_duplicated_work);
-          },
           py::return_value_policy::reference)
       .def(
           "compute_inline",
