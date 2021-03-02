@@ -409,16 +409,17 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Complex.int(int a, int b=0) -> complex"),
          [](Stack* stack) {
-           int a=0, b=0;
+           int a = 0, b = 0;
            pop(stack, a, b);
            push(stack, c10::complex<double>(a, b));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.int_float(int a, float b) -> complex"),
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::Complex.int_float(int a, float b) -> complex"),
          [](Stack* stack) {
-           int a=0;
-           double b=0;
+           int a = 0;
+           double b = 0;
            pop(stack, a, b);
            push(stack, c10::complex<double>(static_cast<double>(a), b));
          },
@@ -427,8 +428,8 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::Complex.float_int(float a, int b) -> complex"),
          [](Stack* stack) {
-           double a=0;
-           int b=0;
+           double a = 0;
+           int b = 0;
            pop(stack, a, b);
            push(stack, c10::complex<double>(a, static_cast<double>(b)));
          },
@@ -437,7 +438,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::Complex.float(float a, float b=0) -> complex"),
          [](Stack* stack) {
-           double a=0, b=0;
+           double a = 0, b = 0;
            pop(stack, a, b);
            push(stack, c10::complex<double>(a, b));
          },
