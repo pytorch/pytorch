@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch {
@@ -176,6 +177,73 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   // clip_ranges+gather_ranges
   ClipRangesGather(graph);
 #endif
+}
+
+TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
+  m.def("static_runtime::pure_inputs() -> Tensor", []() -> at::Tensor {
+    return at::randn({1});
+  });
+  m.def(
+      "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor",
+      [](at::Tensor self, ArrayRef<int64_t> dims) -> at::Tensor {
+        at::Tensor out = at::empty_like(self);
+        at::native::copy_(out, self);
+        return out.permute(dims);
+      });
+}
+
+void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
+  auto* fake_input =
+      graph->insert(Symbol::fromQualString("static_runtime::pure_inputs"), {});
+  fake_input->node()->moveBefore(*graph->nodes().begin());
+
+  std::vector<std::pair<Value*, Use>> old_inputs;
+  for (auto* input : graph->inputs()) {
+    for (const auto& use : input->uses()) {
+      old_inputs.emplace_back(std::make_pair(input, use));
+    }
+    input->replaceAllUsesWith(fake_input);
+  }
+
+  AliasDb db(graph);
+  for (const auto& p : old_inputs) {
+    p.second.user->replaceInput(p.second.offset, p.first);
+  }
+  fake_input->node()->destroy();
+
+  const std::map<c10::Symbol, c10::Symbol> supported = {
+      {c10::Symbol::fromQualString("aten::permute"),
+       c10::Symbol::fromQualString("static_runtime::permute_copy")},
+      {c10::Symbol::fromQualString("aten::narrow"),
+       c10::Symbol::fromQualString("aten::narrow_copy")}};
+  std::vector<std::pair<Node*, Node*>> replacement;
+  for (auto* n : graph->nodes()) {
+    if (!supported.count(n->kind())) {
+      continue;
+    }
+    DCHECK(n->outputs().size() == 1);
+    auto* out = n->output();
+    if (out->uses().size() > 1) {
+      continue;
+    }
+    if (db.mayContainAlias({out}, graph->outputs())) {
+      continue;
+    }
+    auto new_symbol = supported.at(n->kind());
+    auto* new_node = graph->create(new_symbol, n->outputs().size());
+    new_node->insertBefore(n);
+    for (auto* input : n->inputs()) {
+      new_node->addInput(input);
+    }
+    replacement.emplace_back(std::make_pair(n, new_node));
+  }
+
+  for (const auto& p : replacement) {
+    auto* old_node = p.first;
+    auto* new_node = p.second;
+    old_node->replaceAllUsesWith(new_node);
+    old_node->destroy();
+  }
 }
 
 } // namespace jit
