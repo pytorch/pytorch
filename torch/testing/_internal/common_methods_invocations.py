@@ -642,6 +642,7 @@ def sample_inputs_amax_amin(op_info, device, dtype, requires_grad):
         ((S, S, S), ((1, 2,),)),
         ((S, S, S), (1, True,)),
         ((), (0,)),
+        ((), tuple()),
         ((), (0, True,)),
     )
     return tuple(SampleInput((make_tensor(size, device, dtype,
