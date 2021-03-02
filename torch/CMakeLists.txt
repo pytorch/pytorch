@@ -155,6 +155,9 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
+if(USE_MLCOMPUTE)
+    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
+endif()
 
 if(USE_VALGRIND AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
@@ -342,10 +345,13 @@ endif()
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
   COMMAND
+    "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
+  COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
       --is_debug=${TORCH_VERSION_DEBUG}
       --cuda_version=${CUDA_VERSION}
       --hip_version=${HIP_VERSION}
+  DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_custom_target(

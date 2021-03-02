@@ -88,7 +88,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::list(str t) -> str[]"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto str = pop(stack).toStringRef();
            c10::List<std::string> chars;
            chars.reserve(str.size());
@@ -96,7 +96,6 @@ RegisterOperators reg(
              chars.push_back(std::string(1, c));
            }
            push(stack, std::move(chars));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -185,7 +184,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__range_length(int lo, int hi, int step) -> int"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t lo, hi, step;
            pop(stack, lo, hi, step);
            // error handling when step_val = 0 during runtime
@@ -199,17 +198,15 @@ RegisterOperators reg(
            } else {
              push(stack, 0);
            }
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__derive_index(int index, int start, int step) -> int"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t index, start, step;
            pop(stack, index, start, step);
            push(stack, start + index * step);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -640,6 +637,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ne.device(Device a, Device b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack).toDevice();
+           auto b = pop(stack).toDevice();
+           push(stack, a != b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::eq.bool(bool a, bool b) -> bool"),
          [](Stack* stack) {
            auto a = pop(stack);
@@ -830,7 +835,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::ord(str string) -> int"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto string = pop(stack).toStringRef();
            TORCH_CHECK(
                string.size() == 1,
@@ -838,19 +843,17 @@ RegisterOperators reg(
                string.size());
            uint8_t ord = string.at(0);
            push(stack, int64_t(ord));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::lower(str self) -> str"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto string = pop(stack).toStringRef();
            std::stringstream ss;
            for (char c : string) {
              ss << static_cast<char>(::tolower(c));
            }
            push(stack, ss.str());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -865,10 +868,9 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::len.str(str s) -> int"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto string = pop(stack).toStringRef();
            push(stack, static_cast<int64_t>(string.size()));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -882,13 +884,12 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__getitem__.str(str s, int index) -> str"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto index = pop(stack).toInt();
            auto string = pop(stack).toStringRef();
            auto norm_index = normalizeIndex(index, string.size());
            char c = string.at(norm_index);
            push(stack, std::string(&c, 1));
-           return 0;
          },
          aliasAnalysisFromSchema()),
 #define CREATE_COPY_OP(other_type, c_type)                               \

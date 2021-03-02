@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import (
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIfNoMagma,
+    skipCUDAIfNoMagma, skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
@@ -4449,6 +4449,11 @@ class TestTorchDeviceType(TestCase):
         if not x.is_complex():
             with self.assertRaisesRegex(RuntimeError, r"Scalar"):
                 x.index_fill_(1, index, 1 + 1j)
+        # Make sure that the result stays 0-dim while applied to
+        # a 0-dim input
+        x = torch.tensor(1, dtype=dtype, device=device)
+        self.assertEqual(0, x.index_fill(0, index, -1).dim())
+        self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 
     def test_index_select(self, device):
         for dtype in [torch.int, torch.long]:
@@ -6362,8 +6367,7 @@ class TestTorchDeviceType(TestCase):
 
         self._test_where_scalar_template(device, dtype, checkRaises)
 
-    # See https://github.com/pytorch/pytorch/issues/51980
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA misaligned address error on Windows w/ 11.2')
+    @skipCUDAVersionIn([(11, 2)])  # test fails for 11.2, see https://github.com/pytorch/pytorch/issues/51980
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
@@ -6962,11 +6966,6 @@ tensor_op_tests = [
     ('size', '', _new_t((1, 2, 3, 4)), lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'dim', _new_t((1, 2, 3, 4)), lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', '', _small_3d_unique, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'dim_descending', _small_3d_unique, lambda t, d: [1, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'neg_dim_descending', _small_3d_unique, lambda t, d: [-1, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', '', _small_3d, lambda t, d: [2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'dim', _small_3d, lambda t, d: [2, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'neg_dim', _small_3d, lambda t, d: [2, -3], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -7031,7 +7030,6 @@ tensor_op_tests = [
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
