@@ -760,7 +760,7 @@ void listSetItem(Stack* stack);
       aliasAnalysisFromSchema()),                                       \
       OperatorGenerator(                                                \
           TORCH_SELECTIVE_SCHEMA(                                       \
-              #aten_op ".complex_int(complex a, float b) -> " #result), \
+              #aten_op ".complex_float(complex a, float b) -> " #result), \
           [](Stack* stack) {                                            \
             c10::complex<double> a;                                     \
             double b;                                                   \
