@@ -787,8 +787,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq_ns(input_fp32)
 
         # check activation result correctness
-        act_compare_dict = get_matching_activations(
-            'fp32_prepared', mp_ns, 'int8', mq_ns, OutputLogger)
+        act_compare_dict = get_matching_activations(mp_ns, mq_ns, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
@@ -839,8 +838,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq_ns(input_fp32)
 
         # check activation result correctness
-        act_compare_dict = get_matching_activations(
-            'fp32_prepared', mp_ns, 'int8', mq_ns, OutputLogger)
+        act_compare_dict = get_matching_activations(mp_ns, mq_ns, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
@@ -948,7 +946,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
 
         # inspect results
         act_compare_dict = get_matching_activations(
-            'fp32_prepared', sparse_nn, 'int8', sparse_nn_q, OutputLogger)
+            sparse_nn, sparse_nn_q, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 4)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 

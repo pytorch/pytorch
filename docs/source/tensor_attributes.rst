@@ -113,7 +113,7 @@ When the output tensor of an arithmetic operation is specified, we allow casting
 Casting Examples::
 
     # allowed:
-    >>> float_tensor *= double_tensor
+    >>> float_tensor *= float_tensor
     >>> float_tensor *= int_tensor
     >>> float_tensor *= uint_tensor
     >>> float_tensor *= bool_tensor
