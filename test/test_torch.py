@@ -2556,8 +2556,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(output3, output2)
 
         def test_empty_meta(self):
-            x = torch.empty_meta(2 ** 20, 2 ** 20)
-            y = torch.empty_meta(2 ** 20)
+            x = torch.empty(2 ** 20, 2 ** 20, device='meta')
+            y = torch.empty(2 ** 20, device='meta')
             z = x + y
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
             self.assertRaises(RuntimeError, lambda: z[0][0].item())
@@ -2568,14 +2568,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # integrated testing strategy
             # NB: Can't make the exponent too big, or it will overflow
             # signed 64-bit integer
-            x = torch.empty_meta(2 * 10 ** 8, 3, 2 * 10 ** 8)
+            x = torch.empty(2 * 10 ** 8, 3, 2 * 10 ** 8, device='meta')
             z = torch.nn.functional.interpolate(x, scale_factor=2)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
             # interpolate doesn't seem to support out=
             # (not sure why passing None here doesn't work? How strange...)
-            z = torch.empty_meta(0)
+            z = torch.empty(0, device='meta')
             torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
