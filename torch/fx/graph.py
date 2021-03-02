@@ -322,8 +322,7 @@ class Graph:
                     args: Optional[Tuple['Argument', ...]] = None,
                     kwargs: Optional[Dict[str, 'Argument']] = None,
                     name: Optional[str] = None,
-                    type_expr: Optional[Any] = None,
-                    stack_trace: Optional[str] = None) -> Node:
+                    type_expr: Optional[Any] = None) -> Node:
         """
         Create a ``Node`` and add it to the ``Graph`` at the current insert-point.
         Note that the current insert-point can be set via :meth:`Graph.inserting_before`
@@ -357,7 +356,7 @@ class Graph:
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
-        n = Node(self, name, op, target, args, kwargs, type_expr, stack_trace)
+        n = Node(self, name, op, target, args, kwargs, type_expr)
 
         self._graph_namespace.associate_name_with_obj(name, n)
 

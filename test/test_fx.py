@@ -198,7 +198,7 @@ class TestFX(JitTestCase):
         class NoMutableCallTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
                             args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
-                            type_expr : Optional[Any] = None, stack_trace : Optional[str] = None) -> Node:
+                            type_expr : Optional[Any] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == '_':
                     raise RuntimeError('In-place operations are not supported')
@@ -562,7 +562,7 @@ class TestFX(JitTestCase):
         class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
                             args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
-                            type_expr : Optional[Any] = None, stack_trace : Optional[str] = None) -> Node:
+                            type_expr : Optional[Any] = None) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = 'foo'
                 return n

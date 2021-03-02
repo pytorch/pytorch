@@ -14,7 +14,7 @@ class TracerBase:
 
     def create_node(self, kind : str, target : Target,
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
-                    type_expr : Optional[Any] = None, stack_trace : Optional[str] = None) -> Node:
+                    type_expr : Optional[Any] = None) -> Node:
         """
         Inserts a graph node given target, args, kwargs, and name.
 
@@ -22,7 +22,7 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
-        return self.graph.create_node(kind, target, args, kwargs, name, type_expr, stack_trace)
+        return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
@@ -38,20 +38,23 @@ class TracerBase:
         a default parameter, we use the ``args`` tuple. ``args`` is
         otherwise empty for ``placeholder`` Nodes.
         '''
-        stack_trace : Optional[str] = None
-        if self.record_stack_traces:
-            user_frame = self.find_user_frame()
-            if user_frame:
-                walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)
-                tb_lines = summary.format()
-                stack_trace = ''.join(tb_lines)
 
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
-        return self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr, stack_trace))
+        proxy = self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr))
+
+        # Optionally set stack trace on the created Node for debugging purposes
+        if self.record_stack_traces:
+            user_frame = self.find_user_frame()
+            if user_frame:
+                walk_stack_gen = traceback.walk_stack(user_frame)
+                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore
+                tb_lines = summary.format()
+                proxy.node.stack_trace = ''.join(tb_lines)
+
+        return proxy
 
     def find_user_frame(self):
         """
