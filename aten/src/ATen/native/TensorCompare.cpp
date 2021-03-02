@@ -193,6 +193,10 @@ bool is_nonzero(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
 }
 
+void assert_async_cpu(const Tensor& self) {
+  TORCH_CHECK(is_nonzero(self), "Expected Tensor with boolean value true, but got false");
+}
+
 namespace {
 
 // DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
