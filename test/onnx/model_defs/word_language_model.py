@@ -3,7 +3,7 @@
 
 import torch
 import torch.nn as nn
-
+from torch import Tensor
 
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
@@ -45,10 +45,7 @@ class RNNModel(nn.Module):
     @staticmethod
     def repackage_hidden(h):
         """Detach hidden states from their history."""
-        if isinstance(h, torch.Tensor):
-            return h.detach()
-        else:
-            return tuple(RNNModel.repackage_hidden(v) for v in h)
+        return h.detach()
 
     def init_weights(self):
         initrange = 0.1
@@ -56,7 +53,7 @@ class RNNModel(nn.Module):
         self.decoder.bias.data.fill_(0)
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, input, hidden):
+    def forward(self, input: Tensor, hidden):
         emb = self.drop(self.encoder(input))
         output, hidden = self.rnn(emb, hidden)
         output = self.drop(output)

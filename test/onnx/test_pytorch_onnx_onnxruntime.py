@@ -590,7 +590,6 @@ class TestONNXRuntime(unittest.TestCase):
     def test_word_language_model_LSTM(self):
         self.run_word_language_model("LSTM")
 
-    @disableScriptTest()
     def test_word_language_model_GRU(self):
         self.run_word_language_model("GRU")
 
