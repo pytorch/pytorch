@@ -692,6 +692,7 @@ TensorDomain::TensorDomain(
   has_nontrivial_reduction_ = false;
   domain_ = root_domain_;
   resetDomains();
+  name_ = fusion_->registerVal(this);
 }
 
 TensorDomain::TensorDomain(
