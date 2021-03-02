@@ -73,13 +73,13 @@ static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, boo
   // cuBLAS batched trsm requires input to be the device array of pointers to device single matrices
   Tensor A_array = at::arange(
     reinterpret_cast<int64_t>(A_data),
-    reinterpret_cast<int64_t>(&A_data[(batch_size-1) * A_mat_stride]) + 1,
-    static_cast<int64_t>(A_mat_stride * sizeof(scalar_t)), A.options().dtype(at::kLong));
+    reinterpret_cast<int64_t>(&A_data[(std::max<int>(batch_size, 1) - 1) * A_mat_stride]) + 1,
+    static_cast<int64_t>(std::max<int64_t>(A_mat_stride, 1) * sizeof(scalar_t)), A.options().dtype(at::kLong));
 
   Tensor B_array = at::arange(
     reinterpret_cast<int64_t>(B_data),
-    reinterpret_cast<int64_t>(&B_data[(batch_size-1) * B_mat_stride]) + 1,
-    static_cast<int64_t>(B_mat_stride * sizeof(scalar_t)), B.options().dtype(at::kLong));
+    reinterpret_cast<int64_t>(&B_data[(std::max<int>(batch_size, 1) - 1) * B_mat_stride]) + 1,
+    static_cast<int64_t>(std::max<int64_t>(B_mat_stride, 1) * sizeof(scalar_t)), B.options().dtype(at::kLong));
 
   auto A_array_data = reinterpret_cast<scalar_t**>(A_array.data_ptr());
   auto B_array_data = reinterpret_cast<scalar_t**>(B_array.data_ptr());
