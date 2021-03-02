@@ -17,7 +17,7 @@ const char* cusolverGetErrorMessage(cusolverStatus_t status) {
     case CUSOLVER_STATUS_INVALID_VALUE:               return "CUSOLVER_STATUS_INVALID_VALUE";
     case CUSOLVER_STATUS_ARCH_MISMATCH:               return "CUSOLVER_STATUS_ARCH_MISMATCH";
     case CUSOLVER_STATUS_EXECUTION_FAILED:            return "CUSOLVER_STATUS_EXECUTION_FAILED";
-    case CUSOLVER_STATUS_INTERNAL_ERROR:              return "CUSOLVER_STATUS_ITNERNAL_ERROR";
+    case CUSOLVER_STATUS_INTERNAL_ERROR:              return "CUSOLVER_STATUS_INTERNAL_ERROR";
     case CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED:   return "CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
     default:                                          return "Unknown cusolver error number";
   }
