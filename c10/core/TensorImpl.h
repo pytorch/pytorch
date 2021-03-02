@@ -908,6 +908,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_contiguous();
   }
 
+  using SizesVector = SmallVector<int64_t, 5>;
+
   /**
    * Set the sizes and strides of a tensor.
    *
@@ -915,7 +917,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
    */
-  void set_sizes_and_strides_dv(const at::DimVector& new_size, const at::DimVector& new_stride) {
+  void set_sizes_and_strides_dv(const SizesVector& new_size, const SizesVector& new_stride) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides ", err_msg_tensor_metadata_change_not_allowed);
     TORCH_CHECK(
         new_size.size() == new_stride.size(),
@@ -1174,7 +1176,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         is_contiguous_,
         "Right now Extend is only supported for contiguous Tensor.");
-    using SizesVector = SmallVector<int64_t, 5>;
     SizesVector newDims(sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
     newDims[0] += num;
     if (!storage_.data()) {

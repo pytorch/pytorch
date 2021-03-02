@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstdint>
 
-#include <ATen/DimVector.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
@@ -152,7 +151,8 @@ class C10_API SizesAndStrides {
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
 
-  void set_sizes_dv(const at::DimVector& newSizes) {
+  using SizesVector = SmallVector<int64_t, 5>;
+  void set_sizes_dv(const SizesVector& newSizes) {
     resize(newSizes.size());
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
