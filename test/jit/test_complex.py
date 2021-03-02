@@ -48,13 +48,21 @@ class TestComplex(JitTestCase):
         self.assertEqual(loaded.c, {2 + 3j : 2 - 3j, -4.3 - 2j: 3j})
 
     def test_complex_parse(self):
+        # write more tests for complex(int, int), complex(int, float),
+        # complex(float, float), complex(str), complex(float, int)
+        def fn1(a: int):
+            return a + complex(-2, 3.4)
+
         def fn(a: int):
             # uses buildConstant
             # we construct python AST
             # Python AST -> JIT AST (JIT IR)
-            return a + (1 + 1j)
+            return a + (1.4 + 1j)
 
         t = torch.tensor((1,))
+
         scripted = torch.jit.script(fn)
-        print(scripted(t))
         self.assertEqual(scripted(t), fn(t))
+
+        scripted = torch.jit.script(fn1)
+        self.assertEqual(scripted(t), fn1(t))

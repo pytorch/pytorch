@@ -469,6 +469,7 @@ void listSetItem(Stack* stack);
             push(stack, float_op);                                             \
           },                                                                   \
           aliasAnalysisFromSchema())
+
 #define DEFINE_INT_FLOAT_OP(aten_op, op, result)                            \
   OperatorGenerator(                                                        \
       TORCH_SELECTIVE_SCHEMA(#aten_op                                       \
@@ -545,7 +546,6 @@ void listSetItem(Stack* stack);
       },                                                                   \
       aliasAnalysisFromSchema())
 
-// define implementations for primitive number ops
 #define DEFINE_SCALAR_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
   OperatorGenerator(                                                      \
       TORCH_SELECTIVE_SCHEMA(                                             \
@@ -663,6 +663,7 @@ void listSetItem(Stack* stack);
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
+// define implementations for primitive number ops
 #define DEFINE_UNARY_OP_WITH_COMPLEX(aten_op, op, int_result, float_result, complex_result, complex_result_cast) \
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                           \
       DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \

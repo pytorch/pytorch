@@ -108,6 +108,8 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
     out << "{";
     if (scalar_tensor.isFloatingPoint()) {
       out << scalar_tensor.toDouble();
+    } else if (scalar_tensor.isComplex()) {
+      out << scalar_tensor.toComplexDouble();
     } else {
       out << scalar_tensor.toLong();
     }
@@ -1781,6 +1783,8 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
     elem_ty = 1;
   } else if (ptr == BoolType::get()) {
     elem_ty = 2;
+  } else if (ptr == ComplexType::get()) {
+    elem_ty = 3;
   } else {
     TORCH_CHECK(
         false,
