@@ -32,7 +32,7 @@ class Logger {
   // Get size of each bucket (Bytes).
   std::vector<int> get_bucket_sizes();
   // Set comm. hook, if used
-  void set_comm_hook(const std::string &hook);
+  void set_comm_hook(const std::string& hook);
 
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.
@@ -62,8 +62,6 @@ class Logger {
   std::shared_ptr<c10d::Reducer> reducer_;
   // track the number of iterations when runtime stats are collected so far.
   long num_iterations_stats_recorded_ = 0;
-  // Track whether DDP comm. hook has been set or not
-  bool comm_hook_set_{false};
 };
 
 } // namespace c10d

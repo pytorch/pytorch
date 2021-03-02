@@ -310,7 +310,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>())
         .def(
-            "set_comm_hook",
+            "_set_comm_hook_name",
             &::c10d::Logger::set_comm_hook,
             py::arg("comm_hook"),
             py::call_guard<py::gil_scoped_release>());

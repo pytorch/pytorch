@@ -426,16 +426,16 @@ struct DDPLoggingData {
     std::string bucketSizesStr = toString(bucketSizesStream, ddp_logging_data.bucket_sizes);
 
     std::string ddpLoggingDataInfo = c10::str(
-      "world_size: ", ddp_logging_data.world_size, " module_name: ",
-      ddp_logging_data.module_name, " device_ids: ", devicesStr, " output_device: ",
-      ddp_logging_data.output_device, " backend_name: ", ddp_logging_data.backend_name,
-      " parameter_dtype: ", ddp_logging_data.dtype, " total_parameter_size_in_bytes: ",
-      ddp_logging_data.total_parameter_size_bytes, " num_parameter_tensors: ",
+      "world_size: ", ddp_logging_data.world_size, ", module_name: ",
+      ddp_logging_data.module_name, ", device_ids: ", devicesStr, ", output_device: ",
+      ddp_logging_data.output_device, ", backend_name: ", ddp_logging_data.backend_name,
+      ", parameter_dtype: ", ddp_logging_data.dtype, ", total_parameter_size_in_bytes: ",
+      ddp_logging_data.total_parameter_size_bytes, ", num_parameter_tensors: ",
       ddp_logging_data.num_parameter_tensors, " bucket_sizes: ", bucketSizesStr,
-      " CUDA_VISIBLE_DEVICES: ", ddp_logging_data.cuda_visible_devices, " broadcast_buffers: ",
-      ddp_logging_data.broadcast_buffers, " bucket_cap_mb: ", ddp_logging_data.bucket_cap_mb,
-      " find_unused_parameters: ", ddp_logging_data.find_unused_parameters,
-      " gradient_as_bucket_view: ", ddp_logging_data.gradient_as_bucket_view,
+      ", CUDA_VISIBLE_DEVICES: ", ddp_logging_data.cuda_visible_devices, ", broadcast_buffers: ",
+      ddp_logging_data.broadcast_buffers, ", bucket_cap_mb: ", ddp_logging_data.bucket_cap_mb,
+      ", find_unused_parameters: ", ddp_logging_data.find_unused_parameters,
+      ", gradient_as_bucket_view: ", ddp_logging_data.gradient_as_bucket_view,
       "\n"
     );
     std::string backendInfo = " Backend Info: ";
@@ -444,16 +444,27 @@ struct DDPLoggingData {
         "nccl_socket_ifname: ", ddp_logging_data.nccl_socket_ifname,
         " nccl_blocking_wait: ", ddp_logging_data.nccl_blocking_wait,
         " nccl_debug: ", ddp_logging_data.nccl_debug,
+        " nccl_async_error_handling: ", ddp_logging_data.nccl_async_error_handling,
         " nccl_nthreads: ", ddp_logging_data.nccl_nthreads,
-        " nccl_ib_timeout: ", ddp_logging_data.nccl_ib_timeout
+        " nccl_ib_timeout: ", ddp_logging_data.nccl_ib_timeout,
+        "\n"
       );
     } else if (ddp_logging_data.backend_name == "gloo") {
       backendInfo += c10::str(
         "gloo_socket_ifname: ", ddp_logging_data.gloo_socket_ifname,
-        " gloo_device_transport: ", ddp_logging_data.gloo_device_transport
+        " gloo_device_transport: ", ddp_logging_data.gloo_device_transport,
+        "\n"
       );
     }
     ddpLoggingDataInfo += backendInfo;
+
+    std::string commHookInfo = "";
+    if (ddp_logging_data.comm_hook != "") {
+      commHookInfo += c10::str(
+        "comm_hook: ", ddp_logging_data.comm_hook
+      );
+    }
+    ddpLoggingDataInfo += commHookInfo;
     return output << ddpLoggingDataInfo;
   }
 

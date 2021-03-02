@@ -134,8 +134,17 @@ Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_180_PI)));
 }
-
-Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
+Tensor rad2deg(const Tensor& self) {
+  // Note: int-> float promotion handled differently from other Unary ops,
+  // as it does not use the usual TensorIterator + Kernel Dispatch pattern.
+  auto options = self.options();
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    options = options.dtype(c10::get_default_dtype());
+  }
+  auto result = at::empty_like(self, options);
+  at::rad2deg_out(result, self);
+  return result;
+}
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
 Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
@@ -143,7 +152,17 @@ Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
-Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
+Tensor deg2rad(const Tensor& self) {
+  // Note: int-> float promotion handled differently from other Unary ops,
+  // as it does not use the usual TensorIterator + Kernel Dispatch pattern.
+  auto options = self.options();
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    options = options.dtype(c10::get_default_dtype());
+  }
+  auto result = at::empty_like(self, options);
+  at::deg2rad_out(result, self);
+  return result;
+}
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, asin_stub); }

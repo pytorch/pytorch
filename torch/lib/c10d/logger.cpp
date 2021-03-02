@@ -11,8 +11,6 @@ namespace {
 
 const int kMilliSecondToNanosSecond = 1000000;
 
-const char * kDefaultDDPComm = "builtin_allreduce";
-
 std::string parse_env(const char* env_var_name) {
   char* stringValue = std::getenv(env_var_name);
   std::string res = "N/A";
@@ -30,10 +28,23 @@ const char * parseDistDebugLevel() {
     LOG(INFO) << "TORCH_DISTRIBUTED_DEBUG level parsed as " << debugLevel;
   });
 
-  if (!debugLevel.compare(("N/A"))) {
+  if (debugLevel.compare("N/A") == 0) {
     return kDistDebugOffLogLevel;
   } else {
-    return debugLevel.c_str();
+    const char * levelStr = debugLevel.c_str();
+    TORCH_CHECK(
+      strncmp(levelStr, kDistDebugDetailLogLevel, strlen(kDistDebugDetailLogLevel)) == 0
+      || strncmp(levelStr, kDistDebugInfoLogLevel, strlen(kDistDebugInfoLogLevel)) == 0
+      || strncmp(levelStr, kDistDebugOffLogLevel, strlen(kDistDebugOffLogLevel)) == 0,
+      c10::str(
+        "Expected environment variable TORCH_DISTRIBUTED_DEBUG to be one of ",
+        kDistDebugDetailLogLevel,
+        kDistDebugInfoLogLevel,
+        kDistDebugOffLogLevel
+      );
+    )
+    // TORCH_CHECK(debug)
+    // return debugLevel.c_str();
   }
 }
 
@@ -58,6 +69,12 @@ std::ostream& operator<<(
     ddp_logging_data->avg_backward_comm_time,
     ddp_logging_data->avg_backward_compute_comm_overlap_time
   );
+
+  if (ddp_logging_data->comm_hook != "") {
+    loggerInfo +=
+        fmt::format("\n Gradient comm. hook: {}", ddp_logging_data->comm_hook);
+  }
+
   return output << loggerInfo;
 }
 
@@ -105,7 +122,6 @@ std::vector<int> Logger::get_bucket_sizes() {
 
 void Logger::set_comm_hook(const std::string& hook) {
   ddp_logging_data_->comm_hook = hook;
-  comm_hook_set_ = true;
 }
 
 void Logger::set_construction_data_and_log(
@@ -198,13 +214,6 @@ void Logger::set_runtime_stats_and_log() {
     return;
   }
   num_iterations_stats_recorded_++;
-
-  // Check if comm. hook has not been set, if so, set it as builtin allreduce.
-  if (!comm_hook_set_) {
-    ddp_logging_data_->comm_hook = kDefaultDDPComm;
-    comm_hook_set_ = true;
-  }
-
   // Set ith iteration when the runtime stats are set.
   ddp_logging_data_->iteration = reducer_->num_iterations_;
   // If unused_parameters_ is not empty, calculate its sizes.
@@ -295,7 +304,7 @@ void Logger::set_runtime_stats_and_log() {
         reducer_->cpu_timer_.backward_compute_end_time);
   }
   // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG is enabled.
-  if (!(strncmp(parseDistDebugLevel(), kDistDebugDetailLogLevel, 6))) {
+  if (!(strncmp(parseDistDebugLevel(), kDistDebugDetailLogLevel, strlen(kDistDebugDetailLogLevel)))) {
     LOG(INFO) << *this;
   }
 
