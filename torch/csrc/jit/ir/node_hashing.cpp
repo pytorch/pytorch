@@ -213,6 +213,10 @@ size_t HashNode::operator()(const Node* k) const {
         type->isSubtypeOf(NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::f) {
       constant_hash = std::hash<double>{}(k->f(attr::value));
+    } else if (
+        type->isSubtypeOf(NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::c) {
+        constant_hash = c10::hash<c10::complex<double>>{}(k->c(attr::value));
     } else if (type->isSubtypeOf(BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }

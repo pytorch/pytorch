@@ -845,7 +845,7 @@ RegisterOperators reg(
      //  DEFINE_BINARY_OP(aten::add, a + b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::add, a + b),
      //  DEFINE_BINARY_OP(aten::sub, a - b),
-     DEFINE_BINARY_OP_WITH_COMPLEX(aten::sub, a + b),
+     DEFINE_BINARY_OP_WITH_COMPLEX(aten::sub, a - b),
      DEFINE_BINARY_OP(aten::mul, a* b),
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),

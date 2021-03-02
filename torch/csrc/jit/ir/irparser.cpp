@@ -163,7 +163,8 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       str += L.cur().text();
       if (str.find('j') != std::string::npos) {
         r.k = AttributeKind::c;
-        r.c = c10::stod(str);
+        auto imag = c10::stod(str.substr(0, str.size() - 1));
+        r.c = c10::complex<double>(0, imag);
       }
       if (str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {

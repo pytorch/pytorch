@@ -40,7 +40,7 @@ class TestComplex(JitTestCase):
                 self.c = {2 + 3j : 2 - 3j, -4.3 - 2j: 3j}
 
             def forward(self, b: int):
-                return b
+                return b + 2j
 
         loaded = self.getExportImportCopy(ComplexModule())
         self.assertEqual(loaded.a, 3 + 5j)
@@ -57,14 +57,11 @@ class TestComplex(JitTestCase):
             # uses buildConstant
             # we construct python AST
             # Python AST -> JIT AST (JIT IR)
-            return a + 2j + 5j +2j+1j+2j
+            return a + 5j + 2 + 7.4j - 4 + complex(2, 3)
 
         t = torch.tensor((1,))
-
         scripted = torch.jit.script(fn)
-        print(scripted(t), fn(t))
         self.assertEqual(scripted(t), fn(t))
 
         scripted1 = torch.jit.script(fn1)
-        print(scripted1(t), fn1(t))
         self.assertEqual(scripted1(t), fn1(t))
