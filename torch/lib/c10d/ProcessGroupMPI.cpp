@@ -364,7 +364,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
       };
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&tensors, nullptr, std::move(runFunc)));
-  return enqueue(std::move(entry), "mpi:allreduce", c10::optional<std::vector<at::Tensor>>(tensors));
+  return enqueue(std::move(entry), "mpi:all_reduce", c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_coalesced(
@@ -443,7 +443,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
       };
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&inputTensors, &outputTensors[0], std::move(runFunc)));
-  return enqueue(std::move(entry), "mpi:allgather", c10::optional<std::vector<at::Tensor>>(inputTensors));
+  return enqueue(std::move(entry), "mpi:all_gather", c10::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_coalesced(

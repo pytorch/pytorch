@@ -1,6 +1,6 @@
 import torch
 from collections import OrderedDict
-from typing import Union, Callable, Any, Dict
+from typing import Union, Callable, Any
 import re
 
 from .utils import _parent_name
@@ -38,14 +38,14 @@ def get_flattened_qconfig_dict(qconfig_dict):
 
     def flatten_key(key):
         if key in qconfig_dict:
-            for (obj, qconfig) in qconfig_dict[key].items():
+            for obj, qconfig in qconfig_dict[key]:
                 flattened[obj] = qconfig
 
     flatten_key('object_type')
     flatten_key('module_name')
     return flattened
 
-def convert_dict_to_ordered_dict(qconfig_dict: Any) -> Dict[str, Dict[Any, Any]]:
+def convert_dict_to_ordered_dict(qconfig_dict):
     """ Convert dict in qconfig_dict to ordered dict
     """
     # convert a qconfig list for a type to OrderedDict
