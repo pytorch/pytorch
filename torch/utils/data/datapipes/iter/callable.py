@@ -1,7 +1,13 @@
 import warnings
 import torch.nn as nn
-from torch.utils.data import IterDataPipe, _utils
+from torch.utils.data import IterDataPipe, _utils, functional_datapipe
 from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
+
+try:
+    import dill
+    DILL_AVAILABLE = True
+except ImportError:
+    DILL_AVAILABLE = False
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -12,7 +18,7 @@ T_co = TypeVar('T_co', covariant=True)
 def default_fn(data):
     return data
 
-
+@functional_datapipe('map')
 class MapIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`MapIterDataPipe`.
 
@@ -37,7 +43,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         super().__init__()
         self.datapipe = datapipe
         # Partial object has no attribute '__name__', but can be pickled
-        if hasattr(fn, '__name__') and fn.__name__ == '<lambda>':
+        if hasattr(fn, '__name__') and fn.__name__ == '<lambda>' and not DILL_AVAILABLE:
             warnings.warn("Lambda function is not supported for pickle, please use "
                           "regular python function or functools.partial instead.")
         self.fn = fn  # type: ignore
@@ -52,6 +58,21 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
             return len(self.datapipe)
         raise NotImplementedError
+
+    def __getstate__(self):
+        if DILL_AVAILABLE:
+            dill_function = dill.dumps(self.fn)
+        else:
+            dill_function = self.fn
+        state = (self.datapipe, dill_function, self.args, self.kwargs)
+        return state
+
+    def __setstate__(self, state):
+        (self.datapipe, dill_function, self.args, self.kwargs) = state
+        if DILL_AVAILABLE:
+            self.fn = dill.loads(dill_function)  # type: ignore
+        else:
+            self.fn = dill_function  # type: ignore
 
 
 class CollateIterDataPipe(MapIterDataPipe):
