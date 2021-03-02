@@ -2359,8 +2359,7 @@ class TestTensorCreation(TestCase):
             self.assertTrue(t[0].item() == a[0])
             self.assertTrue(t[steps - 1].item() == a[steps - 1])
 
-    def test_linspace_vs_numpy_complex(self, device):
-        dtype = torch.complex64
+    def _test_linspace_logspace_complex_helper(self, torch_fn, np_fn, device, dtype):
         start = torch.randn(1, dtype=dtype).item()
         end = (start + torch.randn(1, dtype=dtype) + random.randint(5, 15)).item()
 
@@ -2372,6 +2371,16 @@ class TestTensorCreation(TestCase):
 
         for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             test_fn(torch.linspace, np.linspace, steps)
+
+    @dtypes(torch.complex64)
+    def test_linspace_vs_numpy_complex(self, device, dtype):
+        self._test_linspace_logspace_complex_helper(torch.linspace, np.linspace,
+                                                    device, dtype)
+
+    @dtypes(torch.complex64)
+    def test_logspace_vs_numpy_complex(self, device, dtype):
+        self._test_linspace_logspace_complex_helper(torch.logspace, np.logspace,
+                                                    device, dtype)
 
     @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
     @dtypes(*torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False))
@@ -2386,20 +2395,6 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t, torch.from_numpy(a))
             self.assertEqual(t[0], a[0])
             self.assertEqual(t[steps - 1], a[steps - 1])
-
-    def test_logspace_vs_numpy_complex(self, device):
-        dtype = torch.complex64
-        start = torch.randn(1, dtype=dtype).item()
-        end = (start + torch.randn(1, dtype=dtype) + random.randint(5, 15)).item()
-
-        def test_fn(torch_fn, numpy_fn, steps):
-            t = torch_fn(start, end, steps, device=device)
-            a = numpy_fn(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
-            t = t.cpu()
-            self.assertEqual(t, torch.from_numpy(a), rtol=1e-05, atol=1e-05)
-
-        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
-            test_fn(torch.logspace, np.logspace, steps)
 
     def _linspace_logspace_warning_helper(self, op, device, dtype):
         with self.maybeWarnsRegex(UserWarning, "Not providing a value for .+"):
