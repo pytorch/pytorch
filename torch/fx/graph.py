@@ -101,6 +101,9 @@ class _Namespace:
         self._unassociated_names = set()
         self._used_names: Dict[str, int] = {}
 
+        self._illegal_char_regex = re.compile('[^0-9a-zA-Z_]+')
+        self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
+
     def create_name(self, candidate: str, obj: Optional[Any]) -> str:
         """Create a unique name.
 
@@ -112,12 +115,12 @@ class _Namespace:
             return self._obj_to_name[obj]
 
         # delete all characters that are illegal in a Python identifier
-        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
+        candidate = self._illegal_char_regex.sub('_', candidate)
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            match = re.match(r"(.*)_(\d+)$", candidate)
+            match = self._name_suffix_regex.match(candidate)
             if match is None:
                 candidate = candidate + '_1'
             else:
@@ -267,16 +270,17 @@ class Graph:
         self._len = 0
         self._graph_namespace = _Namespace()
         self._owners = 0
-        self.owning_module = owning_module
+        self._owning_module = owning_module
 
     @property
     def owning_module(self):
         return self._owning_module
 
     @owning_module.setter
-    def owning_module(self, mod: "GraphModule"):
-        self._owning_module = mod if not self._owners else None
-        self._owners += 1
+    def owning_module(self, mod: Optional["GraphModule"]):
+        if mod:
+            self._owning_module = mod if not self._owners else None
+            self._owners += 1
 
     @property
     def nodes(self) -> _node_list:
@@ -495,12 +499,19 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
         """
-        if self._owning_module and not self._owning_module.has_submodule(qualified_name):
+        if (self.owning_module and 
+                self.owning_module.get_submodule(qualified_name) is None
+                and self.owning_module.get_parameter(qualified_name) is None
+                and self.owning_module.get_buffer(qualified_name) is None):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
                           "GraphModule! Call "
                           "GraphModule.add_submodule to add the "
-                          "necessary submodule")
+                          "necessary submodule, "
+                          "GraphModule.add_parameter to add the "
+                          "necessary Parameter, or "
+                          "nn.Module.register_buffer to add the "
+                          "necessary buffer")
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
     def call_module(self,
@@ -538,7 +549,8 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
-        if self._owning_module and not self._owning_module.has_submodule(module_name):
+        if (self.owning_module and 
+                self.owning_module.get_submodule(module_name) is not None):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
                           "GraphModule! Call "
@@ -961,12 +973,12 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             seen_names.add(node.name)
 
         # Check targets are legit
-        if self._owning_module:
+        if self.owning_module:
             for node in self.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
-                    m_itr = self._owning_module
+                    m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
                         m_itr = getattr(m_itr, atom, None)
                         if m_itr is None:

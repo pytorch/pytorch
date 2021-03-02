@@ -310,6 +310,89 @@ class {module_name}(torch.nn.Module):
             warnings.warn("Was not able to save the following children modules as reprs -"
                           f"saved as pickled files instead: {blobified_modules}")
 
+    def add_submodule(self, target: str, m: torch.nn.Module) -> bool:
+        """
+        Adds the given submodule to ``self``.
+
+        This installs empty Modules where none exist yet if they are 
+        subpaths of ``target``.
+
+        Args:
+            target: The fully-qualified string name of the new submodule
+                (See example in ``nn.Module.get_submodule`` for how to
+                specify a fully-qualified string.)
+            m: The submodule itself; the actual object we want to
+                install in the current Module
+
+        Return:
+            bool: Whether or not the submodule could be inserted. For
+                this method to return True, each object in the chain
+                denoted by ``target`` must either a) not exist yet,
+                or b) reference an ``nn.Module`` (not a parameter or
+                other attribute)
+
+        """
+        *prefix, field = target.split('.')
+        mod: torch.nn.Module = self
+
+        for item in prefix:
+
+            submod = getattr(mod, item, None)
+
+            if submod is None:
+                submod = torch.nn.Module()
+                setattr(mod, item, submod)
+
+            if not isinstance(submod, torch.nn.Module):
+                return False
+
+            mod = submod
+
+        mod.add_module(field, m)
+        return True
+
+    def delete_submodule(self, target: str) -> bool:
+        """
+        Deletes the given submodule from ``self``.
+
+        The module will not be deleted if ``target`` is not a valid
+        target.
+
+        Args:
+            target: The fully-qualified string name of the new submodule
+                (See example in ``nn.Module.get_submodule`` for how to
+                specify a fully-qualified string.)
+
+        Returns:
+            bool: Whether or not the target string referenced a
+                submodule we want to delete. A return value of ``False``
+                means that the ``target`` was not a valid reference to
+                a submodule.
+        """
+        atoms = target.split(".")
+        path, target_submod = atoms[:-1], atoms[-1]
+        mod: torch.nn.Module = self
+
+        # Get the parent module
+        for item in path:
+
+            if not hasattr(mod, item):
+                return False
+
+            mod = getattr(mod, item)
+
+            if not isinstance(mod, torch.nn.Module):
+                return False
+
+        if not hasattr(mod, target_submod):
+            return False
+
+        if not isinstance(getattr(mod, target_submod), torch.nn.Module):
+            return False
+
+        delattr(mod, target_submod)
+        return True
+
     def delete_all_unused_submodules(self) -> None:
         """
         Deletes all unused submodules from ``self``.
@@ -323,10 +406,6 @@ class {module_name}(torch.nn.Module):
 
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
-
-        For ``nn.Module`` manipulation methods not specific to
-        GraphModules (e.g ``has_submodule``, ``add_submodule``, and
-        ``delete_submodule``), see the ``nn.Module`` documentation.
         """
         used: List[str] = []
 

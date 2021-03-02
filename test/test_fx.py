@@ -10,6 +10,7 @@ import pickle
 import sys
 import torch
 import traceback
+import warnings
 import unittest
 from math import sqrt
 from pathlib import Path
@@ -83,6 +84,13 @@ class Pair(NamedTuple):
     y : torch.Tensor
 
 class TestFX(JitTestCase):
+    def setUp(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            return
+        torch_root = Path(__file__).resolve().parent.parent
+        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        torch.ops.load_library(str(p))
+
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
         for a given set of args/kwargs.
@@ -376,9 +384,6 @@ class TestFX(JitTestCase):
     def test_native_callable(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        torch_root = Path(__file__).resolve().parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
-        torch.ops.load_library(str(p))
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
         #
@@ -638,7 +643,7 @@ class TestFX(JitTestCase):
         gm = GraphModule(torch.nn.Module(), graph)
         pickled = pickle.dumps(gm)
         loaded = pickle.loads(pickled)
-        loaded.graph.lint(loaded)
+        loaded.graph.lint()
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(loaded(x, y), gm(x, y))
 
@@ -857,7 +862,7 @@ class TestFX(JitTestCase):
         input = torch.randn(3)
         ref_out = m(input)
         gm = symbolic_trace(m)
-        gm.graph.lint(gm)
+        gm.graph.lint()
         pickled = pickle.dumps(gm)
         loaded = pickle.loads(pickled)
         self.assertEqual(loaded(input), gm(input))
@@ -920,7 +925,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(eb)
         pickled = pickle.dumps(traced)
         loaded = pickle.loads(pickled)
-        loaded.graph.lint(loaded)
+        loaded.graph.lint()
         input = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
         offsets = torch.LongTensor([0, 4])
         self.assertEqual(loaded(input, offsets), traced(input, offsets))
@@ -1845,9 +1850,11 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super(C, self).__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3, stride=2)
+                self.param = torch.nn.Parameter(torch.rand(2, 3))
+                self.register_buffer("buf", torch.randn(2, 3))
 
             def forward(self, x):
-                return self.conv(x)
+                return self.conv(torch.cat([self.param, x, self.buf]))
 
         class B(torch.nn.Module):
             def __init__(self):
@@ -1872,7 +1879,7 @@ class TestFX(JitTestCase):
 
         conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"][-1]
         with a.graph.inserting_before(conv):
-            dropout = a.graph.call_module(module_name='net_b.net_c.dropout',
+            dropout = a.graph.call_module(module_name="net_b.net_c.dropout",
                                           args=conv.args)
 
         conv.replace_all_uses_with(dropout)
@@ -1897,14 +1904,14 @@ class TestFX(JitTestCase):
         # Test that we added the "dropout" submodule
         self.assertTrue(module_exists(a, "net_b.net_c.dropout"))
 
-        # Test `has_submodule` with an added submodule
-        self.assertTrue(a.has_submodule("net_b.net_c.dropout"))
+        # Test `get_submodule` with an added submodule
+        self.assertIsNotNone(a.get_submodule("net_b.net_c.dropout"))
 
         # Test that the "conv" submodule is still there
         self.assertTrue(module_exists(a, "net_b.net_c.conv"))
 
-        # Test `has_submodule` with an original module
-        self.assertTrue(a.has_submodule("net_b.net_c.conv"))
+        # Test `get_submodule` with an original module
+        self.assertIsNotNone(a.get_submodule("net_b.net_c.conv"))
 
         # Test that the "conv" node is NOT still there
         conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"]
@@ -1913,12 +1920,42 @@ class TestFX(JitTestCase):
         a.delete_submodule("net_b.net_c.conv")
 
         # Test that the "conv" submodule is now gone
-        self.assertFalse(hasattr(getattr(getattr(a, "net_b"), "net_c"), "conv"))    # noqa: B009
+        self.assertFalse(module_exists(a, "net_b.net_c.conv"))
 
-        # Test `has_submodule` with a deleted submodule
-        self.assertFalse(a.has_submodule("net_b.net_c.conv"))
+        # Test `get_submodule` with a deleted submodule
+        self.assertIsNone(a.get_submodule("net_b.net_c.conv"))
+
+        # Test `get_attr` warnings
+        cat = [n for n in a.graph.nodes if n.target == torch.cat][-1]
+
+        with a.graph.inserting_before(cat):
+
+            with warnings.catch_warnings(record=True) as w:
+                param = a.graph.get_attr(qualified_name="net_b.net_c.param")
+                self.assertEqual(len(w), 0)
+
+            with self.assertWarnsRegex(UserWarning, "Attempted to "
+                                       "insert a get_attr Node with no "
+                                       "underlying reference in the "
+                                       "owning GraphModule"):
+                bad_param = a.graph.get_attr(qualified_name="net_b.param")
+                a.graph.erase_node(bad_param)
+
+        cat.args = (*cat.args, param)
+
+        a.recompile()
 
         a.graph.lint()
+
+        # Test `get_parameter`
+        self.assertIsNotNone(a.get_parameter("net_b.net_c.param"))
+        self.assertIsNone(a.get_parameter("net_b.net_c.buf"))
+        self.assertIsNone(a.get_parameter("net_b.param"))
+
+        # Test `get_buffer`
+        self.assertIsNotNone(a.get_buffer("net_b.net_c.buf"))
+        self.assertIsNone(a.get_buffer("net_b.net_c.param"))
+        self.assertIsNone(a.get_buffer("net_b.buf"))
 
         # Insert some unused submodules
         a.add_submodule("net_b.embedding", torch.nn.Embedding(10, 3))
@@ -1934,6 +1971,10 @@ class TestFX(JitTestCase):
         self.assertFalse(module_exists(a, "net_b.net_c.embedding"))
         self.assertFalse(module_exists(a, "net_b.net_c.rnn"))
         self.assertFalse(module_exists(a, "batch_norm_2d"))
+
+        # Test that we didn't delete any unused Parameters or buffers
+        self.assertTrue(hasattr(getattr(getattr(a, "net_b"), "net_c"), "param"))    # noqa: B009
+        self.assertTrue(hasattr(getattr(getattr(a, "net_b"), "net_c"), "buf"))    # noqa: B009
 
         a.graph.lint()
 

@@ -382,10 +382,10 @@ class Module:
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    def has_submodule(self, target: str) -> bool:
+    def get_submodule(self, target: str) -> Optional["Module"]:
         """
-        Returns whether or not this Module contains the submodule
-        given by ``target``.
+        Returns the submodule given by ``target`` if it exists,
+        otherwise returns ``None``.
 
         For example, let's say you have an ``nn.Module`` ``A`` that
         looks like this:
@@ -406,9 +406,16 @@ class Module:
         and ``linear``. ``net_c`` then has a submodule ``conv``.)
 
         To check whether or not we have the ``linear`` submodule, we
-        would call ``has_submodule("net_b.linear")``. To check whether
+        would call ``get_submodule("net_b.linear")``. To check whether
         we have the ``conv`` submodule, we would call
-        ``has_submodule("net_b.net_c.conv")``.
+        ``get_submodule("net_b.net_c.conv")``.
+
+        The runtime of ``get_submodule`` is bounded by the degree
+        of module nesting in ``target``. A query against 
+        ``named_modules`` achieves the same result, but it is O(N) in 
+        the number of transitive modules. So, for a simple check to see
+        if some submodule exists, ``get_submodule`` should always be
+        used.
 
         Args:
             target: The fully-qualified string name of the submodule
@@ -416,106 +423,109 @@ class Module:
                 fully-qualified string.)
 
         Returns:
-            bool: Whether or not the target string referenced an
-                existing submodule. Returns False if the target string
-                resolves to something that is not an ``nn.Module``.
+            Optional[torch.nn.Module]: The submodule referenced by
+                ``target`` if it exists, otherwise ``None``. ``None``
+                will also be returned if the target string resolves
+                to something that is not an ``nn.Module``.
         """
         atoms: List[str] = target.split(".")
+        mod: torch.nn.Module = self
 
         for item in atoms:
 
-            if not hasattr(self, item):
-                return False
-
-            self = getattr(self, item)
-
-            if not isinstance(self, torch.nn.Module):
-                return False
-
-        return True
-
-    def add_submodule(self, target: str, m: 'Module') -> bool:
-        """
-        Adds the given submodule to ``self``.
-
-        This installs empty Modules where none exist yet if they are 
-        subpaths of ``target``.
-
-        Args:
-            target: The fully-qualified string name of the new submodule
-                (See example in ``has_submodule`` for how to specify a
-                fully-qualified string.)
-            m: The submodule itself; the actual object we want to
-                install in the current Module
-
-        Return:
-            bool: Whether or not the submodule could be inserted. For
-                this method to return True, each object in the chain
-                denoted by ``target`` must either a) not exist yet,
-                or b) reference an ``nn.Module`` (not a parameter or
-                other attribute)
-
-        """
-        *prefix, field = target.split('.')
-        mod: torch.nn.Module = self
-
-        for item in prefix:
-
-            submod = getattr(mod, item, None)
-
-            if submod is None:
-                submod = torch.nn.Module()
-                setattr(mod, item, submod)
-
-            if not isinstance(submod, torch.nn.Module):
-                return False
-
-            mod = submod
-
-        mod.add_module(field, m)
-        return True
-
-    def delete_submodule(self, target: str) -> bool:
-        """
-        Deletes the given submodule from ``self``.
-
-        The module will not be deleted if ``target`` is not a valid
-        target.
-
-        Args:
-            target: The fully-qualified string name of the new submodule
-                (See example in ``has_submodule`` for how to denote a
-                fully-qualified string.)
-
-        Returns:
-            bool: Whether or not the target string referenced a
-                submodule we want to delete. A return value of ``False``
-                means that the ``target`` was not a valid reference to
-                a submodule.
-        """
-        atoms = target.split(".")
-        path, target_submod = atoms[:-1], atoms[-1]
-        mod: torch.nn.Module = self
-
-        # Get the parent module
-        for item in path:
-
             if not hasattr(mod, item):
-                return False
+                return None
 
             mod = getattr(mod, item)
 
             if not isinstance(mod, torch.nn.Module):
-                return False
+                return None
 
-        if not hasattr(mod, target_submod):
-            return False
+        return mod
 
-        if not isinstance(getattr(mod, target_submod), torch.nn.Module):
-            return False
+    def get_parameter(self, target: str) -> Optional["Parameter"]:
+        """
+        Returns the parameter given by ``target`` if it exists,
+        otherwise returns ``None``.
 
-        delattr(mod, target_submod)
-        return True
+        See the docstring for ``get_submodule`` for a more detailed
+        explanation of this method's functionality as well as how to
+        correctly specify ``target``.
+
+        Args:
+            target: The fully-qualified string name of the Parameter
+                to look for. (See ``get_submodule`` for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            Optional[torch.nn.Parameter]: The Parameter referenced by
+                ``target`` if it exists, otherwise ``None``. ``None``
+                will also be returned if the target string resolves
+                to something that is not an ``nn.Parameter``.
+        """
+        atoms: List[str] = target.split(".")
+        module_atoms, param_name = atoms[:-1], atoms[-1]
+        mod: torch.nn.Module = self
+
+        for item in module_atoms:
+
+            if not hasattr(mod, item):
+                return None
+
+            mod = getattr(mod, item)
+
+            if not isinstance(mod, torch.nn.Module):
+                return None
+
+        if not hasattr(mod, param_name):
+            return None
+
+        param: torch.nn.Parameter = getattr(mod, param_name)
+
+        if not isinstance(param, torch.nn.Parameter):
+            return None
+
+        return param
+
+    def get_buffer(self, target: str) -> Optional["Tensor"]:
+        """
+        Returns the buffer given by ``target`` if it exists,
+        otherwise returns ``None``.
+
+        See the docstring for ``get_submodule`` for a more detailed
+        explanation of this method's functionality as well as how to
+        correctly specify ``target``.
+
+        Args:
+            target: The fully-qualified string name of the buffer
+                to look for. (See ``get_submodule`` for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            Optional[torch.Tensor]: The buffer referenced by
+                ``target`` if it exists, otherwise ``None``. ``None``
+                will also be returned if the target string resolves
+                to something that is not a buffer.
+        """
+        atoms: List[str] = target.split(".")
+        module_atoms, buffer_name = atoms[:-1], atoms[-1]
+        mod: torch.nn.Module = self
+
+        for item in module_atoms:
+
+            if not hasattr(mod, item):
+                return None
+
+            mod = getattr(mod, item)
+
+            if not isinstance(mod, torch.nn.Module):
+                return None
+
+        for name, buffer in mod.named_buffers():
+            if name == buffer_name:
+                return buffer
+
+        return None
 
     def _apply(self, fn):
         for module in self.children():
@@ -985,7 +995,7 @@ class Module:
         recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
             # type ignore was added because at this point one knows that
-            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
+            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
             name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
                 tracing_state.push_scope(name)
@@ -999,41 +1009,45 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
+        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        # If we don't have any hooks, we want to skip the rest of the logic in
+        # this function, and just call forward.
+        if not (self._backward_hooks or self._forward_hooks or self._forward_pre_hooks or _global_backward_hooks
+                or _global_forward_hooks or _global_forward_pre_hooks):
+            return forward_call(*input, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
-        if len(self._backward_hooks) > 0 or len(_global_backward_hooks) > 0:
+        if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
-
-        for hook in itertools.chain(
-                _global_forward_pre_hooks.values(),
-                self._forward_pre_hooks.values()):
-            result = hook(self, input)
-            if result is not None:
-                if not isinstance(result, tuple):
-                    result = (result,)
-                input = result
+        if _global_forward_pre_hooks or self._forward_pre_hooks:
+            for hook in itertools.chain(
+                    _global_forward_pre_hooks.values(),
+                    self._forward_pre_hooks.values()):
+                result = hook(self, input)
+                if result is not None:
+                    if not isinstance(result, tuple):
+                        result = (result,)
+                    input = result
 
         bw_hook = None
-        if len(full_backward_hooks) > 0:
+        if full_backward_hooks:
             bw_hook = hooks.BackwardHook(self, full_backward_hooks)
             input = bw_hook.setup_input_hook(input)
 
-        if torch._C._get_tracing_state():
-            result = self._slow_forward(*input, **kwargs)
-        else:
-            result = self.forward(*input, **kwargs)
-        for hook in itertools.chain(
-                _global_forward_hooks.values(),
-                self._forward_hooks.values()):
-            hook_result = hook(self, input, result)
-            if hook_result is not None:
-                result = hook_result
+        result = forward_call(*input, **kwargs)
+        if _global_forward_hooks or self._forward_hooks:
+            for hook in itertools.chain(
+                    _global_forward_hooks.values(),
+                    self._forward_hooks.values()):
+                hook_result = hook(self, input, result)
+                if hook_result is not None:
+                    result = hook_result
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
 
         # Handle the non-full backward hooks
-        if len(non_full_backward_hooks) > 0:
+        if non_full_backward_hooks:
             var = result
             while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
@@ -1441,7 +1455,7 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, buf in self.named_buffers(recurse=recurse):
+        for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
     def named_buffers(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
