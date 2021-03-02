@@ -33,13 +33,10 @@ class TestOpInfo(TestCase):
         # sample_inputs can have a function for generating the input that doesn't work for specified dtype
         # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
-            try:
-                samples = iter(op.sample_inputs(device, dtype))
-                sample = next(samples)
-            except StopIteration:
-                self.skipTest("Skipped! No sample inputs!")
+            samples = iter(op.sample_inputs(device, dtype))
 
             # NOTE: only tests on first sample
+            sample = next(samples)
             op(*sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
@@ -48,13 +45,10 @@ class TestOpInfo(TestCase):
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
-        try:
-            samples = iter(op.sample_inputs(device, dtype))
-            sample = next(samples)
-        except StopIteration:
-            self.skipTest("Skipped! No sample inputs!")
+        samples = iter(op.sample_inputs(device, dtype))
 
         # NOTE: only tests on first sample
+        sample = next(samples)
         op(*sample.input, *sample.args, **sample.kwargs)
 
 
@@ -197,13 +191,9 @@ class TestCommon(JitCommonTestCase):
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         test_backward = op.supports_autograd and op.test_complex_grad or not dtype.is_complex
-        try:
-            samples = iter(op.sample_inputs(device, dtype, requires_grad=test_backward))
-            first_sample = next(samples)
-        except StopIteration:
-            self.skipTest("Skipped! No sample inputs!")
 
-        for sample in itertools.chain((first_sample,), samples):
+        samples = iter(op.sample_inputs(device, dtype, requires_grad=test_backward))
+        for sample in samples:
             # Acquires variants to test
             method = op.get_method()
             inplace = op.get_inplace()
@@ -269,13 +259,8 @@ class TestCommon(JitCommonTestCase):
             (dtype.is_complex and op.test_complex_grad) or
             (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
 
-        try:
-            samples = iter(op.sample_inputs(device, dtype, requires_grad=test_backward))
-            first_sample = next(samples)
-        except StopIteration:
-            self.skipTest("Skipped! No sample inputs!")
-
-        for sample in itertools.chain((first_sample,), samples):
+        samples = iter(op.sample_inputs(device, dtype, requires_grad=test_backward))
+        for sample in samples:
 
             # Acquires variants to test
             func = op.get_op()
@@ -350,13 +335,10 @@ class TestCommon(JitCommonTestCase):
         if not op.supports_tensor_out:
             self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
 
-        try:
-            samples = iter(op.sample_inputs(device, dtype))
-            sample = next(samples)
-        except StopIteration:
-            self.skipTest("Skipped! No sample inputs!")
+        samples = iter(op.sample_inputs(device, dtype))
 
         # NOTE: only tests on first sample
+        sample = next(samples)
         # call it normally to get the expected result
         expected = op(*sample.input, *sample.args, **sample.kwargs)
 
@@ -373,13 +355,10 @@ class TestCommon(JitCommonTestCase):
 
     @ops([op for op in op_db if op.aliases])
     def test_jit_alias_remapping(self, device, dtype, op):
-        try:
-            samples = iter(op.sample_inputs(device, dtype, requires_grad=True))
-            sample = next(samples)
-        except StopIteration:
-            self.skipTest("Skipped! No sample inputs!")
+        samples = iter(op.sample_inputs(device, dtype, requires_grad=True))
 
         # NOTE: only tests on first sample
+        sample = next(samples)
 
         # Prepare data for test scripting
         # Below we prepare strings of args/kwargs with and without type annotations.
