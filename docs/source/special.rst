@@ -4,7 +4,8 @@
 torch.special
 =============
 
-Special Operations
+The torch.special module, modeled after SciPy's `special <https://docs.scipy.org/doc/scipy/reference/special.html>`_ module.
+It provides numerous special functions of mathematical physics.
 
 This module is in BETA. New functions are still being added, and some
 functions may change in future PyTorch releases. See the documentation of each
