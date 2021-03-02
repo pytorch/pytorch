@@ -13,8 +13,6 @@
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 #include <ATen/native/cpu/zmath.h>
 
-#include <c10/util/irange.h>
-
 #include <THC/THC.h> // for USE_MAGMA
 
 #ifdef USE_MAGMA
@@ -2137,7 +2135,7 @@ static void apply_magma_eigh(Tensor& values, Tensor& vectors, Tensor& infos, boo
     rwork = static_cast<value_t*>(storage_rwork.data());
   }
 
-  for (const auto i : c10::irange(batch_size)) {
+  for (decltype(batch_size) i = 0; i < batch_size; i++) {
     scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
     value_t* values_working_ptr = &values_data[i * values_stride];
     magma_int_t* info_working_ptr = &infos_data[i];

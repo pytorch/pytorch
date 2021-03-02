@@ -9,7 +9,6 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/util/irange.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -340,7 +339,7 @@ static void apply_syevd(Tensor& values, Tensor& vectors, Tensor& infos, bool upp
       at::cuda::getCurrentCUDASolverDnHandle(), jobz, uplo, n_32, vectors_data, lda_32, values_data, &lwork);
 #endif // USE_CUSOLVER_64_BIT
 
-  for (const auto i : c10::irange(batch_size)) {
+  for (decltype(batch_size) i = 0; i < batch_size; i++) {
     scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
     value_t* values_working_ptr = &values_data[i * values_stride];
     int* info_working_ptr = &infos_data[i];
@@ -417,7 +416,7 @@ static void apply_syevj(Tensor& values, Tensor& vectors, Tensor& infos, bool upp
   at::cuda::solver::syevj_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(), jobz, uplo, n, vectors_data, lda, values_data, &lwork, syevj_params);
 
-  for (const auto i : c10::irange(batch_size)) {
+  for (decltype(batch_size) i = 0; i < batch_size; i++) {
     scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
     value_t* values_working_ptr = &values_data[i * values_stride];
     int* info_working_ptr = &infos_data[i];
