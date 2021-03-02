@@ -366,7 +366,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         _ = optimizer.step(closure=closure)
 
         # Update the optimizer state on the reference rank
-        optimizer.consolidate_state_dict(recipient_rank=RECIPIENT_RANK)
+        optimizer.consolidate_state_dict(to=RECIPIENT_RANK)
 
         # Fetch the state on the reference rank
         # - check that it has the correct size
@@ -538,7 +538,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 reference_rank = 0
                 # - get states
                 ddp_state_dict = ddp_optimizer.state_dict()
-                sharded_optimizer.consolidate_state_dict(recipient_rank=reference_rank)
+                sharded_optimizer.consolidate_state_dict(to=reference_rank)
                 sharded_optim_state_dict = [sharded_optimizer.state_dict() if self.rank == reference_rank else {}]
                 dist.broadcast_object_list(sharded_optim_state_dict, src=reference_rank, group=dist.group.WORLD)
                 sharded_optim_state_dict = sharded_optim_state_dict[0]
