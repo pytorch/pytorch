@@ -284,6 +284,7 @@ class PackageImporter(Importer):
         path = None
         parent = name.rpartition('.')[0]
         if parent:
+            child = ".".join(name.split(".")[1:])
             if parent not in self.modules:
                 self._gcd_import(parent)
             # Crazy side-effects!
@@ -291,7 +292,9 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
             try:
-                path = parent_module.__path__  # type: ignore
+                # for os.path issue: os isn't a package but has path as a module
+                if type(getattr(parent_module, child, None)) != types.ModuleType:
+                    path = parent_module.__path__  # type: ignore
             except AttributeError:
                 msg = (_ERR_MSG + '; {!r} is not a package').format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None
