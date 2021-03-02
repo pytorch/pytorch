@@ -124,10 +124,6 @@ void initTensorExprBindings(PyObject* module) {
            const std::string&,
            const Dtype&,
            std::vector<ExprHandle>&>())
-      .def("load", [](Placeholder& self, const std::vector<ExprHandle>& v) {
-        return self.load(v);
-      });
-  py::class_<Tensor>(te, "Tensor")
       .def(
           "load",
           [](Placeholder& self, const std::vector<ExprHandle>& v) {
