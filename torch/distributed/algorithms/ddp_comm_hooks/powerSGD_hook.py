@@ -261,12 +261,7 @@ def powerSGD_hook(
         input_tensor_cp = torch.clone(input_tensor).detach()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
-    tensors = [
-        input_tensor[offset : offset + length].view(sizes)
-        for offset, length, sizes in zip(
-            bucket.get_offsets(), bucket.get_lengths(), bucket.get_sizes_list()
-        )
-    ]
+    tensors = bucket.get_per_parameter_tensors()
 
     # Step I: Divide all the tensors into two groups,
     # one will be compressed before allreduce and the other will be directly allreduced without compression.

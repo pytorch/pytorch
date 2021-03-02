@@ -49,6 +49,9 @@ class GradBucket {
     return tensors_;
   }
 
+  // Each tensor in the list that getPerParameterTensors corresponds to a parameter.
+  std::vector<at::Tensor> getPerParameterTensors() const;
+
   // Returns the start index of each variable in tensors_[0].
   const std::vector<size_t>& getOffsets() const {
     return offsets_;
