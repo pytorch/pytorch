@@ -654,6 +654,15 @@ at::Tensor _convolution(
                           params.output_padding, params.stride, params.dilation,
                           params.groups);
     }
+    if (input_is_mkldnn && weight.is_mkldnn()) {
+      // mkldnn will error on the below 0-dim handling code
+      return empty_mkldnn(
+          o,
+          optTypeMetaToScalarType(input.options().dtype_opt()),
+          input.options().layout_opt(),
+          input.options().device_opt(),
+          input.options().pinned_memory_opt());
+    }
     auto weight_view = at::_unsafe_view(weight, -1);
     auto out = input*weight_view[0];
     if (bias.defined())
