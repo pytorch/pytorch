@@ -555,8 +555,15 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
+    case prim::BroadcastMKLDNNTensors: {
+      makePointerTo(node->outputs().at(0), node->inputs().at(0));
+      makePointerTo(node->outputs().at(1), node->inputs().at(1));
+      return;
+    }
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::MKLDNNGroup:
+    case prim::ConstantMKLDNNTensor:
     case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:
