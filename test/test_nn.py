@@ -6857,10 +6857,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
-        if TEST_WITH_ROCM:
-            dtype = torch.float
-        else:
-            dtype = torch.double
+        dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
@@ -9018,7 +9015,6 @@ class TestNN(NNTestCase):
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocm
     def test_conv_cudnn_memory_layout_dominance(self):
         # desired behavior here is to have the memory_layout of conv.weight to
         # dominante the layout of output.
@@ -13901,7 +13897,6 @@ class TestNNDeviceType(NNTestCase):
     # returning CUDNN_STATUS_BAD_PARAM
     # Disabling that specific test for now [see issue # 33918]
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double)
     def test_conv_cudnn_nhwc_support(self, device, dtype):
