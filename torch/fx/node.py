@@ -111,7 +111,7 @@ class Node:
     """
     def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
                  args: Tuple['Argument', ...], kwargs: Dict[str, 'Argument'],
-                 type : Optional[Any] = None) -> None:
+                 type : Optional[Any] = None, stack_trace : Optional[str] = None) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
@@ -150,6 +150,7 @@ class Node:
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
+        self.stack_trace = stack_trace
 
     @property
     def next(self) -> 'Node':
