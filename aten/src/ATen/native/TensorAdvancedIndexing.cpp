@@ -1170,7 +1170,12 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
     int64_t dim) {
   TORCH_CHECK(
       self.dim() == indices.dim(),
-      "self and indices should have same number of dimensions")
+      "torch.take_along_dim(): input and indices should have the same number of dimensions, ",
+      "but got ", self.dim(), " dimensions for input, and ", indices.dim(), " dimensions for indices")
+  TORCH_CHECK(
+      indices.scalar_type() == ScalarType::Long,
+      "torch.take_along_dim(): dtype of indices should be Long but got ", indices.scalar_type())
+
   dim = at::maybe_wrap_dim(dim, self.dim());
 
   DimVector self_sizes{self.sizes()};

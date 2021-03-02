@@ -8,7 +8,7 @@ from functools import reduce
 
 import numpy as np
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, make_tensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyOnCPUAndCUDA)
@@ -1043,7 +1043,8 @@ class TestIndexing(TestCase):
         for accumulate in [True, False]:
             self.assertRaises(RuntimeError, lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
 
-    def test_take_along_dim(self, device):
+    @dtypes(torch.long, torch.float32)
+    def test_take_along_dim(self, device, dtype):
         def _test_against_numpy(t, indices, dim):
             actual = torch.take_along_dim(t, indices, dim=dim)
             t_np = t.cpu().numpy()
@@ -1051,36 +1052,16 @@ class TestIndexing(TestCase):
             expected = np.take_along_axis(t_np, indices_np, axis=dim)
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
-        for shape in [(2, 3, 5), (3, 2), (2, 3, 1, 4)]:
-            t = torch.randn(shape, device=device)
-            for dim in list(range(t.ndim)) + [None]:
-                if dim is None:
-                    indices = torch.argsort(t.view(-1))
-                else:
-                    indices = torch.argsort(t, dim=dim)
+        for shape in [(3, 2), (2, 3, 5), (2, 4, 0), (2, 3, 1, 4)]:
+            for discontiguous in [True, False]:
+                t = make_tensor(shape, device=device, dtype=dtype, discontiguous=discontiguous)
+                for dim in list(range(t.ndim)) + [None]:
+                    if dim is None:
+                        indices = torch.argsort(t.view(-1))
+                    else:
+                        indices = torch.argsort(t, dim=dim)
 
-            _test_against_numpy(t, indices, dim)
-
-        # dim of `t` and `indices` does not match
-        with self.assertRaises(RuntimeError):
-            torch.take_along_dim(t, indices[0], dim=0)
-
-        # invalid `indices` dtype
-        with self.assertRaises(RuntimeError):
-            torch.take_along_dim(t, indices.to(torch.bool), dim=0)
-
-        with self.assertRaises(RuntimeError):
-            torch.take_along_dim(t, indices.to(torch.float), dim=0)
-
-        with self.assertRaises(RuntimeError):
-            torch.take_along_dim(t, indices.to(torch.int32), dim=0)
-
-        # invalid axis
-        with self.assertRaises(RuntimeError):
-            torch.take_along_dim(t, indices, dim=-7)
-
-        with self.assertRaises(RuntimeError):
-            torch.take_along_dim(t, indices, dim=7)
+                _test_against_numpy(t, indices, dim)
 
         # test broadcasting
         t = torch.ones((3, 4, 1), device=device)
@@ -1093,6 +1074,55 @@ class TestIndexing(TestCase):
         indices = torch.ones((3, 0, 5), dtype=torch.long, device=device)
 
         _test_against_numpy(t, indices, 1)
+
+    @dtypes(torch.long, torch.float)
+    def test_take_along_dim_invalid(self, device, dtype):
+        shape = (2, 3, 1, 4)
+        dim = 0
+        t = make_tensor(shape, device=device, dtype=dtype)
+        indices = torch.argsort(t, dim=dim)
+
+        # dim of `t` and `indices` does not match
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input and indices should have the same number of dimensions"):
+            torch.take_along_dim(t, indices[0], dim=0)
+
+        # invalid `indices` dtype
+        with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+            torch.take_along_dim(t, indices.to(torch.bool), dim=0)
+
+        with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+            torch.take_along_dim(t, indices.to(torch.float), dim=0)
+
+        with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+            torch.take_along_dim(t, indices.to(torch.int32), dim=0)
+
+        # invalid axis
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch.take_along_dim(t, indices, dim=-7)
+
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch.take_along_dim(t, indices, dim=7)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_gather_take_along_dim_cross_device(self, device, dtype):
+        shape = (2, 3, 1, 4)
+        dim = 0
+        t = make_tensor(shape, device=device, dtype=dtype)
+        indices = torch.argsort(t, dim=dim)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            torch.gather(t, 0, indices.cpu())
+
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            torch.take_along_dim(t, indices.cpu(), dim=0)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            torch.gather(t.cpu(), 0, indices)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            torch.take_along_dim(t.cpu(), indices, dim=0)
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
