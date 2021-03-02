@@ -1824,12 +1824,16 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
     triangular_solve_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
   } else {
+#ifndef USE_MAGMA
+    triangular_solve_batched_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+#else
     // cuBLAS batched is faster than MAGMA batched up until 512x512, after that MAGMA is faster
     if (A.size(-1) <= 512) {
       triangular_solve_batched_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
     } else {
       triangular_solve_batched_magma(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
     }
+#endif // USE_MAGMA
   }
 }
 
