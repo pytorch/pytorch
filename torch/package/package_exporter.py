@@ -4,17 +4,19 @@ import collections
 import io
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
-from ._custom_import_pickler import create_custom_import_pickler
+from ._package_pickler import create_pickler
+from ._file_structure_representation import _create_folder_from_file_list, Folder
+from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
 from .importer import Importer, OrderedImporter, sys_importer
 import types
-from typing import List, Any, Callable, Dict, Sequence, Tuple, Union, Iterable, BinaryIO, Optional
+from typing import List, Any, Callable, Dict, Sequence, Tuple, Union, BinaryIO, Optional
 from pathlib import Path
 import linecache
 from urllib.parse import quote
-import re
+
 
 
 class PackageExporter:
@@ -90,6 +92,7 @@ class PackageExporter:
 
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
+        self._unique_id = 0
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -132,6 +135,25 @@ class PackageExporter:
         else:
             is_package = path.name == '__init__.py'
             self.save_source_string(module_name, _read_file(file_or_directory), is_package, dependencies, file_or_directory)
+
+    def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
+        """Returns a file structure representation of package's zipfile.
+
+        Args:
+            include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
+                for the names of the files to be inluded in the zipfile representation. This can also be
+                a glob-style pattern, as described in :meth:`mock`
+
+            exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+        """
+        return _create_folder_from_file_list(self.zip_file.archive_name(), self.zip_file.get_all_written_records(),
+                                             include, exclude)
+
+    def get_unique_id(self) -> str:
+        """Get an id. This id is guaranteed to only be handed out once for this package."""
+        ret = str(self._unique_id)
+        self._unique_id += 1
+        return ret
 
     def save_source_string(self, module_name: str, src: str, is_package: bool = False,
                            dependencies: bool = True, orig_file_name: str = None):
@@ -280,7 +302,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_custom_import_pickler(data_buf, self.importer)
+        pickler = create_pickler(data_buf, self.importer)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
@@ -392,11 +414,6 @@ node [shape=box];
         return qualified_name in self.provided
 
     def _persistent_id(self, obj):
-        # FIXME: the docs say that persistent_id should only return a string
-        # but torch store returns tuples. This works only in the binary protocol
-        # see
-        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
-        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
             obj_key = str(obj._cdata)
@@ -408,6 +425,9 @@ node [shape=box];
                     obj_key,
                     location,
                     obj.size())
+        if hasattr(obj, '__reduce_package__'):
+            return ('reduce_package', *obj.__reduce_package__(self))
+
         return None
 
     def __enter__(self):
@@ -473,42 +493,3 @@ def _read_file(filename: str) -> str:
     with open(filename, 'rb') as f:
         b = f.read()
         return b.decode('utf-8')
-
-GlobPattern = Union[str, Iterable[str]]
-
-
-class _GlobGroup:
-    def __init__(self, include: 'GlobPattern', exclude: 'GlobPattern'):
-        self._dbg = f'_GlobGroup(include={include}, exclude={exclude})'
-        self.include = _GlobGroup._glob_list(include)
-        self.exclude = _GlobGroup._glob_list(exclude)
-
-    def __str__(self):
-        return self._dbg
-
-    def matches(self, candidate: str) -> bool:
-        candidate = '.' + candidate
-        return any(p.fullmatch(candidate) for p in self.include) and all(not p.fullmatch(candidate) for p in self.exclude)
-
-    @staticmethod
-    def _glob_list(elems: 'GlobPattern'):
-        if isinstance(elems, str):
-            return [_GlobGroup._glob_to_re(elems)]
-        else:
-            return [_GlobGroup._glob_to_re(e) for e in elems]
-
-    @staticmethod
-    def _glob_to_re(pattern: str):
-        # to avoid corner cases for the first component, we prefix the candidate string
-        # with '.' so `import torch` will regex against `.torch`
-        def component_to_re(component):
-            if '**' in component:
-                if component == '**':
-                    return '(\\.[^.]+)*'
-                else:
-                    raise ValueError('** can only appear as an entire path segment')
-            else:
-                return '\\.' + '[^.]*'.join(re.escape(x) for x in component.split('*'))
-
-        result = ''.join(component_to_re(c) for c in pattern.split('.'))
-        return re.compile(result)

@@ -402,7 +402,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
     )
 
-  if(NOT INTERN_DISABLE_AUTOGRAD)
+  if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND GENERATED_CXX_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
@@ -501,7 +501,22 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(TORCH_SRCS ${GENERATED_CXX_TORCH})
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
-  append_filelist("libtorch_cmake_sources" TORCH_SRCS)
+  list(APPEND LIBTORCH_CMAKE_SRCS "")
+
+  # Switch between the full jit interpreter and lite interpreter
+  if(BUILD_LITE_INTERPRETER)
+    append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  else()
+    append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  endif()
+  list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
+
+  if(PRINT_CMAKE_DEBUG_INFO)
+    message(STATUS "Interpreter sources: ")
+    foreach(tmp ${LIBTORCH_CMAKE_SRCS})
+      message(STATUS "  " ${tmp})
+    endforeach()
+  endif()
 
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
@@ -535,14 +550,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/utils/out_types.cpp
   )
 
-  if(NOT INTERN_DISABLE_AUTOGRAD)
+  if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
     )
   endif()
 
-  if(NOT INTERN_BUILD_MOBILE)
+  if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
@@ -619,7 +634,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
-  if(NOT NO_API)
+  if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
@@ -836,6 +851,8 @@ if(USE_CUDA OR USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )
 
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
@@ -946,14 +963,24 @@ endif()
 
 
   if(BUILD_TEST)
-    add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
-    add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
-    if(USE_DISTRIBUTED AND NOT WIN32)
-      add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+    if(BUILD_LITE_INTERPRETER)
+      add_subdirectory(
+        ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
+        ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+    else()
+      add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+        add_subdirectory(
+          ${TORCH_ROOT}/test/cpp/tensorexpr
+          ${CMAKE_BINARY_DIR}/test_tensorexpr
+        )
+        if(USE_DISTRIBUTED AND NOT WIN32)
+          add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+        endif()
     endif()
   endif()
 
-  if(BUILD_TEST AND NOT NO_API)
+  if(BUILD_TEST AND NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
     add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
   endif()
@@ -1037,7 +1064,12 @@ if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_FLAGS})
+  if(UNIX)
+    separate_arguments(OpenMP_CXX_OPTIONS UNIX_COMMAND "${OpenMP_CXX_FLAGS}")
+  else()
+    separate_arguments(OpenMP_CXX_OPTIONS WINDOWS_COMMAND "${OpenMP_CXX_FLAGS}")
+  endif()
+  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_OPTIONS})
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
@@ -1067,6 +1099,10 @@ if(USE_ROCM)
     /opt/rocm/rocblas/include
     /opt/rocm/hipsparse/include
     )
+endif()
+
+if(BUILD_LITE_INTERPRETER)
+  target_compile_definitions(torch_cpu PRIVATE BUILD_LITE_INTERPRETER)
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and

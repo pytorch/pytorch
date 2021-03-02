@@ -468,6 +468,36 @@ TEST(LLVM, CondNestedTest) {
   }
 }
 
+TEST(LLVM, DirectVectorization) {
+  KernelScope ks;
+  constexpr int M = 3;
+  constexpr int N = 64;
+  BufHandle a("a", {M, N}, kFloat);
+  BufHandle b("b", {M, N}, kFloat);
+  BufHandle c("c", {M, N}, kFloat);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  Stmt* s = For::make(
+      m,
+      0,
+      M,
+      Store::make(
+          c,
+          {Ramp::make(m * 64, 1, 64)},
+          Load::make(
+              {kFloat, 64},
+              a,
+              {Ramp::make(m * 64, 1, 64)},
+              Broadcast::make(1, 64)) *
+              Load::make(
+                  {kFloat, 64},
+                  b,
+                  {Ramp::make(m * 64, 1, 64)},
+                  Broadcast::make(1, 64)),
+          Broadcast::make(1, 64)));
+  LLVMCodeGen cg(s, {a, b, c});
+}
+
 TEST(LLVM, VecLoadStoreTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));

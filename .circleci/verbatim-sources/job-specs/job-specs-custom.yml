@@ -477,6 +477,7 @@
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
+            echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -494,6 +495,10 @@
           no_output_timeout: "30m"
           command: |
             set -e
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Run Build Test is not for BUILD_LITE_INTERPRETER, skipping."
+              exit 0
+            fi
             PROJ_ROOT=/Users/distiller/project
             PROFILE=PyTorch_CI_2021
             # run the ruby build script
@@ -518,6 +523,9 @@
             set -e
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
+              exit 0
+            elif [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Run Simulator Tests is not for BUILD_LITE_INTERPRETER, skipping."
               exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
