@@ -194,7 +194,7 @@ bool is_nonzero(const Tensor& self) {
 }
 
 void assert_async_cpu(const Tensor& self) {
-  TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with boolean value true, but got false");
+  TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
 
 namespace {

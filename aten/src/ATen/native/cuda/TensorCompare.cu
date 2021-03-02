@@ -4,8 +4,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#include <assert.h>
-
 
 namespace at { namespace native {
 
@@ -63,8 +61,14 @@ REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
 
 template <typename scalar_t>
 __global__ void assert_async_cuda_kernel(scalar_t* input) {
-  assert(0);
-  // assert(input[0] == 1);
+  CUDA_KERNEL_ASSERT(input[0] != 0);
+}
+
+__global__ void assert_async_cuda_kernel(c10::complex<float>* input) {
+  CUDA_KERNEL_ASSERT(input[0] != c10::complex<float>(0, 0));
+}
+__global__ void assert_async_cuda_kernel(c10::complex<double>* input) {
+  CUDA_KERNEL_ASSERT(input[0] != c10::complex<double>(0, 0));
 }
 
 void assert_async_cuda(const Tensor& self) {
@@ -73,8 +77,7 @@ void assert_async_cuda(const Tensor& self) {
   TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "assert_async_cuda", [&] {
-    // assert_async_cuda_kernel<scalar_t><<<1, 1, 0, stream>>>(self.data_ptr<scalar_t>());
-    assert_async_cuda_kernel<scalar_t><<<1, 1>>>(self.data_ptr<scalar_t>());
+    assert_async_cuda_kernel<<<1, 1, 0, stream>>>(self.data_ptr<scalar_t>());
   });
 }
 
