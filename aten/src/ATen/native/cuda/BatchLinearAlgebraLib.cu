@@ -14,10 +14,88 @@
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 
-#ifdef USE_CUSOLVER
-
 namespace at {
 namespace native {
+
+template <typename scalar_t>
+static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;
+  trans = conjugate_transpose ? CUBLAS_OP_C : trans;
+  cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+  cublasSideMode_t side = CUBLAS_SIDE_LEFT;
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto B_data = B.data_ptr<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto B_mat_stride = matrixStride(B);
+  auto batch_size = batchCount(A);
+  auto n = cuda_int_cast(A.size(-2), "n");
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
+  auto lda = std::max<int>(1, n);
+
+  auto alpha = scalar_t{1};
+
+  for (decltype(batch_size) i = 0; i < batch_size; i++) {
+    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    scalar_t* B_working_ptr = &B_data[i * B_mat_stride];
+    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    at::cuda::blas::trsm(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_working_ptr, lda, B_working_ptr, lda);
+  }
+}
+
+void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  (void)infos; // unused
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
+    apply_triangular_solve<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
+  });
+}
+
+template <typename scalar_t>
+static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;
+  trans = conjugate_transpose ? CUBLAS_OP_C : trans;
+  cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+  cublasSideMode_t side = CUBLAS_SIDE_LEFT;
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto B_data = B.data_ptr<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto B_mat_stride = matrixStride(B);
+  auto batch_size = cuda_int_cast(batchCount(A), "batch_size");
+  auto n = cuda_int_cast(A.size(-2), "n");
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
+  auto lda = std::max<int>(1, n);
+
+  auto alpha = scalar_t{1};
+
+  // cuBLAS batched trsm requires input to be the device array of pointers to device single matrices
+  Tensor A_array = at::arange(
+    reinterpret_cast<int64_t>(A_data),
+    reinterpret_cast<int64_t>(&A_data[(batch_size-1) * A_mat_stride]) + 1,
+    static_cast<int64_t>(A_mat_stride * sizeof(scalar_t)), A.options().dtype(at::kLong));
+
+  Tensor B_array = at::arange(
+    reinterpret_cast<int64_t>(B_data),
+    reinterpret_cast<int64_t>(&B_data[(batch_size-1) * B_mat_stride]) + 1,
+    static_cast<int64_t>(B_mat_stride * sizeof(scalar_t)), B.options().dtype(at::kLong));
+
+  auto A_array_data = reinterpret_cast<scalar_t**>(A_array.data_ptr());
+  auto B_array_data = reinterpret_cast<scalar_t**>(B_array.data_ptr());
+
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_array_data, lda, B_array_data, lda, batch_size);
+}
+
+void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  (void)infos; // unused
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
+    apply_triangular_solve_batched<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
+  });
+}
+
+#ifdef USE_CUSOLVER
 
 inline static Tensor column_major_identity_matrix_like(const Tensor& self) {
   auto size = self.sizes();
@@ -297,6 +375,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
-}} // namespace at::native
-
 #endif  // USE_CUSOLVER
+
+}} // namespace at::native
