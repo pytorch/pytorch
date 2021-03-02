@@ -41,10 +41,9 @@ const char * parseDistDebugLevel() {
         kDistDebugDetailLogLevel,
         kDistDebugInfoLogLevel,
         kDistDebugOffLogLevel
-      );
-    )
-    // TORCH_CHECK(debug)
-    // return debugLevel.c_str();
+      )
+    );
+    return levelStr;
   }
 }
 
