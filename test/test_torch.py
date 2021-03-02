@@ -2361,8 +2361,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertFalse(torch.tensor(0.0).is_nonzero())
             self.assertTrue(torch.tensor(True).is_nonzero())
             self.assertFalse(torch.tensor(False).is_nonzero())
-            self.assertFalse(torch.tensor(0+0j).is_nonzero())
-            self.assertTrue(torch.tensor(0+0.1j).is_nonzero())
+            self.assertFalse(torch.tensor(0 + 0j).is_nonzero())
+            self.assertTrue(torch.tensor(0 + 0.1j).is_nonzero())
 
         def test_assert_async(self):
             with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
@@ -2375,13 +2375,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.assert_async(torch.tensor(0.1))
             torch.assert_async(torch.tensor(-0.1))
             with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
-              torch.assert_async(torch.tensor(0.0))
+                torch.assert_async(torch.tensor(0.0))
             torch.assert_async(torch.tensor(True))
             with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
-              torch.assert_async(torch.tensor(False))
-            torch.assert_async(torch.tensor(0+0.1j))
+                torch.assert_async(torch.tensor(False))
+            torch.assert_async(torch.tensor(0 + 0.1j))
             with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
-              torch.assert_async(torch.tensor(0+0j))
+                torch.assert_async(torch.tensor(0 + 0j))
 
         # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
         # is available, we get a different error.

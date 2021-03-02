@@ -1835,13 +1835,13 @@ t2.start()
         torch.assert_async(torch.tensor(0.1, device="cuda"))
         torch.assert_async(torch.tensor(-0.1, device="cuda"))
         torch.assert_async(torch.tensor(True, device="cuda"))
-        torch.assert_async(torch.tensor(0+0.1j, device="cuda"))
+        torch.assert_async(torch.tensor(0 + 0.1j, device="cuda"))
 
         fail_stmts = [
             "torch.assert_async(torch.tensor(0, device='cuda'))",
             "torch.assert_async(torch.tensor(0.0, device='cuda'))",
             "torch.assert_async(torch.tensor(False, device='cuda'))",
-            "torch.assert_async(torch.tensor(0+0j, device='cuda'))",
+            "torch.assert_async(torch.tensor(0+ 0 j, device='cuda'))",
         ]
 
         import subprocess
