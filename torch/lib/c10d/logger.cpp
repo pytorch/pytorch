@@ -111,8 +111,7 @@ void Logger::calculate_avg_cpu_time(
     return;
   }
   time_duration = cpu_end_time - cpu_start_time;
-  avg_time = (time_duration +
-              avg_time * (num_iterations_stats_recorded_ - 1)) /
+  avg_time = (time_duration + avg_time * (num_iterations_stats_recorded_ - 1)) /
       num_iterations_stats_recorded_;
 }
 
@@ -134,8 +133,7 @@ void Logger::calculate_avg_gpu_time(
     return;
   }
   time_duration = int64_t(milliseconds * kMilliSecondToNanosSecond);
-  avg_time = (time_duration +
-              avg_time * (num_iterations_stats_recorded_ - 1)) /
+  avg_time = (time_duration + avg_time * (num_iterations_stats_recorded_ - 1)) /
       num_iterations_stats_recorded_;
 }
 #endif
@@ -229,7 +227,7 @@ void Logger::set_runtime_stats_and_log() {
 
     calculate_avg_cpu_time(
         ddp_logging_data_->avg_backward_compute_time,
-         ddp_logging_data_->backward_compute_time,
+        ddp_logging_data_->backward_compute_time,
         reducer_->cpu_timer_.backward_compute_start_time,
         reducer_->cpu_timer_.backward_compute_end_time);
 
