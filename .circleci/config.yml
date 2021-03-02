@@ -9021,8 +9021,6 @@ workflows:
             branches:
               only:
                 - master
-                - /ci-all\/.*/
-                - /release\/.*/
     jobs:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
