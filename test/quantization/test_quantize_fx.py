@@ -2251,6 +2251,30 @@ class TestQuantizeFxOps(QuantizationTestCase):
             operator.mul, operator.imul, torch.ops.quantized.mul)
         self._test_binary_op_float16_impl(operator.mul, operator.imul)
 
+    def test_sum(self):
+        class Sum(torch.nn.Module):
+            def forward(self, x):
+                x = torch.sum(x, [1], keepdim=True)
+                x = torch.sum(x, [1])
+                return x
+
+
+        data = torch.randn(1, 2, 3, 4, dtype=torch.float)
+        quant_type = QuantType.STATIC
+        # testing for fp16 static quant
+        # we are producing fp16 patterns
+        custom_qconfig_dict = {
+            "object_type": [(torch.sum, float16_static_qconfig)]
+        }
+        node_occurrence = {
+            # input_sum1, output_sum1, output_sum2
+            ns.call_method("to"): 3
+        }
+        self.checkGraphModeFxOp(
+            Sum(), data, quant_type,
+            expected_node_occurrence=node_occurrence,
+            custom_qconfig_dict=custom_qconfig_dict)
+
     def test_bmm(self):
         class BMMMethod(torch.nn.Module):
             def __init__(self):
