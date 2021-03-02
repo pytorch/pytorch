@@ -17,7 +17,7 @@ IValue ScriptDictIterator::next() {
 
   // Since this is the iterator for .items(), the current key and value
   // should be returned as a tuple.
-  IValue result = ivalue::Tuple::create({iter_->key(), iter_->value()});
+  IValue result = c10::ivalue::Tuple::create({iter_->key(), iter_->value()});
 
   // Advance the iterator for next time.
   iter_++;

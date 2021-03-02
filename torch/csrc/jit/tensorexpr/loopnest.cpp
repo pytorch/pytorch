@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
-#include <queue>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -18,6 +17,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -26,8 +26,32 @@ namespace tensorexpr {
 
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
-      output_bufs_(other.output_bufs_),
-      intermediate_bufs_(other.intermediate_bufs_) {}
+      output_bufs_(other.output_bufs_) {
+  verify(root_stmt_);
+}
+
+LoopNest::LoopNest(
+    Stmt* stmt,
+    const std::unordered_set<const Buf*>& output_bufs)
+    : root_stmt_(stmt), output_bufs_(output_bufs) {
+  verify(root_stmt_);
+}
+
+LoopNest::LoopNest(
+    const std::vector<Tensor*>& output_tensors,
+    const std::vector<Tensor*>& tensors_to_compute) {
+  initialize(output_tensors, tensors_to_compute);
+  verify(root_stmt_);
+}
+
+LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
+  // Find all tensors we need to compute (including dependencies) and put them
+  // in a topological order
+  std::vector<Tensor*> tensors_to_compute =
+      findAllNeededTensors(output_tensors);
+  initialize(output_tensors, tensors_to_compute);
+  verify(root_stmt_);
+}
 
 class FunctionCallUseCount : public IRVisitor {
  public:
@@ -51,11 +75,42 @@ class FunctionCallUseCount : public IRVisitor {
       function_calls_;
 };
 
+const std::unordered_set<const Buf*> LoopNest::getIntermediateBufs() const {
+  std::unordered_set<const Buf*> result;
+  auto input_bufs = getInputBufs();
+  auto bufs = NodeFinder<Buf>::find(root_stmt_);
+  for (auto* buf : bufs) {
+    if (!output_bufs_.count(buf) && !input_bufs.count(buf)) {
+      result.insert(buf);
+    }
+  }
+  return result;
+}
+
+const std::unordered_set<const Buf*> LoopNest::getInputBufs() const {
+  std::unordered_set<const Buf*> result;
+  auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  for (const auto& kv : buf_load_store_uses) {
+    bool has_store = false;
+    for (const auto& use : kv.second) {
+      if (use.isStore) {
+        has_store = true;
+        break;
+      }
+    }
+    if (!has_store) {
+      result.insert(kv.first);
+    }
+  }
+  return result;
+}
+
 class IndexFlattener : public IRMutator {
  public:
   Stmt* flatten(Stmt* s) {
     return s->accept_mutator(this);
   }
+
   const Expr* mutate(const Load* v) override {
     if (v->indices().size() == 1) {
       return v;
@@ -423,7 +478,7 @@ void LoopNest::vectorize(For* f) {
     new_f = old_f;
   }
 
-  b->replace_stmt(f, new_f);
+  b->replace_stmt(f, IRSimplifier::simplify(new_f));
 }
 
 class Flattener : public IRMutator {
@@ -441,86 +496,11 @@ class Flattener : public IRMutator {
   }
 };
 
-class DepTracker : public IRVisitor {
- public:
-  std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
-    used_tensors.clear();
-    tensor->stmt()->accept(this);
-    return used_tensors;
-  }
-
- private:
-  void visit(const FunctionCall* v) override {
-    used_tensors.push_back(const_cast<Tensor*>(v->tensor())); // NOLINT
-  }
-
-  std::vector<Tensor*> used_tensors;
-};
-
-std::vector<Tensor*> LoopNest::findAllNeededTensors(
-    const std::vector<Tensor*>& tensors) {
-  DepTracker d;
-  std::queue<Tensor*> q;
-  std::unordered_set<Tensor*> queued;
-  std::vector<Tensor*> result;
-  std::unordered_set<Tensor*> processed;
-  for (Tensor* t : tensors) {
-    if (queued.insert(t).second) {
-      q.push(t);
-    }
-  }
-  while (!q.empty()) {
-    Tensor* t = q.front();
-    q.pop();
-    queued.erase(t);
-    std::vector<Tensor*> deps = d.findUsedTensors(t);
-    bool all_processed = true;
-    for (Tensor* dep : deps) {
-      if (!processed.count(dep)) {
-        if (queued.insert(dep).second) {
-          q.push(dep);
-        }
-        all_processed = false;
-      }
-    }
-    if (all_processed) {
-      result.push_back(t);
-      if (processed.count(t)) {
-        throw malformed_input("failure to find all processed Tensors");
-      }
-
-      processed.insert(t);
-    } else {
-      if (queued.count(t)) {
-        throw malformed_input("failure to find all queued Tensors");
-      }
-
-      q.push(t);
-      queued.insert(t);
-    }
-  }
-
-  return result;
-}
-
-LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
-  // Find all tensors we need to compute (including dependencies) and put them
-  // in a topological order
-  std::vector<Tensor*> tensors_to_compute =
-      findAllNeededTensors(output_tensors);
-
+void LoopNest::initialize(
+    const std::vector<Tensor*>& output_tensors,
+    const std::vector<Tensor*>& tensors_to_compute) {
   for (auto t : output_tensors) {
     output_bufs_.insert(t->buf());
-  }
-
-  // Find all intermediate tensors, we'll need that for inserting alloc/free
-  // statements
-  std::unordered_set<Tensor*> tensors_to_compute_set(
-      tensors_to_compute.begin(), tensors_to_compute.end());
-  for (Tensor* t : tensors_to_compute) {
-    if (!output_bufs_.count(t->buf())) {
-      intermediate_bufs_.insert(t->buf());
-    }
   }
 
   std::vector<Stmt*> loops;
@@ -543,15 +523,6 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   }
 
   root_stmt_ = new Block(loops);
-
-  // If it's referenced in the root_stmt, but it's not in output_bufs_ or
-  // intermediate_bufs_ then it must be an input.
-  auto bufs = NodeFinder<Buf>::find(root_stmt_);
-  for (auto* buf : bufs) {
-    if (!output_bufs_.count(buf) && !intermediate_bufs_.count(buf)) {
-      input_bufs_.insert(buf);
-    }
-  }
 }
 
 class FunctionInliner : public IRMutator {
@@ -590,6 +561,51 @@ class FunctionInliner : public IRMutator {
     for (size_t i = 0; i < buf->ndim(); i++) {
       const Var* func_callee_arg = producer_index_vars_.at(i);
       const Expr* func_caller_param = v->param(i);
+      auto iter = inline_mapping_.find(func_callee_arg);
+      if (iter != inline_mapping_.end()) {
+        throw std::runtime_error(
+            "Duplicated variables: " + func_callee_arg->name_hint());
+      }
+      // Add a mapping for each function parameter to it's source name.
+      inline_mapping_[func_callee_arg] = func_caller_param;
+      index_vars.push_back(func_callee_arg);
+    }
+
+    // Call the actual replacement.
+    const Expr* body = producer_->value();
+    const Expr* result = body->accept_mutator(this);
+
+    // Remove the mappings we created for this function parameters.
+    for (auto* v : index_vars) {
+      for (auto& pair : random_bindings_) {
+        if (pair.second.erase(v)) {
+          const Expr* inlined = inline_mapping_[v];
+          for (auto* nv : VarFinder::find(inlined)) {
+            pair.second.insert(nv);
+          }
+        }
+      }
+      inline_mapping_.erase(v);
+    }
+    return result;
+  }
+
+  const Expr* mutate(const Load* v) override {
+    const Buf* buf = v->buf();
+    if (buf != buf_) {
+      return IRMutator::mutate(v);
+    }
+
+    if (v->indices().size() != buf->ndim()) {
+      throw malformed_input(
+          "Placeholder indexed access is inconsistent with its rank", v);
+    }
+
+    std::vector<const Var*> index_vars;
+    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
+    for (size_t i = 0; i < buf->ndim(); i++) {
+      const Var* func_callee_arg = producer_index_vars_.at(i);
+      const Expr* func_caller_param = v->indices()[i];
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
         throw std::runtime_error(
@@ -728,6 +744,15 @@ bool LoopNest::computeInline(Stmt* s) {
 }
 
 bool LoopNest::computeInline(const Buf* b) {
+  // If buf is used or defined in an ExternalCall, we cannot inline it
+  auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  for (const auto& use : buf_load_store_uses.at(b)) {
+    Stmt* s = use.s;
+    if (dynamic_cast<ExternalCall*>(s)) {
+      return false;
+    }
+  }
+
   // Find producers.
   Store* relevant_store{nullptr};
   auto stores = NodeFinder<Store>::find(root_stmt_);
@@ -745,13 +770,12 @@ bool LoopNest::computeInline(const Buf* b) {
       relevant_store = s;
     }
   }
+
   TORCH_INTERNAL_ASSERT(relevant_store);
 
   FunctionInliner inliner(relevant_store, output_bufs_);
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
 
-  // No longer computing this intermediate tensor, so don't alloc it.
-  intermediate_bufs_.erase(b);
   return true;
 }
 
@@ -760,20 +784,18 @@ bool LoopNest::computeInline(const Buf* b) {
 // difficult synchronization logic across blocks. Inlining trivial reads does
 // not duplicate work
 void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
-  // We need to collect all intermediate buffers as the buffers to be inlined
-  // before calling 'computeInline' since the buffers that are inlined are
-  // erased from the set 'intermediate_bufs_' in that function.
   std::unordered_set<const Buf*> bufs_to_inline;
 
+  auto intermediate_bufs = getIntermediateBufs();
   if (allow_duplicated_work) {
-    bufs_to_inline.insert(intermediate_bufs_.begin(), intermediate_bufs_.end());
+    bufs_to_inline.insert(intermediate_bufs.begin(), intermediate_bufs.end());
   } else {
     FunctionCallUseCount fcu;
     auto function_call_uses = fcu.findUses(root_stmt_);
     auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
     auto input_bufs = getInputBufs();
 
-    for (auto buf : intermediate_bufs_) {
+    for (auto buf : intermediate_bufs) {
       TORCH_INTERNAL_ASSERT(buf_load_store_uses.count(buf));
       std::vector<BufLoadOrStoreUse>& uses = buf_load_store_uses[buf];
       auto stores = c10::filter(
@@ -829,6 +851,22 @@ class LoadOrStoreUseFinder : public IRVisitor {
     last_stmt_ = (Stmt*)v;
     IRVisitor::visit(v);
   }
+
+  void visit(const ExternalCall* v) override {
+    if (stores_[v->buf()].insert(last_stmt_).second) {
+      uses_[v->buf()].push_back({(Stmt*)v, true});
+    }
+    last_stmt_ = (Stmt*)v;
+
+    for (const Buf* input_buf : v->buf_args()) {
+      if (loads_[input_buf].insert(last_stmt_).second) {
+        uses_[input_buf].push_back({last_stmt_, false});
+      }
+    }
+
+    IRVisitor::visit(v);
+  }
+
   void visit(const Load* v) override {
     if (loads_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({last_stmt_, false});
@@ -861,6 +899,10 @@ class ContainedStmtsFinder : public IRVisitor {
 
  private:
   void visit(const Store* v) override {
+    contained_.insert((Stmt*)v);
+    IRVisitor::visit(v);
+  }
+  void visit(const ExternalCall* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
@@ -907,7 +949,8 @@ Block* findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
 }
 
 Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
-  if (intermediate_bufs_.size() == 0ULL) {
+  auto intermediate_bufs = getIntermediateBufs();
+  if (intermediate_bufs.size() == 0ULL) {
     return stmt;
   }
 
@@ -920,14 +963,9 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
       findLoadOrStoreUses(stmt);
   // Insert allocations and frees for temporary buffers in the innermost
   // possible scope.
-  for (const Buf* buf : intermediate_bufs_) {
-    const Expr* flat_size = new IntImm(1);
-    for (auto& d : buf->dims()) {
-      flat_size = new Mul(flat_size, d);
-    }
-    flat_size = IRSimplifier::simplify(flat_size);
-    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), {flat_size});
-    Stmt* free = new Free(buf->base_handle());
+  for (const Buf* buf : intermediate_bufs) {
+    Stmt* alloc = new Allocate(buf);
+    Stmt* free = new Free(buf);
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);
     alloc_block->append_stmt(free);
@@ -1434,16 +1472,18 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
     throw malformed_input("unroll attempted on loop with no parent");
   }
 
-  if (!f->start()->isConstant()) {
+  auto start_expr = IRSimplifier::simplify(f->start());
+  auto stop_expr = IRSimplifier::simplify(f->stop());
+  if (!start_expr->isConstant()) {
     throw std::runtime_error("Can't unroll due to non-constant loop start!");
   }
-  if (!f->stop()->isConstant()) {
+  if (!stop_expr->isConstant()) {
     throw std::runtime_error("Can't unroll due to non-constant loop stop!");
   }
 
   std::vector<Stmt*> unrolled_stmts;
-  int start_val = immediateAs<int>(f->start());
-  int stop_val = immediateAs<int>(f->stop());
+  int start_val = immediateAs<int>(start_expr);
+  int stop_val = immediateAs<int>(stop_expr);
   for (int current = start_val; current < stop_val; ++current) {
     for (const auto stmt : f->body()->stmts()) {
       auto stmt_copy = Stmt::clone(stmt);
@@ -1850,8 +1890,6 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   Stmt* new_consumer =
       IRSimplifier::simplify(consumer->accept_mutator(&replacer));
 
-  intermediate_bufs_.insert(tmp_buf);
-
   // replace the old consumer with the replaced consumer.
   Block* consumer_block = nullptr;
   // if the consumer is a block, we should mutate it in place.
@@ -2133,10 +2171,6 @@ void LoopNest::computeAt(Stmt* s, For* f) {
     Block* bb = dynamic_cast<Block*>(f->get_parent());
     bb->replace_stmt(f, new_f);
   }
-
-  // Mark the new temp buffer as requiring an alloc (it will be inserted as a
-  // part of prepareForCodegen).
-  intermediate_bufs_.insert(temp_buf);
 }
 
 class SwapReduce : public IRMutator {
@@ -2443,7 +2477,6 @@ void LoopNest::rfactor(
 
   std::vector<const Expr*> tmp_dims = getBoundExtents(bounds_it->second);
   tmp_buf->set_dims(tmp_dims);
-  intermediate_bufs_.insert(tmp_buf);
 }
 
 } // namespace tensorexpr

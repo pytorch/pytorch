@@ -1342,6 +1342,11 @@ void initJitScriptBindings(PyObject* module) {
             pp.printMethod(self.function());
             return pp.str();
           })
+      .def(
+          "_debug_flush_compilation_cache",
+          [](Method& self) {
+            return self.get_executor().debugFlushCompilationCache();
+          })
       .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::IValue> constants;
         PrintDepsTable deps;
