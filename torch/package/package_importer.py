@@ -165,13 +165,17 @@ class PackageImporter(Importer):
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
 
-            assert typename == 'storage', \
+            if typename == 'storage':
+                data_type, key, location, size = data
+                if key not in loaded_storages:
+                    load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+                storage = loaded_storages[key]
+                return storage
+            elif typename == 'reduce_package':
+                func, args = data
+                return func(self, *args)
+            else:
                 f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
-            data_type, key, location, size = data
-            if key not in loaded_storages:
-                load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
-            storage = loaded_storages[key]
-            return storage
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
