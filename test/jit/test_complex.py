@@ -57,7 +57,7 @@ class TestComplex(JitTestCase):
             # uses buildConstant
             # we construct python AST
             # Python AST -> JIT AST (JIT IR)
-            return 2j + a - 5j +3 + 4j
+            return a + 2j + 5j +2j+1j+2j
 
         t = torch.tensor((1,))
 
@@ -66,4 +66,5 @@ class TestComplex(JitTestCase):
         self.assertEqual(scripted(t), fn(t))
 
         scripted1 = torch.jit.script(fn1)
-        self.assertEqual(scripted(t), fn1(t))
+        print(scripted1(t), fn1(t))
+        self.assertEqual(scripted1(t), fn1(t))

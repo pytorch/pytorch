@@ -31,6 +31,9 @@ namespace c10 {
   _(prim, ReductionSizes)            \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
+  _(prim, ConstantMKLDNNTensor)      \
+  _(prim, BroadcastMKLDNNTensors)    \
+  _(prim, MKLDNNGroup)               \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -92,6 +95,9 @@ namespace c10 {
   _(aten, Complex)                   \
   _(aten, str)                       \
   _(aten, Delete)                    \
+  _(aten, relu_)                     \
+  _(aten, dropout_)                  \
+  _(aten, sigmoid_)                  \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, layout)                    \
@@ -272,6 +278,7 @@ namespace c10 {
   _(aten, trunc_)                    \
   _(aten, fix)                       \
   _(aten, fix_)                      \
+  _(aten, to_mkldnn)                 \
   _(aten, neg)                       \
   _(aten, neg_)                      \
   _(aten, negative)                  \
