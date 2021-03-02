@@ -1877,13 +1877,14 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular) {
+static void apply_triangular_solve(Tensor& A, Tensor& b, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
 #ifndef USE_MAGMA
 AT_ERROR("triangular_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
   magma_trans_t trans = transpose ? MagmaTrans : MagmaNoTrans;
+  trans = conjugate_transpose ? MagmaConjTrans : trans;
   magma_diag_t diag = unitriangular ? MagmaUnit : MagmaNonUnit;
 
   auto A_data = A.data_ptr<scalar_t>();
@@ -1949,15 +1950,19 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor, Tensor> _triangular_solve_helper_cuda(const Tensor& self, const Tensor& A,
-                                                         bool upper, bool transpose, bool unitriangular) {
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "triangular_solve_cuda", [&]{
-    apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
+void triangular_solve_magma(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  (void)infos; // unused
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cpu", [&]{
+    apply_triangular_solve<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
   });
-  return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
+
+void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  // TODO: add cuBLAS dispatch here
+  triangular_solve_magma(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+}
+
+REGISTER_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
