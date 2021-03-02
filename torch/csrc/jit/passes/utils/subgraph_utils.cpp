@@ -283,14 +283,14 @@ void mergeNodeIntoSubgraph(
       // enable more optimizations
       if (auto value = toIValue(input)) {
         auto nv = subgraph->insertConstant(*value);
-        nv->setType(input->type()); // Need to retain type information on Nones
+        nv->copyMetadata(input);
         inputsMap[input] = nv;
       } else {
         // The common case: this is a regular input, so just register it with
         // the group node and inner subgraph
         subgraphNode->addInput(input);
         auto inputToGraph = subgraph->addInput();
-        inputToGraph->setType(input->type());
+        inputToGraph->copyMetadata(input);
         inputsMap[input] = inputToGraph;
       }
     }
