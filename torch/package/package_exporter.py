@@ -4,7 +4,7 @@ import collections
 import io
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
-from ._custom_import_pickler import create_custom_import_pickler
+from ._package_pickler import create_pickler
 from ._file_structure_representation import _create_folder_from_file_list, Folder
 from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
@@ -302,7 +302,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_custom_import_pickler(data_buf, self.importer)
+        pickler = create_pickler(data_buf, self.importer)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
