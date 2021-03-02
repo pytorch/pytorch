@@ -304,7 +304,7 @@ void Logger::set_runtime_stats_and_log() {
         reducer_->cpu_timer_.backward_comm_start_time,
         reducer_->cpu_timer_.backward_compute_end_time);
   }
-  // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG is enabled.
+  // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG=DETAIL is enabled.
   if (!(strncmp(parseDistDebugLevel(), kDistDebugDetailLogLevel, strlen(kDistDebugDetailLogLevel)))) {
     LOG(INFO) << *this;
   }
