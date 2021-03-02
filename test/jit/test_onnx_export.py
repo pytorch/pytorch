@@ -11,7 +11,6 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.onnx import OperatorExportTypes
-from torch.testing import FileCheck
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
