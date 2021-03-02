@@ -407,25 +407,17 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.int(int a) -> complex"),
+         TORCH_SELECTIVE_SCHEMA("aten::Complex.int(int a, int b=0) -> complex"),
          [](Stack* stack) {
-           int64_t a;
-           pop(stack, a);
-           push(stack, c10::complex<double>(a, 0));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.int(int a, int b) -> complex"),
-         [](Stack* stack) {
-           int64_t a, b;
+           int a, b;
            pop(stack, a, b);
            push(stack, c10::complex<double>(a, b));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.int(int a, float b) -> complex"),
+         TORCH_SELECTIVE_SCHEMA("aten::Complex.int_float(int a, float b) -> complex"),
          [](Stack* stack) {
-           int64_t a;
+           int a;
            double b;
            pop(stack, a, b);
            push(stack, c10::complex<double>(static_cast<double>(a), b));
@@ -433,25 +425,17 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.float(float a, int b) -> complex"),
+             "aten::Complex.float_int(float a, int b) -> complex"),
          [](Stack* stack) {
            double a;
-           int64_t b;
+           int b;
            pop(stack, a, b);
            push(stack, c10::complex<double>(a, static_cast<double>(b)));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.float(float a) -> complex"),
-         [](Stack* stack) {
-           double a;
-           pop(stack, a);
-           push(stack, c10::complex<double>(a, 0));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.float(float a, float b) -> complex"),
+             "aten::Complex.float(float a, float b=0) -> complex"),
          [](Stack* stack) {
            double a, b;
            pop(stack, a, b);
