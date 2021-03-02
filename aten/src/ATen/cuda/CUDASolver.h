@@ -77,6 +77,40 @@ void gesvdjBatched<c10::complex<float>>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(c10::
 template<>
 void gesvdjBatched<c10::complex<double>>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(c10::complex<double>, double));
 
+
+#define CUDASOLVER_POTRF_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, Dtype* A, int lda, int* info
+
+template<class Dtype>
+void potrf(CUDASOLVER_POTRF_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrf: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void potrf<float>(CUDASOLVER_POTRF_ARGTYPES(float));
+template<>
+void potrf<double>(CUDASOLVER_POTRF_ARGTYPES(double));
+template<>
+void potrf<c10::complex<float>>(CUDASOLVER_POTRF_ARGTYPES(c10::complex<float>));
+template<>
+void potrf<c10::complex<double>>(CUDASOLVER_POTRF_ARGTYPES(c10::complex<double>));
+
+
+#define CUDASOLVER_POTRF_BATCHED_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, Dtype** A, int lda, int* info, int batchSize
+
+template<class Dtype>
+void potrfBatched(CUDASOLVER_POTRF_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrfBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void potrfBatched<float>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(float));
+template<>
+void potrfBatched<double>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(double));
+template<>
+void potrfBatched<c10::complex<float>>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(c10::complex<float>));
+template<>
+void potrfBatched<c10::complex<double>>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(c10::complex<double>));
+
 } // namespace solver
 } // namespace cuda
 } // namespace at

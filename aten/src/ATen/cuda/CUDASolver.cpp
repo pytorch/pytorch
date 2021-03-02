@@ -9,6 +9,20 @@ namespace at {
 namespace cuda {
 namespace solver {
 
+const char* cusolverGetErrorMessage(cusolverStatus_t status) {
+  switch (status) {
+    case CUSOLVER_STATUS_SUCCESS:                     return "CUSOLVER_STATUS_SUCCES";
+    case CUSOLVER_STATUS_NOT_INITIALIZED:             return "CUSOLVER_STATUS_NOT_INITIALIZED";
+    case CUSOLVER_STATUS_ALLOC_FAILED:                return "CUSOLVER_STATUS_ALLOC_FAILED";
+    case CUSOLVER_STATUS_INVALID_VALUE:               return "CUSOLVER_STATUS_INVALID_VALUE";
+    case CUSOLVER_STATUS_ARCH_MISMATCH:               return "CUSOLVER_STATUS_ARCH_MISMATCH";
+    case CUSOLVER_STATUS_EXECUTION_FAILED:            return "CUSOLVER_STATUS_EXECUTION_FAILED";
+    case CUSOLVER_STATUS_INTERNAL_ERROR:              return "CUSOLVER_STATUS_ITNERNAL_ERROR";
+    case CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED:   return "CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+    default:                                          return "Unknown cusolver error number";
+  }
+}
+
 template <>
 void getrf<double>(
     cusolverDnHandle_t handle, int m, int n, double* dA, int ldda, int* ipiv, int* info) {
@@ -333,6 +347,121 @@ void gesvdjBatched<c10::complex<double>>(
     ldv,
     static_cast<cuDoubleComplex*>(dataPtr.get()),
     lwork, info, params, batchSize));
+}
+
+
+template<>
+void potrf<float>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, float* A, int lda, int* info
+) {
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnSpotrf_bufferSize(handle, uplo, n, A, lda, &lwork));
+
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto dataPtr = allocator.allocate(sizeof(float)*lwork);
+
+  TORCH_CUSOLVER_CHECK(cusolverDnSpotrf(
+    handle, uplo, n, A, lda,
+    static_cast<float*>(dataPtr.get()),
+    lwork, info));
+}
+
+template<>
+void potrf<double>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, double* A, int lda, int* info
+) {
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnDpotrf_bufferSize(handle, uplo, n, A, lda, &lwork));
+
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto dataPtr = allocator.allocate(sizeof(double)*lwork);
+
+  TORCH_CUSOLVER_CHECK(cusolverDnDpotrf(
+    handle, uplo, n, A, lda,
+    static_cast<double*>(dataPtr.get()),
+    lwork, info));
+}
+
+template<>
+void potrf<c10::complex<float>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<float>* A, int lda, int* info
+) {
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnCpotrf_bufferSize(handle, uplo, n,
+    reinterpret_cast<cuComplex*>(A),
+    lda, &lwork));
+
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto dataPtr = allocator.allocate(sizeof(cuComplex)*lwork);
+
+  TORCH_CUSOLVER_CHECK(cusolverDnCpotrf(
+    handle,
+    uplo,
+    n,
+    reinterpret_cast<cuComplex*>(A),
+    lda,
+    static_cast<cuComplex*>(dataPtr.get()),
+    lwork,
+    info));
+}
+
+template<>
+void potrf<c10::complex<double>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<double>* A, int lda, int* info
+) {
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnZpotrf_bufferSize(
+    handle, uplo, n,
+    reinterpret_cast<cuDoubleComplex*>(A),
+    lda, &lwork));
+
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto dataPtr = allocator.allocate(sizeof(cuDoubleComplex)*lwork);
+
+  TORCH_CUSOLVER_CHECK(cusolverDnZpotrf(
+    handle,
+    uplo,
+    n,
+    reinterpret_cast<cuDoubleComplex*>(A),
+    lda,
+    static_cast<cuDoubleComplex*>(dataPtr.get()),
+    lwork,
+    info));
+}
+
+
+template<>
+void potrfBatched<float>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, float** A, int lda, int* info, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSpotrfBatched(handle, uplo, n, A, lda, info, batchSize));
+}
+
+template<>
+void potrfBatched<double>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, double** A, int lda, int* info, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDpotrfBatched(handle, uplo, n, A, lda, info, batchSize));
+}
+
+template<>
+void potrfBatched<c10::complex<float>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<float>** A, int lda, int* info, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCpotrfBatched(
+    handle, uplo, n,
+    reinterpret_cast<cuComplex**>(A),
+    lda, info, batchSize));
+}
+
+template<>
+void potrfBatched<c10::complex<double>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<double>** A, int lda, int* info, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZpotrfBatched(
+    handle, uplo, n,
+    reinterpret_cast<cuDoubleComplex**>(A),
+    lda, info, batchSize));
 }
 
 } // namespace solver

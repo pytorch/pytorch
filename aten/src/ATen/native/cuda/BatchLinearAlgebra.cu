@@ -1687,6 +1687,14 @@ AT_ERROR("cholesky: MAGMA library not found in "
 }
 
 Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
+#ifdef USE_CUSOLVER
+  return _cholesky_helper_cuda_lib(self, upper);
+#else
+  return _cholesky_helper_cuda_legacy(self, upper);
+#endif
+}
+
+Tensor _cholesky_helper_cuda_legacy(const Tensor& self, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
 
   Tensor result;

@@ -297,6 +297,62 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
+
+template<typename scalar_t>
+inline static void apply_cholesky_lib_potrf(Tensor& self_working_copy, bool upper, Tensor& infos) {
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  const int n = cuda_int_cast(self_working_copy.size(-1), "n");
+  const int lda = std::max<int>(1, n);
+
+  at::cuda::solver::potrf<scalar_t>(
+    handle, uplo, n, self_working_copy.data_ptr<scalar_t>(), lda, infos.data_ptr<int>()
+  );
+}
+
+template<typename scalar_t>
+inline static void apply_cholesky_lib_potrfBatched(Tensor& self_working_copy, bool upper, Tensor& infos) {
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  const int n = cuda_int_cast(self_working_copy.size(-1), "n");
+  const int lda = std::max<int>(1, n);
+
+  const int batch_size = cuda_int_cast(batchCount(self_working_copy), "batch_size");
+  const scalar_t* self_data = self_working_copy.data_ptr<scalar_t>();
+  const int matrix_stride = cuda_int_cast(matrixStride(self_working_copy), "matris_stride");
+
+  // cusolver batched kernels require input be "device array of device pointers"
+  Tensor self_working_copy_array = at::arange(
+    reinterpret_cast<int64_t>(self_data),
+    reinterpret_cast<int64_t>(&self_data[(batch_size-1) * matrix_stride]) + 1,
+    static_cast<int64_t>(matrix_stride * sizeof(scalar_t)), self_working_copy.options().dtype(at::kLong));
+
+  at::cuda::solver::potrfBatched<scalar_t>(
+    handle, uplo, n,
+    reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr()),
+    lda, infos.data_ptr<int>(), batch_size);
+}
+
+Tensor _cholesky_helper_cuda_lib(const Tensor& self, bool upper) {
+  const int64_t batch_size = batchCount(self);
+  at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
+  at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
+
+  if (batch_size > 1) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrfBatched", [&] {
+      apply_cholesky_lib_potrfBatched<scalar_t>(self_working_copy, upper, infos);
+    });
+  }
+  else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrf", [&] {
+      apply_cholesky_lib_potrf<scalar_t>(self_working_copy, upper, infos);
+    });
+  }
+  batchCheckErrors(infos, "cholesky_cuda");
+
+  return self_working_copy;
+}
+
 }} // namespace at::native
 
 #endif  // USE_CUSOLVER
