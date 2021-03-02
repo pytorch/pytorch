@@ -319,7 +319,8 @@ std::string toString(const ComputeAtRootDomainMap& root_map);
 //! current fusion entirely. IterDomains that can be mapped each
 //! other with computeAt are grouped into the same subset in the
 //! DisjointSet.
-class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder : private BackwardVisitor {
+class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
+    : private BackwardVisitor {
  public:
   explicit ComputeAtRootDomainMapBuilder(
       ComputeAtRootDomainMap& root_map,
