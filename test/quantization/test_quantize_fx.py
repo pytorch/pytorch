@@ -93,7 +93,7 @@ class BinaryOp(torch.nn.Module):
         self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
         self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
         self.is_scalar = is_scalar
-        self.op = ibinary_op if is_inplace else binary_op
+        self.op = ibinary_op if ibinary_op and is_inplace else binary_op
 
     def forward(self, x, y):
         x = self.conv1(x)
@@ -125,7 +125,7 @@ class BinaryOpRelu(torch.nn.Module):
         super().__init__()
         self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
         self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
-        self.op = ibinary_op if is_inplace else binary_op
+        self.op = ibinary_op if ibinary_op and is_inplace else binary_op
         self.is_functional_relu = is_functional_relu
         self.is_scalar = is_scalar
         self.relu = F.relu if self.is_functional_relu \
@@ -2236,6 +2236,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             operator.add, operator.iadd, torch.ops.quantized.add)
         self._test_binary_op_float16_impl(
             operator.add, operator.iadd)
+
+    def test_sub(self):
+        self._test_binary_op_float16_impl(operator.sub, operator.isub)
+        self._test_binary_op_float16_impl(torch.sub, None)
 
     @skipIfNoFBGEMM
     def test_mul(self):
