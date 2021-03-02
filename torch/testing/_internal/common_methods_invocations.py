@@ -1350,6 +1350,18 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
 
     return samples
 
+
+def sample_inputs_polar(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput((_make_tensor_helper((S, S), low=0), _make_tensor_helper((S, S)))),
+        SampleInput((_make_tensor_helper((), low=0), _make_tensor_helper(()))),
+    )
+
+    return samples
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2396,6 +2408,10 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('polar',
+           dtypes=floating_types(),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_polar),
     OpInfo('pinverse',
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
