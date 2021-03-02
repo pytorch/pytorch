@@ -20,7 +20,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsuppo
                                  skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import model_defs.word_language_model as word_language_model
 
 import onnx
@@ -2019,35 +2019,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _interpolate(self, x, mode, use_size, is_upsample, align_corners=False):
         class MyModel(torch.nn.Module):
-            def forward(self, x):
-                scale = 2.3 if is_upsample else 0.5
-                if len(x.size()) == 3:
-                    scale_array = 2.3
-                if len(x.size()) == 4:
-                    scale_array = [2.3, 5.1]
-                if len(x.size()) == 5:
-                    scale_array = [3.3, 2.3, 5.1]
-                if use_size:
-                    size_array = [int(float(v) * scale) for v in x.size()[2:]]
-                    if align_corners:
-                        return torch.nn.functional.interpolate(x, mode=mode, size=size_array[0], align_corners=True), \
-                            torch.nn.functional.interpolate(x, mode=mode, size=size_array, align_corners=True)
-                    return torch.nn.functional.interpolate(x, mode=mode, size=size_array[0]), \
-                        torch.nn.functional.interpolate(x, mode=mode, size=size_array)
-                if align_corners:
-                    return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale,
-                                                           align_corners=True, recompute_scale_factor=False), \
-                        torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale_array,
-                                                        align_corners=True, recompute_scale_factor=False)
-                return torch.nn.functional.interpolate(x, mode=mode,
-                                                       scale_factor=scale, recompute_scale_factor=False), \
-                    torch.nn.functional.interpolate(x, mode=mode,
-                                                    scale_factor=scale_array, recompute_scale_factor=False)
-
-        self.run_test(MyModel(), x)
-
-    def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
-        class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
 
             def __init__(self, mode, use_size, is_upsample, align_corners):
@@ -2068,7 +2039,6 @@ class TestONNXRuntime(unittest.TestCase):
                     self.scale_array = [2.3, 3.1, 4.6]
                     self.size_array = [16, 32, 64]
 
-            @torch.jit.script_method
             def forward(self, x):
                 if self.use_size:
                     if self.align_corners:
@@ -2119,23 +2089,25 @@ class TestONNXRuntime(unittest.TestCase):
                 # test with align_corners if supported
                 if mode != 'nearest':
                     self._interpolate(xi, mode_i, True, is_upsample, True)
-                    self._interpolate_script(xi, mode_i, True, is_upsample, True)
                 # the following cases, require dynamic sizes/scales,
                 # which which is not supported for opset_version < 9
                 if self.opset_version >= 9:
-                    self._interpolate_script(xi, mode_i, True, is_upsample)
-                    self._interpolate(xi, mode_i, False, is_upsample)
+                    self._interpolate(xi, mode_i, True, is_upsample)
                     # test with align_corners if supported
                     if mode != 'nearest':
                         self._interpolate(xi, mode_i, False, is_upsample, True)
-                        self._interpolate_script(xi, mode_i, False, is_upsample, True)
-                    self._interpolate_script(xi, mode_i, False, is_upsample)
+                    self._interpolate(xi, mode_i, False, is_upsample)
 
-    @disableScriptTest()
+    # ONNX export failed on interpolate scripting because dynamic size not supported for opsets below 9.
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
 
+    @skipIfUnsupportedMaxOpsetVersion(8)
     @disableScriptTest()
+    def test_interpolate_upsample_trace(self):
+        self._interpolate_tests(True)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_interpolate_function_substitution(self):
         class ScriptModel(torch.jit.ScriptModule):
@@ -2166,12 +2138,10 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TracingModule(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    @disableScriptTest()
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
     def test_interpolate_no_shape(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2185,6 +2155,8 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(16, 16, requires_grad=True)
         self.run_test(MyModel(), (x, y))
 
+    # scripting will throw the OnnxRuntimeError
+    @disableScriptTest()
     def test_interpolate_adaptive_pooling_error(self):
         x = torch.randn(1, 2, 6, requires_grad=True)
         with self.assertRaises(RuntimeError) as cm:
@@ -3047,35 +3019,45 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(LSTMModel(), (input,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
     def test_lstm(self):
-        model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+
+            def forward(self, x, h0, c0):
+                return self.rnn(x, (h0, c0))
+
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         h0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
         c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
-        self.run_test(model, (input, (h0, c0)))
+        self.run_test(LSTMModel(), (input, h0, c0))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
     def test_lstm_default_init_state(self):
-        model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+
+            def forward(self, x):
+                return self.rnn(x)
+
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
-        self.run_test(model, input)
+        self.run_test(LSTMModel(), input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # LSTMModel model not scriptable
     def test_lstm_fixed_batch_size(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
                 super(LSTMModel, self).__init__()
                 self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+                self.RNN_HIDDEN_SIZE = RNN_HIDDEN_SIZE
 
             def forward(self, input):
                 batch_size = input.size()[1]
-                h0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
-                c0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
-                h0 = torch.from_numpy(h0_np)
-                c0 = torch.from_numpy(c0_np)
+                h0 = torch.ones([1, batch_size, self.RNN_HIDDEN_SIZE])
+                c0 = torch.ones([1, batch_size, self.RNN_HIDDEN_SIZE])
                 return self.lstm(input, (h0, c0))
 
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
@@ -3084,37 +3066,33 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LSTMModel(), input, fixed_batch_size=True, test_with_inputs=[input2])
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
     def test_lstm_post_fix_init_state(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
                 super(LSTMModel, self).__init__()
-                self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE,
-                                          1, bidirectional=False)
+                self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+                self.RNN_HIDDEN_SIZE = RNN_HIDDEN_SIZE
 
             def forward(self, input):
                 batch_size = input.size()[1]
-                h0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
-                c0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
-                h0 = torch.from_numpy(h0_np)
-                c0 = torch.from_numpy(c0_np)
+                h0 = torch.ones([1, batch_size, self.RNN_HIDDEN_SIZE])
+                c0 = torch.ones([1, batch_size, self.RNN_HIDDEN_SIZE])
                 return self.lstm(input, (h0, c0))
 
         model = LSTMModel()
         input = torch.randn(RNN_SEQUENCE_LENGTH, 1, RNN_INPUT_SIZE)
         # verify with different input of different batch size
         input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
-        self.run_test(model, input, dynamic_axes={'input' : {0 : 'seq', 1 : 'batch'}},
+        self.run_test(model, input, input_names=["input.1"], dynamic_axes={'input.1' : {0 : 'seq', 1 : 'batch'}},
                       test_with_inputs=[input2])
 
-    @disableScriptTest()
     def test_lstm_constant_folding(self):
         class LstmNet(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
                 super(LstmNet, self).__init__()
                 self.lstm = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional)
 
-            def forward(self, input, initial_state):
+            def forward(self, input, initial_state: Tuple[torch.Tensor, torch.Tensor]):
                 return self.lstm(input, initial_state)
 
         def get_LstmNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
@@ -3135,14 +3113,13 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model2, input2, do_constant_folding=True)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
     def test_lstm_no_bias(self):
         class LstmNet(torch.nn.Module):
             def __init__(self, num_layers, bidirectional):
                 super(LstmNet, self).__init__()
                 self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers, bias=False, bidirectional=bidirectional)
 
-            def forward(self, input, initial_state):
+            def forward(self, input, initial_state: Tuple[torch.Tensor, torch.Tensor]):
                 return self.lstm(input, initial_state)
 
         def get_LstmNet_model_and_inputs(num_layers, bidirectional):
@@ -4980,7 +4957,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_pad_types(self):
         # Test for different pad integer types
         class Pad(torch.nn.Module):
-            def forward(self, x, pad):
+            def forward(self, x, pad: List[int]):
                 return torch.nn.functional.pad(x, pad)
 
         x = torch.randn(2, 2, 4, 4)
@@ -5239,38 +5216,37 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), multi_dim_input)
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    @disableScriptTest()  # variable number of inputs not scriptable
     def test_einsum(self):
         class EinsumModelBatchDiagonal(torch.nn.Module):
-            def forward(self, *tensor_list):
+            def forward(self, x):
                 eqn = '...ii ->...i'
-                return torch.einsum(eqn, *tensor_list)
+                return torch.einsum(eqn, x)
 
         x = torch.randn(3, 5, 5)
         self.run_test(EinsumModelBatchDiagonal(), input=(x,))
 
         class EinsumModelBatchMatmul(torch.nn.Module):
-            def forward(self, *tensor_list):
+            def forward(self, x, y):
                 eqn = 'bij, bjk -> bik'
-                return torch.einsum(eqn, *tensor_list)
+                return torch.einsum(eqn, x, y)
 
         x = torch.randn(5, 2, 3)
         y = torch.randn(5, 3, 4)
         self.run_test(EinsumModelBatchMatmul(), input=(x, y))
 
         class EinsumModelInnerProd(torch.nn.Module):
-            def forward(self, *tensor_list):
+            def forward(self, x, y):
                 eqn = 'i,i'
-                return torch.einsum(eqn, *tensor_list)
+                return torch.einsum(eqn, x, y)
 
         x = torch.randn(5)
         y = torch.randn(5)
         self.run_test(EinsumModelInnerProd(), input=(x, y))
 
         class EinsumModelTranspose(torch.nn.Module):
-            def forward(self, *tensor_list):
+            def forward(self, x):
                 eqn = 'ij->ji'
-                return torch.einsum(eqn, *tensor_list)
+                return torch.einsum(eqn, x)
 
         x = torch.randn(3, 4)
         self.run_test(EinsumModelTranspose(), input=(x,))
@@ -5579,50 +5555,104 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @disableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_binary_cross_entropy_with_logits(self):
         x = torch.randn(5)
         y = torch.empty(5).random_(2)
-        self._bce_logits_loss(x, y)
+        self._bce_logits(x, y)
 
-        x = torch.randn(2, 3, 5, 7)
-        y = torch.empty(2, 3, 5, 7).random_(2)
-        weight = torch.tensor([2])
-        self._bce_logits_loss(x, y, weight)
+        x = torch.randn(3, 4)
+        y = torch.empty(3, 4).random_(2)
+        weight = torch.tensor([3])
+        self._bce_logits_wegiht(x, y, weight)
 
-        x = torch.FloatTensor([[-0.4089, -1.2471, 0.5907], [-0.4897, -0.8267, -0.7349], [0.5241, -0.1246, -0.4751]])
-        y = torch.FloatTensor([[0, 1, 1], [0, 0, 1], [1, 0, 1]])
-        pos_weight = torch.empty([3]).random_(2)
-        self._bce_logits_loss(x, y, pos_weight)
+        x = torch.randn(3, 2, 4)
+        y = torch.empty(3, 2, 4).random_(2)
+        pos_weight = torch.empty([2, 4]).random_(2)
+        self._bce_logits_posweight(x, y, pos_weight)
 
         x = torch.randn(3, 3, 4)
         y = torch.empty(3, 3, 4).random_(2)
         weight = torch.tensor([3])
         pos_weight = torch.empty([3, 4]).random_(2)
-        self._bce_logits_loss(x, y, weight, pos_weight)
+        self._bce_logits_loss_weight_posweight(x, y, weight, pos_weight)
 
-    def _bce_logits_loss(self, x, y, weight=None, pos_weight=None):
-        class BCEWithLogitsLossNoneWeights(torch.nn.Module):
+    def _bce_logits(self, x, y):
+        class BCEWithLogitsLossNone(torch.nn.Module):
+            def forward(self, input, target):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='none')
+
+        self.run_test(BCEWithLogitsLossNone(), input=(x, y))
+
+        class BCEWithLogitsLossMean(torch.nn.Module):
+            def forward(self, input, target):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='mean')
+
+        self.run_test(BCEWithLogitsLossMean(), input=(x, y))
+
+        class BCEWithLogitsLossSum(torch.nn.Module):
+            def forward(self, input, target):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='sum')
+
+        self.run_test(BCEWithLogitsLossSum(), input=(x, y))
+
+    def _bce_logits_wegiht(self, x, y, weight):
+        class BCEWithLogitsLossWegihtNone(torch.nn.Module):
+            def forward(self, input, target, weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight, reduction='none')
+        self.run_test(BCEWithLogitsLossWegihtNone(), input=(x, y, weight))
+
+        class BCEWithLogitsLossWegihtMean(torch.nn.Module):
+            def forward(self, input, target, weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight, reduction='mean')
+
+        self.run_test(BCEWithLogitsLossWegihtMean(), input=(x, y, weight))
+
+        class BCEWithLogitsLossWegihtSum(torch.nn.Module):
+            def forward(self, input, target, weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight, reduction='sum')
+
+        self.run_test(BCEWithLogitsLossWegihtSum(), input=(x, y, weight))
+
+    def _bce_logits_posweight(self, x, y, pos_weight):
+        class BCEWithLogitsLossPosWegihtNone(torch.nn.Module):
+            def forward(self, input, target, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, pos_weight=pos_weight, reduction='none')
+        self.run_test(BCEWithLogitsLossPosWegihtNone(), input=(x, y, pos_weight))
+
+        class BCEWithLogitsLossPosWegihtMean(torch.nn.Module):
+            def forward(self, input, target, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, pos_weight=pos_weight, reduction='mean')
+
+        self.run_test(BCEWithLogitsLossPosWegihtMean(), input=(x, y, pos_weight))
+
+        class BCEWithLogitsLossPosWegihtSum(torch.nn.Module):
+            def forward(self, input, target, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, pos_weight=pos_weight, reduction='sum')
+
+        self.run_test(BCEWithLogitsLossPosWegihtSum(), input=(x, y, pos_weight))
+
+    def _bce_logits_loss_weight_posweight(self, x, y, weight, pos_weight):
+        class BCEWithLogitsLossWeightPosweightNone(torch.nn.Module):
             def forward(self, input, target, weight, pos_weight):
                 return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
                                                                             pos_weight=pos_weight, reduction='none')
 
-        self.run_test(BCEWithLogitsLossNoneWeights(), input=(x, y, weight, pos_weight))
+        self.run_test(BCEWithLogitsLossWeightPosweightNone(), input=(x, y, weight, pos_weight))
 
-        class BCEWithLogitsLossMeanWeights(torch.nn.Module):
+        class BCEWithLogitsLossWeightPosweightMean(torch.nn.Module):
             def forward(self, input, target, weight, pos_weight):
                 return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
                                                                             pos_weight=pos_weight, reduction='mean')
 
-        self.run_test(BCEWithLogitsLossMeanWeights(), input=(x, y, weight, pos_weight))
+        self.run_test(BCEWithLogitsLossWeightPosweightMean(), input=(x, y, weight, pos_weight))
 
-        class BCEWithLogitsLossSumWeights(torch.nn.Module):
+        class BCEWithLogitsLossWeightPosweightSum(torch.nn.Module):
             def forward(self, input, target, weight, pos_weight):
                 return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
                                                                             pos_weight=pos_weight, reduction='sum')
 
-        self.run_test(BCEWithLogitsLossSumWeights(), input=(x, y, weight, pos_weight))
+        self.run_test(BCEWithLogitsLossWeightPosweightSum(), input=(x, y, weight, pos_weight))
 
 
     def test_torch_mm(self):
@@ -6521,7 +6551,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         class Module(torch.nn.Module):
             def forward(self, boxes, size):
-                return ops.boxes.clip_boxes_to_image(boxes, size.shape)
+                shape = (size.shape[0], size.shape[1])
+                return ops.boxes.clip_boxes_to_image(boxes, shape)
 
         self.run_test(Module(), (boxes, size),
                       input_names=["boxes", "size"],
@@ -6591,7 +6622,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super(TransformModule, self).__init__()
                 self.transform = _init_test_generalized_rcnn_transform()
 
-            def forward(self, images):
+            def forward(self, images: List[torch.Tensor]):
                 return self.transform(images)[0].tensors
 
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
@@ -6620,9 +6651,9 @@ class TestONNXRuntime(unittest.TestCase):
                 super(RPNModule, self).__init__()
                 self.rpn = _init_test_rpn()
 
-            def forward(self, images, features):
-                images = ImageList(images, [i.shape[-2:] for i in images])
-                return self.rpn(images, features)
+            def forward(self, images, features: Dict[str, torch.Tensor]):
+                images_m = ImageList(images, [(i.shape[-1], i.shape[-2]) for i in images])
+                return self.rpn(images_m, features)
 
         images = torch.rand(2, 3, 150, 150)
         features = self.get_features(images)
@@ -6651,6 +6682,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.image_sizes = [(512, 512)]
 
             def forward(self, input, boxes):
+                # type: (Dict[str, torch.Tensor], List[torch.Tensor]) -> torch.Tensor
                 return self.model(input, boxes, self.image_sizes)
 
         i = OrderedDict()
@@ -6677,13 +6709,14 @@ class TestONNXRuntime(unittest.TestCase):
                 self.rpn = _init_test_rpn()
                 self.roi_heads = _init_test_roi_heads_faster_rcnn()
 
-            def forward(self, images, features):
-                original_image_sizes = [img.shape[-2:] for img in images]
-                images = ImageList(images, [i.shape[-2:] for i in images])
-                proposals, _ = self.rpn(images, features)
-                detections, _ = self.roi_heads(features, proposals, images.image_sizes)
+            def forward(self, images, features: Dict[str, torch.Tensor]):
+                original_image_sizes = [(img.shape[-1], img.shape[-2]) for img in images]
+
+                images_m = ImageList(images, [(i.shape[-1], i.shape[-2]) for i in images])
+                proposals, _ = self.rpn(images_m, features)
+                detections, _ = self.roi_heads(features, proposals, images_m.image_sizes)
                 detections = self.transform.postprocess(detections,
-                                                        images.image_sizes,
+                                                        images_m.image_sizes,
                                                         original_image_sizes)
                 return detections
 
