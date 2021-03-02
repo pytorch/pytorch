@@ -52,6 +52,12 @@ struct ValueMapper {
         subgraph_num_outputs_, num_outputs - subgraph_num_outputs_);
     for (Value* v : new_outputs) {
       auto maybe_last_use = firstOrLastUse(v, /*find_first*/ false);
+      if (!maybe_last_use) {
+        if (AliasDb::isMutableType(v->type())) {
+          db.createValue(v);
+        }
+        continue;
+      }
       // if it doesnt have a use it shouldnt have been added as output
       TORCH_INTERNAL_ASSERT(maybe_last_use);
       const Use last_use = *maybe_last_use;
