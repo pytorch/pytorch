@@ -17,40 +17,6 @@ namespace cuda {
 class TensorDomain;
 class TensorView;
 
-// We're going to keep data related to the computeAt pass for each TensorView in
-// this structure, this will allow us to keep a single entry in a map from a
-// TensorView to this one.
-class ComputeAtData {
- public:
-  ComputeAtData() = default;
-  ComputeAtData(TensorView* tv);
-
-  // Clear after a given traversal. There will be more than one.
-  void clearPass();
-
-  // Makes sure value matches current_traversal_position if
-  // current_traversal_position_set is true. If this is not the case we're in
-  // an invalid compute_at that would require tensor replication.
-  void setPassPosition(unsigned int pos);
-
-  unsigned int getPassPosition() {
-    return current_traversal_position;
-  }
-
- private:
-  // Hold onto the provided TensorView, only used for error message
-  TensorView* tv_ref_ = nullptr;
-
-  // What was the computeAt position before the computeAt pass started
-  unsigned int original_compute_at_position = 0;
-
-  // Position we can update during a traversal
-  unsigned int current_traversal_position = 0;
-
-  // Did this traversal set a position or not yet
-  bool current_traversal_position_set = false;
-};
-
 class ComputeAt {
  public:
   // Runs the compute at pass making producer look like consumer, computing
@@ -58,21 +24,26 @@ class ComputeAt {
   static void runAt(
       TensorView* producer,
       TensorView* consumer,
-      unsigned int consumer_position);
+      unsigned int consumer_position,
+      ComputeAtMode mode = ComputeAtMode::Standard);
 
   // Runs the compute with pass making consumer look like producer, computing
   // producer relative to consumer
   static void runWith(
       TensorView* producer,
       TensorView* consumer,
-      unsigned int producer_position);
+      unsigned int producer_position,
+      ComputeAtMode mode = ComputeAtMode::Standard);
 
  private:
   TensorView* producer_;
   TensorView* consumer_;
   TensorView* reference_;
   unsigned int reference_position_;
+  unsigned int producer_position_ = 0;
   ComputeAtRootDomainMap root_map_;
+
+  ComputeAtMode mode_ = ComputeAtMode::Standard;
 
   // Runs replayPasC and sets producer computeAt settings. Returns
   // producer_compute_at_pos.
@@ -110,14 +81,12 @@ class ComputeAt {
   // Producer use chains set in, used in a few spots.
   std::deque<std::deque<TensorView*>> producer_use_chains_;
 
-  // All we need to know and keep track of for each TensorView in this pass.
-  std::unordered_map<TensorView*, ComputeAtData> tv_data;
-
   ComputeAt(
       TensorView* _producer,
       TensorView* _consumer,
       TensorView* _reference,
-      unsigned int _reference_position);
+      unsigned int _reference_position,
+      ComputeAtMode _mode);
 
   ComputeAt() = delete;
   ~ComputeAt() = default;

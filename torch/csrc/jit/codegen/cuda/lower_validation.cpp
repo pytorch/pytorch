@@ -274,6 +274,10 @@ void validateParallelize(Fusion* fusion) {
       continue;
     }
     for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
+      // Parallelization on input tensors have no effect.
+      if (producer->isFusionInput()) {
+        continue;
+      }
       for (size_t i = 0; i < producer->nDims(); ++i) {
         // If a producer axis is threaded, either with threadIdx or
         // blockIdx, there must be a mapped consumer axis with the
