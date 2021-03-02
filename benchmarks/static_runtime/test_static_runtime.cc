@@ -107,8 +107,12 @@ TEST(StaticRuntime, IndividualOps_Binary) {
 
   testStaticRuntime(add_script, args);
   testStaticRuntime(list_construct_script, args);
+  testStaticRuntime(list_construct_script_2, args);
+  testStaticRuntime(list_construct_script_3, args);
   testStaticRuntime(list_unpack_script, args);
+  testStaticRuntime(list_unpack_script_2, args);
   testStaticRuntime(tuple_construct_script, args);
+  testStaticRuntime(tuple_construct_script_2, args);
 }
 
 TEST(StaticRuntime, IndividualOps_Reshape) {
