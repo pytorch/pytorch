@@ -182,7 +182,7 @@ Module codegen_backend_module(
                 self.__method_compile_spec = state[0]
                 self.__processed_module = state[1]
                 self.__create_backend()
-                if (self.__backend.is_available()) :
+                if self.__backend.is_available() :
                   self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
                 else:
                   raise Exception("Backend is not available.")
@@ -196,7 +196,7 @@ Module codegen_backend_module(
     static const auto method_ct = CodeTemplate(R"(
             def $method(self${,def_inputs}):
                 typed_inputs: List[Any] = [${fwd_inputs,}]
-                if (self.__backend.is_available()) :
+                if self.__backend.is_available() :
                   $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
                   ${refine,}
                   return $ret

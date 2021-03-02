@@ -195,7 +195,7 @@ class BasicModuleUnavailableTest(JitBackendTestCase):
 
         # Test exception is thrown.
         with self.assertRaisesRegex(Exception, r"Backend is not available."):
-            backend_method = self.lowered_module.__getattr__(function_name)
+            backend_method = self.lowered_module.__getattr__("forward")
             backend_output = backend_method(*(input, input))
 
     @skipIfRocm
@@ -205,7 +205,7 @@ class BasicModuleUnavailableTest(JitBackendTestCase):
         torch.jit.save(self.lowered_module, buffer)
         buffer.seek(0)
         with self.assertRaisesRegex(Exception, r"Backend is not available."):
-            imported = torch.jit.load(buffer, map_location=None)
+            imported = torch.jit.load(buffer)
 
 
 class NestedModuleTest(JitBackendTestCase):
