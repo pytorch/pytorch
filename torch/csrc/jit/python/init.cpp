@@ -134,6 +134,7 @@ TORCH_API void runJITCPPTests();
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  auto jit = m.def_submodule("_jit");
 
   py::register_exception<JITException>(m, "JITException");
 
@@ -814,6 +815,15 @@ void initJITBindings(PyObject* module) {
           [](Code& c) {
             std::vector<GraphExecutorState> states;
             for (auto& e : c.grad_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
+      .def(
+          "differentiable_op_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.diff_graph_op_executors()) {
               states.emplace_back(e->getDebugState());
             }
             return states;

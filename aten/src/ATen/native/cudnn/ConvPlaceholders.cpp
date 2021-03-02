@@ -1,5 +1,5 @@
-#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAConfig.h> // for the definition of AT_CUDNN_ENABLED
 #include <ATen/native/ConvUtils.h>
 
 namespace at { namespace native {
@@ -94,8 +94,8 @@ void raw_cudnn_convolution_backward_weight_out(
 }
 
 at::Tensor cudnn_convolution_bias_relu(
-    const at::Tensor& input,
-    const at::Tensor& weight,
+    const Tensor& input,
+    const Tensor& weight,
     const Tensor& bias,
     IntArrayRef padding,
     IntArrayRef stride,

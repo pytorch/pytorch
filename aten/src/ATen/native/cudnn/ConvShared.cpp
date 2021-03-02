@@ -494,16 +494,14 @@ Tensor cudnn_convolution_transpose_backward_weight(
 Tensor cudnn_convolution_bias_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const Tensor& bias_t,
+    const optional<Tensor>& bias_t,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2},
-      bias{bias_t, "bias", 3};
-  CheckedFrom c = "cudnn_convolution_bias_relu";
-  checkAllSameType(c, {input, weight});
-  checkAllSameGPU(c, {input, weight});
+  // Skip all the shape and type checking because frozen-model opt should
+  // catch problems during the compilation
+  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2};
 
   auto memory_format = cudnn_conv_use_channels_last(*input, *weight)
       ? at::MemoryFormat::ChannelsLast
@@ -516,17 +514,10 @@ Tensor cudnn_convolution_bias_relu(
       /*device=*/kCUDA,
       /*pin_memory=*/c10::nullopt,
       /*memory_format=*/memory_format);
-
   if (output_t.numel() == 0) {
     return output_t;
   }
-
   TensorArg output{output_t, "result", 0};
-  convolution_shape_check(
-      c, input, weight, output, padding, stride, dilation, groups);
-  checkAllSameType(c, {output, bias});
-  checkAllSameGPU(c, {output, bias});
-  checkSize(c, bias, {output->size(output_channels_dim)});
 
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
@@ -534,6 +525,12 @@ Tensor cudnn_convolution_bias_relu(
   weight_contig.resize_(weight_contig.sizes(), memory_format);
   Tensor input_contig = input->contiguous(memory_format);
   input_contig.resize_(input_contig.sizes(), memory_format);
+
+  TensorArg bias{
+      bias_t.has_value() ? bias_t.value()
+                         : zeros({output_t.size(1)}, output_t.options()),
+      "bias",
+      3};
   Tensor bias_contig = bias->contiguous(memory_format);
   bias_contig.resize_(bias_contig.sizes(), memory_format);
 
@@ -546,9 +543,10 @@ Tensor cudnn_convolution_bias_relu(
       stride,
       dilation,
       groups,
-      false,
-      true,
-      true);
+      false, // benchmark
+      true, // deterministic
+      true // allow_tf32
+  );
 
   return *output;
 }

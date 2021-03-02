@@ -1563,30 +1563,43 @@ class TestFrozenOptimizations(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_freeze_conv_relu_fusion(self):
-        class Net(nn.Module):
-            def __init__(self, num_classes: int = 1000) -> None:
-                super(Net, self).__init__()
-                self.conv = nn.Sequential(
-                    nn.Conv2d(1, 4, kernel_size=3, stride=1, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.MaxPool2d(kernel_size=2, stride=2),
-                )
+        conv_bias = [True, False]
+        conv_ops = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
+        use_tracing = [True, False]
 
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                x = self.conv(x)
-                return x
+        for use_bias, conv_op, tracing in product(conv_bias, conv_ops, use_tracing):
+            class Net(nn.Module):
+                def __init__(self, in_channels, out_channels, **kwargs):
+                    super(Net, self).__init__()
+                    self.conv = nn.Sequential(
+                        conv_op(in_channels, out_channels, bias=use_bias, **kwargs),
+                        nn.ReLU(inplace=True),
+                    )
 
-        device = torch.device("cuda:0")
-        mod = torch.jit.script(Net().eval())
-        mod.to(device)
-        # inspect frozen mod
-        torch._C._jit_pass_inline(mod.graph)
-        FileCheck().check("aten::relu").run(mod.graph)
-        frozen_mod = torch.jit.freeze(mod, optimize_numerics=False)
-        torch._C._jit_pass_fuse_frozen_conv_relu(frozen_mod.graph)
-        FileCheck().check("aten::cudnn_convolution_bias_relu").run(frozen_mod.graph)
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    x = self.conv(x)
+                    return x
 
-        input = torch.randn(10, 1, 8, 8, device=device)
-        output_s = mod.forward(input)
-        output_f = frozen_mod.forward(input)
-        self.assertEqual(output_s, output_f)
+            mod_eager = Net(3, 32, kernel_size=3, stride=2).eval().cuda()
+
+            inps = [4, 3, 4]
+            if conv_op == nn.Conv2d:
+                inps.append(inps[-1])
+            if conv_op == nn.Conv3d:
+                inps.append(inps[-1])
+                inps.append(inps[-1])
+            inp = torch.rand(inps).cuda()
+
+            if tracing:
+                scripted_mod = torch.jit.trace(mod_eager, (inp))
+            else:
+                scripted_mod = torch.jit.script(mod_eager)
+
+            self.run_pass("inline", scripted_mod.graph)
+            FileCheck().check("aten::relu").run(scripted_mod.graph)
+            frozen_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("fuse_frozen_conv_relu", frozen_mod.graph)
+            FileCheck().check("aten::cudnn_convolution_bias_relu").run(frozen_mod.graph)
+
+            self.assertEqual(mod_eager(inp), scripted_mod(inp))
+            self.assertEqual(mod_eager(inp), scripted_mod(inp))

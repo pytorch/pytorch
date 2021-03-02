@@ -1219,7 +1219,7 @@
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_weight
 
-- func: cudnn_convolution_bias_relu(Tensor self, Tensor weight, Tensor bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
+- func: cudnn_convolution_bias_relu(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_bias_relu
 
@@ -3272,6 +3272,12 @@
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
 
+- func: relu6(Tensor self) -> Tensor
+  python_module: nn
+
+- func: relu6_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
   dispatch:
@@ -4669,7 +4675,8 @@
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    QuantizedCPU, QuantizedCUDA: dequantize_quant
+    CPU: dequantize_cpu
+    QuantizedCPU, QuantizedCUDA: dequantize_quantized_cpu
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
   variants: function
