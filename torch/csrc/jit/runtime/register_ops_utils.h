@@ -747,26 +747,26 @@ void listSetItem(Stack* stack);
           },                                                                \
           aliasAnalysisFromSchema())
 
-#define DEFINE_FLOAT_COMPLEX_OP(aten_op, op, result)                    \
-  OperatorGenerator(                                                    \
-      TORCH_SELECTIVE_SCHEMA(                                           \
-          #aten_op ".float_complex(float a, complex b) -> " #result),   \
-      [](Stack* stack) {                                                \
-        double a;                                                       \
-        c10::complex<double> b;                                         \
-        pop(stack, a, b);                                               \
-        push(stack, op);                                                \
-      },                                                                \
-      aliasAnalysisFromSchema()),                                       \
-      OperatorGenerator(                                                \
-          TORCH_SELECTIVE_SCHEMA(                                       \
+#define DEFINE_FLOAT_COMPLEX_OP(aten_op, op, result)                      \
+  OperatorGenerator(                                                      \
+      TORCH_SELECTIVE_SCHEMA(                                             \
+          #aten_op ".float_complex(float a, complex b) -> " #result),     \
+      [](Stack* stack) {                                                  \
+        double a;                                                         \
+        c10::complex<double> b;                                           \
+        pop(stack, a, b);                                                 \
+        push(stack, op);                                                  \
+      },                                                                  \
+      aliasAnalysisFromSchema()),                                         \
+      OperatorGenerator(                                                  \
+          TORCH_SELECTIVE_SCHEMA(                                         \
               #aten_op ".complex_float(complex a, float b) -> " #result), \
-          [](Stack* stack) {                                            \
-            c10::complex<double> a;                                     \
-            double b;                                                   \
-            pop(stack, a, b);                                           \
-            push(stack, op);                                            \
-          },                                                            \
+          [](Stack* stack) {                                              \
+            c10::complex<double> a;                                       \
+            double b;                                                     \
+            pop(stack, a, b);                                             \
+            push(stack, op);                                              \
+          },                                                              \
           aliasAnalysisFromSchema())
 
 #define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(                              \
