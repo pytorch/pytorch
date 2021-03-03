@@ -530,7 +530,7 @@ Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
 }
 Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::sum_out(result, self, dim, keepdim, dtype);
 }
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
@@ -566,7 +566,7 @@ Tensor nansum(const Tensor &self, c10::optional<ScalarType> dtype) {
 }
 
 Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::nansum_out(result, self, dim, keepdim, dtype);
 }
 
@@ -619,13 +619,13 @@ Tensor trace_cpu(const Tensor& self) {
 }
 
 Tensor prod(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   native::prod_out_impl(result, self, dim, keepdim, dtype);
   return result;
 }
 
 Tensor prod(const Tensor &self, c10::optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, {}, false, dtype);
   return at::native::prod_out_impl(result, self, {}, false, dtype);
 }
 
@@ -682,7 +682,7 @@ Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
 }
 
 Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
 }
 
@@ -784,7 +784,7 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
     TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
                 "norm only supports floating-point dtypes");
 
-    Tensor result;
+    Tensor result = create_reduction_result(self, IntArrayRef{}, false, c10::nullopt);
     return at::native::norm_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
   }
 }
@@ -804,7 +804,7 @@ static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool
     // are accessed with a different API than strided tensors
     return at::native_norm(self, p, dim, keepdim, opt_dtype);
   } else {
-    Tensor result;
+    Tensor result = create_reduction_result(self, dim, keepdim, opt_dtype);
     return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
   }
 }
