@@ -22,9 +22,9 @@ class GradBucket {
   explicit GradBucket(
       size_t index,
       const std::vector<at::Tensor>& tensors,
-      const std::vector<size_t>& offsets = {},
-      const std::vector<size_t>& lengths = {},
-      const std::vector<c10::IntArrayRef>& sizes_vec = {})
+      const std::vector<size_t>& offsets,
+      const std::vector<size_t>& lengths,
+      const std::vector<c10::IntArrayRef>& sizes_vec)
       : index_(index),
         tensors_(tensors),
         offsets_(offsets),
@@ -47,6 +47,14 @@ class GradBucket {
   // Returns a mutable tensor vector compared with the above method.
   std::vector<at::Tensor>& getTensorsRef() {
     return tensors_;
+  }
+
+  // Each tensor in the list that getPerParameterTensors corresponds to a parameter.
+  std::vector<at::Tensor> getPerParameterTensors() const;
+
+  // Returns whther this bucket is the last bucket to allreduce in an iteration.
+  bool isTheLastBucketToAllreduce() const {
+    return index_ == 0;
   }
 
   // Returns the start index of each variable in tensors_[0].
