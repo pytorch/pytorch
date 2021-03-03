@@ -310,15 +310,13 @@ inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
 template <typename... Ts>
 inline ExprHandle BufHandle::load(const Ts&... ts) const {
   std::vector<ExprHandle> params({ExprHandle(ts)...});
-  return ExprHandle(
-      new Load(node(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+  return Load::make(*this, params);
 }
 
 template <typename T>
 inline ExprHandle BufHandle::load(const std::vector<T>& args) const {
   std::vector<ExprHandle> params(args.begin(), args.end());
-  return ExprHandle(
-      new Load(node(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+  return Load::make(*this, params);
 }
 
 } // namespace tensorexpr

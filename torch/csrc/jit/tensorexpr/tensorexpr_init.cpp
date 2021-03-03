@@ -112,12 +112,9 @@ void initTensorExprBindings(PyObject* module) {
       "BufHandle")
       .def(
           py::init<const std::string&, const std::vector<ExprHandle>&, Dtype>())
-      .def(
-          "load",
-          [](BufHandle& self,
-             const std::vector<ExprHandle>& v) {
-            return Load::make(self, v);
-          });
+      .def("load", [](BufHandle& self, const std::vector<ExprHandle>& v) {
+        return Load::make(self, v);
+      });
 
   py::class_<Placeholder>(te, "Placeholder")
       .def(py::init<
@@ -129,23 +126,16 @@ void initTensorExprBindings(PyObject* module) {
           [](Placeholder& self, const std::vector<ExprHandle>& v) {
             return self.load(v);
           })
-      .def(
-          "buf",
-          [](Placeholder& self) { return BufHandle(self.data()); },
-          py::return_value_policy::reference);
+      .def("buf", [](Placeholder& self) { return BufHandle(self.data()); });
   py::class_<Tensor, std::unique_ptr<Tensor, py::nodelete>>(te, "Tensor")
-      .def(py::init([](BufHandle& b, Stmt* s) {
-        return std::unique_ptr<Tensor, py::nodelete>(new Tensor(b.node(), s));
-      }))
+      .def(py::init(
+          [](BufHandle& b, Stmt* s) { return new Tensor(b.node(), s); }))
       .def(
           "load",
           [](Tensor& self, const std::vector<ExprHandle>& v) {
             return self.call(v);
           })
-      .def(
-          "buf",
-          [](Tensor& self) { return BufHandle(self.buf()); },
-          py::return_value_policy::reference)
+      .def("buf", [](Tensor& self) { return BufHandle(self.buf()); })
       .def("stmt", &Tensor::stmt, py::return_value_policy::reference);
   py::class_<Cast>(te, "Cast").def_static("make", &Cast::make);
 
@@ -234,8 +224,7 @@ void initTensorExprBindings(PyObject* module) {
 
   py::class_<Stmt, std::unique_ptr<Stmt, py::nodelete>>(te, "Stmt")
       .def(py::init([](const std::vector<Stmt*>& stmts) {
-        return std::unique_ptr<Stmt, py::nodelete>(
-            tensorexpr::Block::make(stmts));
+        return tensorexpr::Block::make(stmts);
       }))
       .def("__str__", [](const Stmt& self) {
         std::stringstream ss;
