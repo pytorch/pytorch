@@ -3,9 +3,7 @@
 import itertools
 import os
 import re
-import shutil
 from typing import IO, Dict, List
-import torch
 
 import pytest
 
