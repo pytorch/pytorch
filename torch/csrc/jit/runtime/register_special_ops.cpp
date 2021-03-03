@@ -308,6 +308,7 @@ RegisterOperators reg({
                         scalar_val,
                         at::device(at::kCPU).dtype(
                             c10::get_default_complex_dtype())))
+
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
     OperatorGenerator(
