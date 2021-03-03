@@ -918,6 +918,23 @@ class HermitianOpInfo(OpInfo):
     for calculating derivatives does not preserve the Hermitian property of the input and returning incorrect results.
     """
 
+    def __init__(self,
+                 name,
+                 *,
+                 skips=tuple(),
+                 **kwargs):
+        new_skips = (
+            *skips,
+            # These tests do not take into account custom op.get_op()
+            # TODO: implement op.input_func instead of modifying op.get_op()
+            # See https://github.com/pytorch/pytorch/issues/50837
+            SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+        )
+
+        super().__init__(name=name,
+                         skips=new_skips,
+                         **kwargs)
+
     def get_op(self):
         """
         Returns the function variant of the operator, torch.<op_name>,
@@ -936,6 +953,23 @@ class TriangularOpInfo(OpInfo):
     They require a modified function to be tested for gradcheck, because the finite-difference algorithm
     for calculating derivatives does not preserve the triangular property of the input and returning incorrect results.
     """
+
+    def __init__(self,
+                 name,
+                 *,
+                 skips=tuple(),
+                 **kwargs):
+        new_skips = (
+            *skips,
+            # These tests do not take into account custom op.get_op()
+            # TODO: implement op.input_func instead of modifying op.get_op()
+            # See https://github.com/pytorch/pytorch/issues/50837
+            SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+        )
+
+        super().__init__(name=name,
+                         skips=new_skips,
+                         **kwargs)
 
     def get_op(self):
         """
@@ -1605,8 +1639,6 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_linalg_cholesky,
                     decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
                     skips=(
-                        # These tests do not take into account custom op.get_op()
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                         # cuda gradchecks are slow
                         # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                         SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
@@ -1622,10 +1654,6 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=True,
                      decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                      skips=(
-                         # These tests do not take into account custom op.get_op()
-                         # TODO: implement op.input_func instead of modifying op.get_op()
-                         # See https://github.com/pytorch/pytorch/issues/50837
-                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                          SkipInfo('TestCommon', 'test_variant_consistency_eager',
                                   dtypes=[torch.complex64, torch.complex128]),)),
     UnaryUfuncInfo('clamp',
@@ -1924,8 +1952,6 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_linalg_cholesky,
                     decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
                     skips=(
-                        # These tests do not take into account custom op.get_op()
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                         # cuda gradchecks are slow
                         # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                         SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
@@ -1943,8 +1969,6 @@ op_db: List[OpInfo] = [
                     output_func=lambda out: (out[0], abs(out[1])),  # gauge invariant loss function
                     decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
                     skips=(
-                        # These tests do not take into account custom op.get_op()
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                         # cuda gradchecks are slow
                         # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                         SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
@@ -2494,8 +2518,6 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
                     decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                     skips=(
-                        # These tests do not take into account custom op.get_op()
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                         # cuda gradchecks are slow
                         # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                         SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
