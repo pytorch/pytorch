@@ -30,25 +30,12 @@ class TORCH_API LoopNest {
       const std::vector<Tensor*>& output_tensors,
       const std::vector<Tensor*>& tensors_to_compute);
 
-  // A constructor for building a LoopNest from a pre-baked Stmt and meta-info
-  // TODO: Nuke intermediate_bufs_ from here if they can be deduced.
-  LoopNest(
-      Stmt* stmt,
-      const std::unordered_set<const Buf*>& output_bufs,
-      const std::unordered_set<const Buf*>& input_bufs,
-      const std::unordered_set<const Buf*>& intermediate_bufs)
-      : root_stmt_(stmt),
-        input_bufs_(input_bufs),
-        output_bufs_(output_bufs),
-        intermediate_bufs_(intermediate_bufs) {}
-  LoopNest(
-      Stmt* stmt,
-      const std::unordered_set<const Buf*>& output_bufs,
-      const std::unordered_set<const Buf*>& intermediate_bufs)
-      : root_stmt_(stmt),
-        output_bufs_(output_bufs),
-        intermediate_bufs_(intermediate_bufs) {}
+  // A constructor for building a LoopNest from an Stmt and a list of output
+  // buffers.
+  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs);
 
+  // A constructor for building a LoopNest from another loopnest. It clones the
+  // other loopnest's stmt.
   LoopNest(const LoopNest& other);
 
   Stmt* root_stmt() const {
@@ -126,10 +113,8 @@ class TORCH_API LoopNest {
   // for the LLVM backend, when no reductions are involved.
   void vectorizeInnerLoops();
 
-  const std::unordered_set<const Buf*> getInputBufs() {
-    return input_bufs_;
-  }
-  const std::unordered_set<const Buf*> getOutputBufs() {
+  const std::unordered_set<const Buf*> getInputBufs() const;
+  const std::unordered_set<const Buf*> getOutputBufs() const {
     return output_bufs_;
   }
 
@@ -138,12 +123,11 @@ class TORCH_API LoopNest {
       const std::vector<Tensor*>& output_tensors,
       const std::vector<Tensor*>& tensors_to_compute);
   Stmt* insertAllocFree(Stmt* stmt);
+  const std::unordered_set<const Buf*> getIntermediateBufs() const;
 
   Stmt* root_stmt_;
 
-  std::unordered_set<const Buf*> input_bufs_;
   std::unordered_set<const Buf*> output_bufs_;
-  std::unordered_set<const Buf*> intermediate_bufs_;
 };
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);

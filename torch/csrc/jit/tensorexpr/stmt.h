@@ -64,11 +64,11 @@ class TORCH_API Block : public StmtNode<Block> {
  public:
   static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
-    for (size_t i = 0; i < stmts.size(); i++) {
-      if (!stmts[i]) {
+    for (auto& stmt : stmts) {
+      if (!stmt) {
         continue;
       }
-      valid_stmts.push_back(stmts[i]);
+      valid_stmts.push_back(stmt);
     }
     if (valid_stmts.empty()) {
       return nullptr;
@@ -173,13 +173,16 @@ class TORCH_API Block : public StmtNode<Block> {
 
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
-      if (s->get_parent()) {
-        throw malformed_input(
-            "Block creation has Stmt with existing parent", s);
+      if (!s) {
+        continue;
+      }
+      if (!s->get_parent()) {
+        // If we get here, it's a bug, but we cannot throw an error from a
+        // constructor. But IR verifier would catch this.
+        set_parent(s, this);
       }
 
       stmts_.push_back(s);
-      set_parent(s, this);
     }
   }
 
@@ -604,16 +607,6 @@ class TORCH_API For : public StmtNode<For> {
 
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
       : var_(var), start_(start), stop_(stop) {
-    if (!var) {
-      throw malformed_input("invalid Var in For loop", var);
-    } else if (!start) {
-      throw malformed_input("invalid Start in For loop", start);
-    } else if (!stop) {
-      throw malformed_input("invalid Stop in For loop", stop);
-    } else if (!body || body->get_parent()) {
-      throw malformed_input("invalid Body in For loop", body);
-    }
-
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});
