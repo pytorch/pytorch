@@ -148,9 +148,16 @@ class DistributedDataParallel(Module):
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``.
 
-    .. note ::
+    .. note::
         Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
         for a brief introduction to all features related to distributed training.
+
+    .. note::
+        ``DistributedDataParallel`` can be used in conjunction with
+        :class:`torch.distributed.optim.ZeroRedundancyOptimizer` to reduce
+        per-rank optimizer states memory footprint. Please refer to
+        `ZeroRedundancyOptimizer recipe <https://pytorch.org/tutorials/recipes/zero_redundancy_optimizer.html>`__
+        for more details.
 
     .. note:: ``nccl`` backend is currently the fastest and highly recommended
         backend when using GPUs. This applies to both single-node and
@@ -452,14 +459,11 @@ class DistributedDataParallel(Module):
         # see Note: "Gradient Layout Contract" in Reducer::initialize_buckets).
         if self.device_ids is not None and len(self.device_ids) > 1:
             dist._verify_replicas_within_process(parameters, expect_sparse_gradient)
-        self._verify_model_across_ranks(parameters)
+        dist._verify_model_across_ranks(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
         # Builds reducer.
         self._ddp_init_helper(parameters, expect_sparse_gradient)
-
-    def _verify_model_across_ranks(self, parameters):
-        dist._verify_replica0_across_processes(self.process_group, parameters)
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
@@ -476,28 +480,12 @@ class DistributedDataParallel(Module):
     def _ddp_init_helper(self, parameters, expect_sparse_gradient):
         """
         Initialization helper function that does the following:
-        (1) Initializing list of module buffers
-        (2) bucketing the parameters for reductions
-        (3) resetting the bucketing states
-        (4) registering the grad hooks
-        (5) Logging constructin-time DDP logging data
-        (6) passing a handle of DDP to SyncBatchNorm Layer
+        (1) bucketing the parameters for reductions
+        (2) resetting the bucketing states
+        (3) registering the grad hooks
+        (4) Logging constructin-time DDP logging data
+        (5) passing a handle of DDP to SyncBatchNorm Layer
         """
-        self.modules_params = [list(self._get_parameters(m)) for m in self._module_copies]
-        # Collect buffers for modules, filtering out buffers that should be ignored.
-        named_module_buffers = [
-            [(buffer, buffer_name) for buffer_name, buffer in m.named_buffers()]
-            for m in self._module_copies
-        ]
-        self.modules_buffers = [
-            [
-                buffer
-                for (buffer, buffer_name) in module_buffers
-                if buffer_name not in self.parameters_to_ignore
-            ]
-            for module_buffers in named_module_buffers
-        ]
-
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -640,6 +628,23 @@ class DistributedDataParallel(Module):
         expect_sparse_gradient = [
             list(produces_sparse_gradient(module) for module, _ in replica)
             for replica in modules_and_parameters]
+
+        # The following modules_params and modules_buffers are used for
+        # param/buffer sync in _sync_params.
+        self.modules_params = [list(self._get_parameters(m)) for m in self._module_copies]
+        # Collect buffers for modules, filtering out buffers that should be ignored.
+        named_module_buffers = [
+            [(buffer, buffer_name) for buffer_name, buffer in m.named_buffers()]
+            for m in self._module_copies
+        ]
+        self.modules_buffers = [
+            [
+                buffer
+                for (buffer, buffer_name) in module_buffers
+                if buffer_name not in self.parameters_to_ignore
+            ]
+            for module_buffers in named_module_buffers
+        ]
 
         return parameters, expect_sparse_gradient
 
