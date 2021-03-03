@@ -393,6 +393,13 @@ if TEST_NUMPY:
         np.complex128 : torch.complex128
     }
 
+    if IS_WINDOWS:
+        # Size of `np.intc` is platform defined.
+        # It is returned by functions like `bitwise_not`.
+        # On Windows `int` is 32-bit
+        # https://docs.microsoft.com/en-us/cpp/cpp/data-type-ranges?view=msvc-160
+        numpy_to_torch_dtype_dict[np.intc] = torch.int
+
     # Dict of torch dtype -> NumPy dtype
     torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
