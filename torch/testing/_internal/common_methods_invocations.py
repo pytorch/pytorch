@@ -3561,7 +3561,7 @@ def method_tests():
         ('logdet', lambda dtype, device: make_nonzero_det(random_symmetric_pd_matrix(S, 3), 1), NO_ARGS,
          'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
         ('logdet', lambda dtype, device: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S, 3), 1, 0), NO_ARGS,
-         'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+         'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
         ('lu', (S, S), (True, False), 'square_single_no_info',
          (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
         ('lu', (S, S), (True, True), 'square_single_with_info',
