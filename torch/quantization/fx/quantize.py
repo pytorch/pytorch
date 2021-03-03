@@ -176,9 +176,12 @@ def insert_observer_for_output_of_the_node(
                 and model.training:
             # we only insert fake quantize module in qat
             assert pattern is not None
-            activation_post_process_ctr = \
-                get_default_output_activation_post_process_map().get(
-                    pattern, None)
+            if activation_dtype(qconfig) == torch.float16:
+                activation_post_process_ctr = qconfig.activation
+            else:
+                activation_post_process_ctr = \
+                    get_default_output_activation_post_process_map().get(
+                        pattern, None)
             assert activation_post_process_ctr is not None, \
                 "activation_post_process constructor not provided " + \
                 "for pattern:" + str(pattern)
@@ -203,11 +206,17 @@ def insert_observer_for_output_of_the_node(
                     return input_arg.name in observed_node_names_set
                 elif isinstance(input_arg, list):
                     return all(map(is_observed, input_arg))
-            # propagate observed property from input
-            if is_observed(node.args[0]):
-                observed_node_names_set.add(node.name)
-        elif ((isinstance(quantize_handler, Add) or
-                isinstance(quantize_handler, Mul)) and
+
+            if activation_dtype(qconfig) == torch.float16:
+                insert_observer(
+                    node, qconfig.activation(),
+                    model, activation_post_process_map, env, observed_graph,
+                    load_arg, observed_node_names_set)
+            else:
+                # propagate observed property from input
+                if is_observed(node.args[0]):
+                    observed_node_names_set.add(node.name)
+        elif (isinstance(quantize_handler, BinaryOp) and
               quantize_handler.num_node_args == 1):
             assert matched_nodes is not None
             input_node = matched_nodes[-1]  # first node in the sequence
@@ -222,6 +231,14 @@ def insert_observer_for_output_of_the_node(
             if (input_is_observed(input_node.args[0]) or
                     input_is_observed(input_node.args[1])):
                 observed_node_names_set.add(node.name)
+
+            if activation_dtype(qconfig) == torch.float16:
+                # observer for outputs
+                new_observer = qconfig.activation()
+                insert_observer(
+                    node, new_observer, model,
+                    activation_post_process_map, env, observed_graph,
+                    load_arg, observed_node_names_set)
         elif isinstance(quantize_handler,
                         StandaloneModuleQuantizeHandler):
             assert node.op == "call_module"
@@ -424,6 +441,7 @@ class Quantizer:
         self.patterns = get_combined_dict(
             get_default_quant_patterns(), additional_quant_patterns)
 
+        convert_dict_to_ordered_dict(qconfig_dict)
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
@@ -434,7 +452,6 @@ class Quantizer:
 
         self.modules = dict(model.named_modules())
 
-        convert_dict_to_ordered_dict(qconfig_dict)
         # map from node name to qconfig, used in _find_matches
         self._generate_qconfig_map(model, model.graph, qconfig_dict, node_name_to_scope)
 
@@ -934,6 +951,7 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
         quantized_root = quantized
         quantized_graph = quantized.graph
+
         for node in quantized_graph.nodes:
             prepack_node = folded_nodes.get(node.name, None)
             if prepack_node is node:
