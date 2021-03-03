@@ -419,7 +419,7 @@ def _convert_fx(
         graph_module: GraphModule, is_reference: bool,
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
-        _remove_qconfig = True) -> QuantizedGraphModule:
+        _remove_qconfig: bool = True) -> QuantizedGraphModule:
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
     """
     if convert_custom_config_dict is None:
@@ -428,7 +428,8 @@ def _convert_fx(
     _check_is_graph_module(graph_module)
 
     quantizer = Quantizer()
-    quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict, is_standalone_module, _remove_qconfig=_remove_qconfig)
+    quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict,
+                                  is_standalone_module, _remove_qconfig=_remove_qconfig)
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
     for attr_name in preserved_attributes:
@@ -438,7 +439,7 @@ def _convert_fx(
 def convert_fx(
         graph_module: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None,
-        _remove_qconfig = True) -> QuantizedGraphModule:
+        _remove_qconfig: bool = True) -> QuantizedGraphModule:
     r""" Convert a calibrated or trained model to a quantized model
     Args:
         `graph_module`: A prepared and calibrated/trained model (GraphModule)
