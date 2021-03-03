@@ -93,9 +93,12 @@ jobs:
           check_name: 'flake8-py3'
           linter_output_path: 'flake8-output.txt'
           commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w+\d+) (?<errorDesc>.*)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Catch any other warnings
+        run: |
+          [ ! -s flake8-output.txt ]
 
   clang-tidy:
     if: github.event_name == 'pull_request'

@@ -381,6 +381,8 @@ void listContains(Stack* stack) {
 
 void listAdd(Stack* stack);
 
+void tupleAdd(Stack* stack);
+
 void listInplaceAdd(Stack* stack);
 
 void listMulIntLeftInPlace(Stack* stack);

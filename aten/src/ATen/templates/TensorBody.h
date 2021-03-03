@@ -352,6 +352,9 @@ class TORCH_API Tensor {
   /// Returns if a `Tensor` has XPU backend.
   bool is_xpu() const;
 
+  /// Returns if a `Tensor` has XLA backend.
+  bool is_xla() const;
+
   /// Returns if a `Tensor` has HIP backend.
   bool is_hip() const;
 
@@ -360,6 +363,9 @@ class TORCH_API Tensor {
 
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const;
+
+  /// Returns if a `Tensor` is mlc tensor.
+  bool is_mlc() const;
 
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;

@@ -133,6 +133,7 @@ TORCH_API void runJITCPPTests();
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  auto jit = m.def_submodule("_jit");
 
   py::register_exception<JITException>(m, "JITException");
 
@@ -816,6 +817,15 @@ void initJITBindings(PyObject* module) {
             }
             return states;
           })
+      .def(
+          "differentiable_op_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.diff_graph_op_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
       .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
       .def("request_bailout", [](Code& c, size_t index) {
         c.request_bailout(index);
@@ -877,7 +887,11 @@ void initJITBindings(PyObject* module) {
              size_t size) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
-          });
+          })
+      .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def(
+          "get_all_written_records",
+          &PyTorchStreamWriter::getAllWrittenRecords);
 
   py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
@@ -954,11 +968,12 @@ void initJITBindings(PyObject* module) {
     bool use_readinto_;
   };
 
-  py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchStreamReader, std::shared_ptr<PyTorchStreamReader>>(
+      m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto adapter = std::make_unique<BufferAdapter>(buffer);
-        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
+        return std::make_shared<PyTorchStreamReader>(std::move(adapter));
       }))
       .def(
           "get_record",

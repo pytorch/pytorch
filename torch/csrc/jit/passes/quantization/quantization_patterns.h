@@ -42,8 +42,8 @@ std::string getAtenOpPattern(
           extra_arg + "_scalar = aten::item(" + extra_arg + ")";
     }
 
-    for (size_t i = 0; i < _extra_op_args.size(); ++i) {
-      _extra_op_args[i] = _extra_op_args[i] + "_scalar";
+    for (auto& _extra_op_arg : _extra_op_args) {
+      _extra_op_arg = _extra_op_arg + "_scalar";
     }
   }
   const auto& extra_op_arg_list = getExtraArgList(_extra_op_args);

@@ -1,3 +1,4 @@
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 
@@ -367,6 +368,31 @@ void listAdd(Stack* stack) {
   ret.append(std::move(b));
 
   push(stack, std::move(ret));
+}
+
+void tupleAdd(Stack* stack) {
+  auto b = pop(stack).toTuple();
+  auto a = pop(stack).toTuple();
+
+  std::vector<IValue> result;
+
+  for (const auto& el : a->elements()) {
+    // don't add None to tuple
+    if (!el.isNone()) {
+      result.push_back(el);
+    }
+  }
+
+  for (const auto& el : b->elements()) {
+    // don't add None to tuple
+    if (!el.isNone()) {
+      result.push_back(el);
+    }
+  }
+
+  using Tuple = at::ivalue::Tuple;
+  auto result_tuple = Tuple::create(result);
+  push(stack, std::move(result_tuple));
 }
 
 void listInplaceAdd(Stack* stack) {

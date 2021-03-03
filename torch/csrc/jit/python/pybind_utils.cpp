@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <ATen/core/jit_type_base.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 
 namespace torch {
@@ -69,17 +70,22 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       size_t tuple_size = tuple.size();
       auto tuple_type = type->cast<TupleType>();
       const auto& elem_types = tuple_type->elements();
-      if (elem_types.size() != tuple_size) {
-        throw py::cast_error(c10::str(
-            "Object ",
-            py::str(obj),
-            " had a different number of elements than type ",
-            type->repr_str()));
-      }
+
       std::vector<IValue> values;
-      values.reserve(tuple_size);
+      values.reserve(elem_types.size());
       for (size_t i = 0; i < tuple_size; ++i) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
+      }
+
+      for (size_t i = tuple_size; i < elem_types.size(); i++) {
+        if (elem_types[i]->kind() != TypeKind::OptionalType) {
+          throw py::cast_error(c10::str(
+              "Only optional types are allowed after comma. ",
+              "But it was ",
+              type->repr_str()));
+        }
+
+        values.push_back(toIValue(py::none(), elem_types[i]));
       }
       return tuple_type->name()
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)

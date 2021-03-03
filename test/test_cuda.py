@@ -282,7 +282,6 @@ class TestCuda(TestCase):
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
 
-    @skipIfRocm
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
@@ -843,7 +842,6 @@ class TestCuda(TestCase):
                                     "Expected a cuda device, but got: cpu"):
             torch.cuda.default_stream(torch.device('cpu'))
 
-    @skipIfRocm
     @skipCUDANonDefaultStreamIf(True)
     def test_streams(self):
         default_stream = torch.cuda.current_stream()
@@ -1104,8 +1102,6 @@ class TestCuda(TestCase):
             c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    # Flaky on the ROCm CI
-    @skipIfRocm
     def test_stream_event_nogil(self):
         for sync_func in [TestCuda._stream_synchronize,
                           TestCuda._event_synchronize,
@@ -1546,7 +1542,6 @@ class TestCuda(TestCase):
         self.assertEqual(before0, after0, atol=0, rtol=0)
         self.assertEqual(before1, after1, atol=0, rtol=0)
 
-    @skipIfRocm
     def test_nvtx(self):
         # Just making sure we can see the symbols
         torch.cuda.nvtx.range_push("foo")
@@ -3507,6 +3502,61 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_gather_namedtuple(self):
+        # tests ability to gather a list of namedtuples and return a namedtuple where each
+        # element is of the expected tensor type.
+        fields = ['a', 'b']
+        TestNamedTupleInput_0 = collections.namedtuple('NamedTuple', fields)
+
+        num_gpus = torch.cuda.device_count()
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=1)
+        out1 = TestNamedTupleInput_0(a, b)
+
+        a = torch.rand(num_gpus * 2, device=1)
+        b = torch.rand(num_gpus * 2, device=0)
+        out2 = TestNamedTupleInput_0(a, b)
+
+        outputs = [out1, out2]
+
+        out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
+
+        out = scatter_gather.gather(outputs, 0)  # test on GPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))
+
+        class TestNamedTupleInput_1(NamedTuple):
+            a: torch.tensor
+            b: torch.tensor
+
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=1)
+        out1 = TestNamedTupleInput_1(a, b)
+
+        a = torch.rand(num_gpus * 2, device=1)
+        b = torch.rand(num_gpus * 2, device=0)
+        out2 = TestNamedTupleInput_1(a, b)
+
+        outputs = [out1, out2]
+
+        out = scatter_gather.gather(outputs, 0)  # test on GPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))
+
+        out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
 
 if __name__ == '__main__':
     run_tests()
