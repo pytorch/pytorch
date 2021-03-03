@@ -2388,6 +2388,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_inverse_errors_large(self, device, dtype):
+        # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
         x = torch.empty((8, 10, 616, 616), dtype=dtype, device=device)
         x[:] = torch.eye(616, dtype=dtype, device=device)
         x[..., 10, 10] = 0
