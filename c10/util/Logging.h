@@ -345,8 +345,9 @@ struct DDPLoggingData {
   std::vector<int> device_ids = std::vector<int>();
   int output_device = -1;
   std::string backend_name = "";
-  // Parameter's data type
-  std::string dtype = "";
+  // Parameters' data types, there may be multiple data
+  // types for mixed precision training.
+  std::vector<std::string> dtypes = std::vector<std::string>();
   // Total parameters size (Bytes)
   int64_t total_parameter_size_bytes = -1;
   // The number of parameter tensors

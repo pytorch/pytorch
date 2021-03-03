@@ -687,8 +687,8 @@ Example::
 A TCP-based distributed key-value store implementation. The server store holds
 the data, while the client stores can connect to the server store over TCP and
 perform actions such as :meth:`~torch.distributed.store.set` to insert a key-value
-pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There 
-should always be one server store initialized because the client store(s) will wait for 
+pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc. There
+should always be one server store initialized because the client store(s) will wait for
 the server to establish a connection.
 
 Arguments:
@@ -1256,7 +1256,7 @@ Arguments:
       .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view)
       .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
       .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
-      .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
+      .def_readwrite("dtypes", &c10::DDPLoggingData::dtypes)
       .def_readwrite("total_parameter_size_bytes", &c10::DDPLoggingData::total_parameter_size_bytes)
       .def_readwrite("num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
       .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
