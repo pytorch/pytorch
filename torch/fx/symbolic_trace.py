@@ -187,6 +187,7 @@ class Tracer(TracerBase):
 
             mod (str): The ``Module`` to retrieve the qualified name for.
         """
+        assert self.submodule_paths is not None
         path = self.submodule_paths.get(mod)
         if path is None:
             raise NameError('module is not installed as a submodule')
@@ -289,6 +290,7 @@ class Tracer(TracerBase):
 
             root (Union[Module, Callable]): Either a ``Module`` or a function to be
                 traced through.
+            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
 
         Returns:
 
