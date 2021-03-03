@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
@@ -25,7 +25,6 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their unsupported dtypes
     #   registered correctly by testing that each claimed unsupported dtype
     #   throws a runtime error
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.unsupported)
     def test_unsupported_dtypes(self, device, dtype, op):
@@ -193,7 +192,7 @@ class TestCommon(JitCommonTestCase):
     #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        test_backward = op.supports_autograd and op.test_complex_grad or not dtype.is_complex
+        test_backward = op.supports_autograd and (op.test_complex_grad or not dtype.is_complex)
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
@@ -263,6 +262,7 @@ class TestCommon(JitCommonTestCase):
         test_backward = op.supports_autograd and (
             (dtype.is_complex and op.test_complex_grad) or
             (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
+
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")

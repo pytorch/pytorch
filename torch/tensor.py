@@ -57,7 +57,7 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse or self.device.type == 'xla':
+            if self.is_sparse or self.device.type == 'xla' or self.device.type == 'mlc':
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -123,6 +123,12 @@ class Tensor(torch._C._TensorBase):
                        str(self.device),
                        self.requires_grad)
             return (torch._utils._rebuild_xla_tensor, arg_xla)
+        if self.device.type == 'mlc':
+            arg_mlc = (self.cpu().numpy(),
+                       self.dtype,
+                       str(self.device),
+                       self.requires_grad)
+            return (torch._utils._rebuild_mlc_tensor, arg_mlc)
         if self.is_quantized:
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]]
