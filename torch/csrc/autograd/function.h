@@ -287,13 +287,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   ///
   /// The sequence_nr has two main usages in autograd:
   ///
-  /// 1) Determine the node's execution priority in the engine.
-  ///    Nodes with higher priority numbers are executed first. There is actually no
-  ///    particular reason why we want nodes corresponding to ops executed later to be
-  ///    the first to be executed in the backward pass. The point is to simply make
-  ///    it *deterministic* so its a bit easier to reason about.
-  ///    One caveat is that sequence_nr is UINT64_MAX for AccumulateGrad nodes
-  ///    because we want to prioritize them (why?)
+  /// 1) Helps determine the node's execution priority in the engine.
+  ///    All else being equal, nodes with higher priority numbers are executed first.
+  ///    Thus, nodes corresponding to ops executed later are the first to be executed in
+  ///    the backward pass. One caveat is that we prioritize AccumulateGrad nodes by
+  ///    explicitly setting its sequence_nr to be UINT64_MAX.
   /// 2) The sequence number of this `Node` is paired with with thread_id it was created in
   ///    as a unique identifier by the profiler to annotate recorded events.
   ///    The purpose of this is to help users (and possibly programs) interpreting the profiler's
