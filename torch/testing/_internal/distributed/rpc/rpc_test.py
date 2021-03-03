@@ -770,7 +770,6 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-    @dist_init(setup_rpc=False)
     def test_duplicate_name(self):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             store, _, _ = next(
@@ -782,6 +781,17 @@ class RpcTest(RpcAgentTestFixture):
                 backend=self.rpc_backend,
                 store=store,
                 name="duplicate_name",
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
+    def test_duplicate_name_2(self):
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            rpc.init_rpc(
+                name=worker_name(self.rank % 2),
+                backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
