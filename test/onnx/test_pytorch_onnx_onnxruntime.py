@@ -825,6 +825,15 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(AllOptionalModel(), {'y': y, 'z': None}, input_names=['input_y'])
         self.run_test(AllOptionalModel(), {'y': None, 'z': z}, input_names=['input_z'])
 
+    def test_input_as_output(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x, y
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+        self.run_test(Model(), (x, y), input_names=['x', 'y'], output_names=['x_out', 'y_out'])
+
     @disableScriptTest()
     def test_none_as_input(self):
         class Model(torch.nn.Module):
@@ -6059,6 +6068,24 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(3, 3)
         cond = torch.tensor(1, dtype=torch.bool)
         self.run_test(torch.jit.script(IfModel()), (x, y, cond))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_if_view(self):
+        class IfModel(torch.nn.Module):
+            def forward(self, x, y, cond):
+                bs, seq = y.shape[:2]
+                if cond:
+                    res = x.view(bs, seq, -1)
+                else:
+                    res = y
+                return res.transpose(1, 2)
+
+        x = torch.randn(2, 16, 2, 2)
+        y = torch.randn(2, 16, 8)
+        cond = torch.tensor(1, dtype=torch.bool)
+        self.run_test(torch.jit.script(IfModel()), (x, y, cond),
+                      output_names=['output_1'],
+                      dynamic_axes={'output_1': [1]})
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
