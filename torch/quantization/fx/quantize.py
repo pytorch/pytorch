@@ -232,7 +232,10 @@ def insert_observer_for_output_of_the_node(
             # we will not consider the output to be observed
             if (input_is_observed(input_node.args[0]) or
                     input_is_observed(input_node.args[1])):
-                observed_node_names_set.add(node.name)
+                # TODO(before land): extend to all binary ops and reuse mapping
+                is_sum_not_fp16 = input_node.target == torch.sum and activation_dtype(qconfig) != torch.float16
+                if not is_sum_not_fp16:
+                    observed_node_names_set.add(node.name)
 
             if activation_dtype(qconfig) == torch.float16:
                 # observer for outputs
@@ -276,6 +279,8 @@ def insert_observer_for_input_arg_of_observed_node(
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[str, str], observed_graph: Graph,
         load_arg: Callable):
+    # print('insert_observer_for_input_arg_of_observed_node', node.format_node())
+    # print('in obs', node.name in observed_node_names_set, 'in quant', node.name in quants)
     if node.name not in observed_node_names_set and node.name in quants:
         _, activation_post_process_ctr = quants[node.name]
         if activation_post_process_ctr is not None:
