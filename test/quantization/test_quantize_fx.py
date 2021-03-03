@@ -1754,6 +1754,30 @@ class TestQuantizeFx(QuantizationTestCase):
         mc(torch.rand(4, 1, 4, 4))
         # TODO(before land): test for correct graph
 
+    def test_quant_sum(self):
+        """
+        TODO(before land): explain
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = torch.stack([x])
+                x = torch.sum(x)
+                return x
+
+        m = M().eval()
+        m(torch.rand(4, 1, 4, 4))
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.rand(4, 1, 4, 4))
+        mc = convert_fx(mp)
+        mc(torch.rand(4, 1, 4, 4))
+        # TODO(before land): test for correct graph
+
     def test_state_dict(self):
         """ Make sure packed params appear in state_dict
         """

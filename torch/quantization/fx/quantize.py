@@ -1,3 +1,4 @@
+import operator
 import torch
 from torch.fx import (  # type: ignore
     GraphModule,
@@ -28,6 +29,7 @@ from ..quantize import (
 
 from ..utils import (
     get_combined_dict,
+    get_qconfig_dtypes,
     get_swapped_custom_module_class,
     activation_is_quantized,
     weight_is_quantized,
@@ -346,6 +348,9 @@ def all_node_args_have_no_tensors(node: Node) -> bool:
     elif node.op == 'get_attr':
         # print('getattr')
         return False
+    elif node.op == 'call_method' and node.target == 'size':
+        # TODO(before land): refactor this whole function to reduce duplication
+        return True
     found_one_tensor = False
     for arg in node.args:
         # print('visiting all_node_args arg', arg, type(arg))
@@ -358,8 +363,12 @@ def all_node_args_have_no_tensors(node: Node) -> bool:
         elif type(arg) == int:
             pass
         elif type(arg) == torch.fx.immutable_collections.immutable_list:
-            # TODO: real handling
-            pass
+            for list_el in arg:
+                if type(list_el) == Node:
+                    this_list_el_args_have_no_tensors = \
+                        all_node_args_have_no_tensors(list_el)
+                    found_one_tensor = found_one_tensor or \
+                        (not this_list_el_args_have_no_tensors)
         else:
             if type(arg) == Node:
                 # recurse on args
@@ -857,6 +866,38 @@ class Quantizer:
                     'CopyNode of type ' + node.op + ' is not handled'
                 quantized = node_arg_is_quantized(node.args[0])
 
+            elif type(obj) == BinaryOp:
+                # for now, special case sum to unblock
+                # TODO(before land): clean things up:
+                #  * reuse the mapping from BinaryOp
+                #  * ideally stop special casing BinaryOp and make things more general
+                local_qconfig = self.qconfig_map[node.name]
+                dtypes = get_qconfig_dtypes(local_qconfig)
+
+                # TODO(before land): reuse this instead of copy-paste
+                all_bop_dtypes = [
+                    (torch.quint8, torch.qint8, None),
+                    (torch.float16, torch.float16, None),
+                ]
+                float16_dtypes = [
+                    (torch.float16, torch.float16, None)
+                ]
+                supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
+                    operator.add: all_bop_dtypes,
+                    torch.add: all_bop_dtypes,
+                    operator.mul: all_bop_dtypes,
+                    torch.mul: all_bop_dtypes,
+                    torch.bmm: float16_dtypes,
+                    torch.sub: float16_dtypes,
+                    operator.sub: float16_dtypes,
+                    torch.div: float16_dtypes,
+                    operator.truediv: float16_dtypes,
+                    torch.sum: float16_dtypes
+                }
+                if dtypes not in supported_dtypes[obj.binary_op]:
+                    return False
+
+            # TODO: this refers to a qconfig defined outside of this function, should clean up
             if not activation_is_statically_quantized(qconfig) or \
                not input_output_observed(obj):
                 quantized = False
