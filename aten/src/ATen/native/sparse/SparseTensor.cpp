@@ -9,7 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
 
-#include <TH/THBlasUtils.h>
+#include <ATen/native/CPUBlas.h>
 
 namespace at { namespace native {
 
@@ -413,7 +413,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
           int64_t curr = indicesBufferAccessor[j];
           if (curr == prev) {
             if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-              THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+              at::native::cpublas::axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
             }
           } else {
             ++i;
@@ -421,7 +421,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
               newIndicesAccessor[d][i] = indicesAccessor[d][pos];
             }
             if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-              THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+              at::native::cpublas::copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
             }
           }
           prev = curr;
