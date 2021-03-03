@@ -714,7 +714,8 @@ class TestFile:
             # For other unexpected cases, we should raise a warning.
             if self.name == 'test_cpp_extensions_aot' or \
                self.name == 'distributed/test_distributed_fork' or \
-               self.name == 'distributed/test_distributed_spawn':
+               self.name == 'distributed/test_distributed_spawn' or \
+               self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
                 time_difference = self.test_suites[suite_name].replace(test_case)
                 self.total_time += time_difference
             else: 
@@ -997,7 +998,7 @@ if __name__ == '__main__':
 
     send_report_to_scribe(reports_by_file)
 
-    # longest_tests can contain duplicatesas the same tests can be spawned from different files
+    # longest_tests can contain duplicates as the same tests can be spawned from different files
     longest_tests : List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
