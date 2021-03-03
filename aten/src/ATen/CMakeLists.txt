@@ -122,30 +122,13 @@ foreach(tmp ${ATen_CPU_SRCS})
   message(STATUS "  " ${tmp})
 endforeach()
 
-list(
-  APPEND
-  ATen_CORE_SRCS_LITE
-  # ${PROJECT_SOURCE_DIR}/aten/src/ATen/core/NamedRegistrations.cpp
-  # ${PROJECT_SOURCE_DIR}/aten/src/ATen/core/Range.cpp
-  # ${PROJECT_SOURCE_DIR}/aten/src/ATen/core/Vitals.cpp
-  # ${PROJECT_SOURCE_DIR}/aten/src/ATen/core/blob.cpp
-  # ${PROJECT_SOURCE_DIR}/aten/src/ATen/core/function_schema.cpp
-  ${PROJECT_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.cpp
-  ${PROJECT_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.cpp
-  ${PROJECT_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.cpp
-  ${PROJECT_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.cpp
-  ${PROJECT_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.cpp
-  ${PROJECT_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.cpp
-)
-
-
 if(BUILD_LITE_INTERPRETER)
   list(APPEND ATen_CPU_SRCS_LITE "")
   append_filelist("aten_cpu_source_list" ATen_CPU_SRCS_LITE)
   append_filelist("aten_native_source_list" ATen_CPU_SRCS_LITE)
 
-  # set(all_cpu_cpp ${ATen_CORE_SRCS} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
-  set(all_cpu_cpp ${ATen_CORE_SRCS_LITE} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
+  set(all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS_LITE} ${cpu_kernel_cpp})
+  append_filelist("jit_core_sources" all_cpu_cpp)
 else()
   set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
 endif()
