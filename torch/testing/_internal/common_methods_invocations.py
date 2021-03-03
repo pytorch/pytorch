@@ -508,7 +508,7 @@ def sample_inputs_trace(self, device, dtype, requires_grad):
                                      low=None, high=None,
                                      requires_grad=requires_grad))),)
 
-def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
+def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False):
     """
     This function generates always invertible input for linear algebra ops using
     random_fullrank_matrix_distinct_singular_value.
@@ -1029,7 +1029,7 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.eigh with UPLO="U" or "L" keyword argument.
     """
-    out = sample_inputs_linalg_inv(op_info, device, dtype, requires_grad)
+    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for o in out:
         o.kwargs = {"UPLO": np.random.choice(["L", "U"])}
     return out
@@ -1039,7 +1039,7 @@ def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=Fa
     """
     This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
     """
-    out = sample_inputs_linalg_inv(op_info, device, dtype, requires_grad)
+    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for o in out:
         o.kwargs = {"hermitian": True}
     return out
@@ -1905,7 +1905,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            check_batched_gradgrad=False,
            supports_tensor_out=True,
-           sample_inputs_func=sample_inputs_linalg_inv,
+           sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
@@ -1984,7 +1984,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
            supports_tensor_out=False,
-           sample_inputs_func=sample_inputs_linalg_inv,
+           sample_inputs_func=sample_inputs_linalg_invertible,
            output_func=itemgetter(1),
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     UnaryUfuncInfo('log',
@@ -2429,7 +2429,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
            supports_tensor_out=True,
-           sample_inputs_func=sample_inputs_linalg_inv,
+           sample_inputs_func=sample_inputs_linalg_invertible,
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     UnaryUfuncInfo('angle',
@@ -2476,7 +2476,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_tensor_out=True,
-           sample_inputs_func=sample_inputs_linalg_inv,
+           sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
@@ -2546,7 +2546,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_tensor_out=False,
-           sample_inputs_func=sample_inputs_linalg_inv,
+           sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
