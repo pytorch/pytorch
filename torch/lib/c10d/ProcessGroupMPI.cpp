@@ -100,6 +100,14 @@ ProcessGroupMPI::AsyncWork::AsyncWork(at::Tensor tensor, MPI_Request request, co
       tensor_(std::move(tensor)),
       request_(request) {
   memset(&status_, 0, sizeof(status_));
+  // AsyncWork such as send, recv, and recvAnySource have
+  //  request == MPI_REQUEST_NULL, and thus and thus isCompleted() and wait()
+  // return true immediately without blocking. Since it is considered complete
+  // from user perspective, run profiling end callbacks as well.
+  if (request_ == MPI_REQUEST_NULL &&
+      ProcessGroup::Work::recordFunctionEndCallback_) {
+    ProcessGroup::Work::recordFunctionEndCallback_();
+  }
 }
 
 ProcessGroupMPI::AsyncWork::~AsyncWork() {
