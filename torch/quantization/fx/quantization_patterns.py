@@ -195,17 +195,20 @@ class BinaryOp(QuantizeHandler):
                 # not for land, just a hack to unblock for now
                 # TODO(before land): real fix
                 # add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
-                try:
-                    add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
-                    op = quantizer.quantized_graph.create_node(
-                        'call_function', self.quantized_binary_op, add_args, kwargs)
-                except Exception:
-                    # add_args = (*load_arg(quantized=[1, 0])(self.binary_op_node.args), scale_arg, zero_point_arg)
-                    add_arg0 = load_arg(quantized=True)(self.binary_op_node.args[0])
-                    add_arg1 = load_arg(quantized=False)(self.binary_op_node.args[1])
-                    add_args = (add_arg0, add_arg1, scale_arg, zero_point_arg)
-                    op = quantizer.quantized_graph.create_node(
-                        'call_function', self.quantized_binary_op, add_args, kwargs)
+                # op = quantizer.quantized_graph.create_node(
+                    # 'call_function', self.quantized_binary_op, add_args, kwargs)
+                if True:
+                    try:
+                        add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
+                        op = quantizer.quantized_graph.create_node(
+                            'call_function', self.quantized_binary_op, add_args, kwargs)
+                    except Exception:
+                        # add_args = (*load_arg(quantized=[1, 0])(self.binary_op_node.args), scale_arg, zero_point_arg)
+                        add_arg0 = load_arg(quantized=True)(self.binary_op_node.args[0])
+                        add_arg1 = load_arg(quantized=False)(self.binary_op_node.args[1])
+                        add_args = (add_arg0, add_arg1, scale_arg, zero_point_arg)
+                        op = quantizer.quantized_graph.create_node(
+                            'call_function', self.quantized_binary_op, add_args, kwargs)
                 return op
         else:
             assert dtypes == (torch.float16, torch.float16, None)

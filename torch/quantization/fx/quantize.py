@@ -318,31 +318,59 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
                     return True
     return False
 
-def node_arg_is_getattr_ndim(node: Node, arg: Any) -> bool:
-    if type(arg) == Node:
-        is_getattr_with_ndim = arg.target is getattr and arg.args[1] == 'ndim'
-        if is_getattr_with_ndim:
-            return True
-    return False
-
-def should_ignore_match(node: Node, pattern: Pattern, value: Any) -> bool:
+def all_node_args_have_no_tensors(node: Node) -> bool:
     """
-    There are cases when a match of a node against a pattern makes sense
-    locally, but does not make sense with the added context of surrounding
-    nodes.  For example:
-    * we need to match a + b to the add op
-    * if both a and b are not Tensors, we need to ignore that match
+    If we know for sure that all of this node's args have no
+    tensors (are primitives), return True.  If we either
+    find a tensor or are not sure, return False. Note: this
+    function is not exact.
 
-    There might be a better place for this logic in the long term
+    Things assumed to be not tensors:
+    * primitives such as ints
+    * list or tuples with all elements are primitives (TODO: add the code)
+    * results of x.ndim (an int)
+    * results of x.size (an int)
 
-    TODO(befor land): better docblock
+    Everything which is not covered by the above bucket
+    is currently assumed to have a possibility of being a tensor.
+
+    TODO(before land): remove prints
     """
-    # TODO(before land): handle patterns with length > 1
-    if value == BinaryOp:
-        for arg in node.args:
-            if node_arg_is_getattr_ndim(node, arg):
-                return True
-    return False
+    # print('all_node_args_have_no_tensors for node', node.format_node(), node.op)
+    if node.op == 'placeholder':
+        # print('placeholder')
+        return False
+    elif node.op == 'call_module':
+        # print('call_module')
+        return False
+    elif node.op == 'get_attr':
+        # print('getattr')
+        return False
+    found_one_tensor = False
+    for arg in node.args:
+        # print('visiting all_node_args arg', arg, type(arg))
+        if type(arg) == Node and arg.target is getattr and arg.args[1] == 'ndim':
+            # x1 = x0.ndim
+            pass
+        elif type(arg) == Node and arg.op == 'call_method' and arg.target == 'size':
+            # x1 = x0.size(0)
+            pass
+        elif type(arg) == int:
+            pass
+        elif type(arg) == torch.fx.immutable_collections.immutable_list:
+            # TODO: real handling
+            pass
+        else:
+            if type(arg) == Node:
+                # recurse on args
+                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg)
+                found_one_tensor = found_one_tensor or \
+                    (not this_arg_args_have_no_tensors)
+            else:
+                found_one_tensor = True
+        # print('returning', not found_one_tensor)
+    return not found_one_tensor
+
 
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
@@ -728,6 +756,7 @@ class Quantizer:
             else:
                 return env[n.name]
 
+        # TODO(before land): add a "load from quantized if exists, otherwise non-quantized" concept?
         def load_arg(quantized: Optional[Union[List[int], bool, Tuple[int, ...]]]
                      ) -> Callable[[Node], Argument]:
             """
@@ -1065,9 +1094,10 @@ class Quantizer:
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
-                        should_ignore = should_ignore_match(node, pattern, value)
-                        if should_ignore:
-                            continue
+                        if value is BinaryOp:
+                            use_copy_node = all_node_args_have_no_tensors(node)
+                            if use_copy_node:
+                                value = CopyNode
                         matched: List[Any] = []
                         record_match(pattern, node, matched)
                         for n in matched:
@@ -1130,13 +1160,7 @@ class Quantizer:
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
                 is_activation = not (is_weight or is_bias)
-                # TODO(before land): handle recursion depth > 1
-                # TODO(before land): do not add a dequant just to fetch x.ndim during convert
-                is_getattr_ndim = node_arg_is_getattr_ndim(node, arg)
-                if type(arg) == Node:
-                    for inner_arg in arg.args:
-                        inner_is_getattr_ndim = node_arg_is_getattr_ndim(arg, inner_arg)
-                        is_getattr_ndim = is_getattr_ndim or inner_is_getattr_ndim
+                no_tensors = all_node_args_have_no_tensors(arg)
                 # bias needs to be quantized if activation is fp16 and weight is fp16
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (
@@ -1145,7 +1169,7 @@ class Quantizer:
                     (is_weight and weight_is_quantized(qconfig)) or
                     (is_bias and activation_dtype(qconfig) == torch.float16)
                     and weight_dtype(qconfig) == torch.float16) and \
-                    (not is_getattr_ndim)
+                    (not no_tensors)
 
                 if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \

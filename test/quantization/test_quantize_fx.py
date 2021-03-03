@@ -1686,7 +1686,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_getattr_with_nontensor_result(self):
         """
-        TODO: explain
+        TODO(before land): explain
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -1694,8 +1694,9 @@ class TestQuantizeFx(QuantizationTestCase):
 
             def forward(self, x):
                 dims = x.ndim
-                dims_sub = dims - 2
-                x = torch.add(x, dims_sub)
+                dims_sub = dims - 1
+                dims_sub2 = dims_sub - 1
+                x = torch.add(x, dims_sub2)
                 return x
 
         m = M().eval()
@@ -1704,6 +1705,31 @@ class TestQuantizeFx(QuantizationTestCase):
         mp = prepare_fx(m, qconfig_dict)
         mp(torch.rand(4, 4, 4, 4))
         mc = convert_fx(mp)
+        # TODO(before land): test for correct graph
+
+    def test_getattr_with_nontensor_result2(self):
+        """
+        TODO(before land): explain
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                dims = x.ndim
+                dims_sub = dims - 2
+                mul = [1] * dims_sub
+                dims_list = [-1, x.size(1)] + mul
+                x = x.view(dims_list)
+                return x
+
+        m = M().eval()
+        m(torch.rand(4, 4, 4, 4))
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.rand(4, 4, 4, 4))
+        mc = convert_fx(mp)
+        # TODO(before land): test for correct graph
 
     def test_state_dict(self):
         """ Make sure packed params appear in state_dict
