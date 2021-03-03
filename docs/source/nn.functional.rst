@@ -477,6 +477,11 @@ Loss functions
 
 .. autofunction:: nll_loss
 
+:hidden:`huber_loss`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: huber_loss
+
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

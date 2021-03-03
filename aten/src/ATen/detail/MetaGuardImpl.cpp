@@ -4,6 +4,6 @@
 namespace at {
 namespace detail {
 
-C10_REGISTER_GUARD_IMPL(CPU, c10::impl::NoOpDeviceGuardImpl<DeviceType::CPU>);
+C10_REGISTER_GUARD_IMPL(Meta, c10::impl::NoOpDeviceGuardImpl<DeviceType::Meta>);
 
 }} // namespace at::detail

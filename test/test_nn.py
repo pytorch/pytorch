@@ -4783,6 +4783,7 @@ class TestNN(NNTestCase):
             'mse_loss': lambda x, y: F.mse_loss(x, y),
             'l1_loss': lambda x, y: F.l1_loss(x, y),
             'smooth_l1_loss': lambda x, y: F.smooth_l1_loss(x, y),
+            'huber_loss': lambda x, y: F.huber_loss(x, y),
             'kl_div': lambda x, y: F.kl_div(x, y),
             'poisson_nll_loss': lambda x, y: F.poisson_nll_loss(x, y),
         }
@@ -7705,6 +7706,14 @@ class TestNN(NNTestCase):
                          loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target,
                                                                    margin=0.5, reduction='none'))
 
+    def test_cosine_embedding_loss_invalid_target_shape(self):
+        input1 = torch.randn(15, 10)
+        input2 = torch.randn(15, 10)
+        target = torch.randn(15, 1).sign()
+
+        with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
+            F.cosine_embedding_loss(input1, input2, target)
+
     def test_margin_ranking_loss_no_reduce(self):
         input1 = torch.randn(15).mul_(10).requires_grad_()
         input2 = torch.randn(15).mul_(10).requires_grad_()
@@ -7770,6 +7779,7 @@ class TestNN(NNTestCase):
             'mse_loss': lambda x, y, r: F.mse_loss(x, y, reduction=r),
             'l1_loss': lambda x, y, r: F.l1_loss(x, y, reduction=r),
             'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
+            'huber_loss': lambda x, y, r: F.huber_loss(x, y, reduction=r),
         }
 
         input = torch.randn(2, 1, requires_grad=True)
@@ -7796,6 +7806,22 @@ class TestNN(NNTestCase):
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
             F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
+
+    def test_huber_loss_invalid_delta(self):
+        def _test_huber_loss_delta_error_helper(delta):
+            input, target = torch.randn(2, 2), torch.randn(2, 2)
+            loss = torch.nn.HuberLoss(delta=delta)
+            with self.assertRaises(RuntimeError):
+                loss(input, target)
+
+        def test_huber_loss_negative_delta():
+            _test_huber_loss_delta_error_helper(delta=-0.5)
+
+        def test_huber_loss_zero_delta():
+            _test_huber_loss_delta_error_helper(delta=0.0)
+
+        test_huber_loss_negative_delta()
+        test_huber_loss_zero_delta()
 
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
@@ -11526,6 +11552,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.multi_margin_loss(input, target, reduction=reduction))
 
             v(lambda: F.kl_div(input, input, reduction=reduction))
+            v(lambda: F.huber_loss(input, input, reduction=reduction))
             v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(cinput, cinput, reduction=reduction))
@@ -11553,6 +11580,68 @@ class TestNNDeviceType(NNTestCase):
             # FIXME: should we allow derivatives on these?
             v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.detach(), reduction=reduction))
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
+
+    @onlyOnCPUAndCUDA
+    def test_smooth_l1_loss_vs_huber_loss(self, device):
+        def _make_test_tensor(shape, contiguous=True):
+            if contiguous:
+                test_tensor = torch.randn(shape, device=device)
+            else:
+                # Select every other element in the innermost dimension to
+                # make it non-contiguous.
+                doubled_shape = list(shape)
+                doubled_shape[-1] *= 2
+                test_tensor = torch.randn(doubled_shape, device=device)
+                test_tensor = test_tensor[..., ::2]
+            return test_tensor
+
+        def _test_smooth_l1_loss_vs_huber_loss_helper(input, target, beta, require_equal):
+            for reduction in ['mean', 'sum', 'none']:
+                smooth_l1 = torch.nn.SmoothL1Loss(beta=beta, reduction=reduction)
+                # beta hyper-parameter is called delta for Huber
+                huber = torch.nn.HuberLoss(delta=beta, reduction=reduction)
+                smooth_l1_loss = smooth_l1(input, target)
+                huber_loss = huber(input, target)
+
+                if require_equal:
+                    self.assertEqual(smooth_l1_loss, huber_loss)
+                else:
+                    # Huber loss should be larger than smooth L1 loss by a factor of beta.
+                    self.assertEqual(smooth_l1_loss * beta, huber_loss)
+
+        def _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta, require_equal):
+            # Test the non-vectorized case.
+            shape = (2, 2)
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape),
+                                                      target=_make_test_tensor(shape),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+            # Test the vectorized case (innermost dim > 32).
+            shape = (64, 64)
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape),
+                                                      target=_make_test_tensor(shape),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+            # Test the non-contiguous case.
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape, contiguous=False),
+                                                      target=_make_test_tensor(shape, contiguous=False),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+        def test_equal_when_beta_is_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=1.0, require_equal=True)
+
+        def test_unequal_when_beta_is_less_than_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=0.5, require_equal=False)
+
+        def test_unequal_when_beta_is_greater_than_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=1.5, require_equal=False)
+
+        test_equal_when_beta_is_one()
+        test_unequal_when_beta_is_less_than_one()
+        test_unequal_when_beta_is_greater_than_one()
 
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.

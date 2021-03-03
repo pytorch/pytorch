@@ -3612,8 +3612,8 @@ TEST(LoopNest, DeadStoreElimination) {
   KernelScope kernel_scope;
   VarHandle y("y", kInt);
   VarHandle x("x_tail", kInt);
-  BufHandle f("f", {26, 5}, kFloat);
-  BufHandle g("g", {26, 5}, kFloat);
+  BufHandle f("f", {26, 5}, kInt);
+  BufHandle g("g", {26, 5}, kInt);
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(
@@ -3664,9 +3664,9 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  BufHandle f("f", {26 * 5}, kFloat);
-  BufHandle g("g", {26 * 5}, kFloat);
-  BufHandle h("h", {26, 5}, kFloat);
+  BufHandle f("f", {26 * 5}, kInt);
+  BufHandle g("g", {26 * 5}, kInt);
+  BufHandle h("h", {26, 5}, kInt);
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(x, 0, 26 * 5, Store::make(f, {x}, x));
@@ -3827,6 +3827,98 @@ TEST(LoopNest, InlineFromLoad) {
 # CHECK-NEXT: B[j] = j
 )IR",
       oss.str());
+}
+
+static std::pair<std::unique_ptr<Placeholder>, Tensor*> colReduce(
+    int M,
+    int N) {
+  auto a =
+      std::make_unique<Placeholder>("a", kFloat, std::vector<ExprHandle>{M, N});
+  Tensor* t = Reduce(
+      "b",
+      {{N, "n"}},
+      Sum(),
+      [&](const VarHandle& n, const VarHandle& m) { return a->load(m, n); },
+      {{M, "m"}});
+  return {std::move(a), t};
+}
+
+static Stmt* splitTailReorder(Tensor* b) {
+  constexpr int kVectorWidth = 8;
+  For *outer, *inner, *tail;
+  LoopNest nest({b});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.splitWithTail(loops[0], kVectorWidth, &outer, &inner, &tail);
+  loops = nest.getLoopStmtsFor(b);
+  nest.reorderAxis(loops[1], loops[2]);
+  nest.prepareForCodegen();
+  return nest.root_stmt();
+}
+
+static Stmt* splitMaskReorder(Tensor* b) {
+  constexpr int kVectorWidth = 8;
+  For *outer, *inner;
+  LoopNest nest({b});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.splitWithMask(loops[0], kVectorWidth, &outer, &inner);
+  loops = nest.getLoopStmtsFor(b);
+  nest.reorderAxis(loops[1], loops[2]);
+  std::clog << *nest.root_stmt() << "\n";
+  nest.prepareForCodegen();
+  return nest.root_stmt();
+}
+
+static void checkColReduce(Stmt* s, Placeholder& p, Tensor* t) {
+  int M = immediateAs<int>(p.dim(0));
+  int N = immediateAs<int>(p.dim(1));
+  PaddedBuffer<float> a(M, N);
+  PaddedBuffer<float> b(N);
+  PaddedBuffer<float> ref(N);
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      a(i, j) = 1.0f;
+    }
+  }
+  for (int i = 0; i < N; i++) {
+    b(i) = 0.0f;
+  }
+  for (int i = 0; i < N; i++) {
+    ref(i) = 76.0f;
+  }
+  SimpleIREvaluator(s, {p, t}).call({a, b});
+  ExpectAllNear(b, ref, 1e-5);
+}
+
+TEST(LoopNest, ColReduceSplitTailEvenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 128;
+  auto p = colReduce(M, N);
+  Stmt* s = splitTailReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, DISABLED_ColReduceSplitTailUnevenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 100;
+  auto p = colReduce(M, N);
+  Stmt* s = splitTailReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 128;
+  auto p = colReduce(M, N);
+  Stmt* s = splitMaskReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 100;
+  auto p = colReduce(M, N);
+  Stmt* s = splitMaskReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
 }
 
 } // namespace jit

@@ -3,7 +3,6 @@ from torch.utils.data.datapipes.iter.loadfilesfromdisk import LoadFilesFromDiskI
 from torch.utils.data.datapipes.iter.readfilesfromtar import ReadFilesFromTarIterDataPipe as ReadFilesFromTar
 from torch.utils.data.datapipes.iter.readfilesfromzip import ReadFilesFromZipIterDataPipe as ReadFilesFromZip
 from torch.utils.data.datapipes.iter.routeddecoder import RoutedDecoderIterDataPipe as RoutedDecoder
-from torch.utils.data.datapipes.iter.groupbykey import GroupByKeyIterDataPipe as GroupByKey
 
 # Functional DataPipe
 from torch.utils.data.datapipes.iter.callable import \
@@ -11,7 +10,8 @@ from torch.utils.data.datapipes.iter.callable import \
 from torch.utils.data.datapipes.iter.combinatorics import \
     (SamplerIterDataPipe as Sampler, ShuffleIterDataPipe as Shuffle)
 from torch.utils.data.datapipes.iter.grouping import \
-    (BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch)
+    (BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch,
+     GroupByKeyIterDataPipe as GroupByKey)
 from torch.utils.data.datapipes.iter.selecting import \
     (FilterIterDataPipe as Filter)
 
