@@ -112,9 +112,8 @@ class RandomSampler(Sampler[int]):
     def __iter__(self):
         n = len(self.data_source)
         if self.generator is None:
-            generator = torch.Generator()
-            generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
-            self.generator = generator
+            self.generator = torch.Generator()
+            self.generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
 
         if self.replacement:
             for _ in range(self.num_samples // 32):
