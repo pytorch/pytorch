@@ -1019,7 +1019,8 @@ RegisterOperators reg2({
     Operator(
         "aten::complex.int(int real, int img) -> complex",
         [](Stack* stack) {
-          int real, img;
+          int real = 0;
+          int img = 0;
           pop(stack, real, img);
           auto comp = c10::complex<double>(real, img);
           push(stack, comp);
@@ -1028,7 +1029,8 @@ RegisterOperators reg2({
     Operator(
         "aten::complex.float(float real, float img) -> complex",
         [](Stack* stack) {
-          double real, img;
+          double real = 0.0;
+          double img = 0.0;
           pop(stack, real, img);
           auto comp = c10::complex<double>(real, img);
           push(stack, comp);
@@ -1037,7 +1039,8 @@ RegisterOperators reg2({
     Operator(
         "aten::complex.bool(bool real, bool img) -> complex",
         [](Stack* stack) {
-          bool real, img;
+          bool real = false;
+          bool img = false;
           pop(stack, real, img);
           auto comp = c10::complex<double>(real, img);
           push(stack, comp);
@@ -1046,8 +1049,8 @@ RegisterOperators reg2({
     Operator(
         "aten::complex.int_float(int real, float img) -> complex",
         [](Stack* stack) {
-          int real;
-          double img;
+          int real = 0;
+          double img = 0.0;
           pop(stack, real, img);
           auto comp = c10::complex<double>(real, img);
           push(stack, comp);
@@ -1056,8 +1059,8 @@ RegisterOperators reg2({
     Operator(
         "aten::complex.float_int(float real, int img) -> complex",
         [](Stack* stack) {
-          double real;
-          int img;
+          double real = 0.0;
+          int img = 0;
           pop(stack, real, img);
           auto comp = c10::complex<double>(real, img);
           push(stack, comp);
@@ -1066,8 +1069,8 @@ RegisterOperators reg2({
     Operator(
         "aten::complex.bool_float(bool real, float img) -> complex",
         [](Stack* stack) {
-          bool real;
-          double img;
+          bool real = false;
+          double img = 0.0;
           pop(stack, real, img);
           auto comp = c10::complex<double>(real, img);
           push(stack, comp);
@@ -1076,8 +1079,8 @@ RegisterOperators reg2({
     Operator(
         "aten::complex.float_bool(float real, bool img) -> complex",
         [](Stack* stack) {
-          double real;
-          bool img;
+          double real = 0.0;
+          bool img = false;
           pop(stack, real, img);
           auto comp = c10::complex<double>(real, img);
           push(stack, comp);
