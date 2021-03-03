@@ -967,13 +967,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
 
     // TODO: move abs to aten namespace because it's schematized!
-    DEFINE_UNARY_OP_WITH_COMPLEX(
-        prim::abs,
-        std::abs(a),
-        int,
-        float,
-        float,
-        float),
+    DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
     Operator(
         "prim::abs(Tensor x) -> Tensor",
         [](Stack* stack) {

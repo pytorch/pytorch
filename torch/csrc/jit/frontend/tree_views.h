@@ -899,6 +899,11 @@ struct Const : public Expr {
   c10::complex<double> asComplex() const {
     char* dummy;
     auto str = subtree(0)->stringValue();
+    // complex numbers (a+bj, where a is non-zero) are parsed as an addition between
+    // float/int a and a complex number "bj"
+    // When a is 0, a complex number bj is created as above.
+    // So, while parsing the string, we don't have to worry about the real component of
+    // the complex number
     auto imag =
         torch::jit::strtod_c(str.substr(0, str.size() - 1).c_str(), &dummy);
     return c10::complex<double>(0, imag);

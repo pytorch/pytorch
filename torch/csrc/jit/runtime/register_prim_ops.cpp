@@ -443,27 +443,6 @@ RegisterOperators reg(
            push(stack, c10::complex<double>(a, b));
          },
          aliasAnalysisFromSchema()),
-     // TODO: fix the implementation to correctly extract real and imaginary
-     // values
-     //  OperatorGenerator(
-     //      TORCH_SELECTIVE_SCHEMA("aten::Complex.str(str a) -> complex"),
-     //      [](Stack* stack) {
-     //        auto s = pop(stack).toString();
-     //        std::string::size_type sz;
-     //        double d =
-     //            c10::stod(s->string().substr(0, s->string().size() - 1),
-     //            &sz);
-     //        c10::complex<double> b = c10::complex<double>(0, d);
-     //        if (sz == s->string().size()) {
-     //          push(stack, b);
-     //        } else {
-     //          std::stringstream error_str;
-     //          error_str << "could not convert string "
-     //                    << "to complex: '" << s->string() << "'";
-     //          throw std::runtime_error(error_str.str());
-     //        }
-     //      },
-     //      aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::format(str self, ...) -> str"),
          [](Stack* stack) {
@@ -827,9 +806,7 @@ RegisterOperators reg(
      DEFINE_COMPARISON_OP(aten::gt, a > b),
      DEFINE_COMPARISON_OP(aten::le, a <= b),
      DEFINE_COMPARISON_OP(aten::ge, a >= b),
-     //  DEFINE_BINARY_OP(aten::add, a + b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::add, a + b),
-     //  DEFINE_BINARY_OP(aten::sub, a - b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::sub, a - b),
      DEFINE_BINARY_OP(aten::mul, a* b),
      DEFINE_BOOL_OP(aten::__and__, a&& b),
@@ -838,13 +815,7 @@ RegisterOperators reg(
      DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
-     DEFINE_UNARY_OP_WITH_COMPLEX(
-         aten::neg,
-         -a,
-         int,
-         float,
-         complex,
-         c10::complex<double>),
+     DEFINE_UNARY_OP(aten::neg, -a, int, float),
      DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
