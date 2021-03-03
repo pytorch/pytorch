@@ -629,7 +629,7 @@ class Quantizer:
     def _convert(self, model: GraphModule, is_reference: bool = False,
                  convert_custom_config_dict: Dict[str, Any] = None,
                  is_standalone_module: bool = False,
-                 _remove_qconfig_flag = True) -> QuantizedGraphModule:
+                 _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
         """ standalone_module means it a submodule that is not inlined in
         parent module, and will be quantized separately as one unit.
 
@@ -970,7 +970,7 @@ class Quantizer:
     def convert(self, model: GraphModule, is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None,
                 is_standalone_module: bool = False,
-                _remove_qconfig = True) -> QuantizedGraphModule:
+                _remove_qconfig: bool = True) -> QuantizedGraphModule:
         quantized = self._convert(
             model, is_reference, convert_custom_config_dict, is_standalone_module, _remove_qconfig_flag=_remove_qconfig)
         if not is_reference:
