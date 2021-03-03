@@ -129,7 +129,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
-        torch.empty_meta,
         torch.empty_strided,
         torch.empty_quantized,
         torch.eye,
@@ -1029,6 +1028,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
+        torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1
     }
 
     ret2 = {}

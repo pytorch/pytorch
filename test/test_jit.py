@@ -7380,7 +7380,8 @@ a")
 
         def test_as_tensor_tensor_input(input):
             # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
-            return torch.as_tensor(input, dtype=torch.cfloat), torch.as_tensor(input, dtype=torch.float), torch.as_tensor(input, dtype=torch.int32)
+            return torch.as_tensor(input, dtype=torch.cfloat), torch.as_tensor(input, dtype=torch.float), \
+                torch.as_tensor(input, dtype=torch.int32)
 
         inp = torch.randn(3, 4, dtype=torch.cfloat)
         self.checkScript(test_as_tensor_tensor_input, (inp,))
