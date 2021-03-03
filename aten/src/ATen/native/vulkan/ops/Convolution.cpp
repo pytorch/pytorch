@@ -402,12 +402,12 @@ bool available(
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
          (weight.size(Layout::Filter::width) > 0) &&
-         ((c10::DeviceType::CPU == weight.device().type()) ||
+         ((weight.device().is_cpu()) ||
           (c10::DeviceType::Vulkan == weight.device().type())) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       ((c10::DeviceType::CPU == bias->device().type()) ||
+                                       ((bias->device().is_cpu()) ||
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        (transposed ? false /* to be addded in the future */

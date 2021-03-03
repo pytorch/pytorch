@@ -3,7 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 
-#include <TH/THBlasUtils.h>
+#include <ATen/native/CPUBlas.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -73,7 +73,7 @@ index_select_add(const Tensor &select_indices,
   auto output_stride1 = output.stride(1);
 
   for (int64_t i = 0; i < numel; i++) {
-    THBlas_axpy<data_t>(ddim, 1,
+    at::native::cpublas::axpy<data_t>(ddim, 1,
             src_data + src_stride0 * select_indices_data[i], src_stride1,
             output_data + output_stride0 * add_indices_data[i], output_stride1);
   }
@@ -159,7 +159,7 @@ index_select_add(const Tensor &select_indices,
     auto output_stride1 = output.stride(1);
     auto numel = add_indices.numel();
     for (int64_t i = 0; i < numel; i++) {
-      THBlas_axpy<float>(
+      at::native::cpublas::axpy<float>(
           ddim,
           1,
           src_data + src_stride0 * select_indices_data[i],
@@ -780,7 +780,7 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
           int64_t ddim = grad.size(1);
           auto igwd = index_grad_weight.data_ptr<scalar_t>();
           auto gd = grad.data_ptr<scalar_t>();
-          THBlas_axpy<scalar_t>(ddim, (scalar_t)scale, gd + ddim * source, 1,
+          at::native::cpublas::axpy<scalar_t>(ddim, (scalar_t)scale, gd + ddim * source, 1,
                       igwd + ddim * index, 1);
         }
       }
