@@ -56,7 +56,7 @@ class AliasDb {
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
   TORCH_API bool writesToAlias(Node* n, const ValueSet& vs) const;
 
-  // Does `a` and `b` potentially share a memory location or do either
+  // Do `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
   TORCH_API bool mayContainAlias(Value* a, Value* b) const;
 

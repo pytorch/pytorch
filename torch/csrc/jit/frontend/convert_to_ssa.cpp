@@ -93,7 +93,7 @@ struct ControlFlowLoadStores {
     for (const auto& x : mutated_variables) {
       auto true_type = true_vars->findInAnyFrame(x);
       auto false_type = false_vars->findInAnyFrame(x);
-      auto unified = unifyTypes(true_type, false_type);
+      auto unified = unifyTypes(true_type, false_type, true);
       if (!unified) {
         continue;
       }

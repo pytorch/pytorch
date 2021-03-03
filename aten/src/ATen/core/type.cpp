@@ -325,13 +325,11 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union) {
   auto unified = unifyTypesImpl(t1, t2);
-
-  if (default_to_any && !unified) {
-    return AnyType::get();
+  if (default_to_union && !unified) {
+    return UnionType::create({t1, t2});
   }
-
   return unified;
 }
 
@@ -548,8 +546,14 @@ bool Type::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
     return true;
   }
-  if(auto rhs_ = rhs->cast<OptionalType>()) {
+  if (auto rhs_ = rhs->cast<OptionalType>()) {
     return this->isSubtypeOfExt(rhs_->getElementType(), why_not);
+  }
+  if (auto rhs_ = rhs->cast<UnionType>()) {
+    // Check if `this` is a subtype of any of the types within the Union (`rhs_`)
+    return std::any_of(rhs_->types().begin(), rhs_->types().end(), [this](TypePtr const union_contained_type){
+      return this->isSubtypeOf(union_contained_type);
+    });
   }
   return false;
 }
@@ -745,6 +749,74 @@ TupleTypePtr TupleType::createNamed(
       /*returns=*/std::vector<Argument>{});
   return std::shared_ptr<TupleType>(new TupleType(
       field_types, qualName, schema)); // NOLINT(modernize-make-shared)
+}
+
+void flatten_union(TypePtr& type, std::vector<TypePtr>& res) {
+  if (type->kind() == UnionType::Kind) {
+    for (auto inner_type : type->expect<UnionType>()->types()) {
+      flatten_union(inner_type, res);
+    }
+  }
+  else {
+    res.emplace_back(type);
+  }
+}
+
+UnionType::UnionType(std::vector<TypePtr> types) :
+  Type(TypeKind::UnionType) {
+  // Flatten Unions of Unions while populating `types_`
+  for (auto type : types) {
+    flatten_union(type, types_);
+  }
+  // We want the elements to be sorted so we can easily compare two UnionType
+  // objects for equality in the future
+  std::sort(types_.begin(), types_.end(),
+  [](const TypePtr a, const TypePtr b) -> bool {
+    return a->kind() > b->kind();
+  });
+  // Filter out duplicate types
+  types_.erase(std::unique(types_.begin(), types_.end()), types_.end());
+  // Check if this Union allows None
+  can_hold_none_ = std::any_of(types_.begin(), types_.end(),
+    [](const TypePtr type) { return type->kind() == NoneType::Kind; });
+}
+
+bool UnionType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
+  if (auto union_rhs = rhs_->cast<UnionType>()) {
+    return std::all_of(this->types_.begin(), this->types_.end(),
+      [&](TypePtr this_type) -> bool {
+        return union_rhs->can_hold_type(this_type);
+    });
+  }
+  if (auto optional_rhs = rhs_->cast<OptionalType>()) {
+    return types_.size() == 2
+      && can_hold_type(optional_rhs->getElementType())
+      && can_hold_none();
+  }
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
+    return true;
+  }
+  if (rhs_->kind() == AnyTupleType::Kind) {
+    return true;
+  }
+  return false;
+}
+
+std::string UnionType::str() const {
+  std::stringstream ss;
+  ss << "Union(";
+  for (size_t i = 0; i < types().size(); ++i) {
+    if (i > 0)
+      ss << ", ";
+    if (types_[i] != NoneType::get()) {
+      ss << types()[i]->str();
+    }
+  }
+  ss << ")";
+  if (can_hold_none_) {
+    ss << "?";
+  }
+  return ss.str();
 }
 
 TupleType::TupleType(
@@ -1124,12 +1196,12 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
   std::string input_types = getSchemaInputTypesString(forward_schema);
   const std::vector<Argument>& forward_args = forward_schema.arguments();
-   
+
   std::string single_output = "";
   if (forward_args.size() == 2 &&
       forward_args[1].type()->cast<TupleType>() == nullptr) {
     // if the output type is a single tuple, it needs to be wrapped in an outer tuple
-    // to match eager's behavior 
+    // to match eager's behavior
     single_output = ", '" + forward_args[1].type()->annotation_str() + "',";
   }
   std::string pre_hook_schema =
@@ -1138,9 +1210,9 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
       "This error occured while scripting the forward pre-hook '" +
       pre_hook_name + "' on module '" + name()->name() +
       "'. If you did not want to script this pre-hook remove it from the "
-      "original NN module before scripting. Pre-hooks for module '" + 
-      name()->name() + "' are expected to have the following signature: " 
-      + pre_hook_schema + " with a return type of either 'None'" + 
+      "original NN module before scripting. Pre-hooks for module '" +
+      name()->name() + "' are expected to have the following signature: "
+      + pre_hook_schema + " with a return type of either 'None'" +
       single_output + " or 'Tuple[" + input_types + "]'.";
   return return_string;
 }
@@ -1148,7 +1220,7 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
 std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   const std::string& hook_name = forward_hooks_[hook_idx]->name();
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
-  std::string input_types = getSchemaInputTypesString(forward_schema); 
+  std::string input_types = getSchemaInputTypesString(forward_schema);
 
   // create expected output types string
   const Argument& pre_output =
@@ -1160,33 +1232,33 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   std::string hook_schema = hook_name + "(self, input: Tuple[" +
                             input_types + "], output: " + output_types + ")";
   std::string return_string =
-      "This error occured while scripting the forward hook '" 
+      "This error occured while scripting the forward hook '"
       + hook_name + "' on module " + name()->name() +
       ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
       " expected to have the following signature: " + hook_schema +
-      ". The type of the output arg is the returned type from" + 
-      " either the forward method or the previous hook if it exists. " + 
-      "Note that hooks can return anything, but if the hook is " + 
+      ". The type of the output arg is the returned type from" +
+      " either the forward method or the previous hook if it exists. " +
+      "Note that hooks can return anything, but if the hook is " +
       "on a submodule the outer module is expecting" +
       " the same return type as the submodule's forward.";
   return return_string;
 }
 
 void checkForwardHookInputArguments(
-    const FunctionSchema& forward_schema, 
-    const FunctionSchema& hook_schema, 
-    const std::string& hook_id, 
+    const FunctionSchema& forward_schema,
+    const FunctionSchema& hook_schema,
+    const std::string& hook_id,
     const std::string& hook_err_msg) {
   // check for proper tuple input types
   const std::vector<Argument>& forward_args = forward_schema.arguments();
   const Argument input_arg = hook_schema.arguments()[1];
   TORCH_CHECK(
-      input_arg.type()->cast<TupleType>() != nullptr, 
+      input_arg.type()->cast<TupleType>() != nullptr,
       hook_id,
       "expected the input argument to be typed as a Tuple but found type: '",
-      input_arg.type()->annotation_str(), 
-      "' instead.\n", 
+      input_arg.type()->annotation_str(),
+      "' instead.\n",
       hook_err_msg
    );
 
@@ -1229,7 +1301,7 @@ void checkForwardHookInputArguments(
 }
 
 void ClassType::checkForwardPreHookSchema(
-    int pre_hook_idx, 
+    int pre_hook_idx,
     const FunctionSchema& pre_hook_schema) const {
   const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
   std::string hook_id =
@@ -1261,7 +1333,7 @@ void ClassType::checkForwardPreHookSchema(
             pre_hook_err_msg
   );
   const Argument return_arg = pre_hook_schema.returns()[0];
-  std::string wrong_type_returned_err_msg = hook_id + 
+  std::string wrong_type_returned_err_msg = hook_id +
       "returned the wrong type of: '" +
       return_arg.type()->annotation_str() + "'.";
 
@@ -1269,9 +1341,9 @@ void ClassType::checkForwardPreHookSchema(
     return;
   }
   if (forward_args.size() == 2 && *forward_args[1].type() == *return_arg.type()) {
-    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the 
+    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the
     // pre-hook returns a matching tuple. Eager doesn't support this- the working eager return
-    // for a tuple type is the forward's input tuple wrapped inside of another tuple. 
+    // for a tuple type is the forward's input tuple wrapped inside of another tuple.
     TORCH_CHECK(
         return_arg.type()->cast<TupleType>() == nullptr,
         wrong_type_returned_err_msg,
@@ -1316,7 +1388,7 @@ void ClassType::checkForwardPreHookSchema(
   for (int i = 1; i < forward_args.size(); ++i) {
     if (*forward_args[i].type() != *return_tuple_types[i - 1]) {
       TORCH_CHECK(
-          false, 
+          false,
           wrong_type_returned_err_msg,
           " The returned tuple contains the wrong inner types.\n",
           pre_hook_err_msg);
@@ -1325,7 +1397,7 @@ void ClassType::checkForwardPreHookSchema(
 }
 
 void ClassType::checkForwardHookSchema(
-      int hook_idx, 
+      int hook_idx,
       const FunctionSchema& hook_schema) const {
   const torch::jit::Function* hook = forward_hooks_[hook_idx];
   std::string hook_id =
@@ -1388,8 +1460,8 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
 torch::jit::Function* ClassType::findHook(const std::string& name) const {
   auto hook = findForwardHook(name);
   if (hook == nullptr) {
-    hook = findForwardPreHook(name); 
-  } 
+    hook = findForwardPreHook(name);
+  }
   return hook;
 }
 
@@ -1662,6 +1734,8 @@ size_t ClassType::addAttribute(
             (type->kind() == OptionalType::Kind &&
             type->expectRef<OptionalType>().getElementType()->kind() ==
                 TensorType::Kind) ||
+            (type->kind() == UnionType::Kind &&
+            type->expect<UnionType>()->can_hold_type(TensorType::get())) ||
             (type->kind() == NoneType::Kind),
         "Expecting parameter or buffer to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));

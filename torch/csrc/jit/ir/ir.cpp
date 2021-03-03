@@ -736,7 +736,9 @@ bool Value::mustBeNone() const {
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
-      !type()->cast<OptionalType>();
+      !type()->cast<OptionalType>() &&
+      !(type()->cast<UnionType>() &&
+        type()->expect<UnionType>()->can_hold_none());
 }
 
 std::string Value::debugNameBase() const {
