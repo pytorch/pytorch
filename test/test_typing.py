@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 from typing import IO, Dict, List
+import torch
 
 import pytest
 
@@ -43,8 +44,8 @@ def run_mypy() -> None:
     The mypy results are cached in `OUTPUT_MYPY` for further use.
 
     """
-    if os.path.isdir(CACHE_DIR):
-        shutil.rmtree(CACHE_DIR)
+    # if os.path.isdir(CACHE_DIR):
+    #     shutil.rmtree(CACHE_DIR)
 
     for directory in (REVEAL_DIR,):
         # Run mypy
@@ -80,17 +81,27 @@ def get_test_cases(directory):
                     id=relpath,
                 )
 
+def _construct_format_dict():
+    dct = {
+        'ModuleList': 'torch.nn.modules.container.ModuleList',
+        'AdaptiveAvgPool2d': 'torch.nn.modules.pooling.AdaptiveAvgPool2d',
+        'AdaptiveMaxPool2d': 'torch.nn.modules.pooling.AdaptiveMaxPool2d',
+        'Tensor': 'torch.tensor.Tensor',
+        'Adagrad': 'torch.optim.adagrad.Adagrad',
+        'Adam': 'torch.optim.adam.Adam',
+    }
+    return dct
 
 #: A dictionary with all supported format keys (as keys)
 #: and matching values
-FORMAT_DICT: Dict[str, str] = {}
+FORMAT_DICT: Dict[str, str] = _construct_format_dict()
 
 
 def _parse_reveals(file: IO[str]) -> List[str]:
     """Extract and parse all ``"  # E: "`` comments from the passed file-like object.
 
     All format keys will be substituted for their respective value from `FORMAT_DICT`,
-    *e.g.* ``"{float64}"`` becomes ``"numpy.floating[numpy.typing._64Bit]"``.
+    *e.g.* ``"{Tensor}"`` becomes ``"torch.tensor.Tensor"``.
     """
     string = file.read().replace("*", "")
 
