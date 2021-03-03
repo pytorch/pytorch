@@ -610,6 +610,7 @@ libtorch_python_distributed_core_sources = [
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
     "torch/csrc/distributed/autograd/init.cpp",
+    "torch/csrc/distributed/rpc/agent_utils.cpp",
     "torch/csrc/distributed/rpc/init.cpp",
     "torch/csrc/distributed/rpc/process_group_agent.cpp",
     "torch/csrc/distributed/rpc/py_rref.cpp",
