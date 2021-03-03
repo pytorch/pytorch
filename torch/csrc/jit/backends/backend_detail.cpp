@@ -132,8 +132,9 @@ Module codegen_backend_module(
   // compile and execute functions.
   auto cls = getCustomClass(qual_backend_name.qualifiedName());
   TORCH_INTERNAL_ASSERT(cls);
+  c10::intrusive_ptr<torch::CustomClassHolder> backend;
   loweredModule.register_attribute(
-      "__backend", OptionalType::create(cls), c10::nullopt);
+      "__backend", cls, IValue::make_capsule(backend));
 
   // This is the list of opaque backend handles returned by
   // backend.compile.
@@ -150,9 +151,7 @@ Module codegen_backend_module(
   // backend class.
   static const auto create_backend_ct = CodeTemplate(R"(
             def __create_backend(self):
-                backend = self.__backend
-                if (backend is None):
-                    self.__backend = $name()
+                self.__backend = $name()
             )");
   TemplateEnv create_backend_te;
   create_backend_te.s("name", qual_backend_name.qualifiedName());
@@ -160,19 +159,19 @@ Module codegen_backend_module(
       create_backend_ct.format(create_backend_te), loweredModuleResolver());
 
   // Helper function to expose backend.is_available() to Module generation code.
+  // Assumes self.__backend exists (i.e. __create_backend() has already been
+  // invoked).
   loweredModule.define(
       R"(
             def __is_available(self):
-                self.__create_backend()
-                backend = self.__backend
-                if (backend is not None):
-                    return backend.is_available()
-                return False
+                return self.__backend.is_available()
             )",
       loweredModuleResolver());
 
   // getstate and setstate are for serialization/deserialization of
   // the LoweredModule.
+  // setstate is in charge of initializing self.__backend by invoking
+  // __create_backend().
   loweredModule.define(
       R"(
             def __getstate__(self):
@@ -186,13 +185,10 @@ Module codegen_backend_module(
                 self.__method_compile_spec = state[0]
                 self.__processed_module = state[1]
                 self.__create_backend()
-                backend = self.__backend
-                if (backend is not None):
-                  if backend.is_available() :
-                    self.__handles = backend.compile(self.__processed_module, self.__method_compile_spec)
-                  else:
+                if self.__backend.is_available() :
+                    self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
+                else:
                     raise Exception("Backend is not available.")
-                return
             )",
       loweredModuleResolver());
 
@@ -203,16 +199,12 @@ Module codegen_backend_module(
     static const auto method_ct = CodeTemplate(R"(
             def $method(self${,def_inputs}):
                 typed_inputs: List[Any] = [${fwd_inputs,}]
-                self.__create_backend()
-                backend = self.__backend
-                if (backend is not None):
-                  if backend.is_available() :
-                    $unpack, = backend.execute(self.__handles["$method"], typed_inputs)
-                    ${refine,}
-                    return $ret
-                  else:
-                    raise Exception("Backend is not available.")
-                raise Exception("Backend is not initialized.")
+                if self.__backend.is_available() :
+                  $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
+                  ${refine,}
+                  return $ret
+                else:
+                  raise Exception("Backend is not available.")
             )");
 
     TemplateEnv method_te;
@@ -305,6 +297,7 @@ Module codegen_backend_module(
   // Module is ready to run.
   // Otherwise throw a warning indicating that the resulting Module is not
   // ready for execution until is loaded to a device with the backend.
+  loweredModule.run_method("__create_backend");
   if (loweredModule.run_method("__is_available").toBool()) {
     auto state = at::ivalue::Tuple::create(
         method_compile_spec, loweredModule.attr("__processed_module"));
