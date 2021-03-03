@@ -739,7 +739,14 @@ class Quantizer:
                     'node:' + n.name + \
                     ' in quantized or non quantized environment, env: ' + \
                     str(env) + ' quant_env:' + str(quant_env)
-                env[n.name] = Proxy(quant_env[n.name]).dequantize().node
+                quant_env_node = quant_env[n.name]
+                # TODO(before land): make it nicer
+                if quant_env_node.op == 'call_method' and quant_env_node.target == 'size':
+                    # if we take a size of a quantized tensor, it is an integer
+                    # and it does not make sense to dequantize it
+                    env[n.name] = quant_env[n.name]
+                else:
+                    env[n.name] = Proxy(quant_env[n.name]).dequantize().node
             return env[n.name]
 
         def load_quantized(n: Node) -> Node:
