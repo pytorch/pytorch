@@ -115,14 +115,13 @@ class RandomSampler(Sampler[int]):
             generator = torch.Generator()
             generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
             self.generator = generator
-        else:
-            generator = self.generator
+
         if self.replacement:
             for _ in range(self.num_samples // 32):
-                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
-            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
+                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=self.generator).tolist()
+            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=self.generator).tolist()
         else:
-            yield from torch.randperm(n, generator=generator).tolist()
+            yield from torch.randperm(n, generator=self.generator).tolist()
 
     def __len__(self):
         return self.num_samples
