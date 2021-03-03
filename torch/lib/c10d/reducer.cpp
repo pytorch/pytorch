@@ -669,27 +669,31 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     if (find_unused_parameters_) {
       // H2D from local_used_maps_ to local_used_maps_dev_
       for (size_t i = 0; i < local_used_maps_.size(); i++) {
-        // Note [local_used_maps_ -> local_used_maps_dev copying]
-        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        // We do async H2D to avoid the blocking overhead. The async copy and
-        // allreduce respect the current stream, so will be sequenced correctly.
-        //
-        // Correct sequencing with respect to host operations is also essential.
-        // The H2D copy_ is stream ordered, while the host's changes to local_used_maps_
-        // are host ordered. If a large amount of cuda-stream work pushes the copy_ far
-        // into the future, and if no blocking calls occur between now and finalize_backward()**
-        // such that finalize_backward() re-zeroes local_used_maps_ on the host
-        // before the stream executes the copy_, copy_ will read those zeros instead of the
-        // values we thought we told it to read here.
-        // Copying local_used_maps_[i] to a pinned temporary (which the pinned caching
-        // allocator should supply asynchronously) avoids this nasty, rare race condition.
-        //
-        // ** In the hoped-for case where all params are used, DDP itself won't do any
-        // blocking work between now and the re-zeroing, so the danger is real.
-        auto local_used_maps_tmp = local_used_maps_[i].pin_memory();
-        // Defensively ensures a deep copy to a pinned temporary
-        TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr())
-        local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
+        if (local_used_maps_dev_[i].is_cuda()) {
+          // Note [local_used_maps_ -> local_used_maps_dev copying]
+          // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+          // We do async H2D to avoid the blocking overhead. The async copy and
+          // allreduce respect the current stream, so will be sequenced correctly.
+          //
+          // Correct sequencing with respect to host operations is also essential.
+          // The H2D copy_ is stream ordered, while the host's changes to local_used_maps_
+          // are host ordered. If a large amount of cuda-stream work pushes the copy_ far
+          // into the future, and if no blocking calls occur between now and finalize_backward()**
+          // such that finalize_backward() re-zeroes local_used_maps_ on the host
+          // before the stream executes the copy_, copy_ will read those zeros instead of the
+          // values we thought we told it to read here.
+          // Copying local_used_maps_[i] to a pinned temporary (which the pinned caching
+          // allocator should supply asynchronously) avoids this nasty, rare race condition.
+          //
+          // ** In the hoped-for case where all params are used, DDP itself won't do any
+          // blocking work between now and the re-zeroing, so the danger is real.
+          auto local_used_maps_tmp = local_used_maps_[i].pin_memory();
+          // Defensively ensures a deep copy to a pinned temporary
+          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr())
+          local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
+        } else {
+          local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
+        }
       }
       local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
     }
