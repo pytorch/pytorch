@@ -2654,7 +2654,15 @@ class TestTensorCreation(TestCase):
             dtype = torch.float32
             if isinstance(start, complex) or isinstance(end, complex):
                 dtype = torch.cfloat
-            self.assertEqual(fn(start, end, device=device).dtype, dtype)
+
+            if dtype == torch.cfloat:
+                # TODO(kshitij12345): Fix unnecessary warning
+                # Reference: https://github.com/pytorch/pytorch/issues/53171
+                with self.assertWarnsRegex(UserWarning,
+                                           "As either `start` or `stop` is complex"):
+                    self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
+            else:
+                self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
 
     def test_linspace_deduction(self, device):
         # Test deduction from input parameters.
