@@ -148,7 +148,7 @@ static void allocate_reduction_result(
       }
     }
   }
-  TORCH_INTERNAL_ASSERT(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
+  TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
   result.resize_(shape);
 }
 
