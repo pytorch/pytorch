@@ -632,7 +632,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
     std::vector<at::Tensor> outputTensors = {outputTensor};
     auto entry = std::unique_ptr<WorkEntry>(
         new WorkEntry(&inputTensors, &outputTensors, std::move(runFunc)));
-    return enqueue(std::move(entry));
+    return enqueue(std::move(entry), "mpi:all_to_all", c10::optional<std::vector<at::Tensor>>(inputTensors));
   } else {
     // Need alltoallv
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
@@ -667,7 +667,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
     std::vector<at::Tensor> outputTensors = {outputTensor};
     auto entry = std::unique_ptr<WorkEntry>(
         new WorkEntry(&inputTensors, &outputTensors, std::move(runFunc)));
-    return enqueue(std::move(entry), "mpi:all_to_all", c10::optional<std::vector<at::Tensor>>({inputTensor}));
+    return enqueue(std::move(entry), "mpi:all_to_all", c10::optional<std::vector<at::Tensor>>(inputTensors));
   }
 }
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
