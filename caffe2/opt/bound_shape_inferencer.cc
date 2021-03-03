@@ -239,6 +239,9 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
   auto rt = shape_info_.emplace(name, ShapeInfo());
   ShapeInfo& shape_info = rt.first->second;
   TensorShape& shape = shape_info.shape;
+  if (shape_info.getShapeIsFinal()) {
+    return shape;
+  }
   if (is_quantized) {
     shape_info.is_quantized = true;
     shape_info.q_info.scale.clear();
