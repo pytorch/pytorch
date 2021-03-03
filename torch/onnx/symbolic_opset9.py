@@ -1956,32 +1956,54 @@ def repeat(g, self, repeats):
 
 def repeat_interleave(g, self, repeats, dim=None):
     input = self
-    # if dim = 0 flatten
+    # if dim is None flatten
+    # By default, use the flattened input array, and return a flat output array
     if sym_help._is_none(dim):
         input = reshape(g, self, g.op("Constant", value_t=torch.tensor([-1])))
         dim = 0
     else:
         dim = sym_help._maybe_get_scalar(dim)
+
     repeats_dim = sym_help._get_tensor_rank(repeats)
     repeats_sizes = sym_help._get_tensor_sizes(repeats)
     input_sizes = sym_help._get_tensor_sizes(input)
+    input_sizes_temp = input_sizes.copy()
     for idx, input_size in enumerate(input_sizes):
         if input_size is None:
-            input_sizes[idx] = -1
+            input_sizes[idx], input_sizes_temp[idx] = 0, -1
 
-    # cases where repeats is a single number
+    # Cases where repeats is an int or single value tensor
     if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)):
-        input = unsqueeze(g, input, dim + 1)
-        input_sizes_temp = input_sizes.copy()
-        input_sizes_temp.insert(dim + 1, sym_help._maybe_get_scalar(repeats))
-        input = expand(g, input, g.op("Constant", value_t=torch.LongTensor(input_sizes_temp)), None)
-        input_sizes[dim] *= sym_help._maybe_get_scalar(repeats)
-        input = reshape(g, input, g.op("Constant", value_t=torch.tensor(input_sizes)))
+        if not sym_help._is_tensor(repeats):
+            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+        if input_sizes[dim] == 0:
+            raise RuntimeError("Input size along dimension to repeat must exist")
+        else:
+            reps = input_sizes[dim]
+            repeats = expand(g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None)
+
+    # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
-        assert repeats_sizes[0] == input_sizes[dim]
+        assert repeats_sizes[0] == input_sizes[dim], "repeats must have the same size as input along dim"
+        reps = repeats_sizes[0]
     else:
         raise RuntimeError("repeats must be 0-dim or 1-dim tensor")
-    return input
+
+    final_splits = list()
+    r_splits = g.op("Split", repeats, split_i=[1]*reps, axis_i=0, outputs=reps)
+    i_splits = g.op("Split", input, split_i=[1]*reps, axis_i=dim, outputs=reps)
+    input_sizes[dim], input_sizes_temp[dim] = -1, 1
+    for idx, r_split in enumerate(r_splits):
+        i_split = unsqueeze(g, i_splits[idx], dim + 1)
+        r_concat = [g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[:dim+1])), 
+                    r_split, 
+                    g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[dim+1:]))]
+        r_concat = g.op("Concat", *r_concat, axis_i=0)
+        i_split = expand(g, i_split, r_concat, None)
+        i_split = reshape(g, i_split, g.op("Constant", value_t=torch.LongTensor(input_sizes)))
+        final_splits.append(i_split)
+    return g.op("Concat", *final_splits, axis_i=dim)
+
 
 @parse_args('v', 'i')
 def pixel_shuffle(g, self, upscale_factor):
