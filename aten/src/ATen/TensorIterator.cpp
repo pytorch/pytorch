@@ -1373,17 +1373,9 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   if (!op.tensor.defined()) {
       if (strides.empty()) {
-          if (is_meta_) {
-            op.tensor = at::empty_meta(sizes, options);
-          } else {
-            op.tensor = at::empty(sizes, options);
-          }
+        op.tensor = at::empty(sizes, options);
       } else {
-          if (is_meta_) {
-            TORCH_INTERNAL_ASSERT(0, "meta strided not yet implemented");
-          } else {
-            op.tensor = at::empty_strided(sizes, strides, options);
-          }
+        op.tensor = at::empty_strided(sizes, strides, options);
       }
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
