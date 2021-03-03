@@ -1193,9 +1193,24 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   return std::make_tuple(self_broadcasted, indices_broadcasted, dim);
 }
 
+static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
+  TORCH_CHECK(
+      !t.defined() || t.device() == device,
+      "Expected tensor to have ", device,
+      " Device, but got tensor with ", t.device(), " Device ",
+      "(while checking arguments for ", c, ")");
+}
+
+static inline void checkDevice(CheckedFrom c, at::ArrayRef<Tensor> tensors, Device device) {
+  for (auto &t : tensors) {
+    checkDevice(c, t, device);
+  }
+}
+
 } // anonymous namespace
 
 Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
+  checkDevice("torch.take_along_dim():", {self, indices}, self.device());
   if (opt_dim.has_value()) {
     int64_t dim;
     Tensor self_broadcasted, indices_broadcasted;
@@ -1209,6 +1224,7 @@ Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<i
 }
 
 Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
+  checkDevice("torch.take_along_dim():", {self, indices, result}, self.device());
   if (opt_dim.has_value()) {
     int64_t dim;
     Tensor self_broadcasted, indices_broadcasted;

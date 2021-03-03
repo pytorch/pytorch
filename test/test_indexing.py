@@ -1115,13 +1115,15 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             torch.gather(t, 0, indices.cpu())
 
-        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
             torch.take_along_dim(t, indices.cpu(), dim=0)
 
         with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             torch.gather(t.cpu(), 0, indices)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
 # The tests below are from NumPy test_indexing.py with some modifications to
