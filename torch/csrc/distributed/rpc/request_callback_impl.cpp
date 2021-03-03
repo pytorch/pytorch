@@ -272,42 +272,33 @@ void RequestCallbackImpl::processScriptRemoteCall(
     return;
   }
 
-  auto setRRefValue =
-      [ownerRRef, postProcessing](
-          const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) mutable {
-        try {
-          ownerRRef->setValue(jitFuture->value());
-        } catch (const std::exception& e) {
-          ownerRRef->setError(std::current_exception());
-        }
-        postProcessing();
-      };
-
   auto isAsyncExecution = scriptRemoteCall.isAsyncExecution();
   auto asyncPostProcessing =
-      [ownerRRef,
-       postProcessing,
-       setRRefValue{std::move(setRRefValue)},
-       isAsyncExecution](
+      [ownerRRef, postProcessing, isAsyncExecution](
           const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) mutable {
-        if (isAsyncExecution) {
-          // The user function will return a JIT future, install
-          // setRRefValue and postProcessing to that valueFuture
-          try {
-            auto valueJitFuture = jitFuture->value().toFuture();
-            valueJitFuture->addCallback(
-                [valueJitFuture,
-                 setRRefValue{std::move(setRRefValue)}]() mutable {
-                  setRRefValue(valueJitFuture);
-                });
-          } catch (const std::exception& e) {
-            ownerRRef->setError(std::current_exception());
-            postProcessing();
-          }
-        } else {
-          // The user function will return a value. Set OwnerRRef when that
-          // value is ready.
-          setRRefValue(jitFuture);
+        // The user function will return a JIT future, install
+        // setRRefValue and postProcessing to that valueFuture
+        try {
+          c10::intrusive_ptr<JitFuture> valueJitFuture =
+              isAsyncExecution ? jitFuture->value().toFuture() : jitFuture;
+
+          // Setup callback.
+          auto setRRefValue =
+              [ownerRRef, postProcessing, valueJitFuture]() mutable {
+                try {
+                  ownerRRef->setValue(valueJitFuture->value());
+                } catch (const std::exception& e) {
+                  ownerRRef->setError(std::current_exception());
+                }
+                postProcessing();
+              };
+
+          // Call inline if not async execution.
+          isAsyncExecution ? valueJitFuture->addCallback(setRRefValue)
+                           : setRRefValue();
+        } catch (std::exception& e) {
+          ownerRRef->setError(std::current_exception());
+          postProcessing();
         }
       };
 
