@@ -29,9 +29,11 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
+    "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
+    "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
 ]
 
-libtorch_nvfuser_generated_headers = ["{}.h".format(name[36:-3]) for name in libtorch_nvfuser_runtime_sources]
+libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".")[0]) for name in libtorch_nvfuser_runtime_sources]
 
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
@@ -202,6 +204,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
+    "torch/csrc/jit/passes/frozen_ops_to_mkldnn.cpp",
     "torch/csrc/jit/passes/frozen_graph_optimizations.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/remove_dropout.cpp",
@@ -253,6 +256,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     "torch/csrc/jit/tensorexpr/ir_simplifier.cpp",
+    "torch/csrc/jit/tensorexpr/ir_verifier.cpp",
     "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
     "torch/csrc/jit/tensorexpr/kernel.cpp",
     "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
@@ -729,7 +733,7 @@ aten_cpu_source_codegen_list = [
 # only aten_cpu_source_non_codegen_list need to be added to ${all_cpu_cpp}.
 aten_cpu_source_list = aten_cpu_source_non_codegen_list + aten_cpu_source_codegen_list
 
-# This aten native source file list will go through aten codegen process
+# TODO: move the exceptions to proper locations
 aten_native_source_codegen_list = [
    "aten/src/ATen/native/cpu/Activation.cpp",
    "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
