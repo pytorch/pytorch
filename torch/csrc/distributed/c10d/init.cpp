@@ -199,18 +199,42 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "get_index",
           &::c10d::GradBucket::getIndex,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+.. warning::
+    Since the buckets are rebuilt after the first iteration, should not rely on the indices at the beginning of training.
+
+Returns:
+    The index of a bucket that stores gradients of a few contiguous layers.
+    All the gradients are bucketized.
+)")
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
           py::call_guard<py::gil_scoped_release>(),
           R"(
-            ``get_tensors`` returns a list of ``torch.Tensor``. Each tensor in
-            the list refers to the replica on each device. There will be multiple
-            replicas only in the case of single process multiple device mode. In
-            the single process single device mode, this list would consist of only
-            a single tensor.
-           )")
+Returns:
+    A list of ``torch.Tensor``. Each tensor in the list refers to the replica on each device.
+    Since DDP communication hook only supports single process single device mode at this time,
+    only exactly one tensor is stored in this bucket.
+)")
+      .def(
+          "get_per_parameter_tensors",
+          &::c10d::GradBucket::getPerParameterTensors,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Returns:
+    A list of ``torch.Tensor``. Each tensor in the list corresponds to a parameter.
+)")
+      .def(
+          "is_the_last_bucket_to_allreduce",
+          &::c10d::GradBucket::isTheLastBucketToAllreduce,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Returns:
+    Whether this bucket is the last bucket to allreduce in an iteration.
+    This also means that this bucket corresponds to the first few layers in the forward pass.
+)")
       .def(
           "get_offsets",
           &::c10d::GradBucket::getOffsets,
@@ -698,6 +722,7 @@ Arguments:
     world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
+    wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
 
 Example::
     >>> import torch.distributed as dist
@@ -716,7 +741,8 @@ Example::
               int,
               int,
               bool,
-              std::chrono::milliseconds>(),
+              std::chrono::milliseconds,
+              bool>(),
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size") = -1,
@@ -724,8 +750,8 @@ Example::
           // prevents accidental implicit conversion to bool
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
-              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout))
-
+              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
+          py::arg("wait_for_workers") = true)
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -1244,7 +1270,7 @@ Arguments:
                 Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
            )");
 
-  py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
+py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
       .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
       .def_readwrite("rank", &c10::DDPLoggingData::rank)

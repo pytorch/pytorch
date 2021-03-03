@@ -273,6 +273,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.argmin: lambda input: -1,
         torch.argsort: lambda input, dim=None: -1,
         torch.asin: lambda input, out=None: -1,
+        torch.assert_async: lambda input: -1,
         torch.arcsin: lambda input, out=None: -1,
         torch.asinh: lambda input, out=None: -1,
         torch.arcsinh: lambda input, out=None: -1,
@@ -695,6 +696,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.selu: lambda input, inplace=False: -1,
         torch.nn.functional.silu: lambda input, inplace=False: -1,
         torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean', beta=1.: -1,
+        torch.nn.functional.huber_loss: lambda input, target, reduction='mean', delta=1.: -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
         torch.nn.functional.softmax: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
         torch.nn.functional.softmin: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
@@ -1028,6 +1030,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
+        torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1
     }
 
     ret2 = {}
