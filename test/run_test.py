@@ -18,6 +18,7 @@ import torch.distributed as dist
 from typing import Dict, Optional
 
 TESTS = [
+    'test_public_bindings',
     'test_type_hints',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
@@ -221,7 +222,6 @@ RUN_PARALLEL_BLOCKLIST = [
 ] + [test for test in TESTS if test.startswith('distributed/')]
 
 WINDOWS_COVERAGE_BLOCKLIST = [
-    'test_dataloader',
 ]
 
 
