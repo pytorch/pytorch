@@ -32,9 +32,18 @@ def _orthogonalize(matrix, epsilon=1e-8):
             rest -= torch.sum(col * rest, dim=0) * col
 
 
-def _should_compress(num_rows, num_cols, matrix_approximation_rank, min_compression_rate):
-    """Returns whether a 2D tensor described as number of rows and columns is worth compressing."""
-    return (num_rows + num_cols) * matrix_approximation_rank < num_rows * num_cols * min_compression_rate
+def _should_compress(
+    num_rows, num_cols, matrix_approximation_rank, min_compression_rate
+):
+    """
+    Returns whether a 2D tensor described as number of rows and columns is worth compressing,
+    i.e., ``min_compression_rate`` < uncompressed size / compressed size, where
+    uncompressed size = ``num_rows`` * ``num_cols``,
+    and compressed size = (``num_rows`` + ``num_cols``) * ``matrix_approximation_rank``.
+    """
+    return (
+        num_rows + num_cols
+    ) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols
 
 
 class PowerSGDState(object):
@@ -55,7 +64,7 @@ class PowerSGDState(object):
 
     To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached.
 
-    3. ``min_compression_rate`` is the minimal compression rate required when a layer is compressed. Due to the computation overheads incurred by the compression, a tensor is worth compressing only if there can be sufficient saving in bandwidth, where `` (num_rows + num_cols) * matrix_approximation_rank < num_rows * num_cols * min_compression_rate``. If the specified compression rate threshold cannot be satisfied, the tensor will be directly allreduced without compression.
+    3. ``min_compression_rate`` is the minimum compression rate required when a layer is compressed. Due to the computation overheads incurred by the compression, a tensor is worth compressing only if there can be sufficient saving in bandwidth, where `` (num_rows + num_cols) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols``. If the specified compression rate threshold cannot be satisfied, the tensor will be directly allreduced without compression.
 
     .. warning ::
         If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
@@ -85,7 +94,7 @@ class PowerSGDState(object):
         process_group,
         matrix_approximation_rank=1,
         start_powerSGD_iter=10,
-        min_compression_rate=0.5,
+        min_compression_rate=2,
         use_error_feedback=True,
         warm_start=True,
         random_seed=0,
@@ -282,7 +291,9 @@ def powerSGD_hook(
         n, m = tensor.shape
         matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
 
-        if _should_compress(n, m, matrix_approximation_rank, state.min_compression_rate):
+        if _should_compress(
+            n, m, matrix_approximation_rank, state.min_compression_rate
+        ):
             high_rank_tensors_to_compress.append(tensor)
             total_Ps_size += n * matrix_approximation_rank
             total_Qs_size += m * matrix_approximation_rank
