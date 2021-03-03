@@ -636,7 +636,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
 
     return _libtorch_python_sources
 
-aten_source_list_lite = [
+aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/BatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
     "aten/src/ATen/Context.cpp",
@@ -719,13 +719,18 @@ aten_source_list_lite = [
     "aten/src/ATen/record_function.cpp",
 ]
 
-aten_cpu_source_list = aten_source_list_lite + [
-    "aten/src/ATen/metal/Context.cpp",
+aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
-    "aten/src/ATen/vulkan/Context.cpp",
 ]
 
-aten_regenereated_native_source_list_lite = [
+# When buliding lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
+# codegen process. The codegen version of this file, like Activation.cpp.DEFAULT.cpp, will be included
+# in ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt. As a result, in aten/src/ATen/CMakeLists.txt,
+# only aten_cpu_source_non_codegen_list need to be added to ${all_cpu_cpp}.
+aten_cpu_source_list = aten_cpu_source_non_codegen_list + aten_cpu_source_codegen_list
+
+# This aten native source file list will go through aten codegen process
+aten_native_source_codegen_list = [
    "aten/src/ATen/native/cpu/Activation.cpp",
    "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
    "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
@@ -765,7 +770,8 @@ aten_regenereated_native_source_list_lite = [
    "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
 ]
 
-aten_fixed_native_source_list = [
+# This aten native source file list will not go through aten codegen process
+aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/RNN.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/int_repr_quant.cpp",
@@ -965,6 +971,7 @@ aten_fixed_native_source_list = [
     "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
 ]
 
-# Files in ATen/native with a few exceptions
+# 1. Files in ATen/native with a few exceptions
 # TODO: move the exceptions to proper locations
-aten_native_source_list = aten_fixed_native_source_list + aten_regenereated_native_source_list_lite
+# 2. The whole aten native source list includes the list with and without aten codegen process.
+aten_native_source_list = aten_native_source_non_codegen_list + aten_native_source_codegen_list
