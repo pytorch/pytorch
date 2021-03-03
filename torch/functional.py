@@ -126,6 +126,7 @@ def split(tensor, split_size_or_sections, dim=0):
         dim (int): dimension along which to split the tensor.
 
     Example::
+
         >>> a = torch.arange(10).reshape(5,2)
         >>> a
         tensor([[0, 1],
@@ -1012,8 +1013,8 @@ def cartesian_prod(*tensors):
 
     Returns:
         Tensor: A tensor equivalent to converting all the input tensors into lists,
-            do `itertools.product` on these lists, and finally convert the resulting list
-            into tensor.
+        do `itertools.product` on these lists, and finally convert the resulting list
+        into tensor.
 
     Example::
 
@@ -1043,8 +1044,8 @@ def block_diag(*tensors):
 
     Returns:
         Tensor: A 2 dimensional tensor with all the input tensors arranged in
-            order such that their upper left and lower right corners are
-            diagonally adjacent. All other elements are set to 0.
+        order such that their upper left and lower right corners are
+        diagonally adjacent. All other elements are set to 0.
 
     Example::
 
@@ -1136,6 +1137,7 @@ def atleast_1d(*tensors):
         output (Tensor or tuple of Tensors)
 
     Example::
+
         >>> x = torch.randn(2)
         >>> x
         tensor([1.4584, 0.7583])
@@ -1161,6 +1163,7 @@ def atleast_2d(*tensors):
     r"""
     Returns a 2-dimensional view of each input tensor with zero dimensions.
     Input tensors with two or more dimensions are returned as-is.
+
     Args:
         input (Tensor or list of Tensors)
 
@@ -1168,6 +1171,7 @@ def atleast_2d(*tensors):
         output (Tensor or tuple of Tensors)
 
     Example::
+
         >>> x = torch.tensor(1.)
         >>> x
         tensor(1.)
@@ -1195,6 +1199,7 @@ def atleast_3d(*tensors):
     r"""
     Returns a 3-dimensional view of each input tensor with zero dimensions.
     Input tensors with three or more dimensions are returned as-is.
+
     Args:
         input (Tensor or list of Tensors)
 

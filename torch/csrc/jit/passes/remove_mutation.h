@@ -10,9 +10,12 @@ namespace torch {
 namespace jit {
 
 struct MutationRemover {
-  MutationRemover(std::shared_ptr<Graph> graph)
+  MutationRemover(
+      std::shared_ptr<Graph> graph,
+      c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt)
       : aliasDb_(nullptr), graph_(std::move(graph)) {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    mutation_filter_ = mutation_filter;
   }
 
   void removeListMutation();
@@ -79,17 +82,21 @@ struct MutationRemover {
   void RemoveListMutation(Block* block);
   void RemoveTensorMutation(Block* block);
 
- private:
+  c10::optional<std::function<bool(Node*)>> mutation_filter_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
 };
 
-// Replaces in-place aten ops with their functional equivalents
-// when it can be proven that this does not change graph semantics
+// Removes list mutation with functional equivalents
 TORCH_API void RemoveListMutation(const std::shared_ptr<Graph>& graph);
 
-// Removes list mutation with functional equivalents
-TORCH_API void RemoveTensorMutation(const std::shared_ptr<Graph>& graph);
+// Replaces in-place aten ops with their functional equivalents
+// when it can be proven that this does not change graph semantics
+// if `mutation_filter` is present, the pass will only attempt to
+// remove mutation on nodes which return true for the filter
+TORCH_API void RemoveTensorMutation(
+    const std::shared_ptr<Graph>& graph,
+    c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);
 
 } // namespace jit
 } // namespace torch
