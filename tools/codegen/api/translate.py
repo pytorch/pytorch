@@ -98,7 +98,7 @@ def translate(
         # ctx[ConstRefCType(BaseCType("Tensor", "self"))] = "*this"
 
     def unsat(goal: CType) -> NoReturn:
-        ctx_desc = '\n'.join(f"  {t.cpp_type()} {e};" for t, e in ctx.items())
+        ctx_desc = '\n'.join(f"  {t.cpp_type()} {t.name}; // {e}" for t, e in ctx.items())
         raise UnsatError(f'''
 Failed to synthesize the expression "{goal.cpp_type()} {goal.name}".
 When I failed, the following bindings were available in the context:
