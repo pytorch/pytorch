@@ -4,6 +4,7 @@ import itertools
 import os
 import re
 from typing import IO, Dict, List
+import shutil
 
 import pytest
 
@@ -42,8 +43,8 @@ def run_mypy() -> None:
     The mypy results are cached in `OUTPUT_MYPY` for further use.
 
     """
-    # if os.path.isdir(CACHE_DIR):
-    #     shutil.rmtree(CACHE_DIR)
+    if os.path.isdir(CACHE_DIR):
+        shutil.rmtree(CACHE_DIR)
 
     for directory in (REVEAL_DIR,):
         # Run mypy
