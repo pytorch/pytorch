@@ -13,8 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from contextlib import contextmanager
-from typing import Any, Dict, Iterator
+from typing import Any, Dict
 
 
 import torch
@@ -1124,15 +1123,3 @@ _register_builtin(_jit_internal.is_scripting, "aten::is_scripting")
 _register_builtin(has_torch_function, "aten::has_torch_function")
 _register_builtin(has_torch_function_unary, "aten::has_torch_function")
 _register_builtin(has_torch_function_variadic, "aten::has_torch_function")
-
-# Context manager for globally hiding source ranges when printing graphs.
-# Note that these functions are exposed to Python as static members of the
-# Graph class, so mypy checks need to be skipped.
-@contextmanager
-def _hide_source_ranges() -> Iterator[None]:
-    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges # type: ignore
-    try:
-        torch._C.Graph.set_global_print_source_ranges(False) # type: ignore
-        yield
-    finally:
-        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges) # type: ignore
