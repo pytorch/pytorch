@@ -18,10 +18,12 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
         channels_size(input1) % 4 == 0,
         "Vulkan binary elementwise ops require channel to be a multiple of 4 to broadcast along batch dimension!")
   }
+
   const uint32_t input1_h = height_size(input1);
   const uint32_t input1_w = width_size(input1);
   const uint32_t input2_h = height_size(input2);
   const uint32_t input2_w = width_size(input2);
+
   const std::string broadcast_error_msg =
       "Incompatible input dimensions for broadcasting for Vulkan binary elementwise op!";
   if (input1_h != input2_h) {
@@ -32,8 +34,7 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
       TORCH_CHECK(input1_h == 1, broadcast_error_msg);
       TORCH_CHECK(input1_w == input2_w || input1_w == 1, broadcast_error_msg);
     }
-  }
-  else if (input1_w != input2_w) {
+  } else if (input1_w != input2_w) {
     if (input1_w > input2_w) {
       TORCH_CHECK(input2_w == 1, broadcast_error_msg);
     } else if (input2_w > input1_w) {
@@ -43,15 +44,13 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
 }
 
 bool broadcast_first_input(const vTensor& input1, const vTensor& input2) {
-  if ((input2.extents().data[1u] > 1 && input1.extents().data[1u] == 1) ||
+  return (
+      (input2.extents().data[1u] > 1 && input1.extents().data[1u] == 1) ||
       (input2.extents().data[2u] > 1 && input1.extents().data[2u] == 1) ||
-      input2.extents().data[0u] > input1.extents().data[0u]) {
-    return true;
-  }
-  return false;
+      input2.extents().data[0u] > input1.extents().data[0u]);
 }
 
-Tensor binary_elementwise_scalar(
+Tensor arithmetic_scalar(
     const Tensor& self_arg,
     const Scalar other,
     const c10::optional<Scalar> alpha_arg,
@@ -111,7 +110,7 @@ Tensor binary_elementwise_scalar(
   return convert(v_output);
 }
 
-Tensor& binary_elementwise_scalar_(
+Tensor& arithmetic_scalar_(
     Tensor& self,
     const Scalar other,
     const c10::optional<Scalar> alpha_arg,
@@ -166,7 +165,7 @@ Tensor& binary_elementwise_scalar_(
   return self;
 }
 
-Tensor binary_elementwise_tensor(
+Tensor arithmetic_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar> alpha_arg,
@@ -197,7 +196,6 @@ Tensor binary_elementwise_tensor(
         uvec3 input1_extents;
         uint32_t fill_1;
         uvec3 input2_extents;
-        uint32_t fill_2;
         float alpha;
       } block{
           v_output.extents(),
@@ -205,7 +203,6 @@ Tensor binary_elementwise_tensor(
           v_self.extents(),
           0u,
           v_other.extents(),
-          0u,
           alpha,
       };
 
@@ -242,7 +239,7 @@ Tensor binary_elementwise_tensor(
   return convert(v_output);
 }
 
-Tensor& binary_elementwise_tensor_(
+Tensor& arithmetic_tensor_(
     Tensor& self,
     const Tensor& other_arg,
     const c10::optional<Scalar> alpha_arg,
@@ -269,13 +266,11 @@ Tensor& binary_elementwise_tensor_(
         uvec3 extents;
         uint32_t fill_0;
         uvec3 input_extents;
-        uint32_t fill_1;
         float alpha;
       } block{
           v_self.extents(),
           0u,
           v_other.extents(),
-          0u,
           alpha,
       };
 
@@ -314,12 +309,12 @@ Tensor add_scalar(
     const Tensor& self_arg,
     const Scalar other,
     const Scalar alpha) {
-  return binary_elementwise_scalar(
+  return arithmetic_scalar(
       self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
 }
 
 Tensor& add_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
-  return binary_elementwise_scalar_(
+  return arithmetic_scalar_(
       self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
 }
 
@@ -327,12 +322,12 @@ Tensor add_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar alpha) {
-  return binary_elementwise_tensor(
+  return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
 
 Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar alpha) {
-  return binary_elementwise_tensor_(
+  return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
 }
 
@@ -340,65 +335,77 @@ Tensor sub_scalar(
     const Tensor& self_arg,
     const Scalar other,
     const Scalar alpha) {
-  return binary_elementwise_scalar(
-      self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(sub_scalar));
+  return arithmetic_scalar(
+      self_arg,
+      other,
+      c10::optional<Scalar>(-1 * alpha.to<float>()),
+      VK_KERNEL(add_scalar));
 }
 
 Tensor& sub_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
-  return binary_elementwise_scalar_(
-      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(sub_scalar_));
+  return arithmetic_scalar_(
+      self,
+      other,
+      c10::optional<Scalar>(-1 * alpha.to<float>()),
+      VK_KERNEL(add_scalar_));
 }
 
 Tensor sub_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar alpha) {
-  return binary_elementwise_tensor(
+  return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
 
 Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar alpha) {
-  return binary_elementwise_tensor_(
+  return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
 }
 
 Tensor mul_scalar(const Tensor& self_arg, const Scalar other) {
-  return binary_elementwise_scalar(
+  return arithmetic_scalar(
       self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar));
 }
 
 Tensor& mul_scalar_(Tensor& self, const Scalar other) {
-  return binary_elementwise_scalar_(
+  return arithmetic_scalar_(
       self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
-  return binary_elementwise_tensor(
+  return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul));
 }
 
 Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
-  return binary_elementwise_tensor_(
+  return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
 }
 
 Tensor div_scalar(const Tensor& self_arg, const Scalar other) {
-  return binary_elementwise_scalar(
-      self_arg, other, c10::optional<Scalar>(), VK_KERNEL(div_scalar));
+  return arithmetic_scalar(
+      self_arg,
+      1.0 / other.to<float>(),
+      c10::optional<Scalar>(),
+      VK_KERNEL(mul_scalar));
 }
 
 Tensor& div_scalar_(Tensor& self, const Scalar other) {
-  return binary_elementwise_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(div_scalar_));
+  return arithmetic_scalar_(
+      self,
+      1.0 / other.to<float>(),
+      c10::optional<Scalar>(),
+      VK_KERNEL(mul_scalar_));
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
-  return binary_elementwise_tensor(
+  return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div));
 }
 
 Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
-  return binary_elementwise_tensor_(
+  return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_));
 }
 

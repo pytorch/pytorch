@@ -11,7 +11,7 @@ layout(set = 0, binding = 2) uniform PRECISION                    sampler3D uInp
 layout(set = 0, binding = 3) uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 isize0;
-  ivec4 isize1;
+  ivec3 isize1;
   float alpha;
 } uBlock;
 
