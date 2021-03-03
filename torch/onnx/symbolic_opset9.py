@@ -1990,8 +1990,8 @@ def repeat_interleave(g, self, repeats, dim=None):
         raise RuntimeError("repeats must be 0-dim or 1-dim tensor")
 
     final_splits = list()
-    r_splits = g.op("Split", repeats, split_i=[1] * reps, axis_i=0, outputs=reps)
-    i_splits = g.op("Split", input, split_i=[1] * reps, axis_i=dim, outputs=reps)
+    r_splits = sym_help._repeat_interleave_split_helper(g, repeats, reps, 0)
+    i_splits = sym_help._repeat_interleave_split_helper(g, input, reps, dim)
     input_sizes[dim], input_sizes_temp[dim] = -1, 1
     for idx, r_split in enumerate(r_splits):
         i_split = unsqueeze(g, i_splits[idx], dim + 1)

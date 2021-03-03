@@ -598,6 +598,15 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset11 import scatter  # type: ignore
     return scatter(g, self, dim, index, src)
 
+def _repeat_interleave_split_helper(g, self, reps, dim):
+    if _export_onnx_opset_version <= 10:
+        return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
+    else:
+        from torch.onnx.symbolic_opset11 import split  # type: ignore
+        from torch.onnx.symbolic_opset9 import expand
+        repeats = g.op("Constant", value_t=torch.tensor([reps]))
+        repeats = expand(g, g.op("Constant", value_t=torch.tensor([1])), repeats, None)
+    return split(g, self, repeats, dim, _outputs=reps)
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     def _is_all_integral(scalars):
