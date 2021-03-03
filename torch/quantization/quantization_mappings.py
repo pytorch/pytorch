@@ -89,7 +89,7 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.RNNCell: nnqd.RNNCell,
 }
 
-# Whitelist for propagating the qconfig
+# Allowlist for propagating the qconfig
 _INCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
     nn.Sequential,
 }
@@ -110,6 +110,14 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Sigmoid: default_affine_fixed_qparams_fake_quant,
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
+
+def no_observer_set() -> Set[Any]:
+    r"""These modules cannot have observers inserted by default."""
+    no_observers = set([
+        nn.quantizable.LSTM,
+        nn.quantizable.MultiheadAttention
+    ])
+    return no_observers
 
 def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training static quantization

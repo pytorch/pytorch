@@ -669,7 +669,7 @@ class TestAssert(TestCase):
             ms(torch.tensor([False], dtype=torch.bool))
 
 
-@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only.")
+@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()

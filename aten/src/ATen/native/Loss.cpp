@@ -1,10 +1,3 @@
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-#include <math.h>
-#endif
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
@@ -247,7 +240,7 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     }
 
     if (full) {
-        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target);
+        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * c10::pi<double> * target);
         loss += stirling_term.masked_fill(target <= 1, 0);
     }
 

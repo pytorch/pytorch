@@ -210,7 +210,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  pip install --user dataclasses
+  pip install --user dataclasses typing_extensions
 
   $PYTHON setup.py install --user
 

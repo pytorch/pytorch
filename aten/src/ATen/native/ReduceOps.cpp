@@ -413,6 +413,90 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
   return result.scatter_add_(dim, indices, grad);
 }
 
+static Tensor prepend_append_on_dim(const Tensor& self, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, int64_t dim) {
+  // Helper for diff that handles prepending and appending when at least one is present
+  TORCH_INTERNAL_ASSERT(prepend.has_value() || append.has_value(), "either prepend or append must be have value");
+  if (!prepend.has_value() && append.has_value()) {
+    return at::cat({self, append.value()}, dim);
+  } else if (prepend.has_value() && !append.has_value()) {
+    return at::cat({prepend.value(), self}, dim);
+  } else {
+    return at::cat({prepend.value(), self, append.value()}, dim);
+  }
+}
+
+static inline void diff_check_compatible_shape(const Tensor& self, const c10::optional<Tensor>&other, int64_t dim) {
+  // Helper for diff that checks whether the shape of the tensor to prepend or append
+  // is compatible with that of input
+  if (other.has_value()) {
+    int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim(), false);
+
+    TORCH_CHECK(
+        other.value().dim() == self.dim(),
+        "diff expects prepend or append to be the same dimension as input");
+
+    for (int i = 0; i < other.value().dim(); i++) {
+      TORCH_CHECK(
+          other.value().size(i) == self.size(i) || i == wrapped_dim,
+          "diff expects the shape of tensor to prepend or append to match that of"
+          " input except along the differencing dimension;"
+          " input.size(", i, ") = ", self.size(i), ", but got"
+          " tensor.size(", i, ") = ", other.value().size(i));
+    }
+  }
+}
+
+static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>&prepend, const c10::optional<Tensor>& append) {
+  // Helper for diff that checks whether its parameters are valid
+  TORCH_CHECK(
+      n == 1,
+      "diff only supports n = 1 currently. Please file an issue at"
+      " https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&template=feature-request.md"
+      " if your use case requires supporting higher-order differences");
+
+  TORCH_CHECK(
+      self.dim() >= 1,
+      "diff expects input to be at least one-dimensional");
+
+  diff_check_compatible_shape(self, prepend, dim);
+  diff_check_compatible_shape(self, append, dim);
+}
+
+static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
+  auto out_len = self.size(dim) - 1;
+  if (self.dtype() == at::kBool) {
+    return at::logical_xor(at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+  }
+  return at::narrow(self, dim, 1, out_len) - at::narrow(self, dim, 0, out_len);
+}
+
+Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append) {
+  diff_check(self, n, dim, prepend, append);
+  if (!prepend.has_value() && !append.has_value()) {
+    return diff_helper(self, n, dim);
+  } else {
+    auto a = prepend_append_on_dim(self, prepend, append, dim);
+    return diff_helper(a, n, dim);
+  }
+}
+
+static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
+  auto out_len = self.size(dim) - 1;
+  if (self.dtype() == at::kBool) {
+    return at::logical_xor_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+  }
+  return at::sub_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+}
+
+Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, Tensor& result) {
+  diff_check(self, n, dim, prepend, append);
+  if (!prepend.has_value() && !append.has_value()) {
+    return diff_out_helper(self, n, dim, result);
+  } else {
+    auto a = prepend_append_on_dim(self, prepend, append, dim);
+    return diff_out_helper(a, n, dim, result);
+  }
+}
 
 // ALL REDUCE #################################################################
 
@@ -446,7 +530,7 @@ Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
 }
 Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::sum_out(result, self, dim, keepdim, dtype);
 }
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
@@ -482,7 +566,7 @@ Tensor nansum(const Tensor &self, c10::optional<ScalarType> dtype) {
 }
 
 Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::nansum_out(result, self, dim, keepdim, dtype);
 }
 
@@ -502,9 +586,12 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
   Tensor result;
+  // Returns the ScalarType of the self tensor if the tensor is non integral type
+  // In the case, self is an integer type tensor, at::kLong is return since promote_integers
+  // is set to true
   ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
   result = at::empty({}, self.options().dtype(dtype));
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     accscalar_t sum = 0;
     const auto* t_data = self.data_ptr<scalar_t>();
@@ -521,25 +608,24 @@ Tensor trace_cpu(const Tensor& self) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
 
-    // all integer types get promoted to kLong
-    if (result.scalar_type() == at::kLong) {
-      *result.data_ptr<int64_t>() = sum;
-    } else {
-      *result.data_ptr<scalar_t>() = sum;
-    }
+    c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
+      // all integer types get promoted to kLong
+      [&] (auto _) { *result.data_ptr<int64_t>() = _(sum); },  // then-case, invalid for non-integral types
+      [&] (auto _) { *result.data_ptr<scalar_t>() = _(sum); }  // else-case, invalid for integral types
+    );
   });
 
   return result;
 }
 
 Tensor prod(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   native::prod_out_impl(result, self, dim, keepdim, dtype);
   return result;
 }
 
 Tensor prod(const Tensor &self, c10::optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, {}, false, dtype);
   return at::native::prod_out_impl(result, self, {}, false, dtype);
 }
 
@@ -596,7 +682,7 @@ Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
 }
 
 Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
-  Tensor result;
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
 }
 
@@ -698,7 +784,7 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
     TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
                 "norm only supports floating-point dtypes");
 
-    Tensor result;
+    Tensor result = create_reduction_result(self, IntArrayRef{}, false, c10::nullopt);
     return at::native::norm_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
   }
 }
@@ -718,7 +804,7 @@ static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool
     // are accessed with a different API than strided tensors
     return at::native_norm(self, p, dim, keepdim, opt_dtype);
   } else {
-    Tensor result;
+    Tensor result = create_reduction_result(self, dim, keepdim, opt_dtype);
     return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
   }
 }
@@ -843,7 +929,7 @@ Tensor any(const Tensor& self) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
-  
+
   // Refer [all, any : uint8 compatibility]
   Tensor result;
   ScalarType out_dtype;

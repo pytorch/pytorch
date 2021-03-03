@@ -327,7 +327,6 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    TORCH_CHECK(prop->major >= 8, "BFloat16 bgemm in CUDA requires Ampere or later GPU");
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
                                     opa, opb, (int)m, (int)n, (int)k,
                                     (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
@@ -343,7 +342,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
   #else
-    TORCH_CHECK(false, "BFloat16 bgemm in CUDA requires Ampere or later GPU");
+    TORCH_CHECK(false, "CUDA BFloat16 bgemm requires CUDA 11 or later");
   #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
 #endif // __HIP_PLATFORM_HCC__
@@ -550,37 +549,26 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::BFloat16);
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  if (prop->major >= 8) {
-    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
-    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-    TORCH_CUDABLAS_CHECK(cublasGemmEx(
-        handle,
-        opa,
-        opb,
-        m,
-        n,
-        k,
-        &falpha,
-        a,
-        CUDA_R_16BF,
-        lda,
-        b,
-        CUDA_R_16BF,
-        ldb,
-        &fbeta,
-        c,
-        CUDA_R_16BF,
-        ldc,
-        CUDA_R_32F,
-        CUBLAS_GEMM_DFALT_TENSOR_OP));
-    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
-    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-  } else {
-    TORCH_CHECK(false, "BFloat16 gemm in CUDA requires Ampere or later GPU");
-  }
+  TORCH_CUDABLAS_CHECK(cublasGemmEx(
+      handle,
+      opa,
+      opb,
+      m,
+      n,
+      k,
+      &falpha,
+      a,
+      CUDA_R_16BF,
+      lda,
+      b,
+      CUDA_R_16BF,
+      ldb,
+      &fbeta,
+      c,
+      CUDA_R_16BF,
+      ldc,
+      CUDA_R_32F,
+      CUBLAS_GEMM_DFALT_TENSOR_OP));
 }
 #endif
 

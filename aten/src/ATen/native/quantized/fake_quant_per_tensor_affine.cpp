@@ -10,18 +10,19 @@ namespace at {
 namespace native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
-DEFINE_DISPATCH(fake_quant_tensor_stub);
-DEFINE_DISPATCH(fake_quant_grad_tensor_stub);
+DEFINE_DISPATCH(fake_quant_tensor_cachemask_stub);
 DEFINE_DISPATCH(fake_quant_grad_learnable_tensor_stub);
 
 /* Fake-quantizes the 'inputs' tensor.
+
 Args:
-  X: Forward input tensor.
+  self: Forward input tensor.
   dY: Backward input tensor (_backward op only).
   scale: scale of per tensor affine quantization
   zero_point: zero_point of per tensor affine quantization
   quant_min: minimum quantized value
   quant_max: maximum quantized value
+
 Returns:
   Quantized tensor (double dtype).
 
@@ -32,7 +33,33 @@ Tensor fake_quantize_per_tensor_affine(
     int64_t zero_point,
     int64_t quant_min,
     int64_t quant_max) {
-  TORCH_CHECK(self.scalar_type() == ScalarType::Float);
+  const auto res = at::fake_quantize_per_tensor_affine_cachemask(
+      self, scale, zero_point, quant_min, quant_max);
+  return std::get<0>(res);
+}
+
+/* Fake-quantizes the 'inputs' tensor, saving a mask for the backward pass.
+
+This is numerically equivalent to `fake_quantize_per_tensor_affine`,
+but has a lower memory overhead in the backward pass.
+
+Args:
+  self: Forward input tensor.
+  scale: scale of per tensor affine quantization
+  zero_point: zero_point of per tensor affine quantization
+  quant_min: minimum quantized value
+  quant_max: maximum quantized value
+
+Returns:
+  Quantized tensor (double dtype).
+  Mask (bool dtype).
+*/
+std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
+    const Tensor& self,
+    double scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
   TORCH_CHECK(
       quant_min <= quant_max,
       "`quant_min` should be less than or \
@@ -42,57 +69,36 @@ Tensor fake_quantize_per_tensor_affine(
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
   auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
-  fake_quant_tensor_stub(
-      self.device().type(), Y, self, scale, zero_point, quant_min, quant_max);
-  return Y;
+  auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
+  fake_quant_tensor_cachemask_stub(
+      self.device().type(), Y, mask, self, scale, zero_point, quant_min, quant_max);
+  // TODO(future, optional): look into packing the mask further (BoolTensor uses
+  //   1 byte per element, we only need 1 bit per element).
+  return std::make_tuple(Y, mask);
 }
 
-/* Backward path to fake-quantize the 'inputs' tensor.
+/* Backward path to fake-quantize the 'inputs' tensor, with mask.
 
 Args:
-  X: Forward input tensor.
-  dY: Backward input tensor.
-  scale: scale of per tensor affine quantization
-  zero_point: zero_point of per tensor affine quantization
-  quant_min: minimum quantized value
-  quant_max: maximum quantized value
-  quant_delay: Count of global steps for which to delay the quantization.
-               See note in forward.
-  iter: The current quantization iteration used for `quant_delay`.
+  dY: output grad.
+  mask: mask tensor from the forward pass.
+
 Returns:
-  Quantized tensor (double dtype).
-
-Notes:
-  - quant_delay might be set to non-zero to help weights stabilize in the
-    beginning of the training.
-  - quantization range [0, 2^bits - 1]
+  dX (input grad).
 */
-
-Tensor fake_quantize_per_tensor_affine_backward(
+Tensor fake_quantize_per_tensor_affine_cachemask_backward(
     const Tensor& dY,
-    const Tensor& X,
-    double scale,
-    int64_t zero_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(X.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(X.numel() == dY.numel(), "`X` and `dY` are not the same size");
-  TORCH_CHECK(
-      quant_min <= quant_max,
-      "`quant_min` should be less than or \
-        equal to `quant_max`.");
-  TORCH_CHECK(
-      zero_point >= quant_min && zero_point <= quant_max,
-      "`zero_point` must be between `quant_min` and `quant_max`.");
-  if (X.numel() <= 0) {
-    return X;
+    const Tensor& mask) {
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
+  TORCH_CHECK(mask.numel() == dY.numel(),
+      "`mask` and `dY` are not the same size: ",
+      "`mask` is size ", mask.numel(), " and `dY` is size ", dY.numel());
+  if (dY.numel() <= 0) {
+    return dY;
   }
-
-  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  fake_quant_grad_tensor_stub(
-      X.device().type(), dX, X, dY, scale, zero_point, quant_min, quant_max);
-  return dX;
+  // Note: no additional kernels needed, since mask is pre-computed
+  // and we can use the existing tensor multiplication kernels.
+  return dY * mask;
 }
 
 int64_t _get_zero_point_from_tensor(
@@ -111,7 +117,8 @@ Tensor _fake_quantize_learnable_per_tensor_affine(
     const Tensor& scale,
     const Tensor& zero_point,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    double grad_factor) {
   float scale_val = scale[0].item<float>();
   int64_t zero_point_val = native::_get_zero_point_from_tensor(zero_point, quant_min, quant_max, true);
   return native::fake_quantize_per_tensor_affine(
@@ -124,7 +131,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
     const Tensor& scale,
     const Tensor& zero_point,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    double grad_factor) {
   /* The gradients for scale and zero point are calculated as below:
      Let Xfq be the fake quantized version of X.
      Let Xq be the quantized version of X (clamped at qmin and qmax).
@@ -176,7 +184,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
     .build();
 
   fake_quant_grad_learnable_tensor_stub(
-    X.device().type(), iter, scale_val, inv_scale_val, zero_point_val, quant_min, quant_max);
+    X.device().type(), iter, scale_val, inv_scale_val, zero_point_val, quant_min, quant_max, grad_factor);
 
   // The total sums over the scale and zero point gradient vectors are what will be returned in the end.
   auto dScale = dScale_vec.sum().unsqueeze(0).to(scale.device());

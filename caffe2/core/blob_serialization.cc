@@ -354,9 +354,17 @@ void TensorSerializer::Serialize(
     } break;
     case TensorProto_DataType_ZERO_COLLISION_HASH: {
       CAFFE_ENFORCE(
-          false,
-          "Serialization for zero collision hash type is supported by specialized serializer ZeroCollisionIdHashSerializer");
+        false,
+        "Serialization for zero collision hash type is supported by "
+        "specialized serializer ZeroCollisionIdHashSerializer");
     } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Serialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferSerialier");
+    } break;
+
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
@@ -562,6 +570,16 @@ void TensorDeserializer::DeserializeToTensor(
       tensor->numel());
   auto chunkSize = chunkEnd - chunkBegin;
 
+  if (!tensor_proto.has_data_type()) {
+    // If the data_type field is not set, this either means it was not present
+    // in the serialized data, or it was set to an enum value that we don't know
+    // about.  This likely means that the serialized data was written by a
+    // different version of the software using a new data type value that we
+    // don't understand.
+    throw std::runtime_error(
+        "Cannot deserialize tensor: unrecognized data type");
+  }
+
   switch (tensor_proto.data_type()) {
     case TensorProto_DataType_FLOAT:
       detail::CopyFromProtoAsIs(
@@ -653,8 +671,15 @@ void TensorDeserializer::DeserializeToTensor(
     } break;
     case TensorProto_DataType_ZERO_COLLISION_HASH: {
       CAFFE_ENFORCE(
-          false,
-          "Deserialization for zero collision hash type is supported by specialized deserializer ZeroCollisionIdHashDeserializer");
+        false,
+        "Deserialization for zero collision hash type is supported by "
+        "specialized deserializer ZeroCollisionIdHashDeserializer");
+    } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Deserialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferDeserialier");
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
   }

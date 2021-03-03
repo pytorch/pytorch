@@ -22,6 +22,10 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
+  export BUILD_SPLIT_CUDA=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
@@ -138,6 +142,12 @@ test_aten() {
     aten/tools/run_tests.sh build/bin
     assert_git_not_dirty
   fi
+}
+
+test_without_numpy() {
+  pushd "$(dirname "${BASH_SOURCE[0]}")"
+  python -c "import sys;sys.path.insert(0, 'fake_numpy');from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase().assertRaises(RuntimeError, lambda: x.numpy())"
+  popd
 }
 
 # pytorch extensions require including torch/extension.h which includes all.h
@@ -354,6 +364,12 @@ test_vec256() {
   fi
 }
 
+test_torch_deploy() {
+  python torch/csrc/deploy/example/generate_examples.py
+  build/bin/test_deploy
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -371,12 +387,16 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
+    test_torch_deploy
+  fi
+  test_without_numpy
   install_torchvision
   test_python_shard1
+  test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
   test_python_shard2
-  test_aten
   test_libtorch
   test_custom_script_ops
   test_custom_backend
