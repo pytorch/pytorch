@@ -287,6 +287,7 @@ Loss Functions
     nn.MarginRankingLoss
     nn.HingeEmbeddingLoss
     nn.MultiLabelMarginLoss
+    nn.HuberLoss
     nn.SmoothL1Loss
     nn.SoftMarginLoss
     nn.MultiLabelSoftMarginLoss
