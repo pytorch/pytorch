@@ -25,6 +25,7 @@ from torch.jit._script import (
     CompilationUnit,
     ScriptFunction,
     _unwrap_optional,
+    _hide_source_ranges,
 )
 from torch.jit._trace import (
     trace,
