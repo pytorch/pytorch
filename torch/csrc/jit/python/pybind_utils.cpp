@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include "jit/python/module_python.h"
 
 #include <torch/csrc/jit/python/python_ivalue.h>
 
@@ -158,19 +159,16 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return mod.value()._ivalue();
       }
 
-      // Check if the obj is a ScriptClass.
-      if (py::isinstance(
-              obj,
-              py::module::import("torch.jit").attr("RecursiveScriptClass"))) {
-        auto inst = py::cast<Object>(obj.attr("_c"));
-        return inst._ivalue();
+      // Check if the obj is a ScriptObject.
+      if (auto script_obj = as_object(object)) {
+        return script_obj.value()._ivalue();
       }
 
-      try {
-        Object* script_object = object.cast<Object*>();
-        return script_object->_ivalue();
-      } catch (...) {
-      }
+      // try {
+      //   Object* script_object = object.cast<Object*>();
+      //   return script_object->_ivalue();
+      // } catch (...) {
+      // }
 
       // otherwise is a normal class object, we create a fresh
       // ivalue::Object to use from the py object.
