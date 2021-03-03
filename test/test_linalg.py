@@ -4180,6 +4180,7 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_orgqr(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -4232,6 +4233,7 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfRocm
     def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
