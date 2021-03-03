@@ -162,7 +162,7 @@ class PowerSGDState(object):
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
-        if bucket.get_index() == 0:
+        if bucket.is_the_last_bucket_to_allreduce():
             self.iter += 1
 
         if self.iter == self.start_powerSGD_iter:
@@ -171,7 +171,9 @@ class PowerSGDState(object):
             )
 
 
-def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
+def powerSGD_hook(
+    state: PowerSGDState, bucket: dist._GradBucket
+) -> torch.futures.Future:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -268,12 +270,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         input_tensor_cp = torch.clone(input_tensor).detach()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
-    tensors = [
-        input_tensor[offset : offset + length].view(sizes)
-        for offset, length, sizes in zip(
-            bucket.get_offsets(), bucket.get_lengths(), bucket.get_sizes_list()
-        )
-    ]
+    tensors = bucket.get_per_parameter_tensors()
 
     # Step I: Divide all the tensors into two groups,
     # one will be compressed before allreduce and the other will be directly allreduced without compression.
@@ -455,7 +452,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     )
 
 
-def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
+def batched_powerSGD_hook(
+    state: PowerSGDState, bucket: dist._GradBucket
+) -> torch.futures.Future:
     r"""
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
