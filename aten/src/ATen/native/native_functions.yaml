@@ -8986,15 +8986,17 @@
   dispatch:
     DefaultBackend: linalg_cholesky_out
 
-# torch.linalg.det, alias for torch.det
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    DefaultBackend: linalg_det
 
+# torch.det, alias for torch.linalg.det
 - func: det(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: det
+    Math: det
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg

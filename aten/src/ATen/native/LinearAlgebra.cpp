@@ -45,12 +45,12 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
-// torch.linalg.det, alias for torch.det
-Tensor linalg_det(const Tensor& self) {
-  return self.det();
+// torch.det, alias for torch.linalg.det
+Tensor det(const Tensor& self) {
+  return at::linalg_det(self);
 }
 
-Tensor det(const Tensor& self) {
+Tensor linalg_det(const Tensor& self) {
   squareCheckInputs(self);
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
               "Expected a floating point tensor as input");

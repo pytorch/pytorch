@@ -2280,7 +2280,7 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
 
 // Invertible case is derived from Jacobi's formula, and also can be found at:
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
-Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
+Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
