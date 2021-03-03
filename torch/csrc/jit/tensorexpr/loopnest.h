@@ -32,8 +32,7 @@ class TORCH_API LoopNest {
 
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
-  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs)
-      : root_stmt_(stmt), output_bufs_(output_bufs) {}
+  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs);
 
   // A constructor for building a LoopNest from another loopnest. It clones the
   // other loopnest's stmt.
