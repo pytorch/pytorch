@@ -23,6 +23,7 @@ class FaultyProcessGroupRpcBackendOptions(ProcessGroupRpcBackendOptions):
 class FaultyProcessGroupAgent(ProcessGroupAgent):
     def __init__(
         self,
+        store: Store,
         name: str,
         process_group: ProcessGroup,
         num_send_recv_threads: int,
