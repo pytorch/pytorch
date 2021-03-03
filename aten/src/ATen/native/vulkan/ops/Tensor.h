@@ -2,7 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/ATen.h>
+#include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <c10/util/accumulate.h>
 
