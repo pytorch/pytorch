@@ -75,6 +75,7 @@ allow_list = [
     ("aten::mkldnn_linear", datetime.date(2021, 3, 2)),
     ("aten::linalg_multi_dot", datetime.date(2021, 3, 25)),
     ("aten::empty_meta", datetime.date(2021, 4, 1)),
+    ("aten::batch_norm_backward_elemt", datetime.date(2021, 5, 1)),
 ]
 
 def allow_listed(schema, allow_list):
