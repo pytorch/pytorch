@@ -106,7 +106,17 @@ ProcessGroupMPI::AsyncWork::AsyncWork(at::Tensor tensor, MPI_Request request, co
   // from user perspective, run profiling end callbacks as well.
   if (request_ == MPI_REQUEST_NULL &&
       ProcessGroup::Work::recordFunctionEndCallback_) {
+        LOG(INFO) << "Executing recordfunction end callback";
     ProcessGroup::Work::recordFunctionEndCallback_();
+    ProcessGroup::Work::recordFunctionEndCallback_ = nullptr;
+    LOG(INFO) << "Done with RF end callback";
+  } else {
+    LOG(INFO) << "Not running record function end callback.";
+    if (request_ != MPI_REQUEST_NULL) {
+      LOG(INFO) << "Request is NOT null";
+    } else {
+      LOG(INFO) << "rf end cb seems to be null.";
+    }
   }
 }
 
