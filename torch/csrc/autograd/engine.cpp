@@ -19,6 +19,7 @@
 #include <c10/core/StreamGuard.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -225,11 +226,18 @@ Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority
 Engine::~Engine() {
+  // Under some conditions, autograd threads can hang on shutdown
+  // Do not wait for them to shutdown indefinitely but rely on timeout
+  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  if (!wait_duration_str) {
+    wait_duration_str = "10.0";
+  }
+  auto wait_duration = std::atof(wait_duration_str);
   bool noBackward = true;
   for (auto& queue: device_ready_queues_) {
     noBackward =  noBackward && queue->empty();
   }
-  if (noBackward) {
+  if (noBackward && wait_duration > 0.0f) {
     for (auto& queue : device_ready_queues_) {
      queue->pushShutdownTask();
     }
@@ -237,9 +245,15 @@ Engine::~Engine() {
     // Because CRT terminates DLL threads before calling
     // global object destructors
 #if !defined(_WIN32) || defined(C10_USE_MSVC_STATIC_RUNTIME)
+
+    using namespace std::chrono_literals;
+    // Set a deadline for how long it is OK to wait device threads to shutdown
+    auto wait_deadline = std::chrono::steady_clock::now() + wait_duration * 1.0s;
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
-      non_reentrant_device_thread_condvar_.wait(lk);
+      if (non_reentrant_device_thread_condvar_.wait_until(lk, wait_deadline) == std::cv_status::timeout) {
+        break;
+      }
     }
 #endif
   }
@@ -1092,7 +1106,7 @@ auto Engine::start_device_threads() -> void {
   // Wait for the threads to start
   {
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-    while(non_reentrant_device_thread_count_.load() != num_devices) {
+    while(non_reentrant_device_thread_count_.load() != static_cast<uint32_t>(num_devices)) {
       non_reentrant_device_thread_condvar_.wait(lk);
     }
   }
