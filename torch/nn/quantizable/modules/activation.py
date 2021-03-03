@@ -39,8 +39,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         kdim: total number of features in key. Default: None.
         vdim: total number of features in value. Default: None.
 
-        Note: if kdim and vdim are None, they will be set to embed_dim such that
-        query, key, and value have the same number of features.
+    Note that if :attr:`kdim` and :attr:`vdim` are None, they will be set
+    to :attr:`embed_dim` such that query, key, and value have the same
+    number of features.
 
     Examples::
 
