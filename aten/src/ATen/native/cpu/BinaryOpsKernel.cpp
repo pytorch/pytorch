@@ -648,6 +648,28 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
       });
 }
 
+void huber_kernel(TensorIterator& iter, double delta) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
+    const scalar_t delta_val(delta);
+    const Vec delta_val_vec(delta_val);
+    const Vec point_five_vec(static_cast<scalar_t>(0.5));
+    cpu_kernel_vec(
+      iter,
+      [&delta_val](scalar_t a, scalar_t b) -> scalar_t {
+        auto z = std::abs(a - b);
+        return z < delta_val ? static_cast<scalar_t>(0.5) * z * z :
+        delta_val * (z - static_cast<scalar_t>(0.5) * delta_val);
+      },
+      [&delta_val_vec, &point_five_vec](Vec a, Vec b) {
+        auto z = (a - b).abs();
+        return Vec::blendv(point_five_vec * z * z,
+          delta_val_vec * (z - point_five_vec * delta_val_vec),
+          z >= delta_val_vec);
+    });
+  });
+}
+
 void sigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
@@ -962,6 +984,7 @@ REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
+REGISTER_DISPATCH(huber_stub, &huber_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
