@@ -554,11 +554,13 @@ endif()
 
 # ---[ Vulkan deps
 if(USE_VULKAN)
-  set(Vulkan_LIBS)
+  set(Vulkan_DEFINES)
   set(Vulkan_INCLUDES)
+  set(Vulkan_LIBS)
   include(${CMAKE_CURRENT_LIST_DIR}/VulkanDependencies.cmake)
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${Vulkan_LIBS})
+  string(APPEND CMAKE_CXX_FLAGS ${Vulkan_DEFINES})
   include_directories(SYSTEM ${Vulkan_INCLUDES})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${Vulkan_LIBS})
 endif()
 
 # ---[ gflags
