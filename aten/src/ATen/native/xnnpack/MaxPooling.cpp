@@ -91,7 +91,7 @@ bool use_max_pool2d(
   return xnnpack::internal::available() &&
       // Input
       (4 == input.dim()) &&
-      (c10::DeviceType::CPU == input.device().type()) &&
+      (input.device().is_cpu()) &&
       (kFloat == input.scalar_type()) &&
       !input.requires_grad() &&
       // Kernel
