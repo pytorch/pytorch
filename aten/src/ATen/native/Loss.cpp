@@ -28,6 +28,10 @@ DEFINE_DISPATCH(mse_stub);
 DEFINE_DISPATCH(mse_backward_stub);
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
+  TORCH_CHECK(
+      target.dim() == 1,
+      "1D target tensor expected, multi-target not supported");
+
   auto prod_sum = (input1 * input2).sum(1);
   auto mag_square1 = (input1 * input1).sum(1) + EPSILON;
   auto mag_square2 = (input2 * input2).sum(1) + EPSILON;
