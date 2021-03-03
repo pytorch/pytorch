@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
     TEST_WITH_TSAN,
+    IS_WINDOWS,
 )
 
 
@@ -386,9 +387,15 @@ class TCPStoreTest(TestCase, StoreTestBase):
         if any([p.exitcode != 0 for p in processes]):
             raise RuntimeError(error_message)
 
+    @unittest.skipIf(
+        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
+    )
     def test_multi_worker_with_fixed_world_size(self):
         self._multi_worker_helper(5)
 
+    @unittest.skipIf(
+        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
+    )
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(-1)
 
