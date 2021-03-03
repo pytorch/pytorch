@@ -40,11 +40,11 @@ bool available(
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
          (weight.size(Layout::Filter::width) > 0) &&
-         (c10::DeviceType::CPU == weight.device().type()) &&
+         (weight.device().is_cpu()) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       (c10::DeviceType::CPU == bias->device().type()) &&
+                                       (bias->device().is_cpu()) &&
                                        (kFloat == bias->scalar_type()) &&
                                        ((transposed ? (weight.size(Layout::Filter::input) == (bias->size(0) / groups))
                                                     : (weight.size(Layout::Filter::output) == (bias->size(0))))))
@@ -75,7 +75,7 @@ bool available(
 bool usable(const Tensor& input) {
        // Input
   return (4 == input.ndimension()) &&
-         (c10::DeviceType::CPU == input.device().type()) &&
+         (input.device().is_cpu()) &&
          (kFloat == input.scalar_type()) &&
          (input.size(Layout::Activation4D::batch) >= 0) &&
          (input.size(Layout::Activation4D::channels) > 0) &&
