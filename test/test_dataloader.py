@@ -2049,7 +2049,6 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
 
-
 class SimpleCustomBatch(object):
     def __init__(self, data):
         transposed_data = list(zip(*data))
@@ -2064,9 +2063,13 @@ class SimpleCustomBatch(object):
     def is_pinned(self):
         return self.inp.is_pinned() and self.tgt.is_pinned()
 
+# Workaround for https://github.com/pytorch/pytorch/issues/50661
+# Classes from  `__main__` can not be correctly unpickled from spawned module
+# See https://docs.python.org/3/library/multiprocessing.html#multiprocessing-programming
+self_module = __import__(os.path.splitext(os.path.basename(__file__))[0])
 
 def collate_wrapper(batch):
-    return SimpleCustomBatch(batch)
+    return self_module.SimpleCustomBatch(batch)
 
 
 def collate_into_packed_sequence(batch):
@@ -2097,7 +2100,7 @@ class TestCustomPinFn(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_custom_batch_pin(self):
         test_cases = [
-            (collate_wrapper, SimpleCustomBatch),
+            (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
@@ -2111,7 +2114,7 @@ class TestCustomPinFn(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_custom_batch_pin_worker(self):
         test_cases = [
-            (collate_wrapper, SimpleCustomBatch),
+            (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
