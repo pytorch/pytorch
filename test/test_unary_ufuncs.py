@@ -1339,39 +1339,6 @@ class TestUnaryUfuncs(TestCase):
         with self.assertRaises(TypeError):
             torch.isinf(1)  # Parameter must be a tensor
 
-    def test_bitwise_not(self, device):
-        res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
-        for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            if dtype == torch.bool:
-                a = torch.tensor([True, False], device=device)
-                expected_res = torch.tensor([False, True], device=device)
-            else:
-                a = torch.arange(127, dtype=dtype, device=device)
-                expected_res = res.to(dtype)
-            # new tensor
-            self.assertEqual(expected_res, a.bitwise_not())
-            # out
-            b = torch.empty(0, dtype=dtype, device=device)
-            torch.bitwise_not(a, out=b)
-            self.assertEqual(expected_res, b)
-            # in-place
-            a.bitwise_not_()
-            self.assertEqual(expected_res, a)
-
-        # test exceptions
-        for dtype in (torch.half, torch.float, torch.double):
-            a = torch.zeros(10, dtype=dtype, device=device)
-            # new tensor
-            with self.assertRaises(RuntimeError):
-                a.bitwise_not()
-            # out
-            b = torch.empty(0, dtype=dtype, device=device)
-            with self.assertRaises(RuntimeError):
-                torch.bitwise_not(a, out=b)
-            # in-place
-            with self.assertRaises(RuntimeError):
-                a.bitwise_not_()
-
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
             self.assertEqual(dim, len(tup))
@@ -1519,49 +1486,6 @@ class TestUnaryUfuncs(TestCase):
         a.sign_()
         self.assertEqual(a, a_target, msg='sign_ device={} dtype={}'.format(device, dtype))
 
-    @dtypes(*(torch.testing.torch.testing.get_all_fp_dtypes()))
-    def test_signbit_float(self, device, dtype):
-        t = torch.randn(5, 5, device=device)
-
-        if dtype == torch.bfloat16:
-            t_bf16 = torch.tensor([1, 0, -1], device=device, dtype=dtype)
-            self.assertEqual(torch.signbit(t_bf16), torch.tensor([False, False, True]))
-        else:
-            self.compare_with_numpy(torch.signbit, np.signbit, t)
-
-        t_target = torch.signbit(t)
-        out = torch.empty_like(t, device=device, dtype=torch.bool)
-        torch.signbit(t, out=out)
-        self.assertEqual(out, t_target)
-
-        t_sp = (0, float('inf'), -float('inf'), float('nan'))
-        if dtype == torch.bfloat16:
-            t_sp_df16 = torch.tensor(t_sp, device=device, dtype=dtype)
-            self.assertEqual(torch.signbit(t_sp_df16), torch.tensor([False, False, True, False]))
-        else:
-            self.compare_with_numpy(torch.signbit, np.signbit, t_sp, device, dtype)
-
-    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
-    def test_signbit_int_and_bool(self, device, dtype):
-        t = torch.randint(-5, 5, (5, 5), device=device)
-        self.compare_with_numpy(torch.signbit, np.signbit, t)
-
-        t_target = torch.signbit(t)
-        out = torch.empty_like(t, device=device, dtype=torch.bool)
-        torch.signbit(t, out=out)
-        self.assertEqual(out, t_target)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_signbit_complex(self, device, dtype):
-        vals = (complex(0, -1), complex(-1, 2))
-        t = torch.tensor(vals, device=device, dtype=dtype)
-        out = torch.empty_like(t).real.bool()
-
-        with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
-            torch.signbit(t)
-        with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
-            torch.signbit(t, out=out)
-
     @dtypes(torch.cfloat, torch.cdouble)
     def test_sgn(self, device, dtype):
         x = torch.randn(100, dtype=dtype)
@@ -1574,15 +1498,6 @@ class TestUnaryUfuncs(TestCase):
         torch.sgn(x, out=x_out)
         self.assertEqual(x_out.angle(), angle)
         self.assertEqual(x_out.abs(), torch.ones_like(x).real)
-
-    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
-    def test_signbit_non_boolean_output(self, device, dtype):
-        # test non-boolean tensors as the `out=` parameters
-        # boolean outputs are tested in the above testcases
-        t = torch.randn(5, 5)
-        out = torch.empty_like(t, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
-            torch.signbit(t, out=out)
 
     # This function tests that a nan value is returned for input values not in domain
     @dtypes(torch.float32, torch.float64)

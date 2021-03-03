@@ -142,7 +142,7 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeValue(const torch::jit::Value* v);
 
-  Stmt* generateStmt(BackendType backendType);
+  Stmt* transformLoops(BackendType backendType, Stmt* st);
   std::vector<CodeGen::BufferArg> prepareBufferArgs();
 
   std::string getCodeGenName(BackendType backendType);
