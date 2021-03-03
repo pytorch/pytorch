@@ -132,14 +132,21 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
     if is_input:
         # if the quantize function is at the input of op, then we find the first user of the observer_node
         # to get the path
-        first_use = list(obs_node.users)[0]
+        users = list(obs_node.users)
+        first_use = users[0] if users else None
         prefix = "_input"
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
         first_use = in_node
         prefix = "_output"
 
-    module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    if first_use:
+        module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    else:
+        # TODO: it's not used, so actually we can skip quantization
+        # but this requires changing return type of quantize_node
+        # we can fix it later if needed
+        module_path = ""
     root_module = quantizer.modules['']
     graph = quantizer.quantized_graph
     node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
