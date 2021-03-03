@@ -818,23 +818,6 @@ def _get_restore_location(map_location):
             return result
     return restore_location
 
-
-# from https://stackoverflow.com/questions/13398462/unpickling-python-objects-with-a-changed-module-path/13405732
-# Lets us override the imports that pickle uses when unpickling an object.
-# This is useful for maintaining BC if we change a module path that tensor instantiation relies on.
-# NOTE: this only works for the pickle module.
-# If we switch to a different module (e.g. cpickle), we'll need something else.
-class UnpicklerWrapper(pickle.Unpickler):
-
-    def __init__(self, f, **kwargs):
-        # See https://github.com/pytorch/pytorch/pull/51633
-        self.module_mapping = {'torch.tensor': 'torch._tensor'}
-        pickle.Unpickler.__init__(self, f, **kwargs)
-
-    def find_class(self, module, name):
-        module = self.module_mapping.get(module, module)
-        return pickle.Unpickler.find_class(self, module, name)
-
 def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
@@ -860,13 +843,28 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         storage = loaded_storages[key]
         return storage
 
+    load_module_mapping = {}
+
+    # from https://stackoverflow.com/questions/13398462/unpickling-python-objects-with-a-changed-module-path/13405732
+    # Lets us override the imports that pickle uses when unpickling an object.
+    # This is useful for maintaining BC if we change a module path that tensor instantiation relies on.
+    # NOTE: this only works for the pickle module.
+    # If we switch to a different module (e.g. cpickle), we'll need something else.
+    def unpickler_find_class(mod_name, name):
+        mod_name = load_module_mapping.get(mod_name, mod_name)
+        module = __import__(mod_name, fromlist=[mod_name])
+        return getattr(module, name)
+
+    # Need to subclass Unpickler instead of directly monkey-patching the find_class method
+    # because it's marked readonly in pickle.
+    class UnpicklerWrapper(pickle_module.Unpickler):
+        find_class = staticmethod(unpickler_find_class)
+
     # Load the data (which may in turn use `persistent_load` to load tensors)
     data_file = io.BytesIO(zip_file.get_record(pickle_file))
 
-    if pickle_module.__name__ == 'pickle':
-        unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
-    else:
-        unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
+    # unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
+    unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
 
