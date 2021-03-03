@@ -28,7 +28,7 @@ import subprocess
 import time
 from collections import OrderedDict
 from collections.abc import Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from functools import wraps
 from itertools import product
 from copy import deepcopy
@@ -1195,7 +1195,8 @@ class TestCase(expecttest.TestCase):
             debug_msg = ("Attempted to compare [set] types: "
                          f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        elif (isinstance(x, dict) or isinstance(x, torch._C.ScriptDict)) and (isinstance(y, dict) or isinstance(x, torch._C.ScriptDict)):  # type: ignore
+        elif (isinstance(x, dict) or isinstance(x, torch._C.ScriptDict)) and \
+                (isinstance(y, dict) or isinstance(x, torch._C.ScriptDict)):  # type: ignore
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
@@ -1466,14 +1467,12 @@ def download_file(url, binary=True):
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg) from e
 
-
 def find_free_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('localhost', 0))
-    sockname = sock.getsockname()
-    sock.close()
-    return sockname[1]
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('localhost', 0))
+        _, port = sock.getsockname()
+        return port
 
 # Errors that we can get in c10d initialization for which we should retry tests for.
 ADDRESS_IN_USE = "Address already in use"
@@ -1528,7 +1527,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 # Used in test_autograd.py and test_torch.py
-def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None, 
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
                 requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
@@ -1600,6 +1599,27 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
             s[i] = 1
     return u.mm(torch.diag(s).to(dtype)).mm(v.transpose(0, 1))
 
+def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001):
+    """
+    Returns a random rectangular matrix (batch of matrices)
+    with singular values sampled from a Gaussian with
+    mean `mean` and standard deviation `sigma`.
+    The smaller the `sigma`, the better conditioned
+    the output matrix is.
+    """
+    primitive_dtype = {
+        torch.float: torch.float,
+        torch.double: torch.double,
+        torch.cfloat: torch.float,
+        torch.cdouble: torch.double
+    }
+    x = torch.rand(shape, dtype=dtype, device=device)
+    m = x.size(-2)
+    n = x.size(-1)
+    u, _, v = x.svd()
+    s = (torch.randn(*(shape[:-2] + (min(m, n),)), dtype=primitive_dtype[dtype], device=device) * sigma + mean) \
+        .sort(-1, descending=True).values.to(dtype)
+    return (u * s.unsqueeze(-2)) @ v.transpose(-2, -1).conj()
 
 def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
