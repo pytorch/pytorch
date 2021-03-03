@@ -12,11 +12,10 @@ from unittest import skipIf
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import IterDataPipe, RandomSampler
+from torch.utils.data import IterDataPipe, RandomSampler, DataLoader
 from typing import List, Tuple, Dict, Any, Type
 
 import torch.utils.data.datapipes as dp
-
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler)
@@ -250,6 +249,10 @@ def _fake_fn(data, *args, **kwargs):
 def _fake_filter_fn(data, *args, **kwargs):
     return data >= 5
 
+def _worker_init_fn(worker_id):
+    random.seed(123)
+
+
 class TestFunctionalIterDataPipe(TestCase):
 
     def test_picklable(self):
@@ -445,6 +448,33 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp_nolen = IDP_NoLen(range(10))
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
+
+    def test_shuffle_datapipe(self):
+        exp = list(range(20))
+        input_ds = IDP(exp)
+
+        with self.assertRaises(AssertionError):
+            shuffle_dp = dp.iter.Shuffle(input_ds, buffer_size=0)
+
+
+        for bs in (5, 20, 25):
+            shuffle_dp = dp.iter.Shuffle(input_ds, buffer_size=bs)
+            self.assertEqual(len(shuffle_dp), len(input_ds))
+
+            random.seed(123)
+            res = list(d for d in shuffle_dp)
+            self.assertEqual(sorted(res), exp)
+
+            # Test Deterministic
+            for num_workers in (0, 1):
+                random.seed(123)
+                dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn)
+                dl_res = list(d for d in dl)
+                self.assertEqual(res, dl_res)
+
+        shuffle_dp_nl = dp.iter.Shuffle(IDP_NoLen(range(20)), buffer_size=5)
+        with self.assertRaises(NotImplementedError):
+            len(shuffle_dp_nl)
 
     @skipIfNoTorchVision
     def test_transforms_datapipe(self):

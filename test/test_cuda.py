@@ -282,7 +282,6 @@ class TestCuda(TestCase):
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
 
-    @skipIfRocm
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
@@ -843,7 +842,6 @@ class TestCuda(TestCase):
                                     "Expected a cuda device, but got: cpu"):
             torch.cuda.default_stream(torch.device('cpu'))
 
-    @skipIfRocm
     @skipCUDANonDefaultStreamIf(True)
     def test_streams(self):
         default_stream = torch.cuda.current_stream()
@@ -1104,8 +1102,6 @@ class TestCuda(TestCase):
             c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    # Flaky on the ROCm CI
-    @skipIfRocm
     def test_stream_event_nogil(self):
         for sync_func in [TestCuda._stream_synchronize,
                           TestCuda._event_synchronize,
@@ -1546,7 +1542,6 @@ class TestCuda(TestCase):
         self.assertEqual(before0, after0, atol=0, rtol=0)
         self.assertEqual(before1, after1, atol=0, rtol=0)
 
-    @skipIfRocm
     def test_nvtx(self):
         # Just making sure we can see the symbols
         torch.cuda.nvtx.range_push("foo")
