@@ -239,6 +239,9 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
   auto rt = shape_info_.emplace(name, ShapeInfo());
   ShapeInfo& shape_info = rt.first->second;
   TensorShape& shape = shape_info.shape;
+  if (shape_info.getShapeIsFinal()) {
+    return shape;
+  }
   if (is_quantized) {
     shape_info.is_quantized = true;
     shape_info.q_info.scale.clear();
@@ -879,8 +882,6 @@ void BoundShapeInferencer::InferCommonOp(
             "Int8QuantSchemeBlobFill",
             "ComputeEqualizationScale",
             "Int8GenQuantParamsMinMax"};
-    const static std::unordered_set<std::string> pruning_ops = {
-        "RowwisePruneI64", "RowwisePruneI32"};
     std::vector<TensorShape> input_shapes;
     for (const auto& input : op.input()) {
       const auto it = shape_info_.find(input);
@@ -955,8 +956,7 @@ void BoundShapeInferencer::InferCommonOp(
         continue;
       }
       auto tmp_dtype = infered_data_type;
-      if (infered_data_type == TensorProto::UNDEFINED ||
-          pruning_ops.find(op.type()) != pruning_ops.end()) {
+      if (infered_data_type == TensorProto::UNDEFINED) {
         infered_data_type = shape.data_type();
       }
       CheckAndSetTensorBoundShape(
