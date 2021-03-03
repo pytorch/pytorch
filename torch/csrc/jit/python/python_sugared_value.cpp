@@ -226,14 +226,15 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   const std::unordered_set<std::string> cuda_ops = {
       "current_stream",
       "default_stream",
-      "_current_device",
-      "_set_device",
+      "current_device",
+      "set_device",
       "device_index",
       "device_count",
       "set_stream"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {
-    return std::make_shared<BuiltinFunction>(Symbol::cuda(field), c10::nullopt);
+    return std::make_shared<BuiltinFunction>(
+        Symbol::_cuda(field), c10::nullopt);
   }
 
   py::object member = getattr(loc, field);
