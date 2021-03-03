@@ -188,7 +188,7 @@ class TestCommon(JitCommonTestCase):
     #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        test_backward = op.supports_autograd and op.test_complex_grad or not dtype.is_complex
+        test_backward = op.supports_autograd and (op.test_complex_grad or not dtype.is_complex)
 
         samples = iter(op.sample_inputs(device, dtype, requires_grad=test_backward))
         for sample in samples:
