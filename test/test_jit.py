@@ -7350,7 +7350,8 @@ a")
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
                   ", dtype=torch.uint8", ", dtype=torch.int8", ", dtype=torch.short",
-                  ", dtype=torch.int", ", dtype=torch.long"]
+                  ", dtype=torch.int", ", dtype=torch.long", ", dtype=torch.cfloat",
+                  ", dtype=torch.cdouble"]
 
         ops = ['tensor', 'as_tensor']
         devices = ['', ", device='cpu'"]
@@ -7378,10 +7379,10 @@ a")
                     self.assertEqual(t1.device, t2.device)
 
         def test_as_tensor_tensor_input(input):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return torch.as_tensor(input, dtype=torch.float), torch.as_tensor(input, dtype=torch.int32)
+            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
+            return torch.as_tensor(input, dtype=torch.cfloat), torch.as_tensor(input, dtype=torch.float), torch.as_tensor(input, dtype=torch.int32)
 
-        inp = torch.randn(3, 4)
+        inp = torch.randn(3, 4, dtype=torch.cfloat)
         self.checkScript(test_as_tensor_tensor_input, (inp,))
 
     def test_torch_tensor_dtype(self):
