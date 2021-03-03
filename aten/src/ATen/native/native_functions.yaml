@@ -6017,12 +6017,12 @@
 
 - func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: orgqr_out
+    CPU, CUDA: orgqr_out
 
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
   dispatch:
-    CPU: orgqr
+    CPU, CUDA: orgqr
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -7480,6 +7480,26 @@
   python_module: nn
   dispatch:
     DefaultBackend: smooth_l1_loss_backward
+
+- func: huber_loss.out(Tensor self, Tensor target, int reduction=Mean, float delta=1.0, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU, CUDA: huber_loss_out
+
+- func: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU, CUDA: huber_loss
+
+- func: huber_loss_backward.out(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU, CUDA: huber_loss_backward_out
+
+- func: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta) -> Tensor
+  python_module: nn
+  dispatch:
+    DefaultBackend: huber_loss_backward
 
 - func: soft_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -8995,6 +9015,18 @@
   variants: function, method
   dispatch:
     DefaultBackend: det
+
+- func: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+  python_module: linalg
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_lstsq
+
+- func: _lstsq_helper(Tensor a, Tensor b, float cond, str? driver_name) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: _lstsq_helper_cpu
+    CUDA: _lstsq_helper_cuda
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
