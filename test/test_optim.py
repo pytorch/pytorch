@@ -633,6 +633,26 @@ class TestOptim(TestCase):
             self.assertEqual(len(w), 1)
             self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
 
+    def test_no_grad_for_all_params(self):
+        param = torch.randn(5, 5, requires_grad=False)
+
+        optimizer_list = [
+            optim.Adadelta,
+            optim.AdamW,
+            optim.Adam,
+            optim.Adagrad,
+            optim.Adamax,
+            optim.RMSprop,
+            optim.SGD,
+            optim.SparseAdam,
+            optim.ASGD,
+        ]
+        for optim_ctr in optimizer_list:
+            opt = optim_ctr([param, param], lr=0.1)
+            # make sure step can still run even if
+            # all params have no grad
+            opt.step()
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
