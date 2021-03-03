@@ -4,9 +4,10 @@ import sys
 import requests
 import time
 
-AZURE_PIPELINE_BASE_URL = "https://dev.azure.com/skyline75489/pytorch/"
-AZURE_DEVOPS_PAT_BASE64 = "Om9uamd1NWpmeGJubjRtYmVmaXBwaHhiNWo3Y2oybjJiZ2J4dnJkbmhnczVnZHE0bndmc2E="
-PIPELINE_ID = "3"
+AZURE_PIPELINE_BASE_URL = "https://aiinfra.visualstudio.com/PyTorch"
+AZURE_DEVOPS_PAT_BASE64 = "cXV6M2RydWRnZjd4MzI3NjNscHhrNTJmdG83dGo1Z2hyY2tieXVmNDJ2dmkycnpqNWhucQ=="
+PIPELINE_ID = "911"
+PROJECT_ID = "0628bce4-2d33-499e-bac5-530e12db160f"
 
 s = requests.Session()
 s.headers.update({"Authorization": "Basic " + AZURE_DEVOPS_PAT_BASE64})
@@ -28,7 +29,7 @@ print("Submitting build for branch: " + SOURCE_BRANCH)
 run_build_raw = s.post(build_base_url, json={
     "definition": { "id": PIPELINE_ID },
     "queue": { "id": 99 },
-    "project": { "id": "e54d09ee-8989-4090-b88e-b9916094c521" },
+    "project": { "id": PROJECT_ID },
     "sourceBranch": SOURCE_BRANCH
 })
 
