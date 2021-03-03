@@ -1355,6 +1355,7 @@ filegroup(
         "caffe2/utils/threadpool/ThreadPool.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
+        "caffe2/utils/threadpool/thread_pool_guard.cpp",
     ],
 )
 

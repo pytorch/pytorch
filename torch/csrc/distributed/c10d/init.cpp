@@ -710,6 +710,7 @@ Arguments:
     world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
+    wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
 
 Example::
     >>> import torch.distributed as dist
@@ -728,7 +729,8 @@ Example::
               int,
               int,
               bool,
-              std::chrono::milliseconds>(),
+              std::chrono::milliseconds,
+              bool>(),
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size") = -1,
@@ -736,8 +738,8 @@ Example::
           // prevents accidental implicit conversion to bool
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
-              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout))
-
+              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
+          py::arg("wait_for_workers") = true)
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
