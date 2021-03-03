@@ -65,9 +65,6 @@ class ScriptDict final {
     return dict_.type()->cast<DictType>();
   }
 
-  // Set the value corresponding to the given key.
-  void setItem(const IValue& key, IValue value);
-
   // Return a string representation that can be used
   // to reconstruct the instance.
   std::string repr() const {
@@ -109,6 +106,11 @@ class ScriptDict final {
   // not exist.
   IValue getItem(const IValue& key) {
     return dict_.toGenericDict().at(key);
+  };
+
+  // Set the value for the given key.
+  void setItem(const IValue& key, const IValue& value) {
+    dict_.toGenericDict().insert_or_assign(key, value);
   };
 
   // Check whether the dictionary contains the given key.

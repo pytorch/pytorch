@@ -106,6 +106,16 @@ void initScriptDictBindings(PyObject* module) {
               reference_internal) // Return value is a reference to an object
                                   // that resides in the ScriptDict
       .def(
+          "__setitem__",
+          [](const std::shared_ptr<ScriptDict>& self,
+             py::object key,
+             py::object value) {
+            // TODO: What happens if key and/or value isn't the right type?
+            self->setItem(
+                toIValue(std::move(key), self->type()->getKeyType()),
+                toIValue(std::move(value), self->type()->getValueType()));
+          })
+      .def(
           "__delitem__",
           [](const std::shared_ptr<ScriptDict>& self, py::object key) {
             // TODO: What happens if key isn't the right type?

@@ -1775,6 +1775,19 @@ class TestScriptDict(JitTestCase):
         self.assertEqual(t[1], 2)
         self.assertEqual(t[3], 4)
 
+    def test_setitem(self):
+        """
+        Test setting dictionary values using the [] operator.
+        TODO: Add test for wrong types.
+        """
+        t = torch.jit.dict({1: 2, 3: 4})
+
+        t[1] = 10
+        t[3] = 11
+
+        self.assertEqual(t[1], 10)
+        self.assertEqual(t[3], 11)
+
     def test_contains(self):
         """
         Test membership checks (x in y, x not in y).
