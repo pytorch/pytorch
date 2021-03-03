@@ -230,6 +230,19 @@ __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
 
+if not TYPE_CHECKING:
+    # issue 38137 and python issue 43367. Submodules of a C extension are
+    # non-standard, and attributes of those submodules cannot be pickled since
+    # pickle expect to be able to import them as "from _C.sub import attr"
+    # which fails with "_C is not a package
+    for attr in dir(_C):
+        candidate = getattr(_C, attr)
+        if type(candidate) is type(_C):
+            # submodule
+            if f'torch._C.{attr}' not in sys.modules:
+                sys.modules[f'torch._C.{attr}'] = candidate
+
+
 ################################################################################
 # Define basic utilities
 ################################################################################
@@ -458,6 +471,24 @@ def is_warn_always_enabled():
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
+
+
+def factory_kwargs(kwargs):
+    simple_keys = {"device", "dtype", "memory_format"}
+    expected_keys = simple_keys | {"factory_kwargs"}
+    if not kwargs.keys() <= expected_keys:
+        raise TypeError(f"unexpected kwargs {kwargs.keys() - expected_keys}")
+
+    # guarantee no input kwargs is untouched
+    r = dict(kwargs.get("factory_kwargs", {}))
+    for k in simple_keys:
+        if k in r:
+            raise TypeError(f"{k} specified twice, in **kwargs and in factory_kwargs")
+        if k in kwargs:
+            r[k] = kwargs[k]
+
+    return r
+
 
 ################################################################################
 # Define Storage and Tensor classes

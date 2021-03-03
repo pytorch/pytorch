@@ -9,13 +9,15 @@ from typing import Optional
 class LinearPackedParams(torch.nn.Module):
     _version = 3
 
-    def __init__(self, dtype=torch.qint8):
+    def __init__(self, dtype=torch.qint8, **kwargs):
+        factory_kwargs = torch.factory_kwargs(kwargs)
+        assert 'dtype' not in factory_kwargs
         super().__init__()
         self.dtype = dtype
         if self.dtype == torch.qint8:
-            wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
+            wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8, **factory_kwargs)
         elif self.dtype == torch.float16:
-            wq = torch.zeros([1, 1], dtype=torch.float)
+            wq = torch.zeros([1, 1], dtype=torch.float, **factory_kwargs)
         self.set_weight_bias(wq, None)
 
     @torch.jit.export
@@ -128,7 +130,9 @@ class Linear(torch.nn.Module):
     _FLOAT_MODULE = (nn.Linear, nn.modules.linear._LinearWithBias)
 
     def __init__(self, in_features, out_features, bias_=True,
-                 dtype=torch.qint8):
+                 dtype=torch.qint8, **kwargs):
+        factory_kwargs = torch.factory_kwargs(kwargs)
+        assert 'dtype' not in factory_kwargs
         super().__init__()
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
@@ -138,17 +142,17 @@ class Linear(torch.nn.Module):
         self.out_features = out_features
         bias = None
         if bias_:
-            bias = torch.zeros(out_features, dtype=torch.float)
+            bias = torch.zeros(out_features, dtype=torch.float, **factory_kwargs)
 
         if dtype == torch.qint8:
             qweight = torch._empty_affine_quantized(
-                [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
+                [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8, **factory_kwargs)
         elif dtype == torch.float16:
-            qweight = torch.zeros([out_features, in_features], dtype=torch.float)
+            qweight = torch.zeros([out_features, in_features], dtype=torch.float, **factory_kwargs)
         else:
             raise RuntimeError('Unsupported dtype specified for quantized Linear!')
 
-        self._packed_params = LinearPackedParams(dtype)
+        self._packed_params = LinearPackedParams(dtype, factory_kwargs=factory_kwargs)
         self._packed_params.set_weight_bias(qweight, bias)
         self.scale = 1.0
         self.zero_point = 0
