@@ -179,8 +179,9 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
     if (!(result.has_value() && result.value() == 1)) {
       return false;
     }
-    for (auto loop : ir_utils::filterByType<kir::ForLoop>(fl->body().exprs())) {
-      loops.push_back(loop);
+    for (auto nested_loop :
+         ir_utils::filterByType<kir::ForLoop>(loop->body().exprs())) {
+      loops.push_back(nested_loop);
     }
   }
   return true;
