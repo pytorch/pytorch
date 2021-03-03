@@ -2,12 +2,13 @@ import functools
 import os
 import warnings
 
-from torch.utils.data import IterDataPipe
+from torch.utils.data import IterDataPipe, functional_datapipe
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 
 
+@functional_datapipe('batch')
 class BatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BatchIterDataPipe`.
 
@@ -60,6 +61,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         raise NotImplementedError
 
 
+@functional_datapipe('bucket_batch')
 class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BucketBatchIterDataPipe`.
 
@@ -156,6 +158,7 @@ def default_sort_data_fn(datalist: List[Tuple[str, Any]]):
     return sorted(datalist, key=functools.cmp_to_key(cmp_fn))
 
 
+@functional_datapipe('group_by_key')
 class GroupByKeyIterDataPipe(IterDataPipe):
     r""" :class:`GroupByKeyIterDataPipe`.
 
