@@ -218,20 +218,10 @@ kir::Bool* PredicateCompute::getInlinePredicate(
 
   auto out_tv = firstTvOutput(expr);
 
-  auto pred_contiguity = out_tv->domain()->contiguity();
-
-  for (auto inp : expr->inputs()) {
-    if (auto inp_tv = dynamic_cast<kir::TensorView*>(inp)) {
-      if (inp_tv->domain()->hasRFactor() ||
-          inp_tv->memoryType() == MemoryType::Shared ||
-          inp_tv->memoryType() == MemoryType::Local) {
-        continue;
-      } else {
-        pred_contiguity = IndexCompute::contiguityAnd(
-            pred_contiguity, IndexCompute::contiguityPasC(inp_tv, out_tv));
-      }
-    }
-  }
+  // For the case of generating predicates, it's safe to assume all
+  // axes are contiguous and saves some redundant predicates.
+  auto pred_contiguity =
+      std::vector<bool>(out_tv->domain()->rootDomain().size(), true);
 
   auto pred_inds =
       Index::getConsumerRootPredIndices(out_tv, loops, pred_contiguity);
@@ -328,20 +318,10 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
 
   auto out_tv = firstTvOutput(tv_expr);
 
-  auto pred_contiguity = out_tv->domain()->contiguity();
-
-  for (auto inp : tv_expr->inputs()) {
-    if (auto inp_tv = dynamic_cast<kir::TensorView*>(inp)) {
-      if (inp_tv->domain()->hasRFactor() ||
-          inp_tv->memoryType() == MemoryType::Shared ||
-          inp_tv->memoryType() == MemoryType::Local) {
-        continue;
-      } else {
-        pred_contiguity = IndexCompute::contiguityAnd(
-            pred_contiguity, IndexCompute::contiguityPasC(inp_tv, out_tv));
-      }
-    }
-  }
+  // For the case of generating predicates, it's safe to assume all
+  // axes are contiguous and saves some redundant predicates.
+  auto pred_contiguity =
+      std::vector<bool>(out_tv->domain()->rootDomain().size(), true);
 
   auto pred_inds = Index::getConsumerRootPredIndices(
       out_tv, for_loops_, pred_contiguity, true);
