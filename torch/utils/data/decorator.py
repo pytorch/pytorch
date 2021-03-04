@@ -18,7 +18,7 @@ class functional_datapipe(object):
 _determinism: bool = False
 
 
-class set_determinism:
+class set_determinism(object):
     prev: bool
 
     def __init__(self, mode: bool) -> None:
