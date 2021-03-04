@@ -677,7 +677,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
           //
           // Correct sequencing with respect to host operations is also essential.
           // The H2D copy_ is stream ordered, while the host's changes to local_used_maps_
-          // are host ordered. If a large amount of cuda-stream work pushes the copy_ far
+          // are host ordered. If a large backlog of cuda-stream work pushes the copy_ far
           // into the future, and if no blocking calls occur between now and finalize_backward()**
           // such that finalize_backward() re-zeroes local_used_maps_ on the host
           // before the stream executes the copy_, copy_ will read those zeros instead of the
