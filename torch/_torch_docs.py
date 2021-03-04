@@ -10565,24 +10565,6 @@ Example::
     device(type='cpu')
 """)
 
-add_docstr(torch.assert_async,
-           r"""
-assert_async(tensor) -> void
-
-Asynchronously assert that the contents of tensor are nonzero.  For CPU tensors,
-this is equivalent to ``assert tensor`` or ``assert tensor.is_nonzero()``; for
-CUDA tensors, we DO NOT synchronize and you may only find out the assertion
-failed at a later CUDA kernel launch.  Asynchronous assertion can be helpful for
-testing invariants in CUDA tensors without giving up performance.  This function
-is NOT intended to be used for regular error checking, as it will trash your CUDA
-context if the assert fails (forcing you to restart your PyTorch process.)
-
-Args:
-    tensor (Tensor): a one element tensor to test to see if it is nonzero.  Zero
-        elements (including False for boolean tensors) cause an assertion failure
-        to be raised.
-""")
-
 add_docstr(torch.searchsorted,
            r"""
 searchsorted(sorted_sequence, values, *, out_int32=False, right=False, out=None) -> Tensor

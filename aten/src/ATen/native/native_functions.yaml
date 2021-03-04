@@ -118,14 +118,6 @@
 
 - func: align_tensors(Tensor[] tensors) -> Tensor[]
 
-# Not assert because it's a keyword; not Assert because FX already
-# took that syntax
-# TODO: need to specify this is side-effectful somehow
-- func: assert_async(Tensor self) -> ()
-  dispatch:
-    CPU: assert_async_cpu
-    CUDA: assert_async_cuda
-
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
 
