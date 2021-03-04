@@ -1,0 +1,17 @@
+# Model Optimization Utilities
+
+All utilities used by the model optimization
+
+## Package structure
+./mo
+├── common  # TBD
+├── pruning  # TBD
+│   └── ...
+├── quantization  # TBD
+│   ├── fx
+│   ├── ns
+│   └── ...
+└── sparsity
+    └── ...
+
+The `common` package holds any utilities used by all model optimization frameworks.
