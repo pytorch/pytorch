@@ -172,7 +172,7 @@ class PowerSGDState(object):
 
 
 def powerSGD_hook(
-    state: PowerSGDState, bucket: dist._GradBucket
+    state: PowerSGDState, bucket: dist.GradBucket
 ) -> torch.futures.Future:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
@@ -217,7 +217,7 @@ def powerSGD_hook(
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank``, ``start_powerSGD_iter``
             and ``min_compression_rate``.
-        bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
+        bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
 
@@ -440,7 +440,7 @@ def powerSGD_hook(
 
 
 def batched_powerSGD_hook(
-    state: PowerSGDState, bucket: dist._GradBucket
+    state: PowerSGDState, bucket: dist.GradBucket
 ) -> torch.futures.Future:
     r"""
     This DDP communication hook implements a simplified PowerSGD gradient compression
@@ -484,7 +484,7 @@ def batched_powerSGD_hook(
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank`` and ``start_powerSGD_iter``.
-        bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
+        bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
 
