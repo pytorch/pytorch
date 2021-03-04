@@ -287,6 +287,9 @@ Write PyTorch model in Torch way
 Avoid using numpy
 ~~~~~~~~~~~~~~~~~
 
+Avoid using numpy
+~~~~~~~~~~~~~~~~~
+
 PyTorch models can be written using numpy manipulations, but this is not proper when we convert to the ONNX model.
 For the trace-based exporter, tracing treats the numpy values as the constant node,
 therefore it calculates the wrong result if we change the input.
