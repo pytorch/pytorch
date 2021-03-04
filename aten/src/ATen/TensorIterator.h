@@ -448,26 +448,38 @@ public:
   // not, and if the operator is idempotent (for example, Tensor.fill_(0)), then
   // checking memory overlap is BC-breaking. Please don't check memory overlap
   // in that case.
-  TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap);
+  TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap) {
+    check_mem_overlap_ = check_mem_overlap;
+    return *this;
+  }
 
   // Sets the check_all_same_dtype_ flag, which is true by default
   // If true, checks that all inputs and defined outputs have the same dtype
   // Setting either of promote_inputs_to_common_dtype_
   //   or cast_common_dtype_to_outputs_ to true will set
   //   check_all_same_dtype_ to false.
-  TensorIteratorConfig& check_all_same_dtype(const bool _check_all_same_dtype);
+  TensorIteratorConfig& check_all_same_dtype(const bool _check_all_same_dtype) {
+    check_all_same_dtype_ = _check_all_same_dtype;
+    return *this;
+  }
 
   // Sets the check_all_same_device_ flag, which is true by default
   // If true, all operands must be on the same device, with the possible
   //   exception of CPU scalars, which can be passed to some CUDA kernels
   //   as kernel arguments.
-  TensorIteratorConfig& check_all_same_device(const bool _check_all_same_device);
+  TensorIteratorConfig& check_all_same_device(const bool _check_all_same_device) {
+    check_all_same_device_ = _check_all_same_device;
+    return *this;
+  }
 
   // Sets the enforce_safe_casting_to_output_ flag, which is false by default
   // If true, the iterator's "common dtype" must be computable
   //   (see the [Common Dtype Computation] note) and
   //   canCast(common dtype, output dtype) must be true for all outputs.
-  TensorIteratorConfig& enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output);
+  TensorIteratorConfig& enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
+    enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
+    return *this;
+  }
 
   // Sets the promote_inputs_to_common_dtype_ flag, which is false by default
   // If true, the iterator's "common dtype" is always computed (see the
@@ -475,15 +487,33 @@ public:
   //   the inputs in the common dtype are passed as the actual inputs to
   //   the operation.
   // Setting this flag to true sets check_all_same_dtype_ to false.
-  TensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype);
+  TensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
+    promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
+    if (_promote_inputs_to_common_dtype) {
+      check_all_same_dtype_ = false;
+    }
+    return *this;
+  }
 
   // Sets the promote_integer_inputs_to_float_ flag, which is false by default
   // NOTE: If set to true, the promote_inputs_to_common_dtype_ must also be true.
   // If true, if the iterator's "common dtype" is an integral type (including bool)
   //   then it is changed to the default float scalar type.
-  TensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float);
-  TensorIteratorConfig& is_reduction(const bool _is_reduction);
-  TensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars);
+  TensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
+    promote_integer_inputs_to_float_ = _promote_integer_inputs_to_float;
+    TORCH_INTERNAL_ASSERT(!promote_integer_inputs_to_float_ || promote_inputs_to_common_dtype_);
+    return *this;
+  }
+
+  TensorIteratorConfig& is_reduction(const bool _is_reduction) {
+    is_reduction_ = _is_reduction;
+    return *this;
+  }
+
+  TensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars) {
+    allow_cpu_scalars_ = _allow_cpu_scalars;
+    return *this;
+  }
 
   // Sets the cast_common_dtype_to_outputs_ flag, which is false by default
   // If true, the iterator's "common dtype" must be computatable
@@ -492,8 +522,18 @@ public:
   //   These temporaries are then copied to the original outputs after
   //   the operation is performed (see cast_outputs()).
   // Setting this flag to true sets check_all_same_dtype_ to false.
-  TensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs);
-  TensorIteratorConfig& resize_outputs(bool resize_outputs);
+  TensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
+    cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
+    if (_cast_common_dtype_to_outputs) {
+      check_all_same_dtype_ = false;
+    }
+    return *this;
+  }
+
+  TensorIteratorConfig& resize_outputs(bool resize_outputs) {
+    resize_outputs_ = resize_outputs;
+    return *this;
+  }
 
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
   TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
