@@ -1884,9 +1884,10 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super(A, self).__init__()
                 self.net_b = B()
+                self.param = torch.nn.Parameter(torch.rand(2, 3))
 
             def forward(self, x):
-                return self.net_b(x)
+                return self.net_b(x) + self.param
 
         a = symbolic_trace(A())
 
@@ -1977,6 +1978,10 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(AttributeError, "has no attribute "
                                     "`buf`"):
             a.get_buffer("net_b.net_c.buf")
+
+        # Test non-nested attributes
+        a.get_submodule("")
+        a.get_parameter("param")
 
         # Insert some unused submodules
         a.add_submodule("net_b.embedding", torch.nn.Embedding(10, 3))

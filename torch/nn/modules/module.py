@@ -430,6 +430,9 @@ class Module:
                 path or resolves to something that is not an
                 ``nn.Module``
         """
+        if target == "":
+            return self
+
         atoms: List[str] = target.split(".")
         mod: torch.nn.Module = self
 
