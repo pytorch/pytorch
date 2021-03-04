@@ -1,5 +1,4 @@
 import copy
-import logging
 import math
 import operator
 import os
@@ -9,9 +8,8 @@ import sys
 import tempfile
 import threading
 import time
-import unittest
-import logging
 import traceback
+import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce
@@ -28,7 +26,6 @@ import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._six import string_classes
-
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -71,6 +68,7 @@ else:
 
 DEFAULT_HOSTNAME = "localhost"
 
+
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
     GPUs on each node. Nccl backend requires equal #GPUs in each process.
@@ -85,6 +83,7 @@ def gpus_for_rank(world_size):
             visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
         )
     return gpus_for_rank
+
 
 def simple_reduce_tests(rank, world_size):
     tests = [
@@ -272,7 +271,7 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
         return c10d.PrefixStore(self.prefix, self.filestore)
 
 
-def create_tcp_store(addr):
+def create_tcp_store(addr, world_size=1, wait_for_workers=True):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
     """
@@ -281,7 +280,7 @@ def create_tcp_store(addr):
         try:
             port = common.find_free_port()
             ports.append(port)
-            return c10d.TCPStore(addr, port, 1, True)
+            return c10d.TCPStore(addr, port, world_size, True, wait_for_workers=wait_for_workers)
         except RuntimeError as error:
             if str(error) == "Address already in use":
                 continue
@@ -350,60 +349,56 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store.set("key0", "value0")
         self.assertEqual(b"value0", store.get("key0"))
         old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"wrong_old_value", old_value_result)
+        self.assertEqual(b"value0", old_value_result)
         self.assertEqual(b"value0", store.get("key0"))
         new_value_result = store.compare_set("key0", "value0", "new_value0")
         self.assertEqual(b"new_value0", new_value_result)
         self.assertEqual(b"new_value0", store.get("key0"))
 
-    def _create_client(self, addr, port, world_size):
+    def _create_client(self, index, addr, port, world_size, messages):
         try:
             client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
-            self.assertEqual(b"value", client_store.get("key"))
-            client_store.set("new_key", "new_value0")
-            client_store.compare_set("new_key", "new_value1", "new_value0")
+            self.assertEqual("value".encode(), client_store.get("key"))
+            client_store.set(f"new_key{index}", f"new_value{index}")
+            self.assertEqual(f"next_value{index}".encode(),
+                             client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
         except Exception:
-            logging.error('Caught exception: \n{}exiting process with exit code: {}'
-                          .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
+            messages.put('Caught exception: \n{}exiting process with exit code: {}'
+                         .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
-    @unittest.skipIf(IS_WINDOWS, "Skip test for windows because it cannot serialize logger instance")
+    def _multi_worker_helper(self, world_size):
+        addr = DEFAULT_HOSTNAME
+        server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
+        server_store.set("key", "value")
+        port = server_store.port
+        messages = mp.Queue()
+        processes = []
+        num_proccesses = random.randint(3, 5) if world_size == -1 else world_size
+        for i in range(num_proccesses):
+            p = mp.Process(target=self._create_client, args=(i, addr, port, world_size, messages))
+            processes.append(p)
+            p.start()
+        for p in processes:
+            p.join()
+        error_message = ""
+        while not messages.empty():
+            error_message += messages.get() + "\n"
+        if any([p.exitcode != 0 for p in processes]):
+            raise RuntimeError(error_message)
+
+    @unittest.skipIf(
+        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
+    )
     def test_multi_worker_with_fixed_world_size(self):
-        addr = DEFAULT_HOSTNAME
-        port = common.find_free_port()
-        world_size = 5
-        processes = []
-        for _ in range(world_size):
-            p = mp.Process(target=self._create_client, args=(addr, port, world_size))
-            processes.append(p)
-            p.start()
-        server_store = dist.TCPStore(addr, port, world_size, True, timedelta(seconds=30))
-        server_store.set("key", "value")
-        for (i, p) in enumerate(processes):
-            # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
-                                "Process {} terminated with exit code {}. Check logs for exception stacktrace."
-                                .format(i, p.exitcode))
-            p.join()
+        self._multi_worker_helper(5)
 
-    @unittest.skipIf(IS_WINDOWS, "Skip test for windows because it cannot serialize logger instance")
+    @unittest.skipIf(
+        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
+    )
     def test_multi_worker_with_nonfixed_world_size(self):
-        addr = DEFAULT_HOSTNAME
-        port = common.find_free_port()
-        server_store = dist.TCPStore(addr, port, is_master=True, timeout=timedelta(seconds=30))
-        server_store.set("key", "value")
+        self._multi_worker_helper(-1)
 
-        processes = []
-        for _ in range(random.randint(3, 5)):
-            p = mp.Process(target=self._create_client, args=(addr, port, -1))
-            processes.append(p)
-            p.start()
-        for (i, p) in enumerate(processes):
-            # This is the exit code processes exit with if they encountered an exception.
-            self.assertNotEqual(p.exitcode, MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
-                                "Process {} terminated with exit code {}. Check logs for exception stacktrace."
-                                .format(i, p.exitcode))
-            p.join()
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -578,19 +573,6 @@ class RendezvousEnvTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
-
-    @retry_on_connect_failures
-    def test_logging_init(self):
-        os.environ.update({"WORLD_SIZE": "1"})
-        os.environ.update({"MASTER_ADDR": "127.0.0.1"})
-        os.environ.update({"MASTER_PORT": str(common.find_free_port())})
-        os.environ.update({"RANK": "0"})
-
-        handlers_before = logging.root.handlers
-        c10d.init_process_group(backend="gloo", init_method="env://")
-        handlers_after = logging.root.handlers
-        self.assertEqual(handlers_before, handlers_after)
-        c10d.destroy_process_group()
 
 
 class RendezvousFileTest(TestCase):
@@ -3075,7 +3057,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         """
 
         def allreduce_hook(
-            process_group: object, bucket: dist._GradBucket
+            process_group: object, bucket: dist.GradBucket
         ) -> torch._C.Future:
             tensors = [t / self.world_size for t in bucket.get_tensors()]
             return process_group.allreduce(tensors).get_future()
@@ -3095,7 +3077,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         """
 
         def allreduce_with_then_hook(
-            process_group: object, bucket: dist._GradBucket
+            process_group: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
             fut = process_group.allreduce(bucket.get_tensors()).get_future()
 
@@ -3745,7 +3727,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
 
     def _simple_hook(
-        self, state: object, bucket: dist._GradBucket
+        self, state: object, bucket: dist.GradBucket
     ) -> torch.futures.Future:
         fut = torch.futures.Future()
         fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
@@ -3800,7 +3782,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
+        def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch._C.Future:
             tensors = [t / self.world_size for t in bucket.get_tensors()]
             return process_group.allreduce(tensors).get_future()
 
@@ -3904,13 +3886,16 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
     def test_invalid_powerSGD_state(self):
-        for start_powerSGD_iter, use_error_feedback, warm_start in product([0, 1], [True, False], [True, False]):
+        for start_powerSGD_iter, use_error_feedback, warm_start in product(
+            [0, 1], [True, False], [True, False]
+        ):
             if not use_error_feedback and not warm_start:
                 continue
             with self.assertRaisesRegex(
-                    ValueError,
-                    "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
-                    "because PowerSGD can only be applied after the first two iterations in DDP."):
+                ValueError,
+                "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                "because PowerSGD can only be applied after the first two iterations in DDP.",
+            ):
                 state = powerSGD.PowerSGDState(
                     process_group=None,
                     matrix_approximation_rank=1,
@@ -3945,7 +3930,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_with_then_hook(
-            state: object, bucket: dist._GradBucket
+            state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
             tensors = [t / self.world_size for t in bucket.get_tensors()]
             fut = process_group.allreduce(tensors).get_future()
@@ -3987,7 +3972,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             model.register_comm_hook(state=None, hook=1)
 
         with self.assertRaisesRegex(
-            ValueError, "bucket annotation should be dist._GradBucket."
+            ValueError, "bucket annotation should be dist.GradBucket."
         ):
 
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
@@ -4014,7 +3999,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             "Communication hook: return annotation should be torch.futures.Future or torch._C.Future.",
         ):
 
-            def comm_hook(state: object, bucket: dist._GradBucket) -> int:
+            def comm_hook(state: object, bucket: dist.GradBucket) -> int:
                 return torch.futures.Future()
 
             model.register_comm_hook(state=None, hook=comm_hook)
@@ -4024,7 +4009,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             "callback must return a torch.futures.Future or torch._C.Future object, but got",
         ):
 
-            def comm_hook(state: object, bucket: dist._GradBucket):
+            def comm_hook(state: object, bucket: dist.GradBucket):
                 return 1
 
             model.register_comm_hook(state=None, hook=comm_hook)
@@ -4082,7 +4067,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # "get_future" API does not support gloo backend, see GH Issue #42048.
         # Instead, we wait for an allreduce work, and write its result to a Future.
         def allreduce_hook_gloo(
-            state: object, bucket: dist._GradBucket
+            state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
             # Prepare allreduced grad bucket tensors by running an async work.
             work = process_group.allreduce(bucket.get_tensors())
@@ -4601,10 +4586,8 @@ class CommTest(MultiProcessTestCase):
     def test_nccl_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store)
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
 
         t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
         c10d.all_reduce(t)
@@ -4636,13 +4619,16 @@ class CommTest(MultiProcessTestCase):
     def test_nccl_barrier_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Timed out initializing process group"
+            ):
                 c10d.init_process_group(
                     backend="nccl",
                     rank=self.rank,
                     world_size=self.world_size,
                     store=store,
-                    timeout=timedelta(seconds=1))
+                    timeout=timedelta(seconds=1),
+                )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -4653,13 +4639,18 @@ class CommTest(MultiProcessTestCase):
             rank=self.rank,
             world_size=self.world_size,
             store=store,
-            timeout=timedelta(seconds=1))
+            timeout=timedelta(seconds=1),
+        )
 
         if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Timed out initializing process group"
+            ):
                 c10d.new_group([0, 1], timeout=timedelta(seconds=1))
 
-            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Timed out initializing process group"
+            ):
                 c10d.new_group([0], timeout=timedelta(seconds=1))
 
     @requires_nccl()
@@ -4671,13 +4662,18 @@ class CommTest(MultiProcessTestCase):
             rank=self.rank,
             world_size=self.world_size,
             store=store,
-            timeout=timedelta(seconds=1))
+            timeout=timedelta(seconds=1),
+        )
 
         if self.rank == 1:
-            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Timed out initializing process group"
+            ):
                 c10d.new_group([0, 1], timeout=timedelta(seconds=1))
 
-            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Timed out initializing process group"
+            ):
                 c10d.new_group([0], timeout=timedelta(seconds=1))
 
     @requires_nccl()
@@ -4685,10 +4681,8 @@ class CommTest(MultiProcessTestCase):
     def test_nccl_barrier_device_ids(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store)
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
 
         c10d.barrier(device_ids=[self.rank])
 
@@ -4697,10 +4691,8 @@ class CommTest(MultiProcessTestCase):
     def test_nccl_barrier_device_ids_function_argument(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store)
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
 
         with self.assertRaisesRegex(RuntimeError, "Invalid function argument"):
             c10d.barrier(device_ids=self.rank)
@@ -4709,15 +4701,39 @@ class CommTest(MultiProcessTestCase):
     def test_gloo_barrier_device_ids(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend="gloo",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store)
+            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+        )
 
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
 
-if __name__ == '__main__':
+    def test_distributed_debug_mode(self):
+        # Default should be off
+        default_debug_mode = dist._get_debug_mode()
+        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
+        mapping = {
+            "OFF": dist._DistributedDebugMode.OFF,
+            "INFO": dist._DistributedDebugMode.INFO,
+            "DETAIL": dist._DistributedDebugMode.DETAIL,
+        }
+        invalid_debug_modes = ["foo", 0, 1, -1]
+
+        for mode in mapping.keys():
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            set_debug_mode = dist._get_debug_mode()
+            self.assertEqual(
+                set_debug_mode,
+                mapping[mode],
+                f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}",
+            )
+
+        for mode in invalid_debug_modes:
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+                dist._get_debug_mode()
+
+
+if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"

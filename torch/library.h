@@ -292,6 +292,10 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::CUDA;
       case c10::DeviceType::XLA:
         return c10::DispatchKey::XLA;
+      case c10::DeviceType::MLC:
+        return c10::DispatchKey::MLC;
+      case c10::DeviceType::Meta:
+        return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
         return c10::DispatchKey::HIP;
       case c10::DeviceType::MSNPU:

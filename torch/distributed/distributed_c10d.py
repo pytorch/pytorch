@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import pickle
+import io
 import torch
 import warnings
 import time
@@ -33,6 +34,8 @@ _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
 
+_pickler = pickle.Pickler
+_unpickler = pickle.Unpickler
 
 try:
     from torch._C._distributed_c10d import ProcessGroupMPI
@@ -48,10 +51,6 @@ try:
     from torch._C._distributed_c10d import ProcessGroupGloo
 except ImportError:
     _GLOO_AVAILABLE = False
-
-
-logger = logging.getLogger(__name__)
-
 
 # Some reduce ops are not supported by complex numbers and will result in an error.
 # We currently provide complex support to the distributed API by viewing
@@ -188,7 +187,7 @@ def _store_based_barrier(rank, store, timeout):
     """
     store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
     store.add(store_key, 1)
-    logger.info('Added key: {} to store for rank: {}'.format(store_key, rank))
+    logging.info('Added key: {} to store for rank: {}'.format(store_key, rank))
 
     # Now wait for all workers to check in with the store.
     world_size = get_world_size()
@@ -206,7 +205,7 @@ def _store_based_barrier(rank, store, timeout):
 
         # Print status periodically to keep track.
         if timedelta(seconds=(time.time() - log_time)) > timedelta(seconds=10):
-            logger.info(
+            logging.info(
                 "Waiting in store based barrier to initialize process group for "
                 "rank: {}, key: {} (world_size={}, worker_count={}, timeout={})".format(
                     rank, store_key, world_size, worker_count, timeout))
@@ -1410,8 +1409,9 @@ def all_gather_multigpu(output_tensor_lists,
 
 
 def _object_to_tensor(obj):
-    buffer = pickle.dumps(obj)
-    byte_storage = torch.ByteStorage.from_buffer(buffer)  # type: ignore[attr-defined]
+    f = io.BytesIO()
+    _pickler(f).dump(obj)
+    byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
     byte_tensor = torch.ByteTensor(byte_storage)
     local_size = torch.LongTensor([byte_tensor.numel()])
     return byte_tensor, local_size
@@ -1419,8 +1419,7 @@ def _object_to_tensor(obj):
 
 def _tensor_to_object(tensor, tensor_size):
     buf = tensor.numpy().tobytes()[:tensor_size]
-    out = pickle.loads(buf)
-    return out
+    return _unpickler(io.BytesIO(buf)).load()
 
 
 def all_gather_object(object_list, obj, group=None):
