@@ -100,24 +100,6 @@ ProcessGroupMPI::AsyncWork::AsyncWork(at::Tensor tensor, MPI_Request request, co
       tensor_(std::move(tensor)),
       request_(request) {
   memset(&status_, 0, sizeof(status_));
-  // AsyncWork such as send, recv, and recvAnySource have
-  //  request == MPI_REQUEST_NULL, and thus and thus isCompleted() and wait()
-  // return true immediately without blocking. Since it is considered complete
-  // from user perspective, run profiling end callbacks as well.
-  if (request_ == MPI_REQUEST_NULL &&
-      ProcessGroup::Work::recordFunctionEndCallback_) {
-        LOG(WARNING) << "Executing recordfunction end callback for " << profilingTitle;
-    ProcessGroup::Work::recordFunctionEndCallback_();
-    ProcessGroup::Work::recordFunctionEndCallback_ = nullptr;
-    LOG(WARNING) << "Done with RF end callback for " << profilingTitle;
-  } else {
-    LOG(WARNING) << "Not running record function end callback for " << profilingTitle;
-    if (request_ != MPI_REQUEST_NULL) {
-      LOG(WARNING) << "Request is NOT null";
-    } else {
-      LOG(WARNING) << "rf end cb seems to be null.";
-    }
-  }
 }
 
 ProcessGroupMPI::AsyncWork::~AsyncWork() {
@@ -165,12 +147,24 @@ int ProcessGroupMPI::AsyncWork::sourceRank() const {
 
 bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
   if (request_ == MPI_REQUEST_NULL) {
+    // AsyncWork needs to manually call profiling end callbacks if they are set,
+    // since it does not call ProcessGroup::finish().
+    if (ProcessGroup::Work::recordFunctionEndCallback_) {
+      ProcessGroup::Work::recordFunctionEndCallback_();
+    }
     return true;
   }
 
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
   MPI_CHECK(MPI_Wait(&request_, &status_));
   auto ok = (status_.MPI_ERROR == MPI_SUCCESS);
+
+  // AsyncWork needs to manually call profiling end callbacks if they are set,
+  // since it does not call ProcessGroup::finish().
+  if (ProcessGroup::Work::recordFunctionEndCallback_) {
+      ProcessGroup::Work::recordFunctionEndCallback_();
+  }
+
   if (!ok) {
     populateException();
     std::rethrow_exception(exception_);
