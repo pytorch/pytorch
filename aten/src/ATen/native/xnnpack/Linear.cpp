@@ -24,12 +24,12 @@ bool available(
   return xnnpack::internal::available() &&
           // Weight
           (2 == weight.ndimension()) &&
-          (c10::DeviceType::CPU == weight.device().type()) &&
+          (weight.device().is_cpu()) &&
           (kFloat == weight.scalar_type()) &&
           !weight.requires_grad() &&
           // Bias
           ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       (c10::DeviceType::CPU == bias->device().type()) &&
+                                       (bias->device().is_cpu()) &&
                                        (kFloat == bias->scalar_type()) &&
                                        (weight.size(Layout::Filter::output)) == bias->size(0) &&
                                        !bias->requires_grad())
@@ -43,7 +43,7 @@ bool available(
 bool usable(const Tensor& input) {
          // Input
   return (2 <= input.ndimension()) &&
-         (c10::DeviceType::CPU == input.device().type()) &&
+         (input.device().is_cpu()) &&
          (kFloat == input.scalar_type()) &&
          !input.requires_grad() &&
          true;
