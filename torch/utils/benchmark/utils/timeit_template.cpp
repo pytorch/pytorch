@@ -16,6 +16,8 @@ sections with user provided statements.
 // GLOBAL_SETUP_TEMPLATE_LOCATION
 
 double timeit(int n) {
+    pybind11::gil_scoped_release no_gil;
+
     // Setup
     // SETUP_TEMPLATE_LOCATION
 

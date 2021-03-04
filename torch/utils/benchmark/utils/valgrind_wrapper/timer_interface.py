@@ -100,6 +100,11 @@ class FunctionCounts(object):
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: -c)
 
+    def __mul__(self, other: Union[int, float]) -> "FunctionCounts":
+        return self._from_dict({
+            fn: int(c * other) for c, fn in self._data
+        }, self.inclusive)
+
     def transform(self, map_fn: Callable[[str], str]) -> "FunctionCounts":
         """Apply `map_fn` to all of the function names.
 
@@ -167,6 +172,7 @@ class CallgrindStats(object):
     baseline_exclusive_stats: FunctionCounts
     stmt_inclusive_stats: FunctionCounts
     stmt_exclusive_stats: FunctionCounts
+    stmt_callgrind_out: Optional[str]
 
     def __repr__(self) -> str:
         newline = "\n"  # `\` cannot appear in fstring code section.
@@ -198,9 +204,7 @@ class CallgrindStats(object):
         reducing noise when diffing counts from two different runs. (See
         CallgrindStats.delta(...) for more details)
         """
-        if inclusive:
-            return self.stmt_inclusive_stats - self.baseline_inclusive_stats
-        return self.stmt_exclusive_stats - self.baseline_exclusive_stats
+        return self.stmt_inclusive_stats if inclusive else self.stmt_exclusive_stats
 
     def counts(self, *, denoise: bool = False) -> int:
         """Returns the total number of instructions executed.
@@ -215,7 +219,6 @@ class CallgrindStats(object):
         self,
         other,  # type: CallgrindStats
         inclusive: bool = False,
-        subtract_baselines: bool = True
     ) -> FunctionCounts:
         """Diff two sets of counts.
 
@@ -225,15 +228,9 @@ class CallgrindStats(object):
         next logical question is "why". This generally involves looking at what part
         if the code increased in instruction count. This function automates that
         process so that one can easily diff counts on both an inclusive and
-        exclusive basis. The `subtract_baselines` argument allows one to disable
-        baseline correction, though in most cases it shouldn't matter as the
-        baselines are expected to more or less cancel out.
+        exclusive basis.
         """
-        if subtract_baselines:
-            return self.stats(inclusive=inclusive) - other.stats(inclusive=inclusive)
-        elif inclusive:
-            return self.stmt_inclusive_stats - other.stmt_inclusive_stats
-        return self.stmt_exclusive_stats - other.stmt_exclusive_stats
+        return self.stats(inclusive=inclusive) - other.stats(inclusive=inclusive)
 
     def as_standardized(self) -> "CallgrindStats":
         """Strip library names and some prefixes from function strings.
@@ -284,6 +281,10 @@ class CallgrindStats(object):
             baseline_exclusive_stats=strip(self.baseline_exclusive_stats),
             stmt_inclusive_stats=strip(self.stmt_inclusive_stats),
             stmt_exclusive_stats=strip(self.stmt_exclusive_stats),
+
+            # `as_standardized` will change symbol names, so the contents will
+            # no longer map directly to `callgrind.out`
+            stmt_callgrind_out=None,
         )
 
 
@@ -513,6 +514,7 @@ class _ValgrindWrapper(object):
         number: int,
         collect_baseline: bool,
         is_python: bool,
+        retain_out_file: bool,
     ) -> CallgrindStats:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
@@ -528,16 +530,17 @@ class _ValgrindWrapper(object):
                         stmt="pass",
                         setup="pass",
                         num_threads=task_spec.num_threads,
+                        retain_out_file=False,
                     ),
                     globals={},
                     number=number,
                     is_python=True,
                 )
-            baseline_inclusive_stats, baseline_exclusive_stats = \
+            baseline_inclusive_stats, baseline_exclusive_stats, _ = \
                 self._baseline_cache[cache_key]
 
-        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
-            task_spec, globals, number, is_python)
+        stmt_inclusive_stats, stmt_exclusive_stats, out_contents = self._invoke(
+            task_spec, globals, number, is_python, retain_out_file)
         return CallgrindStats(
             task_spec=task_spec,
             number_per_run=number,
@@ -546,6 +549,7 @@ class _ValgrindWrapper(object):
             baseline_exclusive_stats=baseline_exclusive_stats,
             stmt_inclusive_stats=stmt_inclusive_stats,
             stmt_exclusive_stats=stmt_exclusive_stats,
+            stmt_callgrind_out=out_contents,
         )
 
     def _invoke(
@@ -554,7 +558,8 @@ class _ValgrindWrapper(object):
         globals: Dict[str, Any],
         number: int,
         is_python: bool,
-    ) -> Tuple[FunctionCounts, FunctionCounts]:
+        retain_out_file: bool,
+    ) -> Tuple[FunctionCounts, FunctionCounts, Optional[str]]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -653,6 +658,8 @@ class _ValgrindWrapper(object):
                 annotate_invocation, annotate_invocation_output = run([
                     "callgrind_annotate",
                     f"--inclusive={'yes' if inclusive else 'no'}",
+                    "--threshold=100",
+                    "--show-percs=no",
                     callgrind_out
                 ], check=True)
 
@@ -676,7 +683,17 @@ class _ValgrindWrapper(object):
                     begin_collecting = False
 
                 return FunctionCounts(tuple(sorted(fn_counts, reverse=True)), inclusive=inclusive)
-            return parse_output(inclusive=True), parse_output(inclusive=False)
+
+            callgrind_out_contents: Optional[str] = None
+            if retain_out_file:
+                with open(callgrind_out, "rt") as f:
+                    callgrind_out_contents = f.read()
+
+            return (
+                parse_output(inclusive=True),
+                parse_output(inclusive=False),
+                callgrind_out_contents,
+            )
         finally:
             shutil.rmtree(working_dir)
 

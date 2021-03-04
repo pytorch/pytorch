@@ -100,6 +100,7 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
         baseline_exclusive_stats=baseline_exclusive,
         stmt_inclusive_stats=to_function_counts(artifacts["ones_no_data_inclusive"], True),
         stmt_exclusive_stats=to_function_counts(artifacts["ones_no_data_exclusive"], False),
+        stmt_callgrind_out=None,
     )
 
     stats_with_data = benchmark_utils.CallgrindStats(
@@ -110,6 +111,7 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
         baseline_exclusive_stats=baseline_exclusive,
         stmt_inclusive_stats=to_function_counts(artifacts["ones_with_data_inclusive"], True),
         stmt_exclusive_stats=to_function_counts(artifacts["ones_with_data_exclusive"], False),
+        stmt_callgrind_out=None,
     )
 
     return stats_no_data, stats_with_data
