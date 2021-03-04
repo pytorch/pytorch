@@ -442,7 +442,7 @@ graph(%0):
     parseIR(
         R"IR(
 graph(%0):
-  %b = a::b[intattr=10, floatattr=3.14](%0)
+  %b = a::b[intattr=10, floatattr=3.14, complexattr=-1.4+3.14j](%0)
   return (%b))IR",
         &pattern);
     AT_ASSERT(!findPatternMatches(pattern, graph).empty());
