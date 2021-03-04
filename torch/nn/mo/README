@@ -1,0 +1,20 @@
+# Model Optimization nn
+
+All layers related to model optimization
+
+Eventually, the contents of this folder will include the following
+
+./nn/mo
+├── commonm
+├── pruning
+│   ├── dynamic
+│   └── ...
+├── quantization
+│   ├── intrinsic
+│   ├── qat
+│   ├── quantizable
+│   ├── quantized
+│   └── ...
+└── sparsity
+    ├── dynamic
+    └── ...
