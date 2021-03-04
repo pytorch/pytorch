@@ -1370,6 +1370,8 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
     samples = (
         SampleInput((_make_tensor_helper((S, S, S)), 0)),
         SampleInput((_make_tensor_helper((S, S, S)), 1)),
+        # FIXME : inplace grad fails for the following sample due to mismatch in
+        #         `self.dtype` and passed `dtype`.
         # SampleInput((_make_tensor_helper((S, S, S)), 1), kwargs={'dtype': torch.float64}),
         SampleInput((_make_tensor_helper(()), 0)),
     )
@@ -1696,6 +1698,14 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
            skips=(
+               # For integer inputs,
+               # inplace variant preserves dtype of `self` while method variant
+               # always promotes it to torch.long.
+               # >>> t = torch.randint(2, 10, (3, 2), dtype=torch.int8)
+               # >>> t.cumsum(0).dtype
+               # torch.int64
+               # >>> t.cumsum_(0).dtype
+               # torch.int8
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32]),
            ),
