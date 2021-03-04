@@ -3,6 +3,7 @@ import torchvision
 
 import numpy as np
 from torch import nn
+from torch.onnx import utils
 
 def to_numpy(tensor):
     if tensor.requires_grad:
@@ -51,11 +52,28 @@ total_num_classes=10
 dummy_input = torch.randn(10, 5)
 x = torch.randn(32, 5)
 
+
 print('Start normal model.')
 
 with torch.no_grad():
+    test_module = BadModule(total_input_size, total_hidden_size, total_num_classes)
+    test_module.eval()
+
+    temp_results = test_module(dummy_input)
+
+    f = io.BytesIO()
+    test_trace_module = torch.jit.trace(test_module, dummy_input)
+    
+    full_graph, unsupported_ops = utils._find_missing_ops_onnx_export(test_module, (dummy_input,), f,
+                                                                     opset_version=9)
     m_all = NeuralNet_All(total_input_size, total_hidden_size, total_num_classes)
     m_all.eval()
+
+    temp_results = m_all(dummy_input)
+    test_trace_module = torch.jit.trace(m_all, dummy_input)
+    
+    full_graph, unsupported_ops = utils._find_missing_ops_onnx_export(m_all, (dummy_input,), f,
+                                                                     opset_version=9)
 
     all_params = m_all.state_dict()
 
