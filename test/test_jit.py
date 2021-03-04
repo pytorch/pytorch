@@ -2579,6 +2579,19 @@ graph(%Ra, %Rb):
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
+    def test_hide_source_ranges_context_manager(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.add(x, x)
+
+        graph = foo.graph
+        source_range_regex = "# .*\\.py"
+        self.assertRegex(graph.__repr__(), source_range_regex)
+        with torch.jit._hide_source_ranges():
+            self.assertNotRegex(graph.__repr__(), source_range_regex)
+            self.assertRegex(graph.str(print_source_ranges=True), source_range_regex)
+        self.assertRegex(graph.__repr__(), source_range_regex)
+
 
 class TestFrontend(JitTestCase):
 
