@@ -6365,9 +6365,11 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):
-        boxes = torch.rand(5, 4)
-        boxes[:, 2:] += torch.rand(5, 2)
-        scores = torch.randn(5)
+        num_boxes = 100
+        boxes = torch.rand(num_boxes, 4)
+        boxes[:, 2:] += boxes[:, :2]
+        scores = torch.randn(num_boxes)
+
 
         class Module(torch.nn.Module):
             def forward(self, boxes, scores):
@@ -6377,16 +6379,17 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_batched_nms(self):
+        num_boxes = 100
+        boxes = torch.rand(num_boxes, 4)
+        boxes[:, 2:] += boxes[:, :2]
+        scores = torch.randn(num_boxes)
+        idxs = torch.randint(0, 5, size=(num_boxes,))
+
         class Module(torch.nn.Module):
             def forward(self, boxes, scores, idxs):
                 return ops.batched_nms(boxes, scores, idxs, 0.5)
 
-        for num_boxes in (5, 100, 5_000):
-            boxes = torch.rand(num_boxes, 4)
-            boxes[:, 2:] += torch.rand(num_boxes, 2)
-            scores = torch.randn(num_boxes)
-            idxs = torch.randint(0, 5, size=(num_boxes,))
-            self.run_model(Module(), [(boxes, scores, idxs)])
+        self.run_model(Module(), [(boxes, scores, idxs)])
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
