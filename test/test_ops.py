@@ -476,8 +476,10 @@ class TestCommon(JitCommonTestCase):
                           dtype=expected.dtype,
                           device=expected.device,
                           discontiguous=True)
+        original_strides = out.stride()
         op_out(out=out)
         self.assertEqual(expected, out)
+        self.assertEqual(original_strides, out.stride())
 
         # Case 2: out= with the correct dtype and device, but the wrong shape
         #   Expected behavior: resize with a warning.
