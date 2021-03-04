@@ -281,10 +281,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   if (self.sizes().size() != 0) {
     TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero");
   }
-  TORCH_CHECK(
-      size > 0,
-      "median() cannot compute median for a dimension of size 0 because ",
-      "the operation does not have an identity");
 
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
@@ -368,14 +364,10 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
 Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
 
-  int64_t size = self.numel();
-  TORCH_CHECK(
-      size > 0,
-      "median() operation does not have an identity for empty input tensor");
-
   // Clone the input tensor so we can partition it around the median value
   Tensor in = self.clone();
   Tensor out = at::empty({}, self.options());
+  int64_t size = self.numel();
 
   AT_DISPATCH_ALL_TYPES(in.scalar_type(), "median_cpu", [&] {
     scalar_t* op = out.data_ptr<scalar_t>();

@@ -254,13 +254,8 @@ void kthvalue_cuda_template(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
-  // FIXME: This seems bogus, I only do this because it was the old behaviour.
-  //        The reductions are fine, as long as the axis being reduced along
-  //        isn't of 0 elements (and the output has elements).
-  TORCH_CHECK(
-      self.numel() > 0,
-      "cannot perform reduction function kthvalue",
-      " on tensor with no elements because the operation does not have an identity");
+  TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
+
   TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
 
   at::assert_no_overlap(self, values);
@@ -328,12 +323,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   dim = at::maybe_wrap_dim(dim, self.dim());
   Tensor in = self.dim() > 0 ? self.contiguous() : self.unsqueeze(0);
 
-  int64_t size = in.size(dim);
-  TORCH_CHECK(
-      size > 0,
-      "median() cannot compute median for a dimension of size 0 because ",
-      "the operation does not have an identity");
-
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
@@ -343,6 +332,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
       "median() cannot operate on more than ",
       MAX_TENSORINFO_DIMS,
       " dimensions");
+  TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
 
   std::vector<int64_t> out_shape = self.sizes().vec();
   if (self.dim() > 0) {
