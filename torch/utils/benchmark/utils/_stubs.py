@@ -15,7 +15,8 @@ class TimerClass(Protocol):
         stmt: str,
         setup: str,
         timer: Callable[[], float],
-        globals: Dict[str, Any]
+        globals: Dict[str, Any],
+        **kwargs: Any,
     ) -> None:
         ...
 

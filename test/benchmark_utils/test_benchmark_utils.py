@@ -167,8 +167,15 @@ class TestBenchmarkUtils(TestCase):
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
     def test_cpp_timer(self):
         timer = benchmark_utils.Timer(
-            "torch::Tensor y = x + 1;",
+            """
+                #ifndef TIMER_GLOBAL_CHECK
+                static_assert(false);
+                #endif
+
+                torch::Tensor y = x + 1;
+            """,
             setup="torch::Tensor x = torch::empty({1});",
+            global_setup="#define TIMER_GLOBAL_CHECK",
             timer=timeit.default_timer,
             language=benchmark_utils.Language.CPP,
         )
