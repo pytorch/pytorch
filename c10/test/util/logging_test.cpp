@@ -30,7 +30,7 @@ TEST(LoggingTest, TestEnforceEquals) {
   int x = 4;
   int y = 5;
   try {
-    CAFFE_ENFORCE_THAT(Equals(++x, ++y));
+    CAFFE_ENFORCE_THAT(==, ++x, ++y);
     // This should never be triggered.
     ADD_FAILURE();
   } catch (const ::c10::Error& err) {
@@ -38,7 +38,7 @@ TEST(LoggingTest, TestEnforceEquals) {
   }
 
   // arguments are expanded only once
-  CAFFE_ENFORCE_THAT(Equals(++x, y));
+  CAFFE_ENFORCE_THAT(==, ++x, y);
   EXPECT_EQ(x, 6);
   EXPECT_EQ(y, 6);
 }
@@ -65,7 +65,7 @@ TEST(LoggingTest, EnforceShowcase) {
   WRAP_AND_PRINT(CAFFE_ENFORCE_EQ(
       one * two + three, three * two, "It's a pretty complicated expression"));
 
-  WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(Equals(one * two + three, three * two)));
+  WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(==, one * two + three, three * two));
 }
 
 TEST(LoggingTest, Join) {
