@@ -4125,14 +4125,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                      "set_to_none = {}, use_bucket_view = {}".format(try_set_to_none,
                                                                                      use_bucket_view))
 
-    def test_ddp_checkpointing(self):
-        pass
-        # gradient_as_bucket_view=True, False
-
-    def test_ddp_checkpointing_weight_sharing(self):
-        pass
-        # gradient_as_bucket_view=True, False
-
 
 class ReducerModule(nn.Module):
     def __init__(self):
