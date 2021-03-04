@@ -280,8 +280,5 @@ class NativeSignature:
     def returns_type(self) -> str:
         return native.returns_type(self.func.returns)
 
-    def dispatcher_exprs(self) -> List[Expr]:
-        return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
-
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native, translate

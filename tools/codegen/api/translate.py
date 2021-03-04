@@ -54,7 +54,7 @@ class UnsatError(RuntimeError):
 def translate(
     bindings: Sequence[Union[Expr, Binding]],
     goals: Sequence[Union[CType, Binding]],
-    *, method: bool = False
+    *, method: bool = False, move_ok: bool = False
 ) -> List[Expr]:
 
     binding_exprs: List[Expr] = []
@@ -120,6 +120,8 @@ Check this module for more information.
             return solve(goal, direct=True)
 
         if goal in ctx:
+            if move_ok and goal.cpp_type() == "std::string":
+                return f"std::move({ctx[goal]})"
             # Trivial
             return ctx[goal]
 

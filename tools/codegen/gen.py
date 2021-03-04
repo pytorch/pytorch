@@ -130,14 +130,14 @@ def static_dispatch_extra_headers(backend: Optional[DispatchKey]) -> str:
 
 def static_dispatch(
     f: NativeFunction, cpp_sig: CppSignature,
-    *, method: bool, backend: Optional[DispatchKey]
+    *, method: bool, backend: Optional[DispatchKey], move_ok: bool = False
 ) -> Optional[str]:
     if backend is None or f.manual_kernel_registration:
         return None
 
     target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
     name = target_sig.name()
-    exprs = translate(cpp_sig.arguments(), target_sig.arguments(), method=method)
+    exprs = translate(cpp_sig.arguments(), target_sig.arguments(), method=method, move_ok=move_ok)
     exprs_str = ', '.join(a.expr for a in exprs)
 
     if f.structured_delegate is not None:
@@ -209,7 +209,7 @@ class ComputeFunction:
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
+            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments(), move_ok=True)
             if self.is_redispatching_fn:
                 dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in dispatcher_exprs])
                 dispatcher_call = 'redispatch'
@@ -217,7 +217,7 @@ class ComputeFunction:
                 dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
                 dispatcher_call = 'call'
 
-            static_dispatch_block = static_dispatch(f, sig, method=False, backend=self.static_dispatch_backend)
+            static_dispatch_block = static_dispatch(f, sig, method=False, backend=self.static_dispatch_backend, move_ok=True)
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}
@@ -282,10 +282,10 @@ class ComputeTensorMethod:
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments(), method=True)
+            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments(), method=True, move_ok=True)
             dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
-            static_dispatch_block = static_dispatch(f, sig, method=True, backend=self.static_dispatch_backend)
+            static_dispatch_block = static_dispatch(f, sig, method=True, backend=self.static_dispatch_backend, move_ok=True)
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}

@@ -111,7 +111,7 @@ class RegisterDispatchKey:
             def generate_defn(cpp_sig: CppSignature) -> str:
                 return f"""
 {cpp_sig.defn()} {{
-return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments(), move_ok=True))});
 }}
 """
             result = generate_defn(cpp_sig_group.signature)
@@ -382,7 +382,7 @@ struct {class_name} final : public {parent_class} {{
             def generate_defn(cpp_sig: CppSignature) -> str:
                 return f"""
 {cpp_sig.defn()} {{
-return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments(), move_ok=True))});
 }}
 """
             result = generate_defn(cpp_sig_group.signature)
@@ -428,7 +428,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 e.expr for e in translate(
                     context,
                     structured.meta_arguments(self.g),
-                    method=False
+                    method=False,
+                    move_ok=False
                 )
             )
             sig_body.append(f"op.meta({meta_exprs});")
@@ -458,7 +459,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     e.expr for e in translate(
                         context,
                         out_sig.arguments(),
-                        method=False
+                        method=False,
+                        move_ok=True
                     )
                 )
                 # TODO: I think this means structured won't work with method
@@ -477,7 +479,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     e.expr for e in translate(
                         context,
                         structured.impl_arguments(self.g),
-                        method=False
+                        method=False,
+                        move_ok=True
                     )
                 )
                 sig_body.append(f"op.impl({impl_exprs});")
