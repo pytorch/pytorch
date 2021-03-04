@@ -12,11 +12,17 @@ from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
 from .importer import Importer, OrderedImporter, sys_importer
 import types
-from typing import List, Any, Callable, Dict, Sequence, Tuple, Union, BinaryIO, Optional
+from typing import List, Any, Callable, Dict, Set, Sequence, Tuple, Union, BinaryIO, Optional
 from pathlib import Path
 import linecache
 from urllib.parse import quote
 
+
+class EmptyMatchError(Exception):
+    """This is a exception that is thrown when a mock or extern is marked as
+    allow_empty=False, and is not matched with any module during packaging.
+    """
+    pass
 
 
 class PackageExporter:
@@ -469,7 +475,7 @@ node [shape=box];
         # Check that all mock and extern modules with allow_empty=False were matched.
         for i, (pattern, _, allow_empty) in enumerate(self.patterns):
             if not allow_empty and i not in self.matched_patterns:
-                raise RuntimeError(f"Exporter did not match {pattern} to any modules")
+                raise EmptyMatchError(f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False")
 
         # Write each tensor to a file named tensor/the_tensor_key in the zip archive
         for key in sorted(self.serialized_storages.keys()):

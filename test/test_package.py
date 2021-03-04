@@ -3,7 +3,7 @@ from unittest import skipIf
 import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
-from torch.package import PackageExporter, PackageImporter, OrderedImporter, sys_importer
+from torch.package import PackageExporter, PackageImporter, OrderedImporter, sys_importer, EmptyMatchError
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -236,7 +236,7 @@ import module_a
         and no matching module is required during packaging.
         """
         filename = self.temp()
-        with self.assertRaisesRegex(RuntimeError, r'did not match .* to any modules'):
+        with self.assertRaisesRegex(EmptyMatchError, r'did not match any modules'):
             with PackageExporter(filename, verbose=False) as exporter:
                 exporter.extern(include=['package_a.*'], allow_empty=False)
                 exporter.save_module('package_b.subpackage')
@@ -368,7 +368,7 @@ import module_a
         and no matching module is required during packaging.
         """
         filename = self.temp()
-        with self.assertRaisesRegex(RuntimeError, r'did not match .* to any modules'):
+        with self.assertRaisesRegex(EmptyMatchError, r'did not match any modules'):
             with PackageExporter(filename, verbose=False) as exporter:
                 exporter.mock(include=['package_a.*'], allow_empty=False)
                 exporter.save_module('package_b.subpackage')
