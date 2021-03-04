@@ -11,6 +11,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/ComplexHolder.h>
 
 namespace c10 {
 
@@ -25,6 +26,49 @@ namespace c10 {
 class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
+
+  Scalar(const Scalar& rhs) : tag(rhs.tag), v(rhs.v) {
+      if (isComplex()) {
+        c10::raw::intrusive_ptr::incref(v.z);
+      }
+  }
+
+  Scalar(Scalar&& rhs) noexcept : tag(rhs.tag), v(rhs.v) {}
+
+  ~Scalar() {
+    freeComplexIfNecessary();
+  }
+
+  Scalar& operator=(const Scalar& rhs) & {
+    // TODO: Note this method is implemented differently from the lvalue assignment operator of IValue
+    freeComplexIfNecessary();
+
+    tag = rhs.tag;
+    v = rhs.v;
+
+    if (isComplex()) {
+        c10::raw::intrusive_ptr::incref(v.z);
+    }
+    return *this;
+  }
+
+  C10_ALWAYS_INLINE Scalar& operator=(Scalar&& rhs) & noexcept {
+    if (&rhs == this) {
+      return *this;
+    }
+
+    freeComplexIfNecessary();
+
+    tag = rhs.tag;
+    v = rhs.v;
+
+    if (rhs.isComplex()) {
+      // Clear complex in rhs
+      rhs.tag = Tag::HAS_i;
+      rhs.v.i = 0;
+    }
+    return *this;
+  }
 
 #define DEFINE_IMPLICIT_CTOR(type, name)      \
   Scalar(type vv) : Scalar(vv, true) { }
@@ -51,7 +95,7 @@ class C10_API Scalar {
       return checked_convert<type, double>(v.d, #type);   \
     } else if (Tag::HAS_z == tag) {                       \
       return checked_convert<type, c10::complex<double>>( \
-          v.z, #type);                                    \
+          (*v.z).val, #type);                             \
     } if (Tag::HAS_b == tag) {                            \
       return checked_convert<type, bool>(v.i, #type);     \
     } else {                                              \
@@ -93,7 +137,7 @@ class C10_API Scalar {
   template<typename T, typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
-      auto val = v.z;
+      auto val = (*v.z).val;
       return (val.real() == num) && (val.imag() == T());
     } else if (isFloatingPoint()) {
       return v.d == num;
@@ -108,7 +152,7 @@ class C10_API Scalar {
   template<typename T, typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
-      return v.z == num;
+      return (*v.z).val == num;
     } else if (isFloatingPoint()) {
       return (v.d == num.real()) && (num.imag() == T());
     } else if (isIntegral(/*includeBool=*/false)) {
@@ -160,18 +204,25 @@ class C10_API Scalar {
              typename std::enable_if<c10::is_complex<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_z) {
-      v.z = convert<decltype(v.z), T>(vv);
+      auto intrusive_ptr = c10::make_intrusive<c10::ComplexHolder>(convert<decltype((*v.z).val), T>(vv));
+      v.z = intrusive_ptr.release();
     }
 
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
+
+  void freeComplexIfNecessary() {
+    if (isComplex()) {
+      c10::intrusive_ptr<ComplexHolder>::reclaim(v.z);
+    }
+  }
 
   enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b };
   Tag tag;
   union v_t {
     double d;
     int64_t i;
-    c10::complex<double> z;
+    ComplexHolder* z;
     v_t(){}  // default constructor
   } v;
 };

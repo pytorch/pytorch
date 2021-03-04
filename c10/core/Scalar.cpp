@@ -7,7 +7,7 @@ Scalar Scalar::operator-() const {
   if (isFloatingPoint()) {
     return Scalar(-v.d);
   } else if (isComplex()) {
-    return Scalar(-v.z);
+    return Scalar(-(*v.z).val);
   } else {
     return Scalar(-v.i);
   }
@@ -15,7 +15,7 @@ Scalar Scalar::operator-() const {
 
 Scalar Scalar::conj() const {
   if (isComplex()) {
-    return Scalar(std::conj(v.z));
+    return Scalar(std::conj((*v.z).val));
   } else {
     return *this;
   }
@@ -23,7 +23,7 @@ Scalar Scalar::conj() const {
 
 Scalar Scalar::log() const {
   if (isComplex()) {
-    return std::log(v.z);
+    return std::log((*v.z).val);
   } else if (isFloatingPoint()) {
     return std::log(v.d);
   } else {
