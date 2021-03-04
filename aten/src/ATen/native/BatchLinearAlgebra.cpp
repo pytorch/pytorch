@@ -1171,6 +1171,8 @@ static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
   // triangular_solve_stub performs calculations in-place
   // 'result' must be a copy of 'other'
   // 'clone_input' must be a copy of 'input'
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(other.sizes()));
+  TORCH_INTERNAL_ASSERT(clone_input.sizes().equals(input.sizes()));
   result.copy_(other);
   clone_input.copy_(input);
 
