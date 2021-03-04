@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN
+
 #include <ATen/ATen.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
@@ -33,6 +35,8 @@ struct Layout final {
   };
 };
 
+int64_t normalize(int64_t dimension, int64_t n);
+
 uint32_t batch_size(const Tensor& tensor);
 uint32_t channels_size(const Tensor& tensor);
 uint32_t height_size(const Tensor& tensor);
@@ -42,3 +46,5 @@ uint32_t width_size(const Tensor& tensor);
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN */

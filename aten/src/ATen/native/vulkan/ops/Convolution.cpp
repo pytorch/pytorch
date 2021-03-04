@@ -613,9 +613,13 @@ Tensor convolution(
   ).run(input);
 }
 
+#ifdef USE_VULKAN
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("convolution_overrideable", convolution);
 }
+
+#endif /* USE_VULKAN */
 
 } // namespace
 

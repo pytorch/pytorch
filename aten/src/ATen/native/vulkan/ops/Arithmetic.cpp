@@ -449,6 +449,8 @@ Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
       VK_KERNEL(div_));
 }
 
+#ifdef USE_VULKAN
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("add.Scalar", TORCH_FN(add_scalar));
   m.impl("add_.Scalar", TORCH_FN(add_scalar_));
@@ -467,6 +469,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("div.Tensor", TORCH_FN(div_tensor));
   m.impl("div_.Tensor", TORCH_FN(div_tensor_));
 }
+
+#endif /* USE_VULKAN */
 
 } // namespace
 } // namespace ops

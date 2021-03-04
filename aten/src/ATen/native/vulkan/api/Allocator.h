@@ -5,6 +5,8 @@
 // Always include this file (Allocator.h) instead.
 //
 
+#ifdef USE_VULKAN
+
 #include <ATen/native/vulkan/api/Common.h>
 
 #define VMA_VULKAN_VERSION 1000000
@@ -46,3 +48,5 @@
 #ifdef __clang__
   #pragma clang diagnostic pop
 #endif /* __clang__ */
+
+#endif /* USE_VULKAN */

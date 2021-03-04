@@ -10,6 +10,8 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+#ifdef USE_VULKAN
+
 TORCH_LIBRARY(vulkan, m) {
   m.class_<Conv2dOpContext>("Conv2dOpContext")
       .def_pickle(
@@ -68,6 +70,8 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl("conv2d_clamp_run", TORCH_FN(conv2d_clamp_run));
   m.impl("linear_run", TORCH_FN(linear_run));
 }
+
+#endif /* USE_VULKAN */
 
 } // namespace
 } // namespace ops

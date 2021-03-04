@@ -1,4 +1,6 @@
+#pragma once
 
+#ifdef USE_VULKAN
 
 #include <ATen/native/vulkan/ops/Common.h>
 
@@ -29,3 +31,5 @@ Persistent* persistent();
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN */

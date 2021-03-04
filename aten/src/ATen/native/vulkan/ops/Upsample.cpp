@@ -98,9 +98,13 @@ Tensor upsample_nearest2d(
   return convert(v_output);
 }
 
+#ifdef USE_VULKAN
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("upsample_nearest2d", TORCH_FN(upsample_nearest2d));
 }
+
+#endif /* USE_VULKAN */
 
 } // namespace
 } // namespace ops

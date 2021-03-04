@@ -5,6 +5,12 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
+int64_t normalize(
+    const int64_t dimension,
+    const int64_t n) {
+  return (dimension % n + n) % n;
+}
+
 uint32_t batch_size(const Tensor& tensor) {
   const IntArrayRef sizes = tensor.sizes();
   const uint32_t dims = sizes.size();

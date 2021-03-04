@@ -237,10 +237,14 @@ Tensor avg_pool2d(
   return convert(v_output);
 }
 
+#ifdef USE_VULKAN
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("_adaptive_avg_pool2d", TORCH_FN(adaptive_avg_pool2d));
   m.impl("avg_pool2d", TORCH_FN(avg_pool2d));
 }
+
+#endif /* USE_VULKAN */
 
 } // namespace
 } // namespace ops

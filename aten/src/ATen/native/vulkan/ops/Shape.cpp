@@ -42,9 +42,13 @@ Tensor view(
   return convert(v_output);
 }
 
+#ifdef USE_VULKAN
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("view", TORCH_FN(view));
 }
+
+#endif /* USE_VULKAN */
 
 } // namespace
 } // namespace ops

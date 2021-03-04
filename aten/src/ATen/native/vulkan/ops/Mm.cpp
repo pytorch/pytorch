@@ -214,10 +214,14 @@ Tensor mm(
           1.0f);
 }
 
+#ifdef USE_VULKAN
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("addmm", TORCH_FN(addmm));
   m.impl("mm", TORCH_FN(mm));
 }
+
+#endif /* USE_VULKAN */
 
 } // namespace
 

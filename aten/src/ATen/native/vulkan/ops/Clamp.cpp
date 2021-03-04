@@ -162,6 +162,8 @@ Tensor& relu_(Tensor& self) {
   return ops::clamp_(self, 0, c10::nullopt);
 }
 
+#ifdef USE_VULKAN
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("clamp", TORCH_FN(clamp));
   m.impl("clamp_", TORCH_FN(clamp_));
@@ -170,6 +172,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("relu", relu);
   m.impl("relu_", relu_);
 }
+
+#endif /* USE_VULKAN */
 
 } // namespace
 } // namespace ops

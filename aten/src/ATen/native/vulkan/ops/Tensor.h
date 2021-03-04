@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN
+
 #include <ATen/ATen.h>
 #include <ATen/OpaqueTensorImpl.h>
 #include <ATen/native/vulkan/api/api.h>
@@ -674,3 +676,5 @@ inline Tensor convert(const vTensor& tensor) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN */

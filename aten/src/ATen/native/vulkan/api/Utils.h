@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -106,3 +108,5 @@ using vec4 = vec<4u>;
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN */

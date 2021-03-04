@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
@@ -138,3 +140,5 @@ inline VkCommandBuffer Command::Buffer::handle() const {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN */

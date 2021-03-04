@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
@@ -145,3 +147,5 @@ struct Descriptor final {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN */
