@@ -241,6 +241,30 @@ import module_a
                 exporter.extern(include=['package_a.*'], allow_empty=False)
                 exporter.save_module('package_b.subpackage')
 
+    def test_deny(self):
+        """
+        Test marking packages as "deny" during export.
+        """
+        filename = self.temp()
+
+        with self.assertRaisesRegex(RuntimeError, 'required during packaging but has been explicitly blocklisted'):
+            with PackageExporter(filename, verbose=False) as exporter:
+                exporter.deny(['package_a.subpackage', 'module_a'])
+                exporter.require_module('package_a.subpackage')
+
+    def test_deny_glob(self):
+        """
+        Test marking packages as "deny" using globs instead of package names.
+        """
+        filename = self.temp()
+        with self.assertRaisesRegex(RuntimeError, 'required during packaging but has been explicitly blocklisted'):
+            with PackageExporter(filename, verbose=False) as exporter:
+                exporter.deny(['package_a.*', 'module_*'])
+                exporter.save_source_string('test_module', """\
+import package_a.subpackage
+import module_a
+""")
+
     def test_save_imported_module_fails(self):
         """
         Directly saving/requiring an PackageImported module should raise a specific error message.
