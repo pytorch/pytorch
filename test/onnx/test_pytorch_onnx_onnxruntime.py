@@ -6389,7 +6389,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, boxes, scores, idxs):
                 return ops.batched_nms(boxes, scores, idxs, 0.5)
 
-        self.run_model(Module(), [(boxes, scores, idxs)])
+        self.run_test(Module(), (boxes, scores, idxs))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
