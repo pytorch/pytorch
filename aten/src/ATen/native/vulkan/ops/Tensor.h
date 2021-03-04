@@ -1,11 +1,8 @@
 #pragma once
 
-#ifdef USE_VULKAN_API
-
 #include <ATen/ATen.h>
+#include <ATen/OpaqueTensorImpl.h>
 #include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
-#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -405,11 +402,30 @@ class vTensor final {
  #endif /* VULKAN_TENSOR_DEBUG */
 };
 
+class vTensorImpl final : public OpaqueTensorImpl<vTensor> {
+ public:
+  vTensorImpl(
+      at::DispatchKeySet key_set,
+      caffe2::TypeMeta data_type,
+      c10::Device device,
+      const vTensor& handle,
+      c10::IntArrayRef sizes,
+      c10::IntArrayRef strides);
+
+  IntArrayRef strides() const override;
+  bool is_contiguous(const c10::MemoryFormat memory_format) const override;
+  int64_t stride(const int64_t dim) const override;
+
+ private:
+  const char* tensorimpl_type_name() const override;
+
+ private:
+  SmallVector<int64_t, 5> strides_;
+};
+
 const vTensor& convert(const Tensor& tensor);
 vTensor& convert(Tensor& tensor);
 Tensor convert(const vTensor& tensor);
-
-using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
 void verify(const TensorOptions& options);
 
 //
@@ -588,6 +604,40 @@ inline void vTensor::View::State::set_dirty(
   dirty_ |= components;
 }
 
+inline vTensorImpl::vTensorImpl(
+    const at::DispatchKeySet key_set,
+    const caffe2::TypeMeta data_type,
+    const c10::Device device,
+    const vTensor& handle,
+    const c10::IntArrayRef sizes,
+    const c10::IntArrayRef strides)
+    : OpaqueTensorImpl<vTensor>(
+          key_set,
+          data_type,
+          device,
+          handle,
+          sizes,
+          false),
+      strides_(strides.vec()) {
+}
+
+inline IntArrayRef vTensorImpl::strides() const {
+  return strides_;
+}
+
+inline bool vTensorImpl::is_contiguous(
+    const c10::MemoryFormat memory_format) const {
+  return true;
+}
+
+inline int64_t vTensorImpl::stride(const int64_t dim) const {
+  return strides_[at::maybe_wrap_dim(dim, this->dim(), false)];
+}
+
+inline const char* vTensorImpl::tensorimpl_type_name() const {
+  return "vTensorImpl";
+}
+
 inline const vTensor& convert(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       tensor.is_vulkan(),
@@ -624,5 +674,3 @@ inline Tensor convert(const vTensor& tensor) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif /* USE_VULKAN_API */

@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_VULKAN_API
-
 #include <ATen/native/vulkan/api/Common.h>
 
 namespace at {
@@ -92,5 +90,3 @@ inline void Cache<Factory>::purge() {
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif /* USE_VULKAN_API */

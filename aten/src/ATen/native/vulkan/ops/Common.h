@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_VULKAN_API
-
 #include <ATen/ATen.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
@@ -44,5 +42,3 @@ uint32_t width_size(const Tensor& tensor);
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif /* USE_VULKAN_API */

@@ -102,13 +102,9 @@ Tensor mean(
   return convert(v_output);
 }
 
-#ifdef USE_VULKAN_API
-
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("mean.dim", TORCH_FN(mean));
 }
-
-#endif /* USE_VULKAN_API */
 
 } // namespace
 } // namespace ops

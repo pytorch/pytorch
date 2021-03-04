@@ -32,6 +32,7 @@ void main() {
 
     sh_mem[tid.z * group_size.y * group_size.x + tid.y * group_size.x + tid.x] = sum;
   }
+
   memoryBarrierShared();
   barrier();
 
@@ -40,6 +41,7 @@ void main() {
   }
 
   vec4 total = vec4(0);
+
   for (int y = 0; y < group_size.y; ++y) {
     for (int x = 0; x < group_size.x; ++x) {
       total += sh_mem[tid.z * group_size.y * group_size.x + y * group_size.x + x];

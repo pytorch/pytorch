@@ -67,7 +67,7 @@ Tensor adaptive_avg_pool2d(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(adaptive_avg_pool2d),
+          VK_KERNEL(pool2d_avg_adaptive),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -210,7 +210,7 @@ Tensor avg_pool2d(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(avg_pool2d),
+          VK_KERNEL(pool2d_avg),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -237,14 +237,10 @@ Tensor avg_pool2d(
   return convert(v_output);
 }
 
-#ifdef USE_VULKAN_API
-
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("_adaptive_avg_pool2d", TORCH_FN(adaptive_avg_pool2d));
   m.impl("avg_pool2d", TORCH_FN(avg_pool2d));
 }
-
-#endif /* USE_VULKAN_API */
 
 } // namespace
 } // namespace ops

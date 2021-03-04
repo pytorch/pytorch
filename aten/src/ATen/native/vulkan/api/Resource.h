@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_VULKAN_API
-
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Allocator.h>
 #include <ATen/native/vulkan/api/Cache.h>
@@ -453,5 +451,3 @@ inline Resource::Buffer Resource::Pool::uniform(const Block& block) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif /* USE_VULKAN_API */

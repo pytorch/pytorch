@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_VULKAN_API
-
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
 #include <ATen/native/vulkan/api/Utils.h>
@@ -292,5 +290,3 @@ inline bool operator==(
 
   return (0 == memcmp(&_1, &_2, sizeof(VkDescriptorSetLayoutBinding)));
 }
-
-#endif /* USE_VULKAN_API */

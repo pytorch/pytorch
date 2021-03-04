@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_VULKAN_API
-
 #include <ATen/native/vulkan/ops/Common.h>
 
 namespace at {
@@ -15,5 +13,3 @@ Tensor& copy_(Tensor& self, const Tensor& src);
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif /* USE_VULKAN_API */

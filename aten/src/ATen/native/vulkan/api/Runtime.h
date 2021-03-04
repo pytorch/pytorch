@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_VULKAN_API
-
 #include <ATen/native/vulkan/api/Common.h>
 
 namespace at {
@@ -69,5 +67,3 @@ inline VkInstance Runtime::instance() const {
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif /* USE_VULKAN_API */

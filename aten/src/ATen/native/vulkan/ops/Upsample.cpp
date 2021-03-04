@@ -71,7 +71,7 @@ Tensor upsample_nearest2d(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(upsample_nearest2d),
+          VK_KERNEL(upsample2d_nearest),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -98,13 +98,9 @@ Tensor upsample_nearest2d(
   return convert(v_output);
 }
 
-#ifdef USE_VULKAN_API
-
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("upsample_nearest2d", TORCH_FN(upsample_nearest2d));
 }
-
-#endif /* USE_VULKAN_API */
 
 } // namespace
 } // namespace ops

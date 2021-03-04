@@ -1,5 +1,3 @@
-#ifdef USE_VULKAN_API
-
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Mm.h>
@@ -76,5 +74,3 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif /* USE_VULKAN_API */

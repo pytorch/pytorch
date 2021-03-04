@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_VULKAN_API
-
 #include <ATen/ATen.h>
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
@@ -193,5 +191,3 @@ inline void Handle<Type, Deleter>::reset(Type payload) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif /* USE_VULKAN_API */

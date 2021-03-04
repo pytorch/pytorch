@@ -23,6 +23,7 @@ void main() {
   if (all(lessThan(pos, uBlock.size.xyz))) {
     const ivec3 input0_pos = pos % uBlock.isize0.xyz;
     const ivec3 input1_pos = pos % uBlock.isize1.xyz;
+
     imageStore(
         uOutput,
         pos,

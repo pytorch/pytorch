@@ -42,14 +42,10 @@ Tensor empty_strided(
       c10::MemoryFormat::Contiguous);
 }
 
-#ifdef USE_VULKAN_API
-
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("empty.memory_format", at::native::vulkan::ops::empty_memory_format);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::ops::empty_strided));
 }
-
-#endif /* USE_VULKAN_API */
 
 } // namespace
 } // namespace ops
