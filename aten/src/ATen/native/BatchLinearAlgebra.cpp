@@ -1174,9 +1174,9 @@ static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
 std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
                                             bool upper, bool transpose, bool unitriangular) {
   TORCH_CHECK(self.dim() >= 2,
-           "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+           "torch.triangular_solve: Expected b to have at least 2 dimensions, but it has ", self.dim(), " dimensions instead");
   TORCH_CHECK(A.dim() >= 2,
-           "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
+           "torch.triangular_solve: Expected A to have at least 2 dimensions, but it has ", A.dim(), " dimensions instead");
 
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
