@@ -422,9 +422,7 @@ class {module_name}(torch.nn.Module):
                 # join them with a dot. Otherwise, return that single
                 # element without doing anything to it.
                 def join_fn(x: str, y: str) -> str:
-                    if y:
-                        return x + "." + y
-                    return x
+                    return '.'.join([x, y] if y else [x])
 
                 # Progressively collect all the names of intermediate
                 # modules. For example, if we have the target 

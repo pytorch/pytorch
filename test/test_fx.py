@@ -1851,7 +1851,6 @@ class TestFX(JitTestCase):
                 super(C, self).__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3, stride=2)
                 self.param = torch.nn.Parameter(torch.rand(2, 3))
-                self.register_buffer("buf", torch.randn(2, 3))
 
             def forward(self, x):
                 return self.conv(torch.cat([self.param, x, self.buf]))
@@ -1860,6 +1859,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super(B, self).__init__()
                 self.linear = torch.nn.Linear(100, 200)
+                self.register_buffer("buf", torch.randn(2, 3))
                 self.net_c = C()
 
             def forward(self, x):
@@ -1887,19 +1887,15 @@ class TestFX(JitTestCase):
         a.recompile()
 
         def module_exists(gm: GraphModule, path: str) -> bool:
-            atoms: List[str] = path.split(".")
+            return any(path == name for name in gm.named_modules())
 
-            for item in atoms:
+        def parameter_exists(gm: GraphModule, path: str) -> bool:
+            return (any(path == name for name in gm.named_parameters())
+                    and any(path == name for name in gm.state_dict()))
 
-                if not hasattr(gm, item):
-                    return False
-
-                gm = getattr(gm, item)
-
-                if not isinstance(gm, torch.nn.Module):
-                    return False
-
-            return True
+        def buffer_exists(gm: GraphModule, path: str) -> bool:
+            return (any(path == name for name in gm.named_buffers())
+                    and any(path == name for name in gm.state_dict()))
 
         # Test that we added the "dropout" submodule
         self.assertTrue(module_exists(a, "net_b.net_c.dropout"))
@@ -1949,13 +1945,13 @@ class TestFX(JitTestCase):
 
         # Test `get_parameter`
         self.assertIsNotNone(a.get_parameter("net_b.net_c.param"))
-        self.assertIsNone(a.get_parameter("net_b.net_c.buf"))
+        self.assertIsNone(a.get_parameter("net_b.buf"))
         self.assertIsNone(a.get_parameter("net_b.param"))
 
         # Test `get_buffer`
-        self.assertIsNotNone(a.get_buffer("net_b.net_c.buf"))
-        self.assertIsNone(a.get_buffer("net_b.net_c.param"))
-        self.assertIsNone(a.get_buffer("net_b.buf"))
+        self.assertIsNotNone(a.get_buffer("net_b.buf"))
+        self.assertIsNone(a.get_buffer("net_b.net_c.buf"))
+        self.assertIsNone(a.get_buffer("net_b.param"))
 
         # Insert some unused submodules
         a.add_submodule("net_b.embedding", torch.nn.Embedding(10, 3))
@@ -1973,8 +1969,8 @@ class TestFX(JitTestCase):
         self.assertFalse(module_exists(a, "batch_norm_2d"))
 
         # Test that we didn't delete any unused Parameters or buffers
-        self.assertTrue(hasattr(getattr(getattr(a, "net_b"), "net_c"), "param"))    # noqa: B009
-        self.assertTrue(hasattr(getattr(getattr(a, "net_b"), "net_c"), "buf"))    # noqa: B009
+        self.assertTrue(parameter_exists(a, "net_b.net_c.param"))
+        self.assertTrue(buffer_exists(a, "net_b.buf"))
 
         a.graph.lint()
 

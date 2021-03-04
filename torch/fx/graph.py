@@ -499,10 +499,28 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
         """
+        def _get_attr_reference_exists(mod: torch.nn.Module, qualified_name: str) -> bool:
+            module_path, _, name = qualified_name.rpartition(".")
+
+            submod: Optional[torch.nn.Module] = mod.get_submodule(module_path)
+
+            if not submod:
+                return False
+
+            if not hasattr(submod, name):
+                return False
+
+            res = getattr(submod, name)
+
+            if (not isinstance(res, torch.nn.Module)
+                    and not isinstance(res, torch.nn.Parameter)
+                    and name not in submod._buffers):
+                return False
+
+            return True
+
         if (self.owning_module and 
-                self.owning_module.get_submodule(qualified_name) is None
-                and self.owning_module.get_parameter(qualified_name) is None
-                and self.owning_module.get_buffer(qualified_name) is None):
+                not _get_attr_reference_exists(self.owning_module, qualified_name)):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
                           "GraphModule! Call "

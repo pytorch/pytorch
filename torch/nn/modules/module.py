@@ -382,7 +382,7 @@ class Module:
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    def get_submodule(self, target: str) -> Optional["Module"]:
+    def get_submodule(self, target: str) -> "Module":
         """
         Returns the submodule given by ``target`` if it exists,
         otherwise returns ``None``.
@@ -423,10 +423,12 @@ class Module:
                 fully-qualified string.)
 
         Returns:
-            Optional[torch.nn.Module]: The submodule referenced by
-                ``target`` if it exists, otherwise ``None``. ``None``
-                will also be returned if the target string resolves
-                to something that is not an ``nn.Module``.
+            torch.nn.Module: The submodule referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not an
+                ``nn.Module``
         """
         atoms: List[str] = target.split(".")
         mod: torch.nn.Module = self
@@ -434,16 +436,18 @@ class Module:
         for item in atoms:
 
             if not hasattr(mod, item):
-                return None
+                raise AttributeError(mod._get_name() + " has no "
+                                     "attribute " + item)
 
             mod = getattr(mod, item)
 
             if not isinstance(mod, torch.nn.Module):
-                return None
+                raise AttributeError(mod._get_name() + " is not "
+                                     "an nn.Module")
 
         return mod
 
-    def get_parameter(self, target: str) -> Optional["Parameter"]:
+    def get_parameter(self, target: str) -> "Parameter":
         """
         Returns the parameter given by ``target`` if it exists,
         otherwise returns ``None``.
@@ -458,25 +462,25 @@ class Module:
                 fully-qualified string.)
 
         Returns:
-            Optional[torch.nn.Parameter]: The Parameter referenced by
-                ``target`` if it exists, otherwise ``None``. ``None``
-                will also be returned if the target string resolves
-                to something that is not an ``nn.Parameter``.
+            torch.nn.Parameter: The Parameter referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not an
+                ``nn.Parameter`
         """
         module_path, _, param_name = target.rpartition(".")
 
-        mod: Optional[torch.nn.Module] = self.get_submodule(module_path)
-
-        if not mod:
-            return None
+        mod: torch.nn.Module = self.get_submodule(module_path)
 
         if not hasattr(mod, param_name):
-            return None
+            raise AttributeError(mod._get_name() + " has no attribute "
+                                 + param_name)
 
         param: torch.nn.Parameter = getattr(mod, param_name)
 
         if not isinstance(param, torch.nn.Parameter):
-            return None
+            raise AttributeError(param + " is not an nn.Parameter")
 
         return param
 
@@ -502,16 +506,18 @@ class Module:
         """
         module_path, _, buffer_name = target.rpartition(".")
 
-        mod: Optional[torch.nn.Module] = self.get_submodule(module_path)
+        mod: torch.nn.Module = self.get_submodule(module_path)
 
-        if not mod:
-            return None
+        if not hasattr(mod, buffer_name):
+            raise AttributeError(mod._get_name() + " has no attribute "
+                                 + buffer_name)
 
-        for name, buffer in mod.named_buffers():
-            if name == buffer_name:
-                return buffer
+        buffer: torch.Tensor = getattr(mod, buffer_name)
 
-        return None
+        if buffer not in mod._buffers:
+            raise AttributeError(buffer + " is not a buffer")
+
+        return buffer
 
     def _apply(self, fn):
         for module in self.children():
@@ -1523,7 +1529,7 @@ class Module:
             1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
-        for name, module in self.named_modules():
+        for _, module in self.named_modules():
             yield module
 
     def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = ''):
