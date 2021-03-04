@@ -437,12 +437,12 @@ class Module:
 
             if not hasattr(mod, item):
                 raise AttributeError(mod._get_name() + " has no "
-                                     "attribute " + item)
+                                     "attribute `" + item + "`")
 
             mod = getattr(mod, item)
 
             if not isinstance(mod, torch.nn.Module):
-                raise AttributeError(mod._get_name() + " is not "
+                raise AttributeError("`" + item + "` is not "
                                      "an nn.Module")
 
         return mod
@@ -474,13 +474,14 @@ class Module:
         mod: torch.nn.Module = self.get_submodule(module_path)
 
         if not hasattr(mod, param_name):
-            raise AttributeError(mod._get_name() + " has no attribute "
-                                 + param_name)
+            raise AttributeError(mod._get_name() + " has no attribute `"
+                                 + param_name + "`")
 
         param: torch.nn.Parameter = getattr(mod, param_name)
 
         if not isinstance(param, torch.nn.Parameter):
-            raise AttributeError(param + " is not an nn.Parameter")
+            raise AttributeError("`" + param_name + "` is not an "
+                                 "nn.Parameter")
 
         return param
 
@@ -509,13 +510,13 @@ class Module:
         mod: torch.nn.Module = self.get_submodule(module_path)
 
         if not hasattr(mod, buffer_name):
-            raise AttributeError(mod._get_name() + " has no attribute "
-                                 + buffer_name)
+            raise AttributeError(mod._get_name() + " has no attribute `"
+                                 + buffer_name + "`")
 
         buffer: torch.Tensor = getattr(mod, buffer_name)
 
-        if buffer not in mod._buffers:
-            raise AttributeError(buffer + " is not a buffer")
+        if buffer not in mod._buffers.values():
+            raise AttributeError("`" + buffer_name + "` is not a buffer")
 
         return buffer
 

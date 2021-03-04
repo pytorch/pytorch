@@ -1853,7 +1853,7 @@ class TestFX(JitTestCase):
                 self.param = torch.nn.Parameter(torch.rand(2, 3))
 
             def forward(self, x):
-                return self.conv(torch.cat([self.param, x, self.buf]))
+                return self.conv(torch.cat([self.param, x]))
 
         class B(torch.nn.Module):
             def __init__(self):
@@ -1863,7 +1863,7 @@ class TestFX(JitTestCase):
                 self.net_c = C()
 
             def forward(self, x):
-                return self.linear(self.net_c(x))
+                return self.linear(torch.cat([self.buf, self.net_c(x)]))
 
         class A(torch.nn.Module):
             def __init__(self):
@@ -1887,15 +1887,15 @@ class TestFX(JitTestCase):
         a.recompile()
 
         def module_exists(gm: GraphModule, path: str) -> bool:
-            return any(path == name for name in gm.named_modules())
+            return any(path == name for name, _ in gm.named_modules())
 
         def parameter_exists(gm: GraphModule, path: str) -> bool:
-            return (any(path == name for name in gm.named_parameters())
-                    and any(path == name for name in gm.state_dict()))
+            return (any(path == name for name, _ in gm.named_parameters())
+                    and any(path == name for name in gm.state_dict().keys()))
 
         def buffer_exists(gm: GraphModule, path: str) -> bool:
-            return (any(path == name for name in gm.named_buffers())
-                    and any(path == name for name in gm.state_dict()))
+            return (any(path == name for name, _ in gm.named_buffers())
+                    and any(path == name for name in gm.state_dict().keys()))
 
         # Test that we added the "dropout" submodule
         self.assertTrue(module_exists(a, "net_b.net_c.dropout"))
@@ -1919,7 +1919,9 @@ class TestFX(JitTestCase):
         self.assertFalse(module_exists(a, "net_b.net_c.conv"))
 
         # Test `get_submodule` with a deleted submodule
-        self.assertIsNone(a.get_submodule("net_b.net_c.conv"))
+        with self.assertRaisesRegex(AttributeError, "has no attribute "
+                                    "`conv`"):
+            self.assertIsNone(a.get_submodule("net_b.net_c.conv"))
 
         # Test `get_attr` warnings
         cat = [n for n in a.graph.nodes if n.target == torch.cat][-1]
@@ -1944,14 +1946,22 @@ class TestFX(JitTestCase):
         a.graph.lint()
 
         # Test `get_parameter`
-        self.assertIsNotNone(a.get_parameter("net_b.net_c.param"))
-        self.assertIsNone(a.get_parameter("net_b.buf"))
-        self.assertIsNone(a.get_parameter("net_b.param"))
+        a.get_parameter("net_b.net_c.param")
+        with self.assertRaisesRegex(AttributeError, "is not an "
+                                    "nn.Parameter"):
+            a.get_parameter("net_b.buf")
+        with self.assertRaisesRegex(AttributeError, "has no attribute "
+                                    "`param`"):
+            a.get_parameter("net_b.param")
 
         # Test `get_buffer`
-        self.assertIsNotNone(a.get_buffer("net_b.buf"))
-        self.assertIsNone(a.get_buffer("net_b.net_c.buf"))
-        self.assertIsNone(a.get_buffer("net_b.param"))
+        a.get_buffer("net_b.buf")
+        with self.assertRaisesRegex(AttributeError, "is not a "
+                                    "buffer"):
+            a.get_buffer("net_b.net_c.param")
+        with self.assertRaisesRegex(AttributeError, "has no attribute "
+                                    "`buf`"):
+            a.get_buffer("net_b.net_c.buf")
 
         # Insert some unused submodules
         a.add_submodule("net_b.embedding", torch.nn.Embedding(10, 3))
