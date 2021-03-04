@@ -73,11 +73,9 @@ TEST(IRVerifier, Load) {
   const Var* K = new Var("k", kFloat);
   const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
-    // Indices with different dtypes (kInt, kLong)
-    // TODO: we should actually allow this:
-    // https://github.com/pytorch/pytorch/issues/52773
+    // Indices with different int dtypes (kInt, kLong) are ok
     auto a = new Load(B, {I, J}, new IntImm(1));
-    EXPECT_ANY_THROW(verify(a));
+    EXPECT_NO_THROW(verify(a));
   }
   {
     // Float index
@@ -142,6 +140,40 @@ TEST(IRVerifier, Block) {
     // Stmt can't have multiple parrents, thus inserting it into several blocks
     // is illegal
     EXPECT_ANY_THROW(verify(block2));
+  }
+}
+
+TEST(IRVerifier, Store) {
+  KernelScope kernel_scope;
+  const Var* I = new Var("i", kInt);
+  const Var* J = new Var("j", kLong);
+  const Var* K = new Var("k", kFloat);
+  const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
+  {
+    // Indices with different int dtypes (kInt, kLong) are ok
+    auto a = new Store(B, {I, J}, K, new IntImm(1));
+    EXPECT_NO_THROW(verify(a));
+  }
+  {
+    // Float index
+    auto a = new Store(B, {K, K}, K, new IntImm(1));
+    EXPECT_ANY_THROW(verify(a));
+  }
+  {
+    // Multilanes are only allowed in flattened indices
+    auto multilane_index = new Ramp(I, new IntImm(1), 4);
+    auto a = new Store(B, {I, multilane_index}, K, new IntImm(1));
+    EXPECT_ANY_THROW(verify(a));
+  }
+  {
+    // Lane number mismatch in indices and mask
+    auto a = new Store(B, {I}, K, new Broadcast(new IntImm(1), 4));
+    EXPECT_ANY_THROW(verify(a));
+  }
+  {
+    // Value and buf dtypes mismatch
+    auto a = new Store(B, {I}, I, new Broadcast(new IntImm(1), 4));
+    EXPECT_ANY_THROW(verify(a));
   }
 }
 

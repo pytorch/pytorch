@@ -168,7 +168,7 @@ struct Resource final {
 
         typedef Sampler::Descriptor Descriptor;
         typedef VK_DELETER(Sampler) Deleter;
-        typedef Handle<VkSampler, Deleter> Handle;
+        typedef api::Handle<VkSampler, Deleter> Handle;
 
         struct Hasher {
           size_t operator()(const Descriptor& descriptor) const;
