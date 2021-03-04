@@ -5,7 +5,7 @@ import torch
 
 
 class InterpolateBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, input_size, output_size, channels_last=False):
+    def init(self, input_size, output_size, channels_last=False, interp_mode='linear'):
 
         input_image = torch.randint(0, 256, size=input_size, dtype=torch.float, device='cpu',
                                     requires_grad=self.auto_set())
@@ -25,17 +25,26 @@ class InterpolateBenchmark(op_bench.TorchBenchmarkBase):
             5: 'trilinear',
         }
 
+        mode = interp_mode
+        align_corners = False
+
+        if "nearest" == mode:
+            align_corners = None
+        if "linear" == mode:
+            mode = ndim_to_mode[input_image.ndim]
+
         self.inputs = {
             "input_image": input_image,
             "output_size": output_size,
-            "mode": ndim_to_mode[input_image.ndim],
+            "mode": mode,
+            "align_corners": align_corners,
         }
 
         self.set_module_name("interpolate")
 
-    def forward(self, input_image, output_size, mode):
+    def forward(self, input_image, output_size, mode, align_corners):
         return torch.nn.functional.interpolate(input_image, size=output_size, mode=mode,
-                                               align_corners=False)
+                                               align_corners=align_corners)
 
 
 config_short = op_bench.config_list(
@@ -47,6 +56,7 @@ config_short = op_bench.config_list(
     ],
     cross_product_configs={
         'channels_last': [True, False],
+        'interp_mode': ["nearest", "linear", "bicubic"],
     },
     tags=["short"],
 )
@@ -60,9 +70,11 @@ config_long = op_bench.config_list(
         [(1, 3, 500, 500), (800, 800)],
 
         [(2, 128, 64, 46), (128, 128)],
+        [(2, 128, 64, 46), (32, 24)],
     ],
     cross_product_configs={
         'channels_last': [True, False],
+        'interp_mode': ["nearest", "linear", "bicubic"],
     },
     tags=["long"],
 )
@@ -75,6 +87,9 @@ config_3d = op_bench.config_list(
         [(4, 512, 320), (256,)],
         [(4, 512, 320), (512,)],
     ],
+    cross_product_configs={
+        'interp_mode': ["nearest", "linear"],
+    },
     tags=["long"],
 )
 
@@ -87,6 +102,7 @@ config_5d = op_bench.config_list(
     ],
     cross_product_configs={
         'channels_last': [True, False],
+        'interp_mode': ["nearest", "linear"],
     },
     tags=["long"],
 )
