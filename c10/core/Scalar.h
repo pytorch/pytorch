@@ -27,49 +27,6 @@ class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
 
-  Scalar(const Scalar& rhs) : tag(rhs.tag), v(rhs.v) {
-      if (isComplex()) {
-        c10::raw::intrusive_ptr::incref(v.z);
-      }
-  }
-
-  Scalar(Scalar&& rhs) noexcept : tag(rhs.tag), v(rhs.v) {}
-
-  ~Scalar() {
-    freeComplexIfNecessary();
-  }
-
-  Scalar& operator=(const Scalar& rhs) & {
-    // TODO: Note this method is implemented differently from the lvalue assignment operator of IValue
-    freeComplexIfNecessary();
-
-    tag = rhs.tag;
-    v = rhs.v;
-
-    if (isComplex()) {
-        c10::raw::intrusive_ptr::incref(v.z);
-    }
-    return *this;
-  }
-
-  C10_ALWAYS_INLINE Scalar& operator=(Scalar&& rhs) & noexcept {
-    if (&rhs == this) {
-      return *this;
-    }
-
-    freeComplexIfNecessary();
-
-    tag = rhs.tag;
-    v = rhs.v;
-
-    if (rhs.isComplex()) {
-      // Clear complex in rhs
-      rhs.tag = Tag::HAS_i;
-      rhs.v.i = 0;
-    }
-    return *this;
-  }
-
 #define DEFINE_IMPLICIT_CTOR(type, name)      \
   Scalar(type vv) : Scalar(vv, true) { }
 
