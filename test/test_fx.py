@@ -324,6 +324,21 @@ class TestFX(JitTestCase):
             assert node.name not in seen_names
             seen_names.add(node.name)
 
+    def test_stack_traces(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        graph = tracer.trace(M())
+        for node in graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_fx.py' in node.stack_trace
+
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
