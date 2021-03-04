@@ -22,7 +22,7 @@ How to Use a Communication Hook?
 To use a communication hook, the user just needs to let the DDP model register
 the hook before the training loop as below.
 
-:func:`torch.nn.parallel.DistributedDataParallel.register_comm_hook`.
+:func:`torch.nn.parallel.DistributedDataParallel.register_comm_hook`
     :noindex:
 
 Default Communication Hooks
@@ -30,6 +30,8 @@ Default Communication Hooks
 
 Default communication hooks are simple **stateless** hooks, so the input state
 in ``register_comm_hook`` is either a process group or ``None``.
+The input ``bucket`` is a :class:`torch.distributed.GradBucket` object,
+which mainly contains a flattened 1D gradient tensor that will be allreduced.
 
 .. automodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
     :members:
