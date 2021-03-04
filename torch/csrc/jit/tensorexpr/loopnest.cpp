@@ -560,7 +560,7 @@ class FunctionInliner : public IRMutator {
         TORCH_INTERNAL_ASSERT(
             dynamic_cast<const IntImm*>(func_caller_param) != nullptr &&
                 dynamic_cast<const IntImm*>(func_caller_param)->value() == 0,
-            "We are implicitly assuming that an index of 0 is being inlined into a non-zero");
+            "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0");
         continue;
       }
       if (func_callee_arg == nullptr)
