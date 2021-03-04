@@ -385,7 +385,7 @@ class Module:
     def get_submodule(self, target: str) -> "Module":
         """
         Returns the submodule given by ``target`` if it exists,
-        otherwise returns ``None``.
+        otherwise throws an error.
 
         For example, let's say you have an ``nn.Module`` ``A`` that
         looks like this:
@@ -450,7 +450,7 @@ class Module:
     def get_parameter(self, target: str) -> "Parameter":
         """
         Returns the parameter given by ``target`` if it exists,
-        otherwise returns ``None``.
+        otherwise throws an error.
 
         See the docstring for ``get_submodule`` for a more detailed
         explanation of this method's functionality as well as how to
@@ -467,7 +467,7 @@ class Module:
         Raises:
             AttributeError: If the target string references an invalid
                 path or resolves to something that is not an
-                ``nn.Parameter`
+                ``nn.Parameter``
         """
         module_path, _, param_name = target.rpartition(".")
 
@@ -485,10 +485,10 @@ class Module:
 
         return param
 
-    def get_buffer(self, target: str) -> Optional["Tensor"]:
+    def get_buffer(self, target: str) -> "Tensor":
         """
         Returns the buffer given by ``target`` if it exists,
-        otherwise returns ``None``.
+        otherwise throws an error.
 
         See the docstring for ``get_submodule`` for a more detailed
         explanation of this method's functionality as well as how to
@@ -500,10 +500,12 @@ class Module:
                 fully-qualified string.)
 
         Returns:
-            Optional[torch.Tensor]: The buffer referenced by
-                ``target`` if it exists, otherwise ``None``. ``None``
-                will also be returned if the target string resolves
-                to something that is not a buffer.
+            torch.Tensor: The buffer referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not a
+                buffer
         """
         module_path, _, buffer_name = target.rpartition(".")
 
