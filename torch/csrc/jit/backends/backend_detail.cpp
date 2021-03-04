@@ -189,7 +189,6 @@ Module codegen_backend_module(
             def __setstate__(self, state):
                 self.__method_compile_spec = state[0]
                 self.__processed_module = state[1]
-                # state[2] indicates wherethercreate_backend
                 # state[2] indicates whether to create the backend instance.
                 if state[2]:
                     self.__create_backend()
