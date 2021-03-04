@@ -126,6 +126,12 @@ ddp_find_unused_params_enabled_str = "Since `find_unused_parameters=True` is ena
 ddp_outputs_not_used_in_loss_str = "`forward` function outputs participate in calculating loss"
 
 
+class DDPUnevenTestInput(NamedTuple):
+    name: str
+    model: nn.Module
+    inp: Union[torch.tensor, tuple]
+    sync_interval: int
+
 
 class _FC2(nn.Module):
     def __init__(self):
@@ -4049,12 +4055,6 @@ class DistributedTest:
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         def test_ddp_uneven_inputs(self):
-            class DDPUnevenTestInput(NamedTuple):
-                name: str
-                model: nn.Module
-                inp: Union[torch.tensor, tuple]
-                sync_interval: int
-
             dim = 1000
             batch = 1
             # Create a variety of models to run uneven input tests on.

@@ -20,8 +20,8 @@ class Linear(nn.Linear):
     _FLOAT_MODULE = nn.Linear
 
     def __init__(self, in_features, out_features, bias=True,
-                 qconfig=None):
-        super().__init__(in_features, out_features, bias)
+                 qconfig=None, *, reset_parameters: bool = True, **kwargs):
+        super().__init__(in_features, out_features, bias, reset_parameters=reset_parameters, **kwargs)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight()

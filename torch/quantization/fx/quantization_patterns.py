@@ -42,7 +42,7 @@ from abc import ABC, abstractmethod
 import operator
 import warnings
 
-from typing import Any, Callable, Dict, Union, Optional, Tuple, List
+from typing import Any, Callable, Dict, Union, Optional, Tuple, List, Type
 
 # -------------------------
 # Pattern Registrations
@@ -456,6 +456,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 self.linear.activation_post_process = output_activation_post_process
 
             # 2. select corresponding quantized linear class for the float linear class
+            qlinear: Type[nnq.Linear]
             if type(self.linear) in [torch.nn.Linear, torch.nn.qat.Linear]:
                 qlinear = nnq.Linear if activation_statically_quantized else nnqd.Linear
             elif type(self.linear) in [torch.nn.intrinsic.LinearReLU, torch.nn.intrinsic.qat.LinearReLU]:

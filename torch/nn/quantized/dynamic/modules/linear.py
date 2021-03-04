@@ -29,8 +29,10 @@ class Linear(nnq.Linear):
     # version used in this class is different from the parent class nnq.Linear
     _version = 4
 
-    def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
-        super(Linear, self).__init__(in_features, out_features, bias_, dtype=dtype)
+    def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8, *,
+                 reset_parameters: bool = True, **kwargs):
+        super(Linear, self).__init__(in_features, out_features, bias_, dtype=dtype,
+                                     reset_parameters=reset_parameters, **kwargs)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and

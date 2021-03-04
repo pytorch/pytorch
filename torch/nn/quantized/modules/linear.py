@@ -130,7 +130,8 @@ class Linear(torch.nn.Module):
     _FLOAT_MODULE = (nn.Linear, nn.modules.linear._LinearWithBias)
 
     def __init__(self, in_features, out_features, bias_=True,
-                 dtype=torch.qint8, **kwargs):
+                 dtype=torch.qint8, *, reset_parameters: bool = True, **kwargs):
+        # NB: reset_parameters doesn't do anything
         factory_kwargs = torch.factory_kwargs(kwargs)
         assert 'dtype' not in factory_kwargs
         super().__init__()
@@ -148,6 +149,7 @@ class Linear(torch.nn.Module):
             qweight = torch._empty_affine_quantized(
                 [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8, **factory_kwargs)
         elif dtype == torch.float16:
+            # TODO: shouldn't initialize to zeros, should initialize to empty
             qweight = torch.zeros([out_features, in_features], dtype=torch.float, **factory_kwargs)
         else:
             raise RuntimeError('Unsupported dtype specified for quantized Linear!')

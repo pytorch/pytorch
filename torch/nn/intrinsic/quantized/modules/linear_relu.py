@@ -21,8 +21,9 @@ class LinearReLU(nnq.Linear):
     """
     _FLOAT_MODULE = nni.LinearReLU
 
-    def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
-        super().__init__(in_features, out_features, bias, dtype)
+    def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8, *,
+                 reset_parameters: bool = True, **kwargs):
+        super().__init__(in_features, out_features, bias, dtype, reset_parameters=reset_parameters, **kwargs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.ops.quantized.linear_relu(
