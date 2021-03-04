@@ -118,6 +118,14 @@
 
 - func: align_tensors(Tensor[] tensors) -> Tensor[]
 
+# Not assert because it's a keyword; not Assert because FX already
+# took that syntax
+# TODO: need to specify this is side-effectful somehow
+- func: assert_async(Tensor self) -> ()
+  dispatch:
+    CPU: assert_async_cpu
+    CUDA: assert_async_cuda
+
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
 
@@ -1570,8 +1578,6 @@
     CPU: _embedding_bag_per_sample_weights_backward_cpu
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
-- func: empty_meta(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
@@ -1580,6 +1586,7 @@
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
+    Meta: empty_meta
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
 
@@ -2902,7 +2909,7 @@
   dispatch:
     CUDA: batch_norm_backward_reduce_cuda
 
-- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu) -> Tensor
+- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu, Tensor count) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CUDA: batch_norm_backward_elemt_cuda
@@ -6024,12 +6031,12 @@
 
 - func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: orgqr_out
+    CPU: orgqr_out
 
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA: orgqr
+    CPU: orgqr
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -9022,18 +9029,6 @@
   variants: function, method
   dispatch:
     DefaultBackend: det
-
-- func: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
-  python_module: linalg
-  variants: function
-  dispatch:
-    DefaultBackend: linalg_lstsq
-
-- func: _lstsq_helper(Tensor a, Tensor b, float cond, str? driver_name) -> (Tensor, Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _lstsq_helper_cpu
-    CUDA: _lstsq_helper_cuda
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
