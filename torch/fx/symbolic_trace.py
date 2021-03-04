@@ -203,7 +203,6 @@ class Tracer(TracerBase):
         This method can be overridden to--for example--create nested traced
         GraphModules, or any other behavior you would want while tracing across
         ``Module`` boundaries.
-        ``Module`` boundaries.
 
         Args:
 
@@ -286,6 +285,7 @@ class Tracer(TracerBase):
 
             root (Union[Module, Callable]): Either a ``Module`` or a function to be
                 traced through.
+            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
 
         Returns:
 

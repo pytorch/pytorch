@@ -107,8 +107,12 @@ TEST(StaticRuntime, IndividualOps_Binary) {
 
   testStaticRuntime(add_script, args);
   testStaticRuntime(list_construct_script, args);
+  testStaticRuntime(list_construct_script_2, args);
+  testStaticRuntime(list_construct_script_3, args);
   testStaticRuntime(list_unpack_script, args);
+  testStaticRuntime(list_unpack_script_2, args);
   testStaticRuntime(tuple_construct_script, args);
+  testStaticRuntime(tuple_construct_script_2, args);
 }
 
 TEST(StaticRuntime, IndividualOps_Reshape) {
@@ -118,6 +122,9 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
 
   testStaticRuntime(reshape_script_1, args);
   testStaticRuntime(reshape_script_2, args);
+  testStaticRuntime(reshape_script_3, args);
+  testStaticRuntime(reshape_script_4, args);
+  testStaticRuntime(reshape_script_5, args);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {
@@ -136,6 +143,20 @@ TEST(StaticRuntime, IndividualOps_flatten) {
   test_flatten({0, 1, 3, 0}, 1, 2);
   test_flatten({2, 3}, 1, 1);
   test_flatten({}, 0, 0);
+}
+
+TEST(StaticRuntime, IndividualOps_pow) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+
+  std::vector<IValue> args0{a, 4};
+  testStaticRuntime(pow_script_ten_sca, args0);
+
+  std::vector<IValue> args1{at::abs(a), b};
+  testStaticRuntime(pow_script_ten_ten, args1);
+
+  std::vector<IValue> args2{5, b};
+  testStaticRuntime(pow_script_sca_ten, args2);
 }
 
 TEST(StaticRuntime, LongModel) {
