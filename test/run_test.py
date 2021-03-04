@@ -890,7 +890,7 @@ def get_dep_modules(test):
     )
     # HACK: some platforms default to ascii, so we can't just run_script :(
     with open(test_location, 'r', encoding='utf-8') as fp:
-        finder.load_module('__main__', fp, test_location, ('', 'r', '1'))
+        finder.load_module('__main__', fp, test_location, ('', 'r', 1))
 
     dep_modules = set(finder.modules.keys())
     _DEP_MODULES_CACHE[test] = dep_modules
