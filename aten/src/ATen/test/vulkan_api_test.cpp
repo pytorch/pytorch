@@ -70,6 +70,7 @@ TEST(VulkanAPITest, adaptive_avg_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
+  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
 
   const auto in_cpu = at::rand({5, 7, 47, 31}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::adaptive_avg_pool2d(in_cpu, {3, 3});
@@ -617,6 +618,7 @@ TEST(VulkanAPITest, reshape) {
   if (!at::is_vulkan_available()) {
     return;
   }
+  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
 
   const auto in_cpu = at::rand({47, 11, 83, 97}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -638,6 +640,7 @@ TEST(VulkanAPITest, reshape_) {
   if (!at::is_vulkan_available()) {
     return;
   }
+  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
 
   const auto cpu = at::rand({59, 41, 19, 67}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
