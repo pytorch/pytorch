@@ -175,7 +175,12 @@ Module codegen_backend_module(
   loweredModule.define(
       R"(
             def __getstate__(self):
-                return self.__method_compile_spec, self.__processed_module
+                # The third parameter indicates whether __setstate__ must create
+                # the backend instance. It's hardcoded to True since the only
+                # case it can be false is when __setstate__ is called from
+                # outside the module (at module creation time), because
+                # __create_backed has been called already (also directly).
+                return self.__method_compile_spec, self.__processed_module, True
             )",
       loweredModuleResolver());
 
@@ -184,7 +189,10 @@ Module codegen_backend_module(
             def __setstate__(self, state):
                 self.__method_compile_spec = state[0]
                 self.__processed_module = state[1]
-                self.__create_backend()
+                # state[2] indicates wherethercreate_backend
+                # state[2] indicates whether to create the backend instance.
+                if state[2]:
+                    self.__create_backend()
                 if self.__backend.is_available() :
                     self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
                 else:
@@ -300,7 +308,9 @@ Module codegen_backend_module(
   loweredModule.run_method("__create_backend");
   if (loweredModule.run_method("__is_available").toBool()) {
     auto state = at::ivalue::Tuple::create(
-        method_compile_spec, loweredModule.attr("__processed_module"));
+        method_compile_spec,
+        loweredModule.attr("__processed_module"),
+        /*create_backend*/ false);
     loweredModule.run_method("__setstate__", state);
   } else {
     TORCH_WARN(
