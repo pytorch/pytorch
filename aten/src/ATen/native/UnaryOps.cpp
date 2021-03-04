@@ -35,60 +35,6 @@ TORCH_META_FUNC(sin) (
 } // namespace meta
 
 namespace native {
-DEFINE_DISPATCH(abs_stub);
-DEFINE_DISPATCH(angle_stub);
-DEFINE_DISPATCH(real_stub);
-DEFINE_DISPATCH(imag_stub);
-DEFINE_DISPATCH(conj_stub);
-DEFINE_DISPATCH(acos_stub);
-DEFINE_DISPATCH(acosh_stub);
-DEFINE_DISPATCH(asinh_stub);
-DEFINE_DISPATCH(atanh_stub);
-DEFINE_DISPATCH(asin_stub);
-DEFINE_DISPATCH(atan_stub);
-DEFINE_DISPATCH(bitwise_not_stub);
-DEFINE_DISPATCH(ceil_stub);
-DEFINE_DISPATCH(clamp_stub);
-DEFINE_DISPATCH(clamp_max_stub);
-DEFINE_DISPATCH(clamp_min_stub);
-DEFINE_DISPATCH(cos_stub);
-DEFINE_DISPATCH(cosh_stub);
-DEFINE_DISPATCH(digamma_stub);
-DEFINE_DISPATCH(erf_stub);
-DEFINE_DISPATCH(erfc_stub);
-DEFINE_DISPATCH(erfinv_stub);
-DEFINE_DISPATCH(exp_stub);
-DEFINE_DISPATCH(exp2_stub);
-DEFINE_DISPATCH(expm1_stub);
-DEFINE_DISPATCH(floor_stub);
-DEFINE_DISPATCH(frac_stub);
-DEFINE_DISPATCH(i0_stub);
-DEFINE_DISPATCH(log_stub);
-DEFINE_DISPATCH(log10_stub);
-DEFINE_DISPATCH(log1p_stub);
-DEFINE_DISPATCH(log2_stub);
-DEFINE_DISPATCH(logical_not_stub);
-DEFINE_DISPATCH(neg_stub);
-DEFINE_DISPATCH(nan_to_num_stub);
-DEFINE_DISPATCH(polygamma_stub);
-DEFINE_DISPATCH(reciprocal_stub);
-DEFINE_DISPATCH(round_stub);
-DEFINE_DISPATCH(rsqrt_stub);
-DEFINE_DISPATCH(sigmoid_stub);
-DEFINE_DISPATCH(logit_stub);
-DEFINE_DISPATCH(sign_stub);
-DEFINE_DISPATCH(signbit_stub);
-DEFINE_DISPATCH(sgn_stub);
-DEFINE_DISPATCH(sin_stub);
-DEFINE_DISPATCH(sinc_stub);
-DEFINE_DISPATCH(sinh_stub);
-DEFINE_DISPATCH(sqrt_stub);
-DEFINE_DISPATCH(tan_stub);
-DEFINE_DISPATCH(tanh_stub);
-DEFINE_DISPATCH(trigamma_stub);
-DEFINE_DISPATCH(trunc_stub);
-DEFINE_DISPATCH(lgamma_stub);
-
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
@@ -101,19 +47,19 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
   return result;
 }
 
-template <typename Stub>
-static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub) {
+template <typename Stub, typename ...Args>
+static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, Args... args) {
   auto iter = TensorIterator::unary_float_op(result, self);
-  stub(iter.device_type(), iter);
+  stub(iter.device_type(), iter, args...);
   iter.cast_outputs();
   return result;
 }
 
-template <typename Stub>
-Tensor unary_op_impl_float(const Tensor& self, Stub& stub) {
+template <typename Stub, typename ...Args>
+static inline Tensor unary_op_impl_float(const Tensor& self, Stub& stub, Args... args) {
   Tensor result;
   auto iter = TensorIterator::unary_float_op(result, self);
-  stub(iter.device_type(), iter);
+  stub(iter.device_type(), iter, args...);
   return iter.output();
 }
 
@@ -198,8 +144,17 @@ Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_180_PI)));
 }
-
-Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
+Tensor rad2deg(const Tensor& self) {
+  // Note: int-> float promotion handled differently from other Unary ops,
+  // as it does not use the usual TensorIterator + Kernel Dispatch pattern.
+  auto options = self.options();
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    options = options.dtype(c10::get_default_dtype());
+  }
+  auto result = at::empty_like(self, options);
+  at::rad2deg_out(result, self);
+  return result;
+}
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
 Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
@@ -207,7 +162,17 @@ Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
-Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
+Tensor deg2rad(const Tensor& self) {
+  // Note: int-> float promotion handled differently from other Unary ops,
+  // as it does not use the usual TensorIterator + Kernel Dispatch pattern.
+  auto options = self.options();
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    options = options.dtype(c10::get_default_dtype());
+  }
+  auto result = at::empty_like(self, options);
+  at::deg2rad_out(result, self);
+  return result;
+}
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
 Tensor& asin_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, asin_stub); }
@@ -472,16 +437,13 @@ Tensor& logit_out(
     Tensor& result,
     const Tensor& self,
     c10::optional<double> eps) {
-  auto iter = TensorIterator::unary_op(result, self);
-  logit_stub(iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
-  return result;
+  return unary_op_impl_float_out(
+      result, self, logit_stub, Scalar(eps ? eps.value() : -1.0));
 }
-
 Tensor logit(const Tensor& self, c10::optional<double> eps) {
-  Tensor result = at::empty({0}, self.options());
-  return at::logit_out(result, self, eps);
+  return unary_op_impl_float(
+      self, logit_stub, Scalar(eps ? eps.value() : -1.0));
 }
-
 Tensor& logit_(Tensor& self, c10::optional<double> eps) {
   return at::logit_out(self, self, eps);
 }
@@ -718,5 +680,63 @@ Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_fl
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
+// alias for lgamma, implements special.gammanln equivalent to
+// scipy.special.gammaln
+Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
+Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }
+
+DEFINE_DISPATCH(abs_stub);
+DEFINE_DISPATCH(angle_stub);
+DEFINE_DISPATCH(real_stub);
+DEFINE_DISPATCH(imag_stub);
+DEFINE_DISPATCH(conj_stub);
+DEFINE_DISPATCH(acos_stub);
+DEFINE_DISPATCH(acosh_stub);
+DEFINE_DISPATCH(asinh_stub);
+DEFINE_DISPATCH(atanh_stub);
+DEFINE_DISPATCH(asin_stub);
+DEFINE_DISPATCH(atan_stub);
+DEFINE_DISPATCH(bitwise_not_stub);
+DEFINE_DISPATCH(ceil_stub);
+DEFINE_DISPATCH(clamp_stub);
+DEFINE_DISPATCH(clamp_max_stub);
+DEFINE_DISPATCH(clamp_min_stub);
+DEFINE_DISPATCH(cos_stub);
+DEFINE_DISPATCH(cosh_stub);
+DEFINE_DISPATCH(digamma_stub);
+DEFINE_DISPATCH(erf_stub);
+DEFINE_DISPATCH(erfc_stub);
+DEFINE_DISPATCH(erfinv_stub);
+DEFINE_DISPATCH(exp_stub);
+DEFINE_DISPATCH(exp2_stub);
+DEFINE_DISPATCH(expm1_stub);
+DEFINE_DISPATCH(floor_stub);
+DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(i0_stub);
+DEFINE_DISPATCH(log_stub);
+DEFINE_DISPATCH(log10_stub);
+DEFINE_DISPATCH(log1p_stub);
+DEFINE_DISPATCH(log2_stub);
+DEFINE_DISPATCH(logical_not_stub);
+DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(nan_to_num_stub);
+DEFINE_DISPATCH(polygamma_stub);
+DEFINE_DISPATCH(reciprocal_stub);
+DEFINE_DISPATCH(round_stub);
+DEFINE_DISPATCH(rsqrt_stub);
+DEFINE_DISPATCH(sigmoid_stub);
+DEFINE_DISPATCH(logit_stub);
+DEFINE_DISPATCH(sign_stub);
+DEFINE_DISPATCH(signbit_stub);
+DEFINE_DISPATCH(sgn_stub);
+DEFINE_DISPATCH(sin_stub);
+DEFINE_DISPATCH(sinc_stub);
+DEFINE_DISPATCH(sinh_stub);
+DEFINE_DISPATCH(sqrt_stub);
+DEFINE_DISPATCH(tan_stub);
+DEFINE_DISPATCH(tanh_stub);
+DEFINE_DISPATCH(trigamma_stub);
+DEFINE_DISPATCH(trunc_stub);
+DEFINE_DISPATCH(lgamma_stub);
 } // namespace native
 } // namespace at
