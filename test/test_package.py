@@ -230,6 +230,17 @@ import module_a
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
+    def test_extern_glob_allow_empty(self):
+        """
+        Test that an error is thrown when a extern glob is specified with allow_empty=True
+        and no matching module is required during packaging.
+        """
+        filename = self.temp()
+        with self.assertRaisesRegex(RuntimeError, r'did not match .* to any modules'):
+            with PackageExporter(filename, verbose=False) as exporter:
+                exporter.extern(include=['package_a.*'], allow_empty=False)
+                exporter.save_module('package_b.subpackage')
+
     def test_save_imported_module_fails(self):
         """
         Directly saving/requiring an PackageImported module should raise a specific error message.
@@ -350,6 +361,17 @@ import module_a
         r = m.result
         with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
             r()
+
+    def test_mock_glob_allow_empty(self):
+        """
+        Test that an error is thrown when a mock glob is specified with allow_empty=True
+        and no matching module is required during packaging.
+        """
+        filename = self.temp()
+        with self.assertRaisesRegex(RuntimeError, r'did not match .* to any modules'):
+            with PackageExporter(filename, verbose=False) as exporter:
+                exporter.mock(include=['package_a.*'], allow_empty=False)
+                exporter.save_module('package_b.subpackage')
 
     @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
     def test_custom_requires(self):
