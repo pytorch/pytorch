@@ -211,7 +211,7 @@ REGISTER_OPERATOR_FUNCTOR(
         for (size_t i = 0; i < size; i++) {
           vals.push_back(p_node->Input(i));
         }
-        p_node->Output(0) = vals;
+        p_node->Output(0) = std::move(vals);
       };
     });
 
@@ -232,7 +232,7 @@ REGISTER_OPERATOR_FUNCTOR(
         for (size_t i = 0; i < size; i++) {
           vals.push_back(p_node->Input(i));
         }
-        p_node->Output(0) = c10::ivalue::Tuple::create(vals);
+        p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
       };
     });
 
