@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -133,6 +134,7 @@ TORCH_API void runJITCPPTests();
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  auto jit = m.def_submodule("_jit");
 
   py::register_exception<JITException>(m, "JITException");
 
@@ -313,6 +315,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
       .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
       .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
+      .def("_jit_pass_convert_frozen_ops_to_mkldnn", &ConvertFrozenOpsToMKLDNN)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
@@ -812,6 +815,15 @@ void initJITBindings(PyObject* module) {
           [](Code& c) {
             std::vector<GraphExecutorState> states;
             for (auto& e : c.grad_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
+      .def(
+          "differentiable_op_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.diff_graph_op_executors()) {
               states.emplace_back(e->getDebugState());
             }
             return states;

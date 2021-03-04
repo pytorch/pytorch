@@ -1085,6 +1085,35 @@ class TestJit(JitTestCase):
                 self.assertFalse(fn.has_trace_for(*unk_config))
         self.assertEqual(fn.hits, 0)
 
+    def test_torch_sum(self):
+        def fn(x):
+            return torch.sum(x)
+
+        def fn1(x, dim: int):
+            return torch.sum(x, dim)
+
+        x = torch.randn(3, 4)
+        self.checkScript(fn, (x, ))
+        self.checkScript(fn1, (x, 1, ))
+        self.checkScript(fn1, (x, 0, ))
+
+    def test_list_sum(self):
+        def fn(x: List[int]) -> int:
+            return sum(x)
+
+        def fn1(x: List[float]):
+            return sum(x)
+
+        def fn2(x: List[bool]):
+            return sum(x)
+
+        self.checkScript(fn, ([1, 2, 3], ))
+        self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
+        self.checkScript(fn1, ([1, 2.8, 3], ))
+        self.checkScript(fn2, ([True, False, False], ))
+        self.checkScript(fn2, ([False, False, False], ))
+        self.checkScript(fn2, ([0, 1, 1, 0], ))
+
     def test_cse(self):
         x = torch.tensor([0.4, 0.3], requires_grad=True)
         y = torch.tensor([0.7, 0.5], requires_grad=True)
@@ -1658,6 +1687,18 @@ graph(%Ra, %Rb):
 
         self.checkScript(test_sparse_addmm, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
         self.checkScript(test_sparse_addmm_alpha_beta, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_device_not_equal(self):
+
+        def compare_device(x: torch.device):
+            return x != torch.device("cuda:0")
+
+        def compare_two_device(x: torch.device, y: torch.device):
+            return x != y
+
+        self.checkScript(compare_device, (torch.device("cuda:0"),))
+        self.checkScript(compare_two_device, (torch.device("cuda:0"), torch.device("cuda:1"), ))
 
     def test_tuple_specialization(self):
         @torch.jit.script
@@ -10634,11 +10675,6 @@ dedent """
 
     def test_builtin_args_fails(self):
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected at most'):
-            @torch.jit.script
-            def f0(a):
-                torch.sum(a, a, a, a)
-
         with self.assertRaisesRegex(RuntimeError, 'Argument self not provided'):
             @torch.jit.script
             def f1(a):
@@ -10668,11 +10704,6 @@ dedent """
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
-
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
-            @torch.jit.script
-            def f7(a):
-                torch.sum([4])
 
     def test_builtin_args(self):
 

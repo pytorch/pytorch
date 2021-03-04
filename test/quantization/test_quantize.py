@@ -765,6 +765,16 @@ class TestPostTrainingStatic(QuantizationTestCase):
             str(context.exception) ==
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
 
+    @skipIfNoFBGEMM
+    def test_convtranspose_per_channel_qconfig_none(self):
+        r"""
+        Verifies that having qconfig==None for conv transpose does not crash
+        """
+        m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
+        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        m[0].qconfig = None
+        mp = torch.quantization.prepare(m)
+
 
 @skipIfNoFBGEMM
 class TestPostTrainingDynamic(QuantizationTestCase):

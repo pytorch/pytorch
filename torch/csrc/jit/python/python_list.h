@@ -1,10 +1,12 @@
 #pragma once
 
 #include <ATen/core/Dict.h>
+#include <ATen/core/List.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <c10/util/Optional.h>
+#include <pybind11/detail/common.h>
 #include <torch/csrc/utils/pybind.h>
-#include "ATen/core/List.h"
 
 namespace torch {
 namespace jit {
@@ -52,9 +54,6 @@ class ScriptList final {
     return list_.type()->cast<ListType>();
   }
 
-  // Set the value corresponding to the given key.
-  void setItem(const IValue& key, IValue value);
-
   // Return a string representation that can be used
   // to reconstruct the instance.
   std::string repr() const {
@@ -88,14 +87,20 @@ class ScriptList final {
   // Get the value for the given index.
   // TODO: Handle negative and wraparound.
   // TODO: This should really be difference type.
-  IValue getItem(const size_type key) {
-    return list_.toList().get(key);
+  IValue getItem(const size_type idx) {
+    return list_.toList().get(idx);
   };
 
-  // Check whether the list contains the given key.
-  bool contains(const IValue& key) {
+  // Set the value corresponding to the given index.
+  // TODO: Handle negative and wraparound.
+  void setItem(const size_type idx, const IValue& value) {
+    return list_.toList().set(idx, value);
+  }
+
+  // Check whether the list contains the given value.
+  bool contains(const IValue& value) {
     for (const auto& elem : list_.toList()) {
-      if (elem == key) {
+      if (elem == value) {
         return true;
       }
     }
@@ -112,6 +117,81 @@ class ScriptList final {
   // Get the size of the list.
   int64_t len() const {
     return list_.toList().size();
+  }
+
+  // Count the number of times a value appears in the list.
+  int64_t count(const IValue& value) const {
+    int64_t total = 0;
+
+    for (const auto& elem : list_.toList()) {
+      if (elem == value) {
+        ++total;
+      }
+    }
+
+    return total;
+  }
+
+  // Remove the first occurrence of a value from the list.
+  void remove(const IValue& value) {
+    auto list = list_.toList();
+
+    int64_t idx = -1, i = 0;
+
+    for (const auto& elem : list) {
+      if (elem == value) {
+        idx = i;
+        break;
+      }
+
+      ++i;
+    }
+
+    if (idx == -1) {
+      throw py::value_error();
+    }
+
+    list.erase(list.begin() + idx);
+  }
+
+  // Append a value to the end of the list.
+  void append(const IValue& value) {
+    list_.toList().emplace_back(value);
+  }
+
+  // Clear the contents of the list.
+  void clear() {
+    list_.toList().clear();
+  }
+
+  // Append the contents of an iterable to the list.
+  // TODO: Handle dicts, custom class types.
+  void extend(const IValue& iterable) {
+    list_.toList().append(iterable.toList());
+  }
+
+  // Remove and return the element at the specified index from the list. If no
+  // index is passed, the last element is removed and returned.
+  IValue pop(const c10::optional<size_type> idx = c10::nullopt) {
+    auto list = list_.toList();
+    IValue ret;
+
+    if (idx) {
+      ret = list.get(*idx);
+      list.erase(list.begin() + *idx);
+    } else {
+      ret = list.get(list.size() - 1);
+      list.pop_back();
+    }
+
+    return ret;
+  }
+
+  // Insert a value before the given index.
+  // TODO: Handle index errors.
+  void insert(const IValue& value, const size_type idx) {
+    auto list = list_.toList();
+    list.insert(list.begin() + idx, value);
   }
 
   // A c10::List instance that holds the actual data.

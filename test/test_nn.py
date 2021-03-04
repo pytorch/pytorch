@@ -42,7 +42,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
+    dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
     deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest
 from torch.nn import MultiheadAttention
@@ -6857,10 +6857,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
-        if TEST_WITH_ROCM:
-            dtype = torch.float
-        else:
-            dtype = torch.double
+        dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
@@ -9018,7 +9015,6 @@ class TestNN(NNTestCase):
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocm
     def test_conv_cudnn_memory_layout_dominance(self):
         # desired behavior here is to have the memory_layout of conv.weight to
         # dominante the layout of output.
@@ -11992,6 +11988,25 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(grad_input, ref_grad_input)
                         self.assertEqual(input.grad, ref_input.grad)
 
+    @onlyCUDA
+    @dtypesIfCUDA(torch.float, torch.half)
+    @largeTensorTest("20GB")
+    @precisionOverride({torch.half: 0.001})
+    def test_softmax_64bit_indexing(self, device, dtype):
+        def run_test(*shape):
+            x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
+            y = F.log_softmax(x, dim=-1, dtype=dtype)
+            y.backward(y)
+            with torch.no_grad():
+                xx = x.cpu().requires_grad_()
+            yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
+            yy.backward(yy)
+            self.assertEqual(y, yy)
+            self.assertEqual(x.grad, xx.grad)
+
+        run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
+        run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
     def test_log_softmax_big(self, device, dtype):
@@ -13882,7 +13897,6 @@ class TestNNDeviceType(NNTestCase):
     # returning CUDNN_STATUS_BAD_PARAM
     # Disabling that specific test for now [see issue # 33918]
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double)
     def test_conv_cudnn_nhwc_support(self, device, dtype):

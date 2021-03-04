@@ -1757,11 +1757,25 @@ class TestScriptList(JitTestCase):
         """
         Test accessing list elements using the [] operator.
         TODO: Add test for KeyError.
+        TODO: Add test that uses slice.
         """
         l = torch.jit.list([1, 2, 3, 4])
 
         self.assertEqual(l[1], 2)
         self.assertEqual(l[3], 4)
+
+    def test_setitem(self):
+        """
+        Test setting list elements using the [] operator.
+        TODO: Add test for KeyError.
+        TODO: Add test that uses slice.
+        """
+        l = torch.jit.list([1, 2, 3, 4])
+        l[1] = 10
+        l[3] = 11
+
+        self.assertEqual(l[1], 10)
+        self.assertEqual(l[3], 11)
 
     def test_contains(self):
         """
@@ -1802,6 +1816,81 @@ class TestScriptList(JitTestCase):
         self.assertEqual(len(four), 4)
         self.assertEqual(len(zero), 0)
 
+    def test_count(self):
+        """
+        Test count method.
+        """
+        l = torch.jit.list([1, 2, 3, 3])
+
+        self.assertEqual(l.count(3), 2)
+
+    def test_remove(self):
+        """
+        Test remove method.
+        TODO: Add test for ValueError.
+        """
+        l = torch.jit.list([1, 2, 3])
+        l.remove(1)
+
+        self.assertFalse(1 in l)
+
+    def test_append(self):
+        """
+        Test append method.
+        TODO: Add test for ValueError (appending value of wrong type).
+        TODO: Add test for appending another list (recursive scripting).
+        """
+        l = torch.jit.list([1, 2])
+        l.append(3)
+
+        self.assertTrue(3 in l)
+
+    def test_clear(self):
+        """
+        Test clear.
+        """
+        l = torch.jit.list([1, 2, 3])
+        l.clear()
+
+        self.assertEqual(len(l), 0)
+
+    def test_extend(self):
+        """
+        Test extend.
+        TODO: Add test case for dict argument.
+        TODO: Add test case for custom class argument with __iter__ implemented.
+        TODO: Add test case for extending with wrong types.
+        """
+        l = torch.jit.list([1, 2, 3])
+        l.extend([4, 5, 6])
+
+        self.assertEqual(len(l), 6)
+
+    def test_insert(self):
+        """
+        Test insert.
+        TODO: Add test case for argument with wrong type.
+        """
+        l = torch.jit.list([1, 2, 4])
+        l.insert(3, 2)
+
+        self.assertEqual(l[0], 1)
+        self.assertEqual(l[1], 2)
+        self.assertEqual(l[2], 3)
+        self.assertEqual(l[3], 4)
+
+    def test_pop(self):
+        """
+        Test pop.
+        TODO: Add test case for IndexError.
+        """
+        l = torch.jit.list([1, 2, 3])
+        three = l.pop()
+        one = l.pop(0)
+
+        self.assertEqual(one, 1)
+        self.assertEqual(three, 3)
+
     def test_nested(self):
         """
         Test that reference semantics are honoured when the ScriptList that is
@@ -1820,8 +1909,8 @@ class TestScriptList(JitTestCase):
         self.assertEqual(len(two), 2)
         # self.assertEqual(one[-1], 3)
         # self.assertEqual(two[-1], 4)
-        self.assertEqual(one[len(one)-1], 3)
-        self.assertEqual(two[len(one)-1], 4)
+        self.assertEqual(one[len(one) - 1], 3)
+        self.assertEqual(two[len(one) - 1], 4)
         self.assertEqual(len(nested[0]), 2)
         self.assertEqual(len(nested[1]), 2)
 

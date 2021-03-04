@@ -80,17 +80,77 @@ void initScriptListBindings(PyObject* module) {
               reference_internal) // Return value is a reference to an object
                                   // that resides in the ScriptList
       .def(
+          "__setitem__",
+          [](const std::shared_ptr<ScriptList>& self,
+             ScriptList::size_type idx,
+             py::object value) {
+            // TODO: What happens if value isn't the right type?
+            try {
+              self->setItem(
+                  idx,
+                  toIValue(std::move(value), self->type()->getElementType()));
+            } catch (const std::out_of_range& e) {
+              throw py::index_error();
+            }
+          })
+      .def(
           "__delitem__",
           [](const std::shared_ptr<ScriptList>& self,
-             ScriptList::size_type idx) {
-            // TODO: What happens if idx isn't the right type?
-            self->delItem(idx);
-          })
+             ScriptList::size_type idx) { self->delItem(idx); })
       .def(
           "__iter__",
           [](const std::shared_ptr<ScriptList>& self) { return self->iter(); },
-          py::keep_alive<0, 1>()); // ScriptList needs to be alive at least as
-                                   // long as the iterator
+          py::keep_alive<0, 1>()) // ScriptList needs to be alive at least as
+                                  // long as the iterator
+      .def(
+          "count",
+          [](const std::shared_ptr<ScriptList>& self, py::object value) {
+            // TODO: What happens if value isn't the right type?
+            return self->count(
+                toIValue(std::move(value), self->type()->getElementType()));
+          })
+      .def(
+          "remove",
+          [](const std::shared_ptr<ScriptList>& self, py::object value) {
+            // TODO: What happens if value isn't the right type?
+            return self->remove(
+                toIValue(std::move(value), self->type()->getElementType()));
+          })
+      .def(
+          "append",
+          [](const std::shared_ptr<ScriptList>& self, py::object value) {
+            // TODO: What happens if value isn't the right type?
+            return self->append(
+                toIValue(std::move(value), self->type()->getElementType()));
+          })
+      .def(
+          "clear",
+          [](const std::shared_ptr<ScriptList>& self) { self->clear(); })
+      .def(
+          "extend",
+          [](const std::shared_ptr<ScriptList>& self, py::object obj) {
+            // TODO: Handle dict, custom iterable, object of wrong type.
+            py::list list = obj.cast<py::list>();
+            self->extend(toIValue(list, self->type()));
+          })
+      .def(
+          "pop",
+          [](const std::shared_ptr<ScriptList>& self) {
+            return toPyObject(self->pop());
+          })
+      .def(
+          "pop",
+          [](const std::shared_ptr<ScriptList>& self,
+             ScriptList::size_type idx) { return toPyObject(self->pop(idx)); })
+      .def(
+          "insert",
+          [](const std::shared_ptr<ScriptList>& self,
+             py::object obj,
+             ScriptList::size_type idx) {
+            // TODO: What happens if obj is the wrong type?
+            self->insert(
+                toIValue(std::move(obj), self->type()->getElementType()), idx);
+          });
 }
 
 } // namespace jit
