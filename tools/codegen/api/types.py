@@ -281,4 +281,4 @@ class NativeSignature:
         return native.returns_type(self.func.returns)
 
 # Functions only, no types
-from tools.codegen.api import cpp, dispatcher, native, translate
+from tools.codegen.api import cpp, dispatcher, native
