@@ -733,7 +733,7 @@ aten_cpu_source_codegen_list = [
 # codegen process. The codegen version of this file, like Activation.cpp.DEFAULT.cpp, will be included
 # in ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt. As a result, in aten/src/ATen/CMakeLists.txt,
 # only aten_cpu_source_non_codegen_list need to be added to ${all_cpu_cpp}.
-aten_cpu_source_list = aten_cpu_source_non_codegen_list + aten_cpu_source_codegen_list
+aten_cpu_source_list = sorted(aten_cpu_source_non_codegen_list + aten_cpu_source_codegen_list)
 
 # Same as ${aten_cpu_source_codegen_list}, this list will go through aten codegen, and be included in
 # ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt.
@@ -979,4 +979,4 @@ aten_native_source_non_codegen_list = [
 # 1. Files in ATen/native with a few exceptions
 # TODO: move the exceptions to proper locations
 # 2. The whole aten native source list includes the list with and without aten codegen process.
-aten_native_source_list = aten_native_source_non_codegen_list + aten_native_source_codegen_list
+aten_native_source_list = sorted(aten_native_source_non_codegen_list + aten_native_source_codegen_list)
