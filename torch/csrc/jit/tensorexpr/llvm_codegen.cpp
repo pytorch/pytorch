@@ -256,11 +256,11 @@ void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
   for (int index = start; index < stop; index++) {
     if (index != stop - 1) {
       at::intraop_launch([&, index]() {
-          callee(index, packed_data);
-          std::unique_lock<std::mutex> l(m);
-          remaining_tasks--;
-          cv.notify_one();
-        });
+        callee(index, packed_data);
+        std::unique_lock<std::mutex> l(m);
+        remaining_tasks--;
+        cv.notify_one();
+      });
       USE_TRIGGER(llvm_codegen_parallel_dispatched);
     } else {
       // the current thread handles the last one.
@@ -1184,8 +1184,8 @@ void LLVMCodeGenImpl::visit(const Load* v) {
 llvm::Value* LLVMCodeGenImpl::packFuncArgs(
     const std::vector<llvm::Value*>& func_args) {
   if (func_args.empty()) {
-    llvm::PointerType *VoidPtrType = llvm::Type::getInt8PtrTy(getContext());
-    llvm::Constant *NullPtr = llvm::ConstantPointerNull::get(VoidPtrType);
+    llvm::PointerType* VoidPtrType = llvm::Type::getInt8PtrTy(getContext());
+    llvm::Constant* NullPtr = llvm::ConstantPointerNull::get(VoidPtrType);
     return NullPtr;
   }
   std::vector<llvm::Type*> arg_types(func_args.size());
