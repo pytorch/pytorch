@@ -37,8 +37,8 @@ namespace caffe2 {
 // in some cases, but in most of the computation code we do not access map very
 // often, so it should be fine for us. I am putting a CaffeMap alias so we can
 // change it more easily if things work out for unordered_map down the road.
-template <typename Key, typename Value>
-using CaffeMap = std::map<Key, Value>;
+template <typename Key, typename Value, typename Cmp=std::less<Key>>
+using CaffeMap = std::map<Key, Value, Cmp>;
 // using CaffeMap = std::unordered_map;
 
 // Using statements for common classes that we refer to in caffe2 very often.
