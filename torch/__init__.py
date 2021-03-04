@@ -650,6 +650,7 @@ from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing
 from torch import sparse as sparse
+from torch import special as special
 import torch.utils.backcompat
 from torch import onnx as onnx
 from torch import jit as jit

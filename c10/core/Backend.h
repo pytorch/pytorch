@@ -49,27 +49,6 @@ enum class Backend {
   NumOptions
 };
 
-static inline Backend toSparse(Backend b) {
-  switch (b) {
-    case Backend::CPU:
-      return Backend::SparseCPU;
-    case Backend::XPU:
-      return Backend::SparseXPU;
-    case Backend::CUDA:
-      return Backend::SparseCUDA;
-    case Backend::HIP:
-      return Backend::SparseHIP;
-    case Backend::SparseCPU:
-      return Backend::SparseCPU;
-    case Backend::SparseCUDA:
-      return Backend::SparseCUDA;
-    case Backend::SparseHIP:
-      return Backend::SparseHIP;
-    default:
-      throw std::runtime_error("Unknown backend");
-  }
-}
-
 static inline Backend toDense(Backend b) {
   switch (b) {
     case Backend::CPU:
