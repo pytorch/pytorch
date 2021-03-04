@@ -1708,6 +1708,15 @@ op_db: List[OpInfo] = [
                # torch.int8
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32]),
+               # >>> t = torch.tensor([False])
+               # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
+               # >>> t.cuda().cumsum_(0) # Error "cumsum_cuda" not implemented for 'Bool'
+               # >>> t = torch.tensor(False)
+               # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
+               # >>> t.cuda().cumsum_(0) # Does not fail!
+               # tensor(False, device='cuda:0')
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        device_type='cuda', dtypes=[torch.bool]),
            ),
            sample_inputs_func=sample_inputs_cumsum),
     UnaryUfuncInfo('deg2rad',
