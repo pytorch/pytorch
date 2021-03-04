@@ -474,12 +474,18 @@ class GlobalsBridge:
 class _ValgrindWrapper(object):
     def __init__(self) -> None:
         self._bindings_module: Optional[CallgrindModuleType] = None
-        if hasattr(torch._C, "_valgrind_supported_platform"):
+        valgrind_symbols = (
+            "_valgrind_supported_platform",
+            "_valgrind_toggle",
+            "_valgrind_toggle_and_dump_stats",
+        )
+        if all(hasattr(torch._C, symbol) for symbol in valgrind_symbols):
             self._supported_platform: bool = torch._C._valgrind_supported_platform()
 
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
             self._bindings_module = cpp_jit.get_compat_bindings()
+            assert all(hasattr(self._bindings_module, symbol) for symbol in valgrind_symbols)
             self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}

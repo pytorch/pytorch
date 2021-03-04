@@ -78,7 +78,7 @@ class GroupedBenchmark:
     definition and more intelligent post processing and analysis.
 
     There are also two programming idioms in PyTorch. One is to write free form
-    code (so called "NumPy with gradients"), and the other is to organize code
+    code (so-called "NumPy with gradients"), and the other is to organize code
     using `torch.nn.Module`s. (This is how common neural network layers are
     exposed through the PyTorch API.) To support easy definition two
     initialization methods are provided:
