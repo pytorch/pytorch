@@ -24,8 +24,6 @@ Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Ten
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv);
 
-Tensor& orgqr_helper_cuda_lib(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns);
-
 }}  // namespace at::native
 
 #endif  // USE_CUSOLVER
