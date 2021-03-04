@@ -11,7 +11,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
-#include <c10/util/ComplexHolder.h>
 
 namespace c10 {
 
@@ -52,7 +51,7 @@ class C10_API Scalar {
       return checked_convert<type, double>(v.d, #type);   \
     } else if (Tag::HAS_z == tag) {                       \
       return checked_convert<type, c10::complex<double>>( \
-          (*v.z).val, #type);                             \
+          v.z, #type);                                    \
     } if (Tag::HAS_b == tag) {                            \
       return checked_convert<type, bool>(v.i, #type);     \
     } else {                                              \
@@ -94,7 +93,7 @@ class C10_API Scalar {
   template<typename T, typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
-      auto val = (*v.z).val;
+      auto val = v.z;
       return (val.real() == num) && (val.imag() == T());
     } else if (isFloatingPoint()) {
       return v.d == num;
@@ -109,7 +108,7 @@ class C10_API Scalar {
   template<typename T, typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
-      return (*v.z).val == num;
+      return v.z == num;
     } else if (isFloatingPoint()) {
       return (v.d == num.real()) && (num.imag() == T());
     } else if (isIntegral(/*includeBool=*/false)) {
@@ -161,8 +160,7 @@ class C10_API Scalar {
              typename std::enable_if<c10::is_complex<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_z) {
-      auto intrusive_ptr = c10::make_intrusive<c10::ComplexHolder>(convert<decltype((*v.z).val), T>(vv));
-      v.z = intrusive_ptr.release();
+      v.z = convert<decltype(v.z), T>(vv);
     }
 
   // We can't set v in the initializer list using the
@@ -173,12 +171,10 @@ class C10_API Scalar {
   union v_t {
     double d;
     int64_t i;
-    ComplexHolder* z;
+    c10::complex<double> z;
     v_t(){}  // default constructor
   } v;
 };
-
-static_assert(sizeof(Scalar) == 16, "Size is not correct");
 
 // define the scalar.to<int64_t>() specializations
 template <typename T>
