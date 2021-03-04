@@ -49,4 +49,4 @@ class non_deterministic(object):
             raise TypeError("{} is non-deterministic DataPipe, but you set 'set_determinism(True)' "
                             "You can turn off determinism for this DataPipe if that is acceptable "
                             "for your application".format(self.cls.__name__))
-        return self.cls(*args, **kwargs)
+        return self.cls(*args, **kwargs)  # type: ignore
