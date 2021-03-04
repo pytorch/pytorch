@@ -183,7 +183,7 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           py::arg("reducer"),
           py::arg("comm_hook_type"));
 
-  shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
+  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
       .def(
           py::init<
               size_t,
@@ -1231,7 +1231,7 @@ Arguments:
                 ``get_future` API to retrieve a Future associated with the completion of
                 ``allreduce`` work.
 
-                >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
+                >>> def allreduce(state: object, bucket: dist.GradBucket): -> torch._C.Future
                 >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
