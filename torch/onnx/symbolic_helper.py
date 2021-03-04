@@ -606,7 +606,7 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
         from torch.onnx.symbolic_opset9 import expand
         repeats = g.op("Constant", value_t=torch.tensor([reps]))
         repeats = expand(g, g.op("Constant", value_t=torch.tensor([1])), repeats, None)
-    return split(g, self, repeats, dim, _outputs=reps)
+        return split(g, self, repeats, dim, _outputs=reps)
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     def _is_all_integral(scalars):

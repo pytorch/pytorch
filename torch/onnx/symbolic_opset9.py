@@ -606,7 +606,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
     size = sym_help._get_tensor_dim_size(self, dim)
     if size is None:
         if _outputs is not None:
-            size = _outputs
+            size = split_size * _outputs
         else:
             return sym_help._onnx_opset_unsupported_detailed('split', 9, 11, 'Unknown dimension size not supported')
     splits = [split_size] * (size // split_size)
@@ -1967,6 +1967,16 @@ def repeat_interleave(g, self, repeats, dim=None):
     repeats_dim = sym_help._get_tensor_rank(repeats)
     repeats_sizes = sym_help._get_tensor_sizes(repeats)
     input_sizes = sym_help._get_tensor_sizes(input)
+    if repeats_dim is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                               'repeats rank.')
+    if repeats_sizes is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                               'repeats size.')
+    if input_sizes is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                               'input size.')
+
     input_sizes_temp = input_sizes.copy()
     for idx, input_size in enumerate(input_sizes):
         if input_size is None:
@@ -1977,7 +1987,7 @@ def repeat_interleave(g, self, repeats, dim=None):
         if not sym_help._is_tensor(repeats):
             repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
-            raise RuntimeError("Input size along dimension to repeat must exist")
+            raise NotImplementedError("Unsupported repeat_interleave along dimension with unknown input size")
         else:
             reps = input_sizes[dim]
             repeats = expand(g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None)
