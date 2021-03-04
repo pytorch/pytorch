@@ -262,7 +262,7 @@ void kthvalue_cuda_template(
 
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim, keepdim);
-  if (self.dim() == 0 && self.numel() == 1) {
+  if (self.dim() == 0 && self.numel() <= 1) {
     values.copy_(self);
     indices.zero_();
     return;
