@@ -15,6 +15,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/hash.h>
+#include <c10/util/ComplexHolder.h>
 
 namespace torch {
 namespace jit {
@@ -135,7 +136,7 @@ inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const& {
 }
 inline c10::complex<double> IValue::toComplexDouble() const {
   TORCH_INTERNAL_ASSERT(isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
-  auto ptr = toIntrusivePtr<ivalue::ComplexHolder>();
+  auto ptr = toIntrusivePtr<c10::ComplexHolder>();
   return (*ptr).val;
 }
 inline at::Tensor IValue::toTensor() && {
@@ -1271,7 +1272,7 @@ inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
 template <typename T>
 inline IValue::IValue(c10::complex<T> c)
     : tag(Tag::ComplexDouble), is_intrusive_ptr(true) {
-  auto v = c10::make_intrusive<ivalue::ComplexHolder>(c);
+  auto v = c10::make_intrusive<c10::ComplexHolder>(c);
   payload.u.as_intrusive_ptr = v.release();
 }
 
