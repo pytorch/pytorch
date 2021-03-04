@@ -66,6 +66,7 @@ class AdamW(Optimizer):
 
         for group in self.param_groups:
             amsgrad = group['amsgrad']
+            beta1, beta2 = group['betas']
 
             grads = []
             states = []

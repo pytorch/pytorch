@@ -211,7 +211,7 @@ REGISTER_OPERATOR_FUNCTOR(
         for (size_t i = 0; i < size; i++) {
           vals.push_back(p_node->Input(i));
         }
-        p_node->Output(0) = vals;
+        p_node->Output(0) = std::move(vals);
       };
     });
 
@@ -232,7 +232,7 @@ REGISTER_OPERATOR_FUNCTOR(
         for (size_t i = 0; i < size; i++) {
           vals.push_back(p_node->Input(i));
         }
-        p_node->Output(0) = c10::ivalue::Tuple::create(vals);
+        p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
       };
     });
 
@@ -737,6 +737,43 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
     at::native::index_out(out_t, in0_t, in1_l);
+  };
+});
+REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    if (p_node->Output(0).isNone()) {
+      c10::ScalarType dtype;
+      if (p_node->Input(0).isTensor()) {
+        const auto& in0_t = p_node->Input(0).toTensor();
+        if (p_node->Input(1).isTensor()) {
+          dtype = at::native::result_type(in0_t, p_node->Input(1).toTensor());
+          p_node->Output(0) = at::empty({0}, in0_t.options().dtype(dtype));
+        } else {
+          dtype = at::native::result_type(in0_t, p_node->Input(1).toScalar());
+          p_node->Output(0) = at::native::empty_like(
+              in0_t, in0_t.options().dtype(dtype), at::MemoryFormat::Preserve);
+        }
+      } else {
+        const auto& in1_t = p_node->Input(1).toTensor();
+        dtype = at::native::result_type(p_node->Input(0).toScalar(), in1_t);
+        p_node->Output(0) = at::native::empty_like(
+            in1_t, in1_t.options().dtype(dtype), at::MemoryFormat::Preserve);
+      }
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    if (p_node->Input(0).isTensor()) {
+      if (p_node->Input(1).isTensor()) {
+        at::native::pow_out(
+            out_t, p_node->Input(0).toTensor(), p_node->Input(1).toTensor());
+      } else {
+        at::native::pow_out(
+            out_t, p_node->Input(0).toTensor(), p_node->Input(1).toScalar());
+      }
+    } else {
+      at::native::pow_out(
+          out_t, p_node->Input(0).toScalar(), p_node->Input(1).toTensor());
+    }
   };
 });
 

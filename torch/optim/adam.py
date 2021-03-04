@@ -106,7 +106,6 @@ class Adam(Optimizer):
                 state['step'] += 1
                 states.append(state)
 
-            beta1, beta2 = group['betas']
             F.adam(params_with_grad,
                    grads,
                    exp_avgs,

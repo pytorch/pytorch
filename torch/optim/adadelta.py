@@ -55,6 +55,7 @@ class Adadelta(Optimizer):
             states = []
             square_avgs = []
             acc_deltas = []
+            lr, rho, eps, weight_decay = group['lr'], group['rho'], group['eps'], group['weight_decay']
 
             rho, eps = group['rho'], group['eps']
 
