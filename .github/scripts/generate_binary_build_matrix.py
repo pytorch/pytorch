@@ -71,8 +71,15 @@ def is_pull_request():
     return False
     # return os.environ.get("GITHUB_HEAD_REF")
 
-def generate_matrix(include_cuda=True, include_rocm=False):
+def generate_matrix(
+    *,
+    all_pythons=True,
+    include_cuda=True,
+    include_rocm=False,
+):
     python_versions = FULL_PYTHON_VERSIONS
+    if not all_pythons:
+        python_versions = ["3.7"]
     cuda_versions = CUDA_ARCHES
     rocm_versions = ROCM_ARCHES
     arches = ["cpu"]
@@ -110,14 +117,18 @@ def generate_matrix(include_cuda=True, include_rocm=False):
     return json.dumps({"include": matrix})
 
 def main():
+    all_pythons = True
     include_cuda = True
     include_rocm = True
+    if os.environ.get("SINGLE_PYTHON", False):
+        all_pythons = False
     if os.environ.get("NO_ROCM", False):
         include_rocm = False
     if os.environ.get("NO_CUDA", False):
         include_cuda = False
     print(
         generate_matrix(
+            all_pythons=all_pythons,
             include_cuda=include_cuda,
             include_rocm=include_rocm
         )

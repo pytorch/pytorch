@@ -16,6 +16,7 @@ jobs:
     container:
       image: python:3.9
     env:
+      SINGLE_PYTHON: 1
       # We don't currently build libtorch for rocm
       NO_ROCM: 1
     steps:
