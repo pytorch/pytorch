@@ -359,7 +359,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
             self.assertEqual("value".encode(), client_store.get("key"))
             client_store.set(f"new_key{index}", f"new_value{index}")
-            self.assertEqual(f"next_value{index}".encode(), 
+            self.assertEqual(f"next_value{index}".encode(),
                              client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
         except Exception:
             messages.put('Caught exception: \n{}exiting process with exit code: {}'
@@ -4703,11 +4703,11 @@ class CommTest(MultiProcessTestCase):
     def test_distributed_debug_mode(self):
         # Default should be off
         default_debug_mode = dist._get_debug_mode()
-        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
+        self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
         mapping = {
-            "OFF": dist._DistributedDebugMode.OFF,
-            "INFO": dist._DistributedDebugMode.INFO,
-            "DETAIL": dist._DistributedDebugMode.DETAIL,
+            "OFF": dist._DistributedDebugLevel.OFF,
+            "INFO": dist._DistributedDebugLevel.INFO,
+            "DETAIL": dist._DistributedDebugLevel.DETAIL,
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
@@ -4722,9 +4722,8 @@ class CommTest(MultiProcessTestCase):
 
         for mode in invalid_debug_modes:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+            with self.assertRaisesRegex(RuntimeError, f"to be one of"):
                 dist._get_debug_mode()
-
 
 if __name__ == "__main__":
     assert (

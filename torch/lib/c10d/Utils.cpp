@@ -18,6 +18,49 @@
 #include <thread>
 
 namespace c10d {
+
+  const char* kDistDebugEnvVar = "TORCH_DISTRIBUTED_DEBUG";
+  const char* kDistDebugDetailLogLevel = "DETAIL";
+  const char* kDistDebugInfoLogLevel = "INFO";
+  const char* kDistDebugOffLogLevel = "OFF";
+
+  std::string parse_env(const char* env_var_name) {
+    char* stringValue = std::getenv(env_var_name);
+    std::string res = "N/A";
+    if (stringValue != nullptr) {
+      res = stringValue;
+    }
+    return res;
+  }
+
+  DistributedDebugLevel parseDistDebugLevel() {
+    std::string debugLevel = parse_env(kDistDebugEnvVar);
+    const char * levelStr;
+    if (debugLevel.compare("N/A") == 0) {
+      levelStr = kDistDebugOffLogLevel;
+    } else {
+      levelStr = debugLevel.c_str();
+      TORCH_CHECK(
+        strncmp(levelStr, kDistDebugDetailLogLevel, strlen(kDistDebugDetailLogLevel)) == 0
+        || strncmp(levelStr, kDistDebugInfoLogLevel, strlen(kDistDebugInfoLogLevel)) == 0
+        || strncmp(levelStr, kDistDebugOffLogLevel, strlen(kDistDebugOffLogLevel)) == 0,
+        c10::str(
+          "Expected environment variable TORCH_DISTRIBUTED_DEBUG to be one of ",
+          kDistDebugDetailLogLevel,
+          " ",
+          kDistDebugInfoLogLevel,
+          " ",
+          kDistDebugOffLogLevel,
+          " "
+        )
+      );
+      C10_LOG_FIRST_N(INFO, 1) << "TORCH_DISTRIBUTED_DEBUG level parsed as " << levelStr;
+    }
+    c10d::DistributedDebugLevel level = c10d::getDebugLevel(levelStr);
+    return level;
+}
+
+
 namespace tcputil {
 
 namespace {

@@ -31,6 +31,39 @@ typedef SSIZE_T ssize_t;
 
 namespace c10d {
 
+// Distributed c10d debug levels
+enum DistributedDebugLevel {
+  OFF = 0,
+  DETAIL = 1,
+  INFO = 2,
+};
+
+// String debug log levels
+extern const char * kDistDebugEnvVar;
+extern const char* kDistDebugDetailLogLevel;
+extern const char* kDistDebugInfoLogLevel;
+extern const char* kDistDebugOffLogLevel;
+
+inline DistributedDebugLevel getDebugLevel(const char * levelStr) {
+
+  static std::unordered_map<std::string, DistributedDebugLevel> mapping = {
+    {kDistDebugOffLogLevel, DistributedDebugLevel::OFF},
+    {kDistDebugInfoLogLevel, DistributedDebugLevel::INFO},
+    {kDistDebugDetailLogLevel, DistributedDebugLevel::DETAIL},\
+  };
+
+  auto it = mapping.find(levelStr);
+  TORCH_CHECK(
+    it != mapping.end(),
+    "Invalid string value for distributed debug mode: ", levelStr
+  );
+  return it->second;
+}
+
+std::string parse_env(const char* env_var_name);
+
+DistributedDebugLevel parseDistDebugLevel();
+
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
