@@ -1,7 +1,7 @@
 
 import collections
 from itertools import repeat
-from typing import List
+from typing import List, Dict, Any
 
 
 def _ntuple(n):
@@ -32,3 +32,34 @@ def _list_with_default(out_size: List[int], defaults: List[int]) -> List[int]:
     if len(defaults) <= len(out_size):
         raise ValueError('Input dimension should be at least {}'.format(len(out_size) + 1))
     return [v if v is not None else d for v, d in zip(out_size, defaults[-len(out_size):])]
+
+
+def _consume_prefix_in_state_dict_if_present(state_dict: Dict[str, Any], prefix: str):
+    r"""Strip the prefix in state_dict metadata, if any.
+
+    Args:
+        state_dict (OrderedDict): a state-dict to be loaded to the model.
+        prefix (str): prefix.
+    """
+    keys = sorted(state_dict.keys())
+    for key in keys:
+        if key.startswith(prefix):
+            newkey = key[len(prefix) :]
+            state_dict[newkey] = state_dict.pop(key)
+
+    # also strip the prefix in metadata, if any..
+    try:
+        metadata = state_dict._metadata  # pyre-ignore
+    except AttributeError:
+        pass
+    else:
+        for key in list(metadata.keys()):
+            # for the metadata dict, the key can be:
+            # '': for the DDP module, which we want to remove.
+            # 'module': for the actual model.
+            # 'module.xx.xx': for the rest.
+
+            if len(key) == 0:
+                continue
+            newkey = key[len(prefix) :]
+            metadata[newkey] = metadata.pop(key)
