@@ -59,12 +59,12 @@ The TorchScript type system consists of ``TSType`` and ``TSModuleType`` as defin
 ``TSType`` represents the majority of TorchScript types, that are composable and can be used in TorchScript type annotation.
 ``TSType`` can be further classified into:
 
-    * meta types, e.g., Any
-    * primitive types, e.g., int, float, str
-    * structural types, e.g., Optional[int] or List[MyClass]
-    * nominal types (Python classes), e.g., MyClass (user-defined), torch.tensor (builtin)
+* meta types, e.g., Any
+* primitive types, e.g., int, float, str
+* structural types, e.g., Optional[int] or List[MyClass]
+* nominal types (Python classes), e.g., MyClass (user-defined), torch.tensor (builtin)
 
-``TSModuleType`` represents torch.nn.Module and its  subclasses. It is treated differently from ``TSType`` because its type schema is inferred partly from the object instance and partly from the class definition.
+``TSModuleType`` represents torch.nn.Module and its subclasses. It is treated differently from ``TSType`` because its type schema is inferred partly from the object instance and partly from the class definition.
 As such, instances of a ``TSModuleType`` may not follow the same static type schema. ``TSModuleType`` cannot be used in TorchScript type annotation or be composed with TSType for type safety considerations.
 
 Meta Types
@@ -73,8 +73,8 @@ Meta Types
 Meta types are so abstract that they are more like type constraints than concrete types.
 Currently TorchScript defines one meta-type, ``Any``, that represents any TorchScript type.
 
-Any Type
-""""""""
+``Any`` Type
+""""""""""""
 
 The ``Any`` type literally represents any type. ``Any`` specifies no type constraints, thus there is no type checking on ``Any``.
 As such it can be bound to any Python or TorchScript data types (e.g., int, TorchScript tuple, or an arbitrary Python class that is not scripted).
@@ -93,7 +93,7 @@ Operators supported for Any type
 
 * assignment to data of Any type
 * binding to parameter or return of Any type
-* x is  , x is not  where x is of Any type
+* x is, x is not  where x is of Any type
 * isinstance(x, Type) where x is of Any type
 * data of Any type is printable
 * Data of List[Any] type may be sortable if the data is a list of values of the same type T and that T supports comparison operators
@@ -205,7 +205,7 @@ where
 Compared to Python
 """"""""""""""""""
 
-Apart from only composable with TorchScript types, these TorchScript structural types often support a common subset of
+* Apart from only composable with TorchScript types, these TorchScript structural types often support a common subset of
 the operators and methods of its Python counterparts.
 
 Example:
@@ -305,8 +305,8 @@ Special note on torch.nn.ModuleList and torch.nn.ModuleDict
 Although torch.nn.ModuleList and torch.nn.ModuleDict are defined as a list and dictionary in Python,
 in TorchScript, ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict`` behave more like a tuple.
 
-    * Within the execution of TorchScript, instances of ``torch.nn.ModuleList``  or ``torch.nn.ModuleDict`` are immutable.
-    * Iterating over ``torch.nn.ModuleList`` or ``torch.nn.ModuleDict`` is completely unrolled so that elements of ``torch.nn.ModuleList`` or keys of ``torch.nn.ModuleDict`` can be of different subclasses of ``torch.nn.Module``.
+* Within the execution of TorchScript, instances of ``torch.nn.ModuleList``  or ``torch.nn.ModuleDict`` are immutable.
+* Iterating over ``torch.nn.ModuleList`` or ``torch.nn.ModuleDict`` is completely unrolled so that elements of ``torch.nn.ModuleList`` or keys of ``torch.nn.ModuleDict`` can be of different subclasses of ``torch.nn.Module``.
 
 Example:
 
@@ -338,26 +338,28 @@ Unlike built-in classes, semantics of custom classes are user-defined and the en
 
     TSClassDef := [ "@torch.jit.script" ]
                 "class" ClassName [ "(object)" ]  ":"
+                        MethodDefinition |
+                    [ "@torch.jit.ignore" ] | [ "@torch.jit.unused" ]
                         MethodDefinition
 
 where
 
-    * Classes must be new-style classes (note that Python 3 supports only new-style classes, for Python 2.x new-style class is specified by subclassing from object)
-    * Instance data attributes are statically typed, and instance attributes must be declared by assignments inside the ``__init__()`` method
-    * Method overloading is not supported (i.e., cannot have multiple methods with the same method name)
-    * MethodDefinition must be compilable to TorchScript IR and subject to TorchScript’s type-checking rules, i.e., all methods must be valid TorchScript functions and class attribute definitions are valid TorchScript statements
-
+* Classes must be new-style classes (note that Python 3 supports only new-style classes, for Python 2.x new-style class is specified by subclassing from object)
+* Instance data attributes are statically typed, and instance attributes must be declared by assignments inside the ``__init__()`` method
+* Method overloading is not supported (i.e., cannot have multiple methods with the same method name)
+* MethodDefinition must be compilable to TorchScript IR and subject to TorchScript’s type-checking rules, i.e., all methods must be valid TorchScript functions and class attribute definitions are valid TorchScript statements
+* ``torch.jit.ignore`` and ``torch.jit.unused`` can be used to ignore the method or function that is not fully torchscriptable or just needs to be ignored by the compiler
 
 Compared to Python
 """"""""""""""""""
 
 TorchScript custom class is quite limited compared to its Python counterpart. Most notably, TorchScript custom classes
 
-    * do not support class attributes
-    * do not support subclassing except for subclassing an interface type or object
-    * do not support method overloading
-    * must initialize all its instance attributes in  ``__init__()``; this is because TorchScript construct a static schema of the class by inferring attribute types in ``__init__()``
-    * must contain only methods that satisfy TorchScript type-checking rules and are compilable to TorchScript IRs
+* do not support class attributes
+* do not support subclassing except for subclassing an interface type or object
+* do not support method overloading
+* must initialize all its instance attributes in  ``__init__()``; this is because TorchScript construct a static schema of the class by inferring attribute types in ``__init__()``
+* must contain only methods that satisfy TorchScript type-checking rules and are compilable to TorchScript IRs
 
 Example:
 
@@ -440,14 +442,15 @@ Like custom classes, semantics of enum type are user-defined and the entire clas
 
 where
 
-    * Value must be TorchScript literals of type ``int``, ``float``, or ``str``, and must be of the same TorchScript type
-    * ``TSEnumType`` is the name of a TorchScript ``enum`` type. Similar to Python enum, TorchScript allows restricted Enum subclassing, that is, subclassing an enum is allowed only if the enum does not define any members.
+* Value must be TorchScript literals of type ``int``, ``float``, or ``str``, and must be of the same TorchScript type
+* ``TSEnumType`` is the name of a TorchScript ``enum`` type. Similar to Python enum, TorchScript allows restricted Enum subclassing, that is, subclassing an enum is allowed only if the enum does not define any members.
 
 Compared to Python
 """"""""""""""""""
 
-    * TorchScript supports only ``enum.Enum``, but not other variations such as ``enum.IntEnum``, ``enum.Flag``, ``enum.IntFlag``, or  ``enum.auto``
-    * Values of TorchScript enum members must be of the same type and can only be of ``int``, ``float``, or ``str`` type, whereas Python enum members can be of any type
+* TorchScript supports only ``enum.Enum``, but not other variations such as ``enum.IntEnum``, ``enum.Flag``, ``enum.IntFlag``, or  ``enum.auto``
+* Values of TorchScript enum members must be of the same type and can only be of ``int``, ``float``, or ``str`` type, whereas Python enum members can be of any type
+* Enums containing methods, are ignored in TorchScript.
 
 Example:
 
@@ -518,7 +521,7 @@ TorchScript module type represents type schema of a user-defined PyTorch module 
 
 where
 
-    * ``forward()`` and other methods decorated with ``@torch.jit.export`` must be compilable to TorchScript IR and subject to TorchScript’s type checking rules
+* ``forward()`` and other methods decorated with ``@torch.jit.export`` must be compilable to TorchScript IR and subject to TorchScript’s type checking rules
 
 Unlike custom classes, only the forward method and other methods decorated with ``@torch.jit.export``  of the module type need to be compilable to TorchScript IR. Most notably, ``__init__()`` is not considered a TorchScript method. Thus module type constructors should not be invoked within the scope of TorchScript. Instead, TorchScript module objects are always constructed outside and passed into ``torch.jit.script(ModuleObj)``.
 
@@ -555,12 +558,12 @@ Example:
 
 This example illustrates a few features of module types:
 
-    *  The TestModule instance is created outside the scope of TorchScript (i.e., before invoking torch.jit.script).
-    * ``__init__()`` is not considered as a TorchScript method, therefore it does not have to be annotated and can contain arbitrary Python codes. In fact, it is prohibited to invoke ``__init__()`` of a instance class within the scope of TorchScript execution.
-    * Because TestModule instances are instantiated in Python, in this example, TestModule(2.0) and TestModule(2) create two instances with different types for its data attributes, i.e., (self.x is of type float for TestModule(2.0), whereas self.y is of type int for TestModule(2.0)).
-In this sense, module instance type provides a mechanism to specialize a class definition to different types based on how the instance is instantiated.
-    * TorchScript automatically compiles other methods (e.g., mul()) invoked by methods annotated via ``@torch.jit.export`` or ``forward()`` methods
-    * Entry-points to a TorchScript program are either ``forward()`` of a module type or methods annotated via ``torch.jit.script``
+*  The TestModule instance is created outside the scope of TorchScript (i.e., before invoking torch.jit.script).
+* ``__init__()`` is not considered as a TorchScript method, therefore it does not have to be annotated and can contain arbitrary Python codes. In fact, it is prohibited to invoke ``__init__()`` of a instance class within the scope of TorchScript execution.
+* Because TestModule instances are instantiated in Python, in this example, TestModule(2.0) and TestModule(2) create two instances with different types for its data attributes, i.e., (self.x is of type float for TestModule(2.0), whereas self.y is of type int for TestModule(2.0)).
+  In this sense, module instance type provides a mechanism to specialize a class definition to different types based on how the instance is instantiated.
+* TorchScript automatically compiles other methods (e.g., mul()) invoked by methods annotated via ``@torch.jit.export`` or ``forward()`` methods
+* Entry-points to a TorchScript program are either ``forward()`` of a module type or methods annotated via ``torch.jit.script``
 
 Example:
 
