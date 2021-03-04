@@ -305,7 +305,6 @@ class TestOptim(TestCase):
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
-    @skipIfRocm
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
             return
@@ -632,6 +631,26 @@ class TestOptim(TestCase):
             optim.SGD([param, param], lr=0.1)
             self.assertEqual(len(w), 1)
             self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
+
+    def test_no_grad_for_all_params(self):
+        param = torch.randn(5, 5, requires_grad=False)
+
+        optimizer_list = [
+            optim.Adadelta,
+            optim.AdamW,
+            optim.Adam,
+            optim.Adagrad,
+            optim.Adamax,
+            optim.RMSprop,
+            optim.SGD,
+            optim.SparseAdam,
+            optim.ASGD,
+        ]
+        for optim_ctr in optimizer_list:
+            opt = optim_ctr([param, param], lr=0.1)
+            # make sure step can still run even if
+            # all params have no grad
+            opt.step()
 
 
 class SchedulerTestNet(torch.nn.Module):
