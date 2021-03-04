@@ -240,19 +240,25 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       common_device = op.tensor.device();
     }
 
-    // Determines if there are varying input dtypes
-    // NOTE: the common dtype is set to the first defined input dtype observed
-    if (!op.is_output && op.target_dtype != common_dtype_) {
-      if (common_dtype_ == ScalarType::Undefined) {
-        common_dtype_ = op.target_dtype;
-      } else {
-        has_different_input_dtypes = true;
+    if (!op.is_output) {
+      // Determines if there are varying input dtypes
+      // NOTE: the common dtype is set to the first defined input dtype observed
+      if (op.target_dtype != common_dtype_) {
+        if (common_dtype_ == ScalarType::Undefined) {
+          common_dtype_ = op.target_dtype;
+        } else {
+          has_different_input_dtypes = true;
+        }
       }
-    } else if (op.is_output && op.target_dtype != common_dtype_) {
-      if (output_dtype == ScalarType::Undefined) {
-        output_dtype = op.target_dtype;
-      } else {
-        has_different_output_dtypes = true;
+    } else {  // op.is_output
+      // Determines if there are varying output dtypes
+      // NOTE: the output dtype is set to the first defined output dtype observed
+      if (op.target_dtype != output_dtype) {
+        if (output_dtype == ScalarType::Undefined) {
+          output_dtype = op.target_dtype;
+        } else {
+          has_different_output_dtypes = true;
+        }
       }
     }
   }
