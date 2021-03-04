@@ -112,6 +112,14 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             callback(``Future``): a ``Callable`` that takes in one argument,
             which is the reference to this ``Future``.
 
+        .. note:: Note that if the callback function throws, either
+            through the original future being completed with an exception and
+            calling ``fut.wait()``, or through other code in the callback,
+            error handling must be carefully taken care of. For example, if
+            this callback later completes additional futures, those futures are
+            not marked as completed with an error and the user is responsible
+            for handling completion/waiting on those futures independently.
+
         Example::
             >>> import torch
             >>>

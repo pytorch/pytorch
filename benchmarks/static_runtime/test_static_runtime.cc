@@ -145,6 +145,20 @@ TEST(StaticRuntime, IndividualOps_flatten) {
   test_flatten({}, 0, 0);
 }
 
+TEST(StaticRuntime, IndividualOps_pow) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+
+  std::vector<IValue> args0{a, 4};
+  testStaticRuntime(pow_script_ten_sca, args0);
+
+  std::vector<IValue> args1{at::abs(a), b};
+  testStaticRuntime(pow_script_ten_ten, args1);
+
+  std::vector<IValue> args2{5, b};
+  testStaticRuntime(pow_script_sca_ten, args2);
+}
+
 TEST(StaticRuntime, LongModel) {
   torch::jit::Module mod = getLongScriptModel();
   auto a = torch::randn({2, 2});

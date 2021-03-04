@@ -635,6 +635,8 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::Vulkan;
           case DeviceType::Metal:
             return DispatchKey::Metal;
+          case DeviceType::Meta:
+            return DispatchKey::Meta;
           default:
             TORCH_CHECK(false, "Unsupported device type for dense layout: ", device_.type());
         }
@@ -691,6 +693,8 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::XLA;
   } else if (tid == DispatchKey::MLC) {
     return DeviceType::MLC;
+  } else if (tid == DispatchKey::Meta) {
+    return DeviceType::Meta;
   } else if (tid == DispatchKey::SparseCPU) {
     return DeviceType::CPU;
   } else if (tid == DispatchKey::SparseCUDA) {
