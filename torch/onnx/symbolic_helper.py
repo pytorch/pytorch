@@ -603,7 +603,7 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
         return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
         from torch.onnx.symbolic_opset13 import split  # type: ignore
-        repeats = g.op("Constant", value_t=torch.tensor([1] *reps))
+        repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
         return split(g, self, repeats, dim, _outputs=reps)
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
