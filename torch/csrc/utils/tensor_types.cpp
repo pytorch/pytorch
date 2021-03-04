@@ -15,7 +15,7 @@ using namespace at;
 
 namespace torch { namespace utils {
 
-static const char* backend_to_string(const at::Backend& backend) {
+const char* backend_to_string(const at::Backend& backend) {
   switch (backend) {
     case at::Backend::CPU: return "torch";
     case at::Backend::CUDA: return "torch.cuda";

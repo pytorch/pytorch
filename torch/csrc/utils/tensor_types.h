@@ -6,6 +6,7 @@
 
 namespace torch { namespace utils {
 
+const char* backend_to_string(const at::Backend& backend);
 std::string options_to_string(const at::TensorOptions options);
 std::string type_to_string(const at::DeprecatedTypeProperties& type);
 at::TensorOptions options_from_string(const std::string& str);
