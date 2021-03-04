@@ -70,7 +70,13 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         return g.op("Split", self, split_size_or_sizes, axis_i=dim, outputs=_outputs)
     split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
 
-    size = self.type().sizes()[dim]
+    if self.type().sizes()[dim] is not None:
+        size = self.type().sizes()[dim]
+    else:
+        if _outputs is not None:
+            size = split_size * _outputs
+        else:
+            raise RuntimeError('Unknown dimension size not supported')
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:

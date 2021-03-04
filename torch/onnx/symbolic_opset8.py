@@ -42,7 +42,7 @@ import warnings
 block_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
     "arange", "masked_fill",
-    "index_fill", "index_copy"
+    "index_fill", "index_copy", "repeat_interleave"
 ]
 
 for block_listed_op in block_listed_operators:
