@@ -3539,25 +3539,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('vstack',
            # gradcheck expects the input arguments as a flat list
-<<<<<<< HEAD
-<<<<<<< HEAD
            op=lambda *args, **kwargs: torch.vstack([*args], **kwargs),
-=======
-           op=lambda x, *args: x.unfold(*args),
->>>>>>> final updates
-=======
-           op=lambda *args: torch.vstack([*args]),
->>>>>>> fixing unfold and vstack confusion
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-<<<<<<< HEAD
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
                # vstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
-=======
-                        dtypes=all_types_and_complex_and(torch.bool, torch.fl16, torch.bfloat16)),
->>>>>>> updates to the opinfo unfold test
            ),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('dstack',
