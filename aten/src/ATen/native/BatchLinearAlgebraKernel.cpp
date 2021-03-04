@@ -176,6 +176,10 @@ Solves the matrix equation op(A) X = B
 X and B are n-by-nrhs matrices, A is a unit, or non-unit, upper or lower triangular matrix
 and op(A) is one of op(A) = A or op(A) = A^T or op(A) = A^H.
 This is an in-place routine, content of 'B' is overwritten.
+'upper' controls the portion of input matrix to consider in computations,
+'transpose' if true then op(A) = A^T,
+'unitriangular' if true then the diagonal elements of A are assumed to be 1
+and the actual diagonal values are not used.
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see LAPACK's documentation for TRTRS routine.
 */
