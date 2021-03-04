@@ -50,17 +50,27 @@ Tensor det(const Tensor& self) {
   return at::linalg_det(self);
 }
 
-Tensor linalg_det(const Tensor& self) {
+Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
   squareCheckInputs(self);
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
               "Expected a floating point tensor as input");
+
+  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
+  at::native::resize_output(out, out_sizes);
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
   // complete_det is 0 when U is singular (U(i, i) = 0 for some i in [1, self.size(-1)]).
   // The product accumulation takes care of this case, and hence no special case handling is required.
-  auto complete_det = diag_U.prod(-1).mul_(det_P);
-  return complete_det;
+  at::prod_out(out, diag_U, -1);
+  out.mul_(det_P);
+  return out;
+}
+
+Tensor linalg_det(const Tensor& self) {
+  auto out = at::empty({0}, self.options());
+  linalg_det_out(self, out);
+  return out;
 }
 
 Tensor logdet(const Tensor& self) {

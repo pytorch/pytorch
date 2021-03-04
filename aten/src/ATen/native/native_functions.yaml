@@ -8992,6 +8992,11 @@
   dispatch:
     DefaultBackend: linalg_det
 
+- func: linalg_det.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    DefaultBackend: linalg_det_out
+
 # torch.det, alias for torch.linalg.det
 - func: det(Tensor self) -> Tensor
   variants: function, method

@@ -1911,7 +1911,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            test_complex_grad=False,
            test_inplace_grad=False,
-           supports_tensor_out=False,  # FIXME
+           supports_tensor_out=True,
            ),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
