@@ -23,6 +23,14 @@ std::string qual_name_for_entry(const Entry& entry) {
   return s;
 }
 
+// NOTE: we could save even more space by packing the string data as follows:
+// constexpr char namespaces[] = "namespaces\0prim\0aten\0...";
+// constexpr char unqual_names[] = "prim\0aten\0cuda\0...";
+// and then storing two uint16_t (or uint32_t if needed) offsets into
+// the raw string tables in Entry instead of 8-byte pointers.
+// I haven't implemented that because it's not clear to me how to
+// dedupe the namespaces array at compile-time, particularly in C++14,
+// but it would be straightforward if we switched to codegen.
 constexpr Entry entries[] = {
 #define SYMBOL_ENTRY(n, s) {#n, #s, n::s, namespaces::n},
 
