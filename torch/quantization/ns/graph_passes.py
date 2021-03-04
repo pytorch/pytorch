@@ -102,7 +102,7 @@ def _insert_dtype_cast_after_node(
     gm_b: GraphModule,
     graph_c: Graph,
     node_name_prefix: str,
-) -> Node:
+) -> Union[Node, List[Node]]:
     """
     Given a starting graph C (derived from graph B) of
 
@@ -129,15 +129,29 @@ def _insert_dtype_cast_after_node(
         raise AssertionError(
             f"dtype cast from {node_input_type_c} to {node_input_type_a} needs to be implemented")
 
-    new_dtype_cast_name = \
-        get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+    if isinstance(prev_node_c, Node):
+        new_dtype_cast_name = \
+            get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
 
-    return graph_c.create_node(
-        'call_function', dtype_cast_op, (prev_node_c,), {},
-        new_dtype_cast_name)
+        return graph_c.create_node(
+            'call_function', dtype_cast_op, (prev_node_c,), {},
+            new_dtype_cast_name)
+    elif isinstance(prev_node_c, list):
+        results = []
+        for prev_node_c_inner in prev_node_c:
+            new_dtype_cast_name = \
+                get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+
+            new_dtype_cast_node = graph_c.create_node(
+                'call_function', dtype_cast_op, (prev_node_c_inner,), {},
+                new_dtype_cast_name)
+            results.append(new_dtype_cast_node)
+        return results
+    else:
+        raise AssertionError(f"type f{type(prev_node_c)} is not handled")
 
 def _insert_copy_of_subgraph_a_after_input_node_c(
-    input_node_c: Node,
+    input_node_c: Union[Node, List[Node]],
     node_start_a: Node,
     node_end_a: Node,
     gm_a: GraphModule,
@@ -147,7 +161,10 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     """
     TODO(before land): real docblock
     """
-    graph_c = input_node_c.graph
+    if isinstance(input_node_c, Node):
+        graph_c = input_node_c.graph
+    else:
+        graph_c = input_node_c[0].graph
 
     # create a sequential list of the subgraphs' nodes from start to end,
     # because we need to add the nodes to graph C in non-reverse order
@@ -180,7 +197,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
 
 
 def _insert_copy_of_node_a_after_input_node_c(
-    input_node_c: Node,
+    input_node_c: Union[Node, List[Node]],
     node_a: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -221,7 +238,10 @@ def _insert_copy_of_node_a_after_input_node_c(
                      /
     bias_copy ------/
     """
-    graph_c = input_node_c.graph
+    if isinstance(input_node_c, Node):
+        graph_c = input_node_c.graph
+    else:
+        graph_c = input_node_c[0].graph
 
     # generically handle all args and kwargs except for the input
     # Note: this hasn't been tested with many ops, logic may change.
@@ -358,40 +378,42 @@ def create_a_shadows_b(
             #
             # subgraph so far:
             #
-            # prev_node_c -> node_c
+            # (prev_node_c)+ -> node_c
 
             # cast dtype from the dtype of node_c's input to the dtype of
             # node_a's input (dequant, etc)
             dtype_cast_node = _insert_dtype_cast_after_node(
                 node_start_a, node_c, node_c.args[0], gm_a, gm_b, graph_c,
                 node_b.name + '_dtype_cast_')
-            env_c[dtype_cast_node.name] = dtype_cast_node
+            # note: not inserting to env_c because all nodes which use the dtype
+            #   casts are copied from graph_a
+            #
             # subgraph so far:
             #
-            #       dtype_cast_node
+            #       (dtype_cast_node)+
             #      /
-            # prev_node_c -> node_c
+            # (prev_node_c)+ -> node_c
 
             # hook up the new mod_a copy to be in the graph, receiving the
             # same inputs as mod_b does, with dtype cast to match a
             node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
-                env_c[dtype_cast_node.name],
+                dtype_cast_node,
                 node_start_a, node_end_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
             env_c[node_a_shadows_c.name] = node_a_shadows_c
             # subgraph so far:
             #
-            #       dtype_cast_node --> subgraph_a_copy(args/kwargs not shown)
+            #       (dtype_cast_node)+ --> subgraph_a_copy(args/kwargs not shown)
             #      /
-            # prev_node_c -> node_c
+            # (prev_node_c)+ -> node_c
 
             # hook up a logger to the mod_b copy
             env_c[node_b.name] = _insert_logger_after_node(
                 env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_', name_b, ref_name)
             # subgraph so far:
             #
-            #       dtype_cast_node --> subgraph_a_copy
+            #       (dtype_cast_node)+ --> subgraph_a_copy
             #      /
-            # prev_node_c -> node_c --> logger_c
+            # (prev_node_c)+ -> node_c --> logger_c
 
             # hook up a logger to the mod_a copy
             # Note: we pass node_b.name to this logger, for easy matching later
@@ -400,9 +422,9 @@ def create_a_shadows_b(
                 ref_name)
             # subgraph so far:
             #
-            #       dtype_cast_node --> subgraph_a_copy --> logger_a
+            #       (dtype_cast_node)+ --> subgraph_a_copy --> logger_a
             #      /
-            # prev_node_c -> node_c --> logger_c
+            # (prev_node_c)+ -> node_c --> logger_c
 
         else:
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
