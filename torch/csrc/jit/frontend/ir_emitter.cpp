@@ -667,7 +667,7 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*, std::hash<int>> integral_constants;
+  std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
   std::unordered_map<double, Value*, std::hash<float>> fp_constants;
   std::unordered_map<
       c10::complex<double>,
