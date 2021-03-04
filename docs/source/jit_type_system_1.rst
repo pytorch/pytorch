@@ -29,8 +29,7 @@
 Type System (I): TorchScript Types
 ==================================
 
-This section summarizes TorchScript type system. The information is based on TorchScript language reference
-and reading the implementation.
+This section summarizes TorchScript type system.
 
 Terminology
 ^^^^^^^^^^^
@@ -53,19 +52,19 @@ The TorchScript type system consists of ``TSType`` and ``TSModuleType`` as defin
 
 ::
 
-    TSAllType := TSType | TSModuleType
-    TSType := TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
+    TSAllType ::= TSType | TSModuleType
+    TSType ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
 
-``TSType`` represents the majority of TorchScript types, that are composable and can be used in TorchScript type annotation.
+``TSType`` represents the majority of TorchScript types that are composable and can be used in TorchScript type annotation.
 ``TSType`` can be further classified into:
 
-    * meta types, e.g., Any
-    * primitive types, e.g., int, float, str
-    * structural types, e.g., Optional[int] or List[MyClass]
-    * nominal types (Python classes), e.g., MyClass (user-defined), torch.tensor (builtin)
+* meta types, e.g., ``Any``
+* primitive types, e.g., ``int``, ``float``, ``str``
+* structural types, e.g., ``Optional[int]`` or ``List[MyClass]``
+* nominal types (Python classes), e.g., ``MyClass`` (user-defined), ``torch.tensor`` (builtin)
 
-``TSModuleType`` represents torch.nn.Module and its  subclasses. It is treated differently from ``TSType`` because its type schema is inferred partly from the object instance and partly from the class definition.
-As such, instances of a ``TSModuleType`` may not follow the same static type schema. ``TSModuleType`` cannot be used in TorchScript type annotation or be composed with TSType for type safety considerations.
+``TSModuleType`` represents ``torch.nn.Module`` and its subclasses. It is treated differently from ``TSType`` because its type schema is inferred partly from the object instance and partly from the class definition.
+As such, instances of a ``TSModuleType`` may not follow the same static type schema. ``TSModuleType`` cannot be used as a TorchScript type annotation or be composed with ``TSType`` for type safety considerations.
 
 Meta Types
 ^^^^^^^^^^
@@ -73,30 +72,30 @@ Meta Types
 Meta types are so abstract that they are more like type constraints than concrete types.
 Currently TorchScript defines one meta-type, ``Any``, that represents any TorchScript type.
 
-Any Type
-""""""""
+``Any`` Type
+""""""""""""
 
 The ``Any`` type literally represents any type. ``Any`` specifies no type constraints, thus there is no type checking on ``Any``.
-As such it can be bound to any Python or TorchScript data types (e.g., int, TorchScript tuple, or an arbitrary Python class that is not scripted).
+As such it can be bound to any Python or TorchScript data types (e.g., int, TorchScript ``tuple``, or an arbitrary Python class that is not scripted).
 
 ::
 
-    TSMetaType := "Any"
+    TSMetaType ::= "Any"
 
 where
 
-    * ``Any`` is the Python class name from the typing module, therefore usage of the ``Any`` type requires from typing import Any
-    * Since Any can represent any data, operators allowed on Any is quite limited
+    * ``Any`` is the Python class name from the typing module, therefore usage of the ``Any`` type requires from ``typing import Any``
+    * Since ``Any`` can represent any type, the set of operators allowed to operate on values of this type on Any is limited.
 
 Operators supported for Any type
 """"""""""""""""""""""""""""""""
 
-* assignment to data of Any type
-* binding to parameter or return of Any type
-* x is  , x is not  where x is of Any type
-* isinstance(x, Type) where x is of Any type
-* data of Any type is printable
-* Data of List[Any] type may be sortable if the data is a list of values of the same type T and that T supports comparison operators
+* assignment to data of ``Any`` type
+* binding to parameter or return of ``Any`` type
+* ``x is``, ``x is not`` where ``x`` is of ``Any`` type
+* ``isinstance(x, Type)`` where ``x`` is of ``Any`` type
+* data of ``Any`` type is printable
+* Data of ``List[Any]`` type may be sortable if the data is a list of values of the same type ``T`` and that ``T`` supports comparison operators
 
 Compared to Python
 """"""""""""""""""
@@ -109,11 +108,11 @@ Design notes
 
 When we script a PyTorch module, we may encounter data that are not involved in the execution of the script, nevertheless has to be described
 by a type schema. It is not only cumbersome to describe static types for unused data (in the context of the script) but also may lead to unnecessary
-scripting failures. Any is introduced to describe the type of the data where precise static types are not necessary for compilation.
+scripting failures. ``Any`` is introduced to describe the type of the data where precise static types are not necessary for compilation.
 
 Example:
 
-This example illustrates how ``Any`` can be used to allow the second element of the tuple parameter to be of any type. This is possible,
+This example illustrates how ``Any`` can be used to allow the second element of the tuple parameter to be of ``any`` type. This is possible,
 because ``x[1]`` is not involved in any computation that requires knowing its precise type.
 
 .. testcode::
@@ -128,11 +127,11 @@ because ``x[1]`` is not involved in any computation that requires knowing its pr
     return (x[0]+1, x[1])
 
     m = torch.jit.script(incFirstElement)
-    print(incFirstElement((1,2.0)))
-    print(incFirstElement((1,(100,200))))
+    print(m((1,2.0)))
+    print(m((1,(100,200))))
 
 The example will generate the following output, where the second element of the tuple is of ``Any`` type
-thus can bind to multiple types, e.g., (1, 2.0) binds a float type to Any as in ``Tuple[int, Any]``,
+thus can bind to multiple types, e.g., (1, 2.0) binds a float type to ``Any`` as in ``Tuple[int, Any]``,
 whereas ``(1, (100, 200))`` binds a tuple to ``Any`` in the second invocation.
 
 .. testoutput::
@@ -142,7 +141,7 @@ whereas ``(1, (100, 200))`` binds a tuple to ``Any`` in the second invocation.
 
 Example:
 
-We can use isinstance to dynamically check the type of the data annotated as ``Any`` type.
+We can use ``isinstance`` to dynamically check the type of the data annotated as ``Any`` type.
 
 .. testcode::
 
@@ -174,7 +173,7 @@ type name.
 
 ::
 
-    TSPrimitiveType := "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
+    TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
 Structural Types
 ^^^^^^^^^^^^^^^^
@@ -184,33 +183,33 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
 
 ::
 
-    TSStructualType :=  TSTuple | TSNamedTuple | TSList | TSDict |
+    TSStructuralType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
                         TSOptional | TSFuture | TSRRef
 
-    TSTuple := "Tuple" "[" (TSType ",")* TSType "]"
-    TSNamedTuple := "namedtuple" "(" (TSType ",")* TSType ")"
-    TSList := "List" "[" TSType "]"
-    TSOptional := "Optional" "[" TSType "]"
-    TSFuture := "Future" "[" TSType "]"
-    TSRRef := "RRef" "[" TSType "]"
-    TSDict := "Dict" "[" KeyType "," TSType "]"
-    KeyType := "str" | "int" | "float" | "bool" | TensorType | "Any"
+    TSTuple ::= "Tuple" "[" (TSType ",")* TSType "]"
+    TSNamedTuple ::= "namedtuple" "(" (TSType ",")* TSType ")"
+    TSList ::= "List" "[" TSType "]"
+    TSOptional ::= "Optional" "[" TSType "]"
+    TSFuture ::= "Future" "[" TSType "]"
+    TSRRef ::= "RRef" "[" TSType "]"
+    TSDict ::= "Dict" "[" KeyType "," TSType "]"
+    KeyType ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
 where
 
-* ``Tuple``, ``List``, ``Optional``, ``Union``, ``Future``, ``Dict`` represent Python type class names defined in module typing. Therefore before using these type names, one must import them from ``typing (e.g., from typing import Tuple)``.
-* namedtuple represents Python class  ``collections.namedtuple`` or ``typing.NamedTuple`` .
+* ``Tuple``, ``List``, ``Optional``, ``Union``, ``Future``, ``Dict`` represent Python type class names defined in module ``typing``. Therefore before using these type names, one must import them from ``typing`` (e.g., ``from typing import Tuple)``.
+* ``namedtuple`` represents Python class  ``collections.namedtuple`` or ``typing.NamedTuple`` .
 * ``Future`` and ``RRef`` represent Python classes  ``torch.futures``, ``torch.distributed.rpc``.
 
 Compared to Python
 """"""""""""""""""
 
-Apart from only composable with TorchScript types, these TorchScript structural types often support a common subset of
-the operators and methods of its Python counterparts.
+* Apart from being composable with TorchScript types, these TorchScript structural types often support a common subset of
+the operators and methods of their Python counterparts.
 
 Example:
 
-This example uses typing.NamedTuple syntax:
+This example uses ``typing.NamedTuple`` syntax:
 
 .. testcode::
 
@@ -280,7 +279,7 @@ name and are compared using class names. Nominal classes are further classified 
 
 ::
 
-    TSNominalType := TSBuiltinClasses | TSCustomClass | TSEnum
+    TSNominalType ::= TSBuiltinClasses | TSCustomClass | TSEnum
 
 Among them, ``TSCustomClass`` and ``TSEnum`` must be compilable to TorchScript IR (as enforced by the type-checker).
 
@@ -288,25 +287,25 @@ Builtin Class
 ^^^^^^^^^^^^^
 
 Builtin nominal types are Python classes whose semantics are built into the TorchScript system, such as tensor types.
-TorchScript defines the semantics of these builtin nominal types, and often support only a subset of the methods or
+TorchScript defines the semantics of these builtin nominal types, and often supports only a subset of the methods or
 attributes of its Python class definition.
 
 ::
 
-    TSBuiltinClass := TSTensor | "torch.device" | "torch.Stream" | "torch.dtype" |
+    TSBuiltinClass ::= TSTensor | "torch.device" | "torch.Stream" | "torch.dtype" |
                     "torch.nn.ModuleList" | "torch.nn.ModuleDict" | ...
-    TSTensor := "torch.Tensor" | "common.SubTensor" | "common.SubWithTorchFunction" |
+    TSTensor ::= "torch.Tensor" | "common.SubTensor" | "common.SubWithTorchFunction" |
                 "torch.nn.parameter.Parameter" | and subclasses of torch.Tensor
 
 
 Special note on torch.nn.ModuleList and torch.nn.ModuleDict
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-Although torch.nn.ModuleList and torch.nn.ModuleDict are defined as a list and dictionary in Python,
-in TorchScript, ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict`` behave more like a tuple.
+Although ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict`` are defined as a list and dictionary in Python,
+they behave more like tuples in TorchScript.
 
-    * Within the execution of TorchScript, instances of ``torch.nn.ModuleList``  or ``torch.nn.ModuleDict`` are immutable.
-    * Iterating over ``torch.nn.ModuleList`` or ``torch.nn.ModuleDict`` is completely unrolled so that elements of ``torch.nn.ModuleList`` or keys of ``torch.nn.ModuleDict`` can be of different subclasses of ``torch.nn.Module``.
+* In TorchScript, instances of ``torch.nn.ModuleList``  or ``torch.nn.ModuleDict`` are immutable.
+* Code that iterates over ``torch.nn.ModuleList`` or ``torch.nn.ModuleDict`` is completely unrolled so that elements of ``torch.nn.ModuleList`` or keys of ``torch.nn.ModuleDict`` can be of different subclasses of ``torch.nn.Module``.
 
 Example:
 
@@ -332,37 +331,38 @@ Example:
 Custom Class
 ^^^^^^^^^^^^
 
-Unlike built-in classes, semantics of custom classes are user-defined and the entire class definition must be compilable into TorchScript IR and subject to TorchScript type-checking rules.
+Unlike built-in classes, semantics of custom classes are user-defined and the entire class definition must be compilable to TorchScript IR and subject to TorchScript type-checking rules.
 
 ::
 
-    TSClassDef := [ "@torch.jit.script" ]
+    TSClassDef ::= [ "@torch.jit.script" ]
                 "class" ClassName [ "(object)" ]  ":"
+                        MethodDefinition |
+                    [ "@torch.jit.ignore" ] | [ "@torch.jit.unused" ]
                         MethodDefinition
 
 where
 
-    * Classes must be new-style classes (note that Python 3 supports only new-style classes, for Python 2.x new-style class is specified by subclassing from object)
-    * Instance data attributes are statically typed, and instance attributes must be declared by assignments inside the ``__init__()`` method
-    * Method overloading is not supported (i.e., cannot have multiple methods with the same method name)
-    * MethodDefinition must be compilable to TorchScript IR and subject to TorchScript’s type-checking rules, i.e., all methods must be valid TorchScript functions and class attribute definitions are valid TorchScript statements
-
+* Classes must be new-style classes (note that Python 3 supports only new-style classes, for Python 2.x new-style class is specified by subclassing from object)
+* Instance data attributes are statically typed, and instance attributes must be declared by assignments inside the ``__init__()`` method
+* Method overloading is not supported (i.e., cannot have multiple methods with the same method name)
+* MethodDefinition must be compilable to TorchScript IR and adhere to TorchScript’s type-checking rules, (e.g., all methods must be valid TorchScript functions and class attribute definitions must be valid TorchScript statements)
+* ``torch.jit.ignore``<placeholder for link to ``torch.jit.ignore``> and ``torch.jit.unused``<placeholder for link to ``torch.jit.unused``> can be used to ignore the method or function that is not fully torchscriptable or should be ignored by the compiler
 
 Compared to Python
 """"""""""""""""""
 
-TorchScript custom class is quite limited compared to its Python counterpart. Most notably, TorchScript custom classes
+TorchScript custom classes are quite limited compared to their Python counterpart.
 
-    * do not support class attributes
-    * do not support subclassing except for subclassing an interface type or object
-    * do not support method overloading
-    * must initialize all its instance attributes in  ``__init__()``; this is because TorchScript construct a static schema of the class by inferring attribute types in ``__init__()``
-    * must contain only methods that satisfy TorchScript type-checking rules and are compilable to TorchScript IRs
+* do not support class attributes
+* do not support subclassing except for subclassing an interface type or object
+* do not support method overloading
+* must initialize all its instance attributes in  ``__init__()``; this is because TorchScript constructs a static schema of the class by inferring attribute types in ``__init__()``
+* must contain only methods that satisfy TorchScript type-checking rules and are compilable to TorchScript IRs
 
 Example:
 
-Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``, similar to how you would declare a TorchScript function:
-
+Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``, similar to how a TorchScript function would be declared:
 .. testcode::
 
     @torch.jit.script
@@ -430,24 +430,25 @@ It leads to the following compile-time error:
 Enum Type
 ^^^^^^^^^^
 
-Like custom classes, semantics of enum type are user-defined and the entire class definition must be compilable to TorchScript IR and subject to TorchScript type-checking rules.
+Like custom classes, semantics of enum type are user-defined and the entire class definition must be compilable to TorchScript IR and adhere to TorchScript type-checking rules.
 
 ::
 
-    TSEnumDef := "class" Identifier "(enum.Enum | TSEnumType)" ":"
+    TSEnumDef ::= "class" Identifier "(enum.Enum | TSEnumType)" ":"
                 ( MemberIdentifier "=" Value )+
                 ( MethodDefinition )*
 
 where
 
-    * Value must be TorchScript literals of type ``int``, ``float``, or ``str``, and must be of the same TorchScript type
-    * ``TSEnumType`` is the name of a TorchScript ``enum`` type. Similar to Python enum, TorchScript allows restricted Enum subclassing, that is, subclassing an enum is allowed only if the enum does not define any members.
+* Value must be a TorchScript literal of type ``int``, ``float``, or ``str``, and must be of the same TorchScript type
+* ``TSEnumType`` is the name of a TorchScript enumerated type. Similar to Python enum, TorchScript allows restricted ``Enum`` subclassing, that is, subclassing an enumerated is allowed only if it does not define any members.
 
 Compared to Python
 """"""""""""""""""
 
-    * TorchScript supports only ``enum.Enum``, but not other variations such as ``enum.IntEnum``, ``enum.Flag``, ``enum.IntFlag``, or  ``enum.auto``
-    * Values of TorchScript enum members must be of the same type and can only be of ``int``, ``float``, or ``str`` type, whereas Python enum members can be of any type
+* TorchScript supports only ``enum.Enum``, but not other variations such as ``enum.IntEnum``, ``enum.Flag``, ``enum.IntFlag``, or  ``enum.auto``
+* Values of TorchScript enum members must be of the same type and can only be of ``int``, ``float``, or ``str`` type, whereas Python enum members can be of any type
+* Enums containing methods are ignored in TorchScript.
 
 Example:
 
@@ -472,7 +473,7 @@ Example:
 
 Example:
 
-The following example shows the case of restricted enum subclassing, where BaseColor does not define any member, thus can be subclassed by Color.
+The following example shows the case of restricted enum subclassing, where ``BaseColor`` does not define any member, thus can be subclassed by ``Color``.
 
 .. testcode::
 
@@ -500,71 +501,63 @@ The following example shows the case of restricted enum subclassing, where BaseC
 TorchScript Module Class
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-``TSModuleType`` is a special class type that is inferred from object instances created outside TorchScript. Although ``TSModuleType`` is named by the Python class of the object instance. Method ``__init__()`` of the Python class are not considered as a TorchScript method, thus it does not have to comply to TorchScript’s type checking rules.
+``TSModuleType`` is a special class type that is inferred from object instances created outside TorchScript. ``TSModuleType`` is named by the Python class of the object instance. The ``__init__()`` method of the Python class is not considered as a TorchScript method, so it does not have to comply with TorchScript’s type checking rules.
 
 Since the type schema of module instance class is constructed directly from an instance object (created outside the scope of TorchScript), rather than inferred from ``__init__()`` like custom classes. It is possible that two objects of the same instance class type follow two different type schemas.
 
-In this sense, ``TSModuleType`` is not really a static type. Therefore, for type safety considerations, ``TSModuleType`` cannot be used in TorchScript type annotation or be composed with ``TSType``.
+In this sense, ``TSModuleType`` is not really a static type. Therefore, for type safety considerations, ``TSModuleType`` cannot be used in a TorchScript type annotation or be composed with ``TSType``.
 
 Module Instance Class
 ^^^^^^^^^^^^^^^^^^^^^
 
-TorchScript module type represents type schema of a user-defined PyTorch module instance.  When scripting a PyTorch module, the module object is always created outside TorchScript (i.e., passed in as parameter to forward()), the Python module class is treated as a module instance class so that ``__init__()`` of the Python module class are not subject to the type checking rules of TorchScript
+TorchScript module type represents type schema of a user-defined PyTorch module instance.  When scripting a PyTorch module, the module object is always created outside TorchScript (i.e., passed in as parameter to ``forward``), The Python module class is treated as a module instance class, so the ``__init__()`` method of the Python module class is not subject to the type checking rules of TorchScript.
 
 ::
 
-    TSModuleType := "class" Identifier "(torch.nn.Module)" ":"
+    TSModuleType ::= "class" Identifier "(torch.nn.Module)" ":"
                         ClassBodyDefinition
 
 where
 
-    * ``forward()`` and other methods decorated with ``@torch.jit.export`` must be compilable to TorchScript IR and subject to TorchScript’s type checking rules
+* ``forward()`` and other methods decorated with ``@torch.jit.export`` must be compilable to TorchScript IR and subject to TorchScript’s type checking rules
 
-Unlike custom classes, only the forward method and other methods decorated with ``@torch.jit.export``  of the module type need to be compilable to TorchScript IR. Most notably, ``__init__()`` is not considered a TorchScript method. Thus module type constructors should not be invoked within the scope of TorchScript. Instead, TorchScript module objects are always constructed outside and passed into ``torch.jit.script(ModuleObj)``.
+Unlike custom classes, only the forward method and other methods decorated with ``@torch.jit.export``  of the module type need to be compilable. Most notably, ``__init__()`` is not considered a TorchScript method. Consequently, module type constructors cannot be invoked within the scope of TorchScript. Instead, TorchScript module objects are always constructed outside and passed into ``torch.jit.script(ModuleObj)``.
 
 Example:
 
 .. testcode::
 
     import torch
-    class TestModule(torch.nn.Module):
-        def __init__(self, v):
-            super().__init__()
-            self.x = v
 
-        def mul(self, x: int):
-            return self.x * x
+class TestModule(torch.nn.Module):
+    def __init__(self, v):
+        super().__init__()
+        self.x = v
 
-        @torch.jit.export
-        def madd(self, x: int, y: int):
-            return self.mul(x) + y
+    def forward(self, inc: int):
+        return self.x + inc
 
-        def forward(self, x: int):
-            return self.x + x
+m = torch.jit.script(TestModule(1))
+print(f"First instance: {m(3)}")
 
-    m = torch.jit.script(TestModule(2))
-    print(m.madd(2, 3))
-
-    m = torch.jit.script(TestModule(2.0))
-    print(m.madd(2, 3))
+m = torch.jit.script(TestModule(torch.ones([5])))
+print(f"Second instance: {m(3)}")
 
 .. testoutput::
 
-    7
-    7.0
+    First instance: 4
+    Second instance: tensor([4., 4., 4., 4., 4.])
 
 This example illustrates a few features of module types:
 
-    *  The TestModule instance is created outside the scope of TorchScript (i.e., before invoking torch.jit.script).
-    * ``__init__()`` is not considered as a TorchScript method, therefore it does not have to be annotated and can contain arbitrary Python codes. In fact, it is prohibited to invoke ``__init__()`` of a instance class within the scope of TorchScript execution.
-    * Because TestModule instances are instantiated in Python, in this example, TestModule(2.0) and TestModule(2) create two instances with different types for its data attributes, i.e., (self.x is of type float for TestModule(2.0), whereas self.y is of type int for TestModule(2.0)).
-In this sense, module instance type provides a mechanism to specialize a class definition to different types based on how the instance is instantiated.
-    * TorchScript automatically compiles other methods (e.g., mul()) invoked by methods annotated via ``@torch.jit.export`` or ``forward()`` methods
-    * Entry-points to a TorchScript program are either ``forward()`` of a module type or methods annotated via ``torch.jit.script``
+*  The ``TestModule`` instance is created outside the scope of TorchScript (i.e., before invoking ``torch.jit.script``).
+* ``__init__()`` is not considered to be a TorchScript method, therefore it does not have to be annotated and can contain arbitrary Python code. In addition, the ``__init__()`` method of an instance class cannot be invoked in TorchScript code.* Because ``TestModule`` instances are instantiated in Python, in this example, ``TestModule(2.0)`` and ``TestModule(2)`` create two instances with different types for its data attributes. ``self.x is of type ``float`` for ``TestModule(2.0)``, whereas ``self.y`` is of type ``int`` for ``TestModule(2.0)``.
+* TorchScript automatically compiles other methods (e.g., ``mul()``) invoked by methods annotated via ``@torch.jit.export`` or ``forward()`` methods
+* Entry-points to a TorchScript program are either ``forward()`` of a module type or functions annotated as ``torch.jit.script`` or methods annotated as ``torch.jit.export``
 
 Example:
 
-The following shows an incorrect usage of module type. Specifically, this example invokes the constructor of TestModule inside the scope of TorchScript.
+The following shows an incorrect usage of module type. Specifically, this example invokes the constructor of ``TestModule`` inside the scope of TorchScript.
 
 .. testcode::
 
@@ -600,26 +593,26 @@ Appendix: TorchScript Type System Definition
 
 ::
 
-    TSAllType := TSType | TSModuleType
-    TSType := TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
+    TSAllType ::= TSType | TSModuleType
+    TSType ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
 
-    TSMetaType := "Any"
-    TSPrimitiveType := "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
+    TSMetaType ::= "Any"
+    TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
-    TSStructualType :=  TSTuple | TSNamedTuple | TSList | TSDict |
+    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
                         TSOptional | TSFuture | TSRRef
-    TSTuple := "Tuple" "[" (TSType ",")* TSType "]"
-    TSNamedTuple := "namedtuple" "(" (TSType ",")* TSType ")"
-    TSList := "List" "[" TSType "]"
-    TSOptional := "Optional" "[" TSType "]"
-    TSUnion := "Union" "[" (TSType ",")* TSType "]"
-    TSFuture := "Future" "[" TSType "]"
-    TSRRef := "RRef" "[" TSType "]"
-    TSDict := "Dict" "[" KeyType "," TSType "]"
-    KeyType := "str" | "int" | "float" | "bool" | TensorType | "Any"
+    TSTuple ::= "Tuple" "[" (TSType ",")* TSType "]"
+    TSNamedTuple ::= "namedtuple" "(" (TSType ",")* TSType ")"
+    TSList ::= "List" "[" TSType "]"
+    TSOptional ::= "Optional" "[" TSType "]"
+    TSUnion ::= "Union" "[" (TSType ",")* TSType "]"
+    TSFuture ::= "Future" "[" TSType "]"
+    TSRRef ::= "RRef" "[" TSType "]"
+    TSDict ::= "Dict" "[" KeyType "," TSType "]"
+    KeyType ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
-    TSNominalType := TSBuiltinClasses | TSCustomClass | TSEnum
-    TSBuiltinClass := TSTensor | "torch.device" | "torch.stream"|
+    TSNominalType ::= TSBuiltinClasses | TSCustomClass | TSEnum
+    TSBuiltinClass ::= TSTensor | "torch.device" | "torch.stream"|
                     "torch.dtype" | "torch.nn.ModuleList" |
                     "torch.nn.ModuleDict" | ...
-    TSTensor := "torch.tensor" and subclasses
+    TSTensor ::= "torch.tensor" and subclasses
