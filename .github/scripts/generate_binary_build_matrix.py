@@ -49,6 +49,16 @@ CONDA_CONTAINER_IMAGES = {
     "cpu": "pytorch/conda-builder:cpu"
 }
 
+LIBTORCH_CONTAINER_IMAGES = {
+    **{
+        # TODO: Re-do manylinux CUDA image tagging scheme to be similar to
+        #       ROCM so we don't have to do this replacement
+        gpu_arch: f"pytorch/manylinux-cuda{gpu_arch.replace('.', '')}"
+        for gpu_arch in CUDA_ARCHES
+    },
+    "cpu": "pytorch/manylinux-cpu",
+}
+
 FULL_PYTHON_VERSIONS = [
     "3.6",
     "3.7",
@@ -92,7 +102,10 @@ def generate_matrix(include_cuda=True, include_rocm=False):
             ),
             "conda_container_image": CONDA_CONTAINER_IMAGES.get(
                 arch_version, ""
-            )
+            ),
+            "libtorch_container_image": LIBTORCH_CONTAINER_IMAGES.get(
+                arch_version, ""
+            ),
         })
     return json.dumps({"include": matrix})
 
