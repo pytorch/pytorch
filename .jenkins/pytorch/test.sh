@@ -302,6 +302,11 @@ test_xla() {
   echo "Running Python Tests"
   ./test/run_tests.sh
 
+  # Disabled due to MNIST download issue.
+  # See https://github.com/pytorch/pytorch/issues/53267
+  # echo "Running MNIST Test"
+  # python test/test_train_mnist.py --tidy
+
   echo "Running C++ Tests"
   pushd test/cpp
   CC=clang-9 CXX=clang++-9 ./run_tests.sh
