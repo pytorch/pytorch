@@ -5,14 +5,26 @@ namespace c10 {
 namespace {
 
 struct Entry {
-  const char* const qual_name;
+  const char* const namespace_;
   const char* const unqual_name;
   const Symbol sym;
   const Symbol ns_sym;
 };
 
+std::string qual_name_for_entry(const Entry& entry) {
+  const auto namespace_len = strlen(entry.namespace_);
+  const auto unqual_name_len = strlen(entry.unqual_name);
+  std::string s;
+  s.reserve(namespace_len + strlen("::") + unqual_name_len);
+  s.append(entry.namespace_);
+  s.push_back(':');
+  s.push_back(':');
+  s.append(entry.unqual_name);
+  return s;
+}
+
 constexpr Entry entries[] = {
-#define SYMBOL_ENTRY(n, s) {#n "::" #s, #s, n::s, namespaces::n},
+#define SYMBOL_ENTRY(n, s) {#n, #s, n::s, namespaces::n},
 
     FORALL_NS_SYMBOLS(SYMBOL_ENTRY)
 #undef SYMBOL_ENTRY
@@ -29,9 +41,10 @@ InternedStrings::InternedStrings()
   // static C array of constexpr-constructible structs takes instead
   // no time to compile.
   for (const auto& entry : entries) {
-    string_to_sym_[entry.qual_name] = entry.sym;
+    auto qual_name = qual_name_for_entry(entry);
+    string_to_sym_[qual_name] = entry.sym;
     sym_to_info_[entry.sym] = {
-        entry.ns_sym, entry.qual_name, entry.unqual_name};
+      entry.ns_sym, std::move(qual_name), entry.unqual_name};
   }
 }
 
