@@ -16,12 +16,8 @@ namespace jit {
 
 namespace {
 
-const std::set<c10::Symbol> inplace_ops = {
-    aten::append,
-    aten::index_put_,
-    aten::pop,
-    aten::insert,
-    aten::Delete};
+const std::set<c10::Symbol> inplace_ops =
+    {aten::append, aten::index_put_, aten::pop, aten::insert, aten::Delete};
 
 bool IsInplaceNode(const Node* n) {
   if (inplace_ops.find(n->kind()) != inplace_ops.end()) {
@@ -66,6 +62,10 @@ Value* MatchIfBlocksOutputForValue(
     Value* orig_data,
     Block* outer_block,
     Value* origOutput) {
+  if (outer_block->owningNode()->kind() == prim::Loop)
+    return outer_block->owningNode()->outputs().at(
+        outer_block->owningNode()->outputs().size() - 1);
+
   if (outer_block->owningNode()->kind() != prim::If)
     return nullptr;
   size_t output_size = outer_block->outputs().size();
@@ -97,7 +97,7 @@ Value* MatchIfBlocksOutputForValue(
 // Register inplace op node inputs/outputs through the blocks.
 // Eg. The IR before updating:
 //%23 : bool = aten::eq(%22, %13)
-// = prim::If(%23) # test/onnx/test_pytorch_onnx_onnxruntime.py:6243:12
+// = prim::If(%23)
 //  block0():
 //    %24 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1, %spatial_size_1.1)
 //    %25 : Tensor = aten::ones(%24, %12, %12, %12, %12)
@@ -107,7 +107,7 @@ Value* MatchIfBlocksOutputForValue(
 //  block1():
 //    %28 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1, %spatial_size_1.1)
 //    %29 : Tensor = aten::randn(%28, %12, %12, %12, %12)
-//    %30 : Tensor = aten::slice(%state.1, %13, %13, %10, %11)
+//    %30: Tensor = aten::slice(%state.1, %13, %13, %10, %11)
 //    %31 : Tensor = aten::copy_(%30, %29, %9)
 //    -> ()
 // After updating:
@@ -183,12 +183,12 @@ void RegisterInplaceNodeInIfBlocks(
       next_block_node->addOutput()->setType(new_data->type());
     next_block = next_block_node->owningBlock();
   }
-
   orig_data->replaceAllUsesAfterNodeWith(
-      next_block_node->output(0)->node(),
+      next_block_node,
       next_block_node->outputs().at(next_block_node->outputs().size() - 1));
 }
 
+// clang-format off
 // Register inplace op node inputs/outputs through the blocks.
 // Eg. The IR before updating:
 //   = prim::Loop(%10, %27)
@@ -209,6 +209,7 @@ void RegisterInplaceNodeInIfBlocks(
 //          %60 : Tensor = aten::index_put(%bias.1, %59, %45, %25)
 //          -> (%27, %60)
 //      -> (%27, %61)
+// clang-format on
 void RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
   Node* inplace_node = new_data->node();
   Block* outer_block = inplace_node->owningBlock();
@@ -237,8 +238,8 @@ void RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
     next_node = outer_block->owningNode();
     next_node->addOutput()->setType(new_data->type());
     next_block = next_node->owningBlock();
-    if (next_node->kind() ==
-        prim::Loop) // Do not register input if nested in If block
+    if (next_node->kind() == prim::Loop) // Do not register input if nested in
+                                         // If block. Register in Loop blocks.
       node_list.emplace_back(std::make_pair(outer_block, next_node));
   }
 
@@ -255,11 +256,10 @@ void RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
     node_list.pop_back();
   }
 
-  // Update inplace node inputs inside the inner most block.
-  auto prev_data = inplace_node->inputs().at(0);
-  while (IsInplaceNode(prev_data->node())) {
-    prev_data = prev_data->node()->inputs().at(0);
-  }
+  // Update inplace node inputs inside the outer most block.
+  outer_block_node = outer_block->owningNode();
+  auto prev_data =
+      outer_block_node->inputs().at(outer_block_node->inputs().size() - 1);
   for (auto node : inplace_node->owningBlock()->nodes()) {
     size_t idx = 0;
     for (auto inputs_ : node->inputs()) {
@@ -366,6 +366,42 @@ void PrepareCopyForONNX(Node* node) {
   }
 }
 
+void PrepareInplaceOpsInBlocksForONNX(Node* node) {
+  if (!node->kind().is_aten())
+    return;
+
+  auto name = node->schema().name();
+  bool inplace_op = name.at(name.size() - 1) == '_';
+  if (!inplace_op)
+    return;
+
+  auto new_schema = name.substr(0, name.size() - 1);
+
+  Node* input_node = node->inputs().at(0)->node();
+  if (input_node->kind() != aten::select && input_node->kind() != aten::slice)
+    return;
+
+  auto graph = node->owningGraph();
+  auto new_node = graph->create(Symbol::fromQualString(new_schema), 1);
+  for (Value* input : node->inputs()) {
+    new_node->addInput(input);
+  }
+  new_node->output()->setType(node->output()->type());
+  new_node->insertBefore(node);
+  new_node->setSourceRange(node->sourceRange());
+
+  auto false_val_ = graph->insertConstant(false);
+
+  auto new_copy = graph->create(aten::copy_, 1);
+  new_copy->addInput(input_node->output());
+  new_copy->addInput(new_node->output());
+  new_copy->addInput(false_val_);
+  new_copy->insertBefore(node);
+  new_copy->setSourceRange(node->sourceRange());
+
+  PrepareCopyForONNX(new_copy);
+}
+
 // aten::pop is inplace. The tensor list input is updated.
 // This pass creates an aten::__getitem__ op to return the original output from
 // aten::pop. Then it makes the original aten::pop operator return the updated
@@ -421,39 +457,6 @@ static void PrepareListAppendAndInsertForONNX(Node* n) {
   }
 }
 
-static void PrepareInplaceOpsForONNX(Block* b) {
-  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
-    for (auto* child_block : it->blocks()) {
-      PrepareInplaceOpsForONNX(child_block);
-    }
-
-    switch (it->kind()) {
-      case aten::copy_: {
-        PrepareCopyForONNX(*it);
-        break;
-      }
-      case aten::index_put:
-      case aten::index_put_: {
-        PrepareIndexPutForONNX(*it);
-        break;
-      }
-      case aten::pop: {
-        PrepareListPopForONNX(*it);
-        break;
-      }
-      case aten::insert:
-      case aten::append: {
-        PrepareListAppendAndInsertForONNX(*it);
-        break;
-      }
-      case aten::Delete: {
-        PrepareListDeleteForONNX(*it);
-        break;
-      }
-    }
-  }
-}
-
 // Remove Mutation pass does not handle mutation on block inputs.
 // To fix this, insert a clone node following the graph input:
 // Example for graph input node %0:
@@ -484,9 +487,10 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
       auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
       if (it != node->inputs().end()) {
         int index = std::distance(node->inputs().begin(), it);
-        std::cerr
-            << "Warning: ONNX Preprocess - Removing mutation on block inputs. "
-            << "This changes graph semantics." << std::endl;
+        std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
+                  << node->kind().toQualString() << " on block input: '"
+                  << (*it)->debugName() << "'. This changes graph semantics."
+                  << std::endl;
 
         Node* newNode = addDummyCloneToBlock(b, input);
         TORCH_INTERNAL_ASSERT(nullptr != newNode);
@@ -542,7 +546,7 @@ Value* findArgumentAsInputParam(
     std::string& name,
     IValue& attr) {
   for (auto input : graph->inputs()) {
-    if ((input->debugName() == name))
+    if (input->debugName() == name)
       return input;
   }
   throw std::runtime_error(
@@ -578,16 +582,60 @@ Node* insertCloneBeforeNode(
 Value* registerSetAttrInBlocks(
     const std::shared_ptr<Graph>& graph,
     Block* block,
-    Value* newValue,
+    Node* cloneNode,
     Value* origValue,
     const std::string& output_name) {
-  auto cloneNode = insertCloneBeforeNode(graph, newValue, block->return_node());
-
+  RegisterInplaceNodeInLoopBlocks(origValue, cloneNode->output());
   RegisterInplaceNodeInIfBlocks(origValue, cloneNode->output(), output_name);
 
-  return MatchIfBlocksOutputForValue(origValue, block, cloneNode->output());
+  Value* output = nullptr;
+  while (nullptr != block->owningNode() &&
+         block != origValue->node()->owningBlock()) {
+    output = MatchIfBlocksOutputForValue(origValue, block, cloneNode->output());
+    block = block->owningNode()->owningBlock();
+  }
+  return output;
 }
 
+// clang-format off
+// The trackAndRegisterAttributesInBlocks function tracks any instances
+// of getAttr and setAttr in a sub-block and capture these nodes as inpalce
+// read/write ops. This pass captures the output of setAttr in sub-block outputs
+// so that it gets reflected into the outer block.
+// Also, the pass matched the number of If sub-block outputs
+// if a value is updated in one branch, but no updated on the other branch.
+// For example:
+//= prim::If(%12)
+//    block0():
+//      %13 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %b.1 : Tensor? = prim::GetAttr[name="bias"](%13)
+//      ...
+//      %18 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %19 : Tensor = aten::add(%anchors.1, %b, %6)
+//       = prim::SetAttr[name="bias"](%18, %19)
+//     -> ()
+//    block1():
+//      %20 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %21 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %22 : Tensor = prim::GetAttr[name="weight"](%21)
+//      %23 : Tensor = aten::slice(%22, %7, %7, %8, %6)
+//       = prim::SetAttr[name="bias"](%20, %23)
+//     -> ()
+// After the pass
+//%_output_conv.bias.3 : Tensor = prim::If(%12)
+//    block0():
+//     ...
+//      %18 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %19 : Tensor = aten::add(%anchors.1, %b, %6)
+//      %_output_conv.bias.2 : Tensor = aten::clone(%19, %26)
+//     -> (%_output_conv.bias.2)
+//    block1():
+//      %20 : __torch__.torch.nn.modules.conv.___torch_mangle_9.Conv1d = prim::GetAttr[name="conv"](%3)
+//      %23 : Tensor = aten::slice(%conv.weight, %7, %7, %8, %6)
+//      %31 : None = prim::Constant()
+//      %_output_conv.bias.4 : Tensor = aten::clone(%23, %31)
+//     -> (%_output_conv.bias.4)
+// clang-format on
 void trackAndRegisterAttributesInBlocks(
     Node* n,
     const std::shared_ptr<Graph>& graph,
@@ -600,13 +648,10 @@ void trackAndRegisterAttributesInBlocks(
 
   auto name = n->s(attr::name);
   auto attrModule = module_;
+  Value* paramConst = nullptr;
 
   auto moduleNames =
       findSubModuleAttr(n->inputs().at(0), name, attrModule, graph);
-  if (!attrModule.hasattr(name))
-    return;
-  auto attr = attrModule.attr(name);
-  Value* paramConst = nullptr;
 
   std::string fullName("");
   for (auto& name : moduleNames) {
@@ -614,16 +659,33 @@ void trackAndRegisterAttributesInBlocks(
   }
   fullName += name;
 
-  auto type = attrModule.type();
-  auto slot = *type->findAttributeSlot(name);
+  if (allAttrValues.find(fullName) == allAttrValues.end() &&
+      attrModule.hasattr(name)) {
+    auto attr = attrModule.attr(name);
+    auto type = attrModule.type();
+    auto slot = *type->findAttributeSlot(name);
 
-  // Add model_parameters and model_buffers as model inputs. Order is
-  // preserved based on the appearance in the graph.
-  if (type->is_parameter(slot) || type->is_buffer(slot) ||
-      (attr.isObject() && !attr.toObjectRef().type()->is_module())) {
-    if (allAttrValues.find(fullName) == allAttrValues.end()) {
-      paramConst = findArgumentAsInputParam(graph, fullName, attr);
-      allAttrValues.insert({fullName, paramConst});
+    // Add model_parameters and model_buffers as model inputs. Order is
+    // preserved based on the appearance in the graph.
+    if (type->is_parameter(slot) || type->is_buffer(slot) ||
+        (attr.isObject() && !attr.toObjectRef().type()->is_module())) {
+      if (allAttrValues.find(fullName) == allAttrValues.end()) {
+        paramConst = findArgumentAsInputParam(graph, fullName, attr);
+        allAttrValues.insert({fullName, paramConst});
+      }
+    } else if (auto attrVal = tryInsertConstant(*graph, attr)) {
+      for (size_t i = 0; i < type->getAttributes().size(); i++) {
+        if (type->getAttributeName(i) == name) {
+          paramConst = *attrVal;
+          allAttrValues.insert({fullName, paramConst});
+        }
+      }
+    } else {
+      GRAPH_DEBUG(
+          attr.type()->cast<ClassType>() ? "" : "attribute: ",
+          name,
+          " is not materializable.");
+      return;
     }
   }
 
@@ -632,20 +694,22 @@ void trackAndRegisterAttributesInBlocks(
       // If inside a block, keep the output value to register in block
       // output.
       auto block_ = n->owningBlock();
+      Node* cloneNode = insertCloneBeforeNode(graph, n->inputs().at(1), n);
       if (block_->owningNode() &&
-          block_->owningNode()->kind() == prim::If) { // TODO: Add loop
-
+          (block_->owningNode()->kind() == prim::If ||
+           block_->owningNode()->kind() == prim::Loop)) {
         auto attrValue = (setAttrValues.find(fullName) != setAttrValues.end())
             ? setAttrValues[fullName]
             : allAttrValues[fullName];
 
         auto blockOutput = registerSetAttrInBlocks(
-            graph, block_, n->inputs().at(1), attrValue, fullName);
+            graph, block_, cloneNode, attrValue, fullName);
+
         nextSetAttrValues[fullName] = blockOutput;
       }
       // SetAttr writes a value to an attr. Keep this
       // in the setAttrValues map.
-      setAttrValues[fullName] = n->inputs().at(1);
+      setAttrValues[fullName] = cloneNode->output();
     }
   } else if (n->kind() == prim::GetAttr) { // Handle GetAttr node
     if (setAttrValues.find(fullName) != setAttrValues.end()) {
@@ -653,8 +717,7 @@ void trackAndRegisterAttributesInBlocks(
       // Read its value from setAttrValues map.
       auto set_attr_node_input = setAttrValues[fullName];
       // Clone SetAttr input
-      auto cloneNode = insertCloneBeforeNode(graph, set_attr_node_input, n);
-      n->output()->replaceAllUsesAfterNodeWith(n, cloneNode->output());
+      n->output()->replaceAllUsesAfterNodeWith(n, set_attr_node_input);
     } else if (allAttrValues.find(fullName) != allAttrValues.end()) {
       // Attr has not been set earlier in the graph. Replace it with the
       // graph parameter if exists.
@@ -664,29 +727,79 @@ void trackAndRegisterAttributesInBlocks(
   }
 }
 
+// clang-format off
+// The registerInplaceOpAsBlockOutputs function tracks inplace op
+// (like aten::copy_ or aten::append) outputs as sub-block output.
+// Also, match the number of If sub-block outputs
+// if a value is updated in one branch, but no updated on the other branch.
+// For example:
+// = prim::If(%30)
+//    block0():
+//      ...
+//      %35 : Tensor = aten::copy_(%state_copy.1, %33, %12)
+//      -> ()
+//    block1():
+//      ...
+//      %40 : Tensor = aten::copy_(%state.1, %38, %12)
+//      -> ()
+//
+// After the pass
+//%_output_state_copy.1 : Tensor, %_output_state.1 : Tensor = prim::If(%30)
+//    block0():
+//      %_output_state.2 : Tensor = aten::clone(%state.1, %59)
+//      ...
+//      %_output_state_copy.3 : Tensor = onnx::Placeholder[name="index_put_"](%state_copy.1)...
+//      ...
+//      -> (%_output_state_copy.3, %_output_state.2)
+//    block1():
+//      %50 : None = prim::Constant()
+//      %_output_state_copy.2 : Tensor = aten::clone(%state_copy.1, %50)
+//      ...
+//      %_output_state.3 : Tensor = onnx::Placeholder[name="index_put_"](%state.1)...
+//       ...
+//      -> (%_output_state_copy.2, %_output_state.3)
 std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
     Block* block,
     const std::shared_ptr<Graph>& graph,
-    const Module& module_,
     std::unordered_map<std::string, Value*>& allAttrValues,
-    std::unordered_map<std::string, Value*>& setAttrValues) {
+    std::unordered_map<std::string, Value*>& setAttrValues,
+    MutationRemover& mr,
+    Module* module_ = nullptr) {
   Node* m = *block->nodes().begin();
   WithInsertPoint guard(m);
-
   std::unordered_map<std::string, Value*> nextSetAttrValues = {};
 
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // node n can be destroyed
 
-    if (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr) {
+    if (nullptr != module_ &&
+        (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr)) {
+      Module moduleClone = (*module_);
       trackAndRegisterAttributesInBlocks(
-          n, graph, module_, allAttrValues, setAttrValues, nextSetAttrValues);
+          n,
+          graph,
+          moduleClone,
+          allAttrValues,
+          setAttrValues,
+          nextSetAttrValues);
+    } else if (n->kind() == aten::copy_) {
+      PrepareCopyForONNX(n);
+    } else if (n->kind() == aten::index_put || n->kind() == aten::index_put_) {
+      PrepareIndexPutForONNX(n);
+    } else if (mr.inplaceOpVariant(n)) {
+      PrepareInplaceOpsInBlocksForONNX(n);
+    } else if (n->kind() == aten::pop) {
+      PrepareListPopForONNX(n);
+    } else if (n->kind() == aten::insert || n->kind() == aten::append) {
+      PrepareListAppendAndInsertForONNX(n);
+    } else if (n->kind() == aten::Delete) {
+      PrepareListDeleteForONNX(n);
     } else { // for prim::If and prim::Loop nodes with blocks.
       for (Block* sub_block : n->blocks()) {
         std::unordered_map<std::string, Value*> map_ =
             registerInplaceOpAsBlockOutputs(
-                sub_block, graph, module_, allAttrValues, setAttrValues);
+                sub_block, graph, allAttrValues, setAttrValues, mr, module_);
         std::unordered_map<std::string, Value*>::iterator mapIt;
         for (mapIt = map_.begin(); mapIt != map_.end(); mapIt++) {
           setAttrValues[mapIt->first] = mapIt->second;
@@ -697,25 +810,27 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
   return nextSetAttrValues;
 }
 
+// Register Inplace Ops As Block Outputs
+// Inplace operations like aten::copy_ or aten::append that are inside
+// sub-blocks would require the output of the operation to be captured
+// as sub-block output, so that the inplace operation would be visible
+// to the outer block.
+// We also consider setAttr node an inplace op, and handle those
+// similarly by tracking the output as sub-block outputs.
 void RegisterInplaceOpAsBlockOutputs(
     Module* module,
-    const std::shared_ptr<Graph>& graph) {
+    const std::shared_ptr<Graph>& graph,
+    MutationRemover& mr) {
   // A map of names and values of referenced attributes, to avoid duplicates.
   std::unordered_map<std::string, Value*> allAttrValues = {};
   // A map of names and values of set attributes, to track mutations.
   std::unordered_map<std::string, Value*> setAttrValues = {};
 
-  Module moduleClone = module->clone(true);
   registerInplaceOpAsBlockOutputs(
-      graph->block(), graph, moduleClone, allAttrValues, setAttrValues);
-  EliminateDeadCode(graph->block());
+      graph->block(), graph, allAttrValues, setAttrValues, mr, module);
 }
 
 } // namespace
-
-void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
-  PrepareInplaceOpsForONNX(graph->block());
-}
 
 void RemoveInplaceOpsForONNX(
     const std::shared_ptr<Graph>& graph,
@@ -723,10 +838,9 @@ void RemoveInplaceOpsForONNX(
   MutationRemover mr(graph);
   ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
-  if (model)
-    RegisterInplaceOpAsBlockOutputs(model, graph);
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
+  RegisterInplaceOpAsBlockOutputs(model, graph, mr);
 }
 
 } // namespace jit
