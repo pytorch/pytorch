@@ -539,7 +539,9 @@ class FunctionInliner : public IRMutator {
       } else if (dynamic_cast<const IntImm*>(i) != nullptr) {
         // If the index can be a constant, then that dimension must have size 1
         // (since we don't support in-place writes). Resolves issue 52581.
-        TORCH_INTERNAL_ASSERT(dynamic_cast<const IntImm*>(i)->value() == 0, "It shouldn't be possbile for this to ever be non-zero");
+        TORCH_INTERNAL_ASSERT(
+            dynamic_cast<const IntImm*>(i)->value() == 0,
+            "It shouldn't be possbile for this to ever be non-zero");
         producer_index_vars_.push_back(nullptr);
       } else {
         throw std::logic_error("cannot inline Buf with compound indices");
@@ -549,17 +551,20 @@ class FunctionInliner : public IRMutator {
 
  private:
   const Expr* mutate_loads(const Buf* buf, std::vector<const Expr*> dims) {
-
     std::vector<const Var*> index_vars;
     TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
     for (size_t i = 0; i < buf->ndim(); i++) {
       const Var* func_callee_arg = producer_index_vars_.at(i);
       const Expr* func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
-        TORCH_INTERNAL_ASSERT(dynamic_cast<const IntImm*>(func_caller_param) != nullptr && dynamic_cast<const IntImm*>(func_caller_param)->value() == 0, "We are implicitly assuming that an index of 0 is being inlined into a non-zero");
+        TORCH_INTERNAL_ASSERT(
+            dynamic_cast<const IntImm*>(func_caller_param) != nullptr &&
+                dynamic_cast<const IntImm*>(func_caller_param)->value() == 0,
+            "We are implicitly assuming that an index of 0 is being inlined into a non-zero");
         continue;
       }
-      if (func_callee_arg == nullptr) continue;
+      if (func_callee_arg == nullptr)
+        continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
         throw std::runtime_error(
