@@ -18,6 +18,7 @@ T_co = TypeVar('T_co', covariant=True)
 def default_fn(data):
     return data
 
+
 @functional_datapipe('map')
 class MapIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`MapIterDataPipe`.
