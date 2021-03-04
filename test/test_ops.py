@@ -1,10 +1,12 @@
 from functools import partial, wraps
+import warnings
 
 import torch
 
-from torch.testing import FileCheck
+from torch.testing import \
+    (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper)
+    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
@@ -337,32 +339,6 @@ class TestCommon(JitCommonTestCase):
                         self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
                         self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
 
-
-    @ops(op_db)
-    def test_out(self, device, dtype, op):
-        if not op.supports_tensor_out:
-            self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
-
-        samples = op.sample_inputs(device, dtype)
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
-        # NOTE: only tests on first sample
-        sample = samples[0]
-        # call it normally to get the expected result
-        expected = op(*sample.input, *sample.args, **sample.kwargs)
-
-        def _test(tested_op):
-            # call it with out=... and check we get the expected result
-            out_kwargs = sample.kwargs.copy()
-            out_kwargs['out'] = out = torch.empty_like(expected)
-            tested_op(*sample.input, *sample.args, **out_kwargs)
-            self.assertEqual(expected, out)
-
-        _test(op)
-        for a_op in op.aliases:
-            _test(a_op)
-
     @ops([op for op in op_db if op.aliases])
     def test_jit_alias_remapping(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -400,9 +376,9 @@ class TestCommon(JitCommonTestCase):
         original_name_inplace = original_name + "_"
         expected_dtype = op(*sample.input, *sample.args, **sample.kwargs).dtype
 
-        for a_op in op.aliases:  
+        for a_op in op.aliases:
             inplace = a_op.inplace_variant
-            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]            
+            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]
             variants = (v for v in (a_op.op, a_op.method_variant, a_op.inplace_variant) if v is not None)
 
             # Test scripting:
@@ -463,6 +439,113 @@ class TestCommon(JitCommonTestCase):
                 graph = traced.graph_for(*inp)
                 FileCheck().check(op_name).check_not(variant_name).run(graph)
 
+    # Validates ops implement the correct out= behavior
+    # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
+    #   for a description of the correct behavior
+    @ops(op_db, dtypes=OpDTypes.supported, allowed_dtypes=(torch.float,))
+    def test_out(self, device, dtype, op):
+        # TODO: verify the op doesn't suppor the out= kwarg
+        if not op.supports_out:
+            self.skipTest("Skipped! Op doesn't support out= kwarg.")
+
+        # NOTE: only tests on first sample
+        samples = op.sample_inputs(device, dtype)
+        sample = samples[0]
+
+        # calls it normally to get the expected result
+        expected = op(*sample.input, *sample.args, **sample.kwargs)
+        op_out = partial(op, *sample.input, *sample.args, **sample.kwargs)
+
+        # Short-circuits if output is not a single tensor
+        # TODO: extend this to handle multiple tensors
+        if not isinstance(expected, torch.Tensor):
+            self.skipTest("Skipped! Only supports single tensor outputs for now.")
+
+        # Case 0: out= with the correct shape, dtype, and device
+        #   but NaN values
+        #   Expected behavior: out= values have no effect on the computation.
+        out = torch.full_like(expected, float('nan'))
+        op_out(out=out)
+        self.assertEqual(expected, out)
+
+        # Case 1: out= with the correct shape, dtype, and device,
+        #   but noncontiguous.
+        #   Expected behavior: strides are respected.
+        # TODO: (implement) and switch to make_tensor_like()
+        out = make_tensor(expected.shape,
+                          dtype=expected.dtype,
+                          device=expected.device,
+                          discontiguous=True)
+        op_out(out=out)
+        self.assertEqual(expected, out)
+
+        # Case 2: out= with the correct dtype and device, but the wrong shape
+        #   Expected behavior: resize with a warning.
+        wrong_shape = list(expected.shape)
+        wrong_shape[-1] = wrong_shape[-1] + 1
+        out = make_tensor(wrong_shape,
+                          dtype=expected.dtype,
+                          device=expected.device)
+        with self.assertWarnsRegex(UserWarning, "An output with one or more elements"):
+            op_out(out=out)
+        self.assertEqual(expected, out)
+
+        # Case 3: out= with the correct dtype and device, but an empty
+        #   tensor.
+        #   Expected behavior: resize without warning.
+        # TODO: this currently asserts the op throws NO warnings,
+        #   which may be too strict (if the op is deprecated, for example)
+        out = make_tensor((0,),
+                          dtype=expected.dtype,
+                          device=expected.device)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            op_out(out=out)
+        self.assertEqual(len(w), 0)
+        self.assertEqual(expected, out)
+
+        # Case 4: out= with correct shape and dtype, but wrong device.
+        #   NOTE: this case only tested if a CUDA device is available.
+        #   Expected behavior: error.
+        if torch.device(device).type == 'cuda':
+            # Case 4A: CUDA input with CPU out.
+            out = make_tensor(expected.shape,
+                              dtype=expected.dtype,
+                              device='cpu')
+            with self.assertRaises(RuntimeError):
+                op_out(out=out)
+
+            # Case 4B: CPU input with CUDA out.
+            #   TODO: not implemented.
+
+        # Case 5: out= with correct shape and device, but a dtype
+        #   that the output can be "safely" cast to (cdouble).
+        #   Expected behavior: same computation is performed.
+        # TODO: enable this. Too many ops require that the out
+        #     tensor have the same dtype as the input tensor.
+
+        # out = make_tensor(expected.shape,
+        #                   dtype=torch.cdouble,
+        #                   device=expected.device)
+        # op_out(out=out)
+        # self.assertEqual(expected, out, exact_dtype=False)
+
+        # Case 6: out= with correct shape and device, but a dtype
+        #   that output cannot be "safely" cast to (long).
+        #   Expected behavior: error.
+        # NOTE: this case is filtered by dtype since some ops produce
+        #   bool tensors, for example, which can be safely cast to any
+        #   dtype.
+        _dtypes = floating_and_complex_types_and(torch.float16, torch.bfloat16)
+        if expected.dtype in _dtypes:
+            out = make_tensor(expected.shape,
+                              dtype=torch.long,
+                              device=expected.device)
+            with self.assertRaises(RuntimeError):
+                op_out(out=out)
+
+        # Case 7: out= where out= is given the input tensor.
+        #   TODO: not currently tested.
 
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())
