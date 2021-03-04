@@ -635,6 +635,22 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+def sample_inputs_amax_amin(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((S, S, S), ()),
+        ((S, S, S), (1,)),
+        ((S, S, S), ((1, 2,),)),
+        ((S, S, S), (1, True,)),
+        ((), (0,)),
+        ((), ()),
+        ((), (0, True,)),
+    )
+    return tuple(SampleInput((make_tensor(size, device, dtype,
+                                          low=None, high=None,
+                                          requires_grad=requires_grad)),
+                             args=args)
+                 for size, args in test_cases)
+
 def sample_inputs_diff(op_info, device, dtype, requires_grad):
     test_cases = (
         ((1,), 0, None, None),
@@ -1004,17 +1020,6 @@ class TriangularOpInfo(OpInfo):
             out.append(SampleInput(a, kwargs=dict(upper=True)))
         return out
 
-def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False):
-    from torch.testing._internal.common_utils import random_well_conditioned_matrix
-    out = []
-    for batch in ((), (3,), (3, 3)):
-        shape = batch + (3, 3)
-        # NOTE: inputs are not marked with `requires_grad` since
-        # linalg_lstsq is not differentiable
-        a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
-        b = make_tensor(shape, device, dtype, low=None, high=None)
-        out.append(SampleInput((a, b)))
-    return out
 
 def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
     """
@@ -1489,7 +1494,28 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
            sample_inputs_func=sample_inputs_addr),
-
+    OpInfo('amax',
+           op=torch.amax,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_amax_amin,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/48978
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bfloat16]),)),
+    OpInfo('amin',
+           op=torch.amin,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_amax_amin,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/48978
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bfloat16]),)),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -2356,21 +2382,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_solve,
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
-    OpInfo('linalg.lstsq',
-           aten_name='linalg_lstsq',
-           op=torch.linalg.lstsq,
-           dtypes=floating_and_complex_types(),
-           test_inplace_grad=False,
-           supports_tensor_out=False,
-           sample_inputs_func=sample_inputs_linalg_lstsq,
-           check_batched_grad=False,
-           check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           skips=(
-               # skip because `linalg_lstsq` is not differentiable
-               SkipInfo('TestGradients', 'test_fn_grad'),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-           )),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
            op=torch.linalg.pinv,
@@ -2667,6 +2678,7 @@ if TEST_SCIPY:
                        ),
         UnaryUfuncInfo('lgamma',
                        ref=reference_lgamma,
+                       aliases=('special.gammaln', ),
                        decorators=(precisionOverride({torch.float16: 7e-1}),),
                        dtypes=all_types_and(torch.bool),
                        dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
@@ -3035,20 +3047,6 @@ def method_tests():
         ('lerp', (S, S, S), ((), 0.4), 'scalar_broadcast_rhs', (True,)),
         ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
         ('lerp', (S, 1, S), ((S, S), (S, 1, 1, S)), 'tensor_broadcast_all', (True,)),
-        ('amax', (S, S, S), NO_ARGS),
-        ('amax', (S, S, S), (1,), 'dim'),
-        ('amax', (S, S, S), ([1, 2],), 'multiple_dim'),
-        ('amax', (S, S, S), (1, True,), 'keepdim_dim'),
-        ('amax', (), NO_ARGS, 'scalar'),
-        ('amax', (), (0,), 'scalar_dim'),
-        ('amax', (), (0, True,), 'scalar_keepdim_dim'),
-        ('amin', (S, S, S), NO_ARGS, ),
-        ('amin', (S, S, S), (1,), 'dim',),
-        ('amin', (S, S, S), ([1, 2],), 'multiple_dim'),
-        ('amin', (S, S, S), (1, True,), 'keepdim_dim'),
-        ('amin', (), NO_ARGS, 'scalar'),
-        ('amin', (), (0,), 'scalar_dim'),
-        ('amin', (), (0, True,), 'scalar_keepdim_dim'),
         ('mean', (S, S, S), NO_ARGS, '', (True,)),
         ('mean', (S, S, S), (1,), 'dim', (True,), [0]),
         ('mean', (S, S, S), (1, True,), 'keepdim_dim', (True,), [0]),
