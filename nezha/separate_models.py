@@ -19,6 +19,8 @@ torch._C.ScriptMethod.__call__ = prof_meth_call
 
 import onnxruntime as ort
 import onnx
+import io
+
 
 old_call = torch._C.ScriptMethod.__call__
 
@@ -97,6 +99,7 @@ dummy_input = torch.randn(10, 5)
 # x = dummy_input
 x = torch.randn(32, 5)
 y = torch.randn(15, 6)
+
 
 print('Start normal model.')
 with torch.no_grad():
