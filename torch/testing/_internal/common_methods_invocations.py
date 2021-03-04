@@ -3149,6 +3149,7 @@ def method_tests():
         ('cummin', (S, S, S), (0,), 'dim0', (), [0]),
         ('cummin', (S, S, S), (1,), 'dim1', (), [0]),
         ('cummin', (), (0,), 'dim0_scalar', (), [0]),
+        ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
         ('cumprod', (S, S, S), (0,)),
         ('cumprod', (S, S, S), (1,), 'dim1', (), [0]),
         ('cumprod', (), (0,), 'scalar'),
