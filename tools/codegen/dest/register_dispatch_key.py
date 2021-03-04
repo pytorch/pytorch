@@ -247,7 +247,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
             if self.dispatch_key == DispatchKey.Meta:
                 return """
 if (strides.empty()) {
-    outputs_[output_idx] = at::empty_meta(sizes, options);
+    outputs_[output_idx] = at::empty(sizes, options.device(at::kMeta));
 } else {
     TORCH_INTERNAL_ASSERT(0, "not implemented yet");
 }

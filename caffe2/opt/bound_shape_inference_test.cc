@@ -93,6 +93,63 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       {spec.max_batch_size, 16});
 }
 
+TEST(BoundShapeInference, SparseLengthsSumSparseLookup) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "SparseLengthsSumSparseLookup",
+      "",
+      {"Indices", "Lengths", "Remapping", "Weights"},
+      {"IndicesOut", "LengthsOut", "WeightsOut"},
+      {}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "Remapping",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT},
+          {1000},
+          TensorProto_DataType_INT32));
+  BoundShapeSpec spec(20, 1000);
+  shape_map.emplace(
+      "Indices",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+          {spec.max_batch_size * spec.max_seq_size},
+          TensorProto_DataType_INT32));
+  shape_map.emplace(
+      "Weights",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+          {spec.max_batch_size * spec.max_seq_size},
+          TensorProto_DataType_FLOAT));
+  shape_map.emplace(
+      "Lengths",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH},
+          {spec.max_batch_size},
+          TensorProto_DataType_INT32));
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "WeightsOut",
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
+      TensorProto_DataType_FLOAT);
+  verifyShapeInfo(
+      out_shape,
+      "IndicesOut",
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "LengthsOut",
+      {TensorBoundShape_DimType_BATCH},
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+}
+
 TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
