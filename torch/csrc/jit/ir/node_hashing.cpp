@@ -170,6 +170,7 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
     switch (lhs->kindOf(name)) {
       COMPARE_ATTRIBUTEVALUE(f)
+      COMPARE_ATTRIBUTEVALUE(c)
       COMPARE_ATTRIBUTEVALUE(fs)
       COMPARE_ATTRIBUTEVALUE(i)
       COMPARE_ATTRIBUTEVALUE(is)
