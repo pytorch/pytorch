@@ -1792,7 +1792,8 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   // Compute as many batches of 65535 possible
   // The number of "mini"-batches are floor(batch_size / batch_limit)
   // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
-  int64_t mini_batches = batch_size / batch_limit, mini_idx;
+  int64_t mini_batches = batch_size / batch_limit;
+  int64_t mini_idx; // this is outside the loop because it is used for the case batch_size % batch_limit != 0
   for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
     scalar_t** A_array_cur = &A_array[mini_idx];
     scalar_t** b_array_cur = &b_array[mini_idx];
