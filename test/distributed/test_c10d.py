@@ -603,9 +603,15 @@ class RendezvousEnvTest(TestCase):
         os.environ["MASTER_PORT"] = str(common.find_free_port())
         os.environ["RANK"] = "0"
 
-        self.assertFalse(logging.root.hasHandlers())
+        previous_handlers = logging.root.handlers
+
         c10d.init_process_group(backend="gloo", init_method="env://")
-        self.assertFalse(logging.root.hasHandlers())
+
+        current_handlers = logging.root.handlers
+        self.assertEqual(len(previous_handlers), len(current_handlers))
+        for current, previous in zip(current_handlers, previous_handlers):
+            self.assertEqual(current, previous)
+
         c10d.destroy_process_group()
 
 
