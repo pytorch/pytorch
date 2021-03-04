@@ -58,7 +58,7 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules : Tuple[ModuleType] = (math, )):
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, )) -> None:
         """
         Construct a Tracer object.
 
@@ -82,7 +82,6 @@ class Tracer(TracerBase):
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
-
 
     def create_arg(self, a: Any) -> 'Argument':
         """
@@ -187,12 +186,21 @@ class Tracer(TracerBase):
 
             mod (str): The ``Module`` to retrieve the qualified name for.
         """
-        assert self.submodule_paths is not None
-        path = self.submodule_paths.get(mod)
-        if path is None:
+        # Prefer the O(1) algorithm
+        if self.submodule_paths:
+            path = self.submodule_paths.get(mod)
+            if path is None:
+                raise NameError('module is not installed as a submodule')
+            assert isinstance(path, str)
+            return path
+        # O(N^2) fallback in the case that we didn't store the submodule
+        # paths. (This happens e.g. in using NormalizeArgs. See
+        #  `test/test_fx_experimental:test_normalize_args`)
+        else:
+            for n, p in self.root.named_modules():
+                if mod is p:
+                    return n
             raise NameError('module is not installed as a submodule')
-        assert isinstance(path, str)
-        return path
 
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
@@ -360,6 +368,8 @@ class Tracer(TracerBase):
 
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
+
+        self.submodule_paths = None
 
         return self.graph
 
