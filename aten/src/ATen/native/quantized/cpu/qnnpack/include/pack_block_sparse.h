@@ -31,8 +31,8 @@ typedef struct BCSRMatrix {
   std::vector<uint32_t> row_values;
   std::vector<uint8_t> values;
 #endif
-  uint32_t col_block_size;
-  uint32_t row_block_size;
+  uint32_t col_block_size;  // input features block size
+  uint32_t row_block_size;  // output features block size
   void print() {
     std::cout << "row block size:" << row_block_size << std::endl;
     std::cout << "col block size:" << col_block_size << std::endl;
