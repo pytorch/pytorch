@@ -1809,14 +1809,14 @@ class TestQuantizeFx(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
 
-            def forward(self, x, y):
+            def forward(self, x):
                 x = x + x
                 x.sigmoid_()
                 return x
 
         m = M().eval()
         qconfig_dict = {"": float16_static_qconfig}
-        # makee sure quantization runs
+        # make sure quantization runs
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
 
