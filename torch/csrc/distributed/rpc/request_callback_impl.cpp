@@ -85,7 +85,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
   }
 }
 
-void processPythonAsyncExecution(
+void processPythonExecution(
     const py::object& pyFn,
     const int64_t messageId,
     const std::shared_ptr<JitFuture>& responseFuture,
@@ -211,7 +211,7 @@ void RequestCallbackImpl::processPythonCall(
     const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& upc = static_cast<UnpickledPythonCall&>(rpc);
   try {
-    processPythonAsyncExecution(
+    processPythonExecution(
         upc.pythonUdf(),
         messageId,
         responseFuture,
@@ -220,6 +220,9 @@ void RequestCallbackImpl::processPythonCall(
            const int64_t messageId,
            PythonRpcHandler& pythonRpcHandler,
            const std::shared_ptr<JitFuture>& responseFuture) {
+          // Check we have GIL.
+          DCHECK(PyGILState_Check());
+
           auto serializedPyObj = pythonRpcHandler.serialize(result);
           py::gil_scoped_release release;
           auto m =
@@ -348,7 +351,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
   }
 
   try {
-    processPythonAsyncExecution(
+    processPythonExecution(
         uprc.pythonUdf(),
         messageId,
         responseFuture,
@@ -358,6 +361,9 @@ void RequestCallbackImpl::processPythonRemoteCall(
             const int64_t messageId,
             PythonRpcHandler& /* unused */,
             const std::shared_ptr<JitFuture>& responseFuture) {
+          // Check we have GIL.
+          DCHECK(PyGILState_Check());
+
           IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
 
           py::gil_scoped_release release;
