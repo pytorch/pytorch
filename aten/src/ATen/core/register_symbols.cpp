@@ -12,14 +12,15 @@ struct Entry {
 };
 
 std::string qual_name_for_entry(const Entry& entry) {
+  const char *const sep = "::";
   const auto namespace_len = strlen(entry.namespace_);
+  const auto sep_len = strlen(sep);
   const auto unqual_name_len = strlen(entry.unqual_name);
   std::string s;
-  s.reserve(namespace_len + strlen("::") + unqual_name_len);
-  s.append(entry.namespace_);
-  s.push_back(':');
-  s.push_back(':');
-  s.append(entry.unqual_name);
+  s.reserve(namespace_len + sep_len + unqual_name_len);
+  s.append(entry.namespace_, namespace_len);
+  s.append(sep, sep_len);
+  s.append(entry.unqual_name, unqual_name_len);
   return s;
 }
 
