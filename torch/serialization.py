@@ -843,12 +843,11 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         storage = loaded_storages[key]
         return storage
 
-    load_module_mapping = {}
+    load_module_mapping: Dict[str, str] = {}
 
     # Need to subclass Unpickler instead of directly monkey-patching the find_class method
     # because it's marked readonly in pickle.
-    # The type: ignore is because mypy can't statically determine the type of this class.
-    class UnpicklerWrapper(pickle_module.Unpickler):  # type: ignore
+    class UnpicklerWrapper(pickle_module.Unpickler):  # type: ignore[name-defined]
         # from https://stackoverflow.com/questions/13398462/unpickling-python-objects-with-a-changed-module-path/13405732
         # Lets us override the imports that pickle uses when unpickling an object.
         # This is useful for maintaining BC if we change a module path that tensor instantiation relies on.
@@ -859,6 +858,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
     # Load the data (which may in turn use `persistent_load` to load tensors)
     data_file = io.BytesIO(zip_file.get_record(pickle_file))
 
+    # unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
     unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
