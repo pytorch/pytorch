@@ -131,3 +131,18 @@ const auto aten_sum_1_true = R"JIT(
   def forward(self, input):
       return torch.sum(input, 1, True)
 )JIT";
+
+const auto pow_script_ten_sca = R"JIT(
+  def forward(self, input : Tensor, exponent : int):
+      return torch.pow(input, exponent)
+)JIT";
+
+const auto pow_script_ten_ten = R"JIT(
+  def forward(self, input : Tensor, exponent : Tensor):
+      return torch.pow(input, exponent)
+)JIT";
+
+const auto pow_script_sca_ten = R"JIT(
+  def forward(self, input : int, exponent : Tensor):
+      return torch.pow(input, exponent)
+)JIT";
