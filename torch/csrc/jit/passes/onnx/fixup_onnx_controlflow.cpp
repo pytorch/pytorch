@@ -183,6 +183,23 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   return new_outputs;
 }
 
+// Resolving limitation from ONNX that the block output can not be
+// a value from outside the block. Inserting an Identity node inside
+// the block, linking with the value outside as workaround.
+void FixupONNXSubblockOutputs(Node* n) {
+  for (Block* block : n->blocks()) {
+    for (Value* output : block->outputs()) {
+      if (output->node()->owningBlock() != block) {
+        Node* id_node = block->owningGraph()->create(onnx::Identity);
+        id_node->insertBefore(block->return_node());
+        id_node->addInput(output);
+        id_node->output()->copyMetadata(output);
+        block->return_node()->replaceInputWith(output, id_node->output());
+      }
+    }
+  }
+}
+
 } // anonymous namespace
 
 void FixupONNXLoopNodeInputs(Node* node) {
@@ -215,6 +232,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
   FixupONNXLoopNodeInputs(node);
+  FixupONNXSubblockOutputs(node);
   // NOTE: the output order is deliberately changed to match expected order
   //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
@@ -357,6 +375,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
   auto* graph = if_node->owningGraph();
+  FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(if_node);
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
   return if_node->outputs().vec();
