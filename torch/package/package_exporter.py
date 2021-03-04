@@ -12,11 +12,24 @@ from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
 from .importer import Importer, OrderedImporter, sys_importer
 import types
-from typing import List, Any, Callable, Dict, Sequence, Tuple, Union, BinaryIO, Optional
+from typing import List, Any, Callable, Dict, Set, Sequence, Tuple, Union, BinaryIO, Optional
 from pathlib import Path
 import linecache
 from urllib.parse import quote
 
+
+class EmptyMatchError(Exception):
+    """This is an exception that is thrown when a mock or extern is marked as
+    allow_empty=False, and is not matched with any module during packaging.
+    """
+    pass
+
+
+class DeniedModuleError(Exception):
+    """This is an exception that is thrown when a pattern added with deny matches
+    a module required during the packaging process.
+    """
+    pass
 
 
 class PackageExporter:
@@ -409,7 +422,7 @@ node [shape=box];
 
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
         """
-        self.patterns.append((_GlobGroup(include, exclude), self.reject_denied_module, True))
+        self.patterns.append((_GlobGroup(include, exclude), self._reject_denied_module, True))
 
     def save_extern_module(self, module_name: str):
         """Add `module_name` to the list of external modules, regardless of whether it is
@@ -431,11 +444,11 @@ node [shape=box];
         is_package = hasattr(self._import_module(module_name), '__path__')
         self.save_source_string(module_name, _MOCK_IMPL, is_package, dependencies=False)
 
-    def reject_denied_module(self, module_name: str):
+    def _reject_denied_module(self, module_name: str):
         """Throw an exception containing a message that `module_name` was explicitly blocklisted via
         `deny` and was still required during packaging.
         """
-        raise RuntimeError(f"{module_name} was required during packaging but has been explicitly blocklisted")
+        raise DeniedModuleError(f"{module_name} was required during packaging but has been explicitly blocklisted")
 
     def _module_is_already_provided(self, qualified_name: str) -> bool:
         for mod in self.external:
@@ -487,7 +500,7 @@ node [shape=box];
         # Check that all mock and extern modules with allow_empty=False were matched.
         for i, (pattern, _, allow_empty) in enumerate(self.patterns):
             if not allow_empty and i not in self.matched_patterns:
-                raise RuntimeError(f"Exporter did not match {pattern} to any modules")
+                raise EmptyMatchError(f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False")
 
         # Write each tensor to a file named tensor/the_tensor_key in the zip archive
         for key in sorted(self.serialized_storages.keys()):

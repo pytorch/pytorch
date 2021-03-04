@@ -3,7 +3,14 @@ from unittest import skipIf
 import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
-from torch.package import PackageExporter, PackageImporter, OrderedImporter, sys_importer
+from torch.package import (
+    PackageExporter,
+    PackageImporter,
+    OrderedImporter,
+    sys_importer,
+    EmptyMatchError,
+    DeniedModuleError,
+)
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -236,7 +243,7 @@ import module_a
         and no matching module is required during packaging.
         """
         filename = self.temp()
-        with self.assertRaisesRegex(RuntimeError, r'did not match .* to any modules'):
+        with self.assertRaisesRegex(EmptyMatchError, r'did not match any modules'):
             with PackageExporter(filename, verbose=False) as exporter:
                 exporter.extern(include=['package_a.*'], allow_empty=False)
                 exporter.save_module('package_b.subpackage')
@@ -247,7 +254,7 @@ import module_a
         """
         filename = self.temp()
 
-        with self.assertRaisesRegex(RuntimeError, 'required during packaging but has been explicitly blocklisted'):
+        with self.assertRaisesRegex(DeniedModuleError, 'required during packaging but has been explicitly blocklisted'):
             with PackageExporter(filename, verbose=False) as exporter:
                 exporter.deny(['package_a.subpackage', 'module_a'])
                 exporter.require_module('package_a.subpackage')
@@ -257,7 +264,7 @@ import module_a
         Test marking packages as "deny" using globs instead of package names.
         """
         filename = self.temp()
-        with self.assertRaisesRegex(RuntimeError, 'required during packaging but has been explicitly blocklisted'):
+        with self.assertRaisesRegex(DeniedModuleError, 'required during packaging but has been explicitly blocklisted'):
             with PackageExporter(filename, verbose=False) as exporter:
                 exporter.deny(['package_a.*', 'module_*'])
                 exporter.save_source_string('test_module', """\
@@ -392,7 +399,7 @@ import module_a
         and no matching module is required during packaging.
         """
         filename = self.temp()
-        with self.assertRaisesRegex(RuntimeError, r'did not match .* to any modules'):
+        with self.assertRaisesRegex(EmptyMatchError, r'did not match any modules'):
             with PackageExporter(filename, verbose=False) as exporter:
                 exporter.mock(include=['package_a.*'], allow_empty=False)
                 exporter.save_module('package_b.subpackage')
