@@ -1362,6 +1362,20 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
 
     return samples
 
+
+def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput((_make_tensor_helper((S, S, S)), 0)),
+        SampleInput((_make_tensor_helper((S, S, S)), 1)),
+        # SampleInput((_make_tensor_helper((S, S, S)), 1), kwargs={'dtype': torch.float64}),
+        SampleInput((_make_tensor_helper(()), 0)),
+    )
+
+    return samples
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -1678,6 +1692,14 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('cumsum',
+           dtypesIfCPU=all_types_and_complex_and(torch.bool),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32]),
+           ),
+           sample_inputs_func=sample_inputs_cumsum),
     UnaryUfuncInfo('deg2rad',
                    ref=np.radians,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -3127,10 +3149,6 @@ def method_tests():
         ('cummin', (S, S, S), (0,), 'dim0', (), [0]),
         ('cummin', (S, S, S), (1,), 'dim1', (), [0]),
         ('cummin', (), (0,), 'dim0_scalar', (), [0]),
-        ('cumsum', (S, S, S), (0,), 'dim0', (), [0]),
-        ('cumsum', (S, S, S), (1,), 'dim1', (), [0]),
-        ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
-        ('cumsum', (), (0,), 'dim0_scalar', (), [0]),
         ('cumprod', (S, S, S), (0,)),
         ('cumprod', (S, S, S), (1,), 'dim1', (), [0]),
         ('cumprod', (), (0,), 'scalar'),
