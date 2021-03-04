@@ -675,6 +675,8 @@ class QuantizationTestCase(TestCase):
             3. shapes of each pair of seen tensors match
             """
             for layer_name, layer_data in act_compare_dict.items():
+                # TODO(before land): remove
+                print('len(layer_data)', len(layer_data))
                 self.assertTrue(
                     len(layer_data) == 2,
                     f"Layer {layer_name} does not have exactly two model results.")
