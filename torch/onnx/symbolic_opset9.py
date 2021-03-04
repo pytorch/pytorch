@@ -1969,13 +1969,13 @@ def repeat_interleave(g, self, repeats, dim=None):
     input_sizes = sym_help._get_tensor_sizes(input)
     if repeats_dim is None:
         raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
-                               'repeats rank.')
+                           'repeats rank.')
     if repeats_sizes is None:
         raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
-                               'repeats size.')
+                           'repeats size.')
     if input_sizes is None:
         raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
-                               'input size.')
+                           'input size.')
 
     input_sizes_temp = input_sizes.copy()
     for idx, input_size in enumerate(input_sizes):
