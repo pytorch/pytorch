@@ -1116,7 +1116,16 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
 
 DEFINE_DISPATCH(triangular_solve_stub);
 
-// Solves 'input' @ 'result' = 'other'
+/*
+Solves the matrix equation 'input' @ 'result' = 'other' for the 'result'.
+The result of the computation is saved in-place in 'result' tensor,
+'clone_input' will be a copy of 'input',
+'infos' is used to store information for possible checks for error,
+'upper' controls the portion of input matrix to consider in computations,
+'transpose' if true then 'input.transpose(-2, -1)' @ 'result' = 'other' is solved,
+'unitriangular' if true then the diagonal elements of 'input' are assumed to be 1
+and the actual diagonal values are not used.
+*/
 static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
     Tensor& result,
     Tensor& clone_input,
