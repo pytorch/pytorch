@@ -132,13 +132,17 @@ class TORCH_API Tensor {
   /// increment/decrement if *this is already contiguous, at the cost
   /// in all cases of an extra pointer of stack usage, an extra branch
   /// to access, and an extra branch at destruction time.
-  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const {
+  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const & {
     if (is_contiguous(memory_format)) {
       return c10::MaybeOwned<Tensor>::borrowed(*this);
     } else {
       return c10::MaybeOwned<Tensor>::owned(__dispatch_contiguous(memory_format));
     }
   }
+
+  // Use .contiguous() instead. Trying to borrow from a prvalue Tensor
+  // will only lead to trouble and dangling references.
+  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
