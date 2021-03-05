@@ -85,21 +85,26 @@ class SampleInput(object):
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
     
+    # Unpacks TensorList inputs (tuple or list of tensors) into a single
+    # tuple of tensors. This is useful for functions like gradcheck that do
+    # not work well for TensorList inputs.
     def unpack_inputs(self):
         result = []
         for arg in self.input:
-            if isinstance(arg, list):
+            if isinstance(arg, (tuple, list)):
                 result.extend(arg)
             else:
                 result.append(arg)
         result.extend(self.args)
         return result
     
+    # Reverse of #unpack_inputs
+    # pack_inputs(unpack_inputs(inputs)) == inputs
     def pack_inputs(self, inputs):
         result = []
         i = 0
         for arg in self.input:
-            if isinstance(arg, list):
+            if isinstance(arg, (tuple, list)):
                 result.append(inputs[i:i + len(arg)])
                 i += len(arg)
             else:

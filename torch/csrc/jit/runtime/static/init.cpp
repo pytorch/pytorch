@@ -7,11 +7,11 @@
 namespace torch {
 namespace jit {
 
-void initStaticRuntimeBindings(PyObject* module) {
+void initStaticModuleBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  py::class_<StaticRuntime> static_runtime(m, "StaticRuntime");
+  py::class_<StaticModule> static_module(m, "StaticModule");
   py::class_<StaticRuntime::IndividualMetrics>(
-      static_runtime, "IndividualMetrics")
+      static_module, "IndividualMetrics")
       .def_readonly("setup_time", &StaticRuntime::IndividualMetrics::setup_time)
       .def_readonly(
           "memory_alloc_time",
@@ -34,25 +34,25 @@ void initStaticRuntimeBindings(PyObject* module) {
       .def_readonly(
           "instances_per_node_type",
           &StaticRuntime::IndividualMetrics::instances_per_node_type);
-  static_runtime
+  static_module
       .def(
-          "run",
+          "__call__",
           py::overload_cast<const std::vector<at::Tensor>&>(
-              &StaticRuntime::run))
+              &StaticModule::operator()))
       .def(
-          "run",
-          [](StaticRuntime& self,
+          "__call__",
+          [](StaticModule& self,
              const std::vector<at::Tensor>& args,
              const std::unordered_map<std::string, at::Tensor>& kwargs) {
             std::vector<c10::IValue> arg_ivalues{args.begin(), args.end()};
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
                 kwargs.begin(), kwargs.end()};
-            c10::IValue ret = self.run(arg_ivalues, kwarg_ivalues);
+            c10::IValue ret = self(arg_ivalues, kwarg_ivalues);
             return toPyObject(ret);
           })
       .def(
           "benchmark",
-          [](StaticRuntime& self,
+          [](StaticModule& self,
              const std::vector<at::Tensor>& args,
              const std::unordered_map<std::string, at::Tensor>& kwargs,
              const int warmup_runs,
@@ -60,11 +60,12 @@ void initStaticRuntimeBindings(PyObject* module) {
             std::vector<c10::IValue> arg_ivalues{args.begin(), args.end()};
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
                 kwargs.begin(), kwargs.end()};
-            self.benchmark(arg_ivalues, kwarg_ivalues, warmup_runs, main_runs);
+            self.runtime().benchmark(
+                arg_ivalues, kwarg_ivalues, warmup_runs, main_runs);
           })
       .def(
           "benchmark_individual_ops",
-          [](StaticRuntime& self,
+          [](StaticModule& self,
              const std::vector<at::Tensor>& args,
              const std::unordered_map<std::string, at::Tensor>& kwargs,
              const int warmup_runs,
@@ -72,21 +73,17 @@ void initStaticRuntimeBindings(PyObject* module) {
             std::vector<c10::IValue> arg_ivalues{args.begin(), args.end()};
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
                 kwargs.begin(), kwargs.end()};
-            return self.benchmark_individual_ops(
+            return self.runtime().benchmark_individual_ops(
                 arg_ivalues, kwarg_ivalues, warmup_runs, main_runs);
           });
   m.def(
-       "_jit_to_static_runtime",
-       [](std::shared_ptr<torch::jit::Graph> g) {
-         return StaticRuntime(PrepareForStaticRuntime(g));
-       })
+       "_jit_to_static_module",
+       [](std::shared_ptr<torch::jit::Graph> g) { return StaticModule(g); })
       .def(
-          "_jit_to_static_runtime",
-          [](const torch::jit::Module& m) {
-            return StaticRuntime(PrepareForStaticRuntime(m));
-          })
+          "_jit_to_static_module",
+          [](const torch::jit::Module& module) { return StaticModule(module); })
       .def(
-          "_fuse_to_static_runtime",
+          "_fuse_to_static_module",
           [](torch::jit::Module& module) {
             module.eval();
             module = freeze_module(module);
@@ -95,7 +92,7 @@ void initStaticRuntimeBindings(PyObject* module) {
             auto graph = method.graph();
             fuseStaticSubgraphs(graph);
           })
-      .def("_fuse_to_static_runtime", [](std::shared_ptr<torch::jit::Graph> g) {
+      .def("_fuse_to_static_module", [](std::shared_ptr<torch::jit::Graph> g) {
         fuseStaticSubgraphs(g);
       });
 }
