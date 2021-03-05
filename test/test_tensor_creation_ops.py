@@ -621,7 +621,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(a, b)
         self.assertEqual(w[:6], y.view(-1)[:6])
 
-        # Case: 
+        # Case:
         # Reference: https://github.com/pytorch/pytorch/issues/49878
         for dim in [0, 1]:
             x = torch.zeros((10, 5, 2), device=device)

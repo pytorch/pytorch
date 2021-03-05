@@ -5,7 +5,7 @@
 #
 #       If you do not use buildkit you are not going to have a good time
 #
-#       For reference: 
+#       For reference:
 #           https://docs.docker.com/develop/develop-images/build_enhancements/
 ARG BASE_IMAGE=ubuntu:18.04
 ARG PYTHON_VERSION=3.8

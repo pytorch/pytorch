@@ -2,7 +2,7 @@
 ##############################################################################
 # Example command to build Caffe2 on Tegra X1.
 ##############################################################################
-# 
+#
 # This script shows how one can build a Caffe2 binary for NVidia's TX1.
 # The build script assumes that you have the most recent libraries installed
 # via the JetPack toolkit available at

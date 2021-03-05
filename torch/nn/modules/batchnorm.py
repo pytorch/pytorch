@@ -565,7 +565,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> # creating process group (optional)
         >>> # ranks is a list of int identifying rank ids.
         >>> ranks = list(range(8))
-        >>> r1, r2 = ranks[:4], ranks[4:] 
+        >>> r1, r2 = ranks[:4], ranks[4:]
         >>> # Note: every rank calls into new_group for every
         >>> # process group created, even if that rank is not
         >>> # part of the group.
@@ -706,7 +706,7 @@ class SyncBatchNorm(_BatchNorm):
             >>> # creating process group (optional)
             >>> # ranks is a list of int identifying rank ids.
             >>> ranks = list(range(8))
-            >>> r1, r2 = ranks[:4], ranks[4:] 
+            >>> r1, r2 = ranks[:4], ranks[4:]
             >>> # Note: every rank calls into new_group for every
             >>> # process group created, even if that rank is not
             >>> # part of the group.

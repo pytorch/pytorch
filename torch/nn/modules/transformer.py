@@ -95,7 +95,7 @@ class Transformer(Module):
             positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
             while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
-            is provided, it will be added to the attention weight. 
+            is provided, it will be added to the attention weight.
             [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
             the attention. If a ByteTensor is provided, the non-zero positions will be ignored while the zero
             positions will be unchanged. If a BoolTensor is provided, the positions with the
