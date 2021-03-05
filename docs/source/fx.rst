@@ -397,7 +397,7 @@ Examples of the Interpreter Pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Shape
-   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py>`__
+   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__
 -  `Performance Profiler <https://github.com/pytorch/tutorials/pull/1319>`__
 
 
