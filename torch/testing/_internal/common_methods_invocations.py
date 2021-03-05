@@ -1370,9 +1370,9 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
     samples = (
         SampleInput((_make_tensor_helper((S, S, S)), 0)),
         SampleInput((_make_tensor_helper((S, S, S)), 1)),
-        # FIXME : inplace grad fails for the following sample due to mismatch in
-        #         `self.dtype` and passed `dtype`.
-        # SampleInput((_make_tensor_helper((S, S, S)), 1), kwargs={'dtype': torch.float64}),
+        # NOTE: if `dtype` is not same as input, then inplace variants fail with
+        # `provided dtype must match the dtype of self tensor in cumsum`
+        SampleInput((_make_tensor_helper((S, S, S)), 1), kwargs={'dtype': dtype}),
         SampleInput((_make_tensor_helper(()), 0)),
     )
 
@@ -1698,6 +1698,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
            skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53360
                # For integer inputs,
                # inplace variant preserves dtype of `self` while method variant
                # always promotes it to torch.long.
@@ -1708,6 +1709,7 @@ op_db: List[OpInfo] = [
                # torch.int8
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32]),
+               # Reference: https://github.com/pytorch/pytorch/issues/53358
                # >>> t = torch.tensor([False])
                # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
                # >>> t.cuda().cumsum_(0) # Error "cumsum_cuda" not implemented for 'Bool'
@@ -1716,7 +1718,9 @@ op_db: List[OpInfo] = [
                # >>> t.cuda().cumsum_(0) # Does not fail!
                # tensor(False, device='cuda:0')
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                        device_type='cuda', dtypes=[torch.bool]),
+                        dtypes=[torch.bool]),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bool]),
            ),
            sample_inputs_func=sample_inputs_cumsum),
     UnaryUfuncInfo('deg2rad',
