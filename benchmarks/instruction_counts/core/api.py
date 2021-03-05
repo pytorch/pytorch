@@ -1,10 +1,9 @@
 """Key enums and structs used to handle data flow within the benchmark."""
 import dataclasses
 import enum
-import itertools as it
 import re
 import textwrap
-from typing import List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Optional, Tuple, Union, TYPE_CHECKING
 
 from worker.main import WorkerTimerArgs
 

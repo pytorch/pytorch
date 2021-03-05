@@ -30,12 +30,11 @@ if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow
     # imports using the public namespace. (Due to an exclusion rule in
     # mypy-strict.ini)
-    from torch.utils.benchmark.utils.common import Measurement
     from torch.utils.benchmark.utils.timer import Language, Timer
     from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
 
 else:
-    from torch.utils.benchmark import CallgrindStats, Language, Measurement, Timer
+    from torch.utils.benchmark import CallgrindStats, Language, Timer
 
 
 WORKER_PATH = os.path.abspath(__file__)

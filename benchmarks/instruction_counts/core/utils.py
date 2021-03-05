@@ -6,7 +6,7 @@ import textwrap
 from typing import List, Optional, Tuple
 
 from core.api import GroupedBenchmark, TimerArgs
-from core.types import Definition, FlatDefinition, FlatIntermediateDefinition, Label
+from core.types import Definition, FlatIntermediateDefinition, Label
 
 
 _TEMPDIR: Optional[str] = None
