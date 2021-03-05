@@ -307,6 +307,27 @@ class TestCheckpoint(TestCase):
         self.assertEqual(t1.grad, t1_grad)
         self.assertEqual(t2.grad, t2_grad)
 
+    def test_checkpoint_no_tensors(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
+
+        t1 = random.random()
+        t2 = random.random()
+        t3 = random.random()
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
     def test_checkpoint_partial_grad(self):
         def run_fn(tensor1, tensor2):
             # tensor 2 is used for other application logic
@@ -327,7 +348,7 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
 
-class TestDataLoader(TestCase):
+class TestDataLoaderUtils(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3

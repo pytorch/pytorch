@@ -213,6 +213,13 @@ def get_timeout(test_id):
     else:
         return DEFAULT_TIMEOUT
 
+default_pg_timeout = 60
+# These tests can run slowly and need additional time to complete, otherwise
+# they would be taken down by NCCL_ASYNC_ERROR_HANDLING.
+CUSTOM_PG_TIMEOUT = {
+    "test_ddp_uneven_inputs": 300,
+}
+
 
 def require_backend(backends):
     if BACKEND not in backends:
@@ -330,7 +337,10 @@ class TestDistBackend(MultiProcessTestCase):
     def setUpClass(cls):
         os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
         os.environ["MASTER_PORT"] = str(MASTER_PORT)
-        # os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # such as test_batch_isend_irecv_nccl will test NCCL_BLOCKING_WAIT as
+        # expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         super().setUpClass()
 
     def setUp(self):
@@ -359,7 +369,10 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.is_available() and torch.cuda.device_count() < int(self.world_size):
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
-            timeout = timedelta(seconds=60)
+            pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(
+                test_name, default_pg_timeout
+            )
+            timeout = timedelta(seconds=pg_timeout_seconds)
             dist.init_process_group(
                 init_method=self.init_method,
                 backend=BACKEND,
@@ -2848,11 +2861,13 @@ class DistributedTest:
             return global_bs, input_cpu, target, loss
 
         # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-        def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0):
+        def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0, memory_format=None):
             model.train()
             output = model(input_var)
             l = loss(output, target) * scale_factor
             l.backward()
+            if memory_format is not None:
+                self.assertTrue(output.is_contiguous(memory_format=memory_format))
 
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
@@ -2861,11 +2876,11 @@ class DistributedTest:
 
         def _test_DDP_5iter(
             self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
-            offset=None, world_size=0, zero_grad=False
+            offset=None, world_size=0, zero_grad=False, memory_format=None
         ):
             for idx in range(5):
                 # single cpu/gpu training
-                self._test_DDP_helper(model_base, input, target, loss)
+                self._test_DDP_helper(model_base, input, target, loss, memory_format=memory_format)
 
                 if offset is None:
                     offset = rank * local_bs
@@ -2877,6 +2892,7 @@ class DistributedTest:
                     target[offset: offset + local_bs],
                     loss,
                     world_size * local_bs / batch_size if world_size != 0 else 1,
+                    memory_format=memory_format
                 )
 
                 # Update weights and run a second iteration to shake out errors
@@ -3206,6 +3222,44 @@ class DistributedTest:
                 True,
                 offset,
                 dist.get_world_size()
+            )
+            self._barrier()
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_Channels_Last(self):
+            group, group_id, rank = self._init_global_test()
+            num_processes = dist.get_world_size()
+            local_bs = 2
+            bs_offset = int(rank * 2)
+            global_bs = int(num_processes * 2)
+
+            model = ONLY_SBN_NET
+            model_gpu = copy.deepcopy(model).cuda(rank)
+            model_DDP = nn.parallel.DistributedDataParallel(
+                model_gpu, device_ids=[rank]
+            )
+
+            memory_format = torch.channels_last
+            input_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)
+            target_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)
+            loss = nn.MSELoss()
+
+            # check two model parameters over 5 iterations
+            self._test_DDP_5iter(
+                model_gpu,
+                model_DDP,
+                input_gpu,
+                target_gpu,
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True,
+                bs_offset,
+                dist.get_world_size(),
+                memory_format=memory_format
             )
             self._barrier()
 

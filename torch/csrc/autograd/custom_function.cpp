@@ -102,14 +102,8 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   int num_diff_outputs = 0;
 
 
-  uint32_t num_tensors = 0;
   for (auto i = 0; i < num_outputs; ++i) {
     Variable var = raw_outputs[i];
-    if (!var.defined()) {
-      // If variable is not defined continue without any recording.
-      outputs.emplace_back(var);
-      continue;
-    }
 
     auto out_tensor_impl = raw_outputs[i].unsafeGetTensorImpl();
     bool is_input = inputs.count(out_tensor_impl) > 0;
@@ -119,9 +113,9 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
-      AT_ASSERT(num_tensors == output_nr);
+      AT_ASSERT(i == (int)output_nr);
     }
-    set_history(var, num_tensors, is_input, is_modified, is_differentiable);
+    set_history(var, i, is_input, is_modified, is_differentiable);
 
     // For deprecation cycle. Can be removed after 1.6. In the case where we detected a view
     // in no grad mode during the forward, only warn the user (do not change the flag if we
@@ -139,14 +133,13 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
     outputs_impl.insert(out_tensor_impl);
     outputs.emplace_back(var);
-    num_tensors++;
   }
 
   // If multiple differentiable outputs are returned, we do not allow views to be modified inplace
   // See NOTE [ View + Inplace detection ] for more details
   if (num_diff_outputs > 1) {
     for (auto& var: outputs) {
-      if (var.defined() && var.is_view()) {
+      if (var.is_view()) {
         // NB: is_view() ==> get_autograd_meta()
         auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
         diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
