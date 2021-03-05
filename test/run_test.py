@@ -513,9 +513,9 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
         # we must remove '--run-parallel' plus the next arg if it is an int
         new_args = []
         skip_i = -1
-        for i,arg in enumerate(unittest_args):
+        for i, arg in enumerate(unittest_args):
             if arg.startswith('--run-parallel'):
-                skip_i = i+1
+                skip_i = i + 1
             elif i == skip_i and arg.isnumeric():
                 pass
             else:
