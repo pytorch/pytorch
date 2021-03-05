@@ -167,42 +167,40 @@ void RequestCallbackImpl::processScriptCall(
                        ->get_function(scriptCall.qualifiedName())
                        .runAsync(stack);
 
-  if (scriptCall.isAsyncExecution()) {
-    jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
-      try {
-        auto valueJitFuture = jitFuture->value().toFuture();
-        valueJitFuture->addCallback(
-            [responseFuture, messageId, valueJitFuture]() {
-              try {
-                Message m = ScriptResp(valueJitFuture->value()).toMessage();
-                m.setId(messageId);
-                responseFuture->markCompleted(
-                    IValue(c10::make_intrusive<Message>(std::move(m))));
-              } catch (const std::exception& /* unused */) {
-                responseFuture->setError(std::current_exception());
-              }
-            });
-      } catch (const std::exception& /* unused */) {
-        responseFuture->setError(std::current_exception());
-      }
-    });
-  } else {
-    if (jitFuture->completed()) {
-      markComplete(std::move(ScriptResp(jitFuture->value())).toMessage());
-      return;
-    }
-
-    jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
-      try {
-        Message m = ScriptResp(jitFuture->value()).toMessage();
-        m.setId(messageId);
-        responseFuture->markCompleted(
-            IValue(c10::make_intrusive<Message>(std::move(m))));
-      } catch (const std::exception& /* unused */) {
-        responseFuture->setError(std::current_exception());
-      }
-    });
+  // Fastpath: avoid callbacks if not neeeded.
+  if (jitFuture->completed() && !scriptCall.isAsyncExecution()) {
+    markComplete(std::move(ScriptResp(jitFuture->value())).toMessage());
+    return;
   }
+
+  jitFuture->addCallback([responseFuture,
+                          messageId,
+                          jitFutureCaptured = jitFuture,
+                          isAsyncExecution = scriptCall.isAsyncExecution(),
+                          markComplete]() {
+    try {
+      c10::intrusive_ptr<JitFuture> jitFuture = isAsyncExecution
+          ? jitFutureCaptured->value().toFuture()
+          : jitFutureCaptured;
+
+      // Setup response callback appropriately.
+      auto responseCb = [responseFuture, messageId, jitFuture]() {
+        try {
+          Message m = ScriptResp(jitFuture->value()).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(
+              IValue(c10::make_intrusive<Message>(std::move(m))));
+        } catch (const std::exception& /* unused */) {
+          responseFuture->setError(std::current_exception());
+        }
+      };
+
+      // Call inline if we don't have async execution.
+      isAsyncExecution ? jitFuture->addCallback(responseCb) : responseCb();
+    } catch (const std::exception& /* unused */) {
+      responseFuture->setError(std::current_exception());
+    }
+  });
 }
 
 void RequestCallbackImpl::processPythonCall(
