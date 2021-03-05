@@ -305,10 +305,9 @@ class TORCH_API SaveOpImpl {
 
  private:
   OperatorBase* operator_;
-  Workspace* ws_;
-  string strip_prefix_;
-  string full_db_name_;
-  string db_type_;
+  std::string strip_prefix_;
+  std::string full_db_name_;
+  std::string db_type_;
   std::vector<std::string> blob_names_;
   int chunk_size_;
 };
