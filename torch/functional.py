@@ -152,7 +152,7 @@ def split(tensor, split_size_or_sections, dim=0):
             split, (tensor,), tensor, split_size_or_sections, dim=dim)
     # Overwriting reason:
     # This dispatches to two ATen functions depending on the type of
-    # split_size_or_sections. The branching code is in tensor.py, which we
+    # split_size_or_sections. The branching code is in _tensor.py, which we
     # call here.
     return tensor.split(split_size_or_sections, dim)
 

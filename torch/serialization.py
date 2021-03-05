@@ -822,7 +822,10 @@ def _get_restore_location(map_location):
 def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
-    loaded_storages = {}
+    loaded_storages = {
+        # See https://github.com/pytorch/pytorch/pull/51633
+        'torch.tensor': 'torch._tensor'
+    }
 
     def load_tensor(data_type, size, key, location):
         name = f'data/{key}'
