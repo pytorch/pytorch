@@ -35,6 +35,11 @@ if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
     find . -regex '.*test_lite_interpreter_runtime'
     pwd
 
+    cp ${HOME}/project/torch/bin/test_lite_interpreter_runtime ${WORKSPACE_DIR}//miniconda3/lib/python3.7/site-packages/torch/lib
+    ${WORKSPACE_DIR}//miniconda3/lib/python3.7/site-packages/torch/lib/test_lite_interpreter_runtime
+
+    git diff
+
     assert_git_not_dirty
 else
     echo "Skipping libtorch (lite interpreter)."
