@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Generator, List, NamedTuple, Optional, Tuple, Type
 
 from caffe2.proto import caffe2_pb2
+from caffe2.proto.caffe2_pb2 import BlobSerializationOptions
 from caffe2.python import core, test_util, workspace
 
 if workspace.has_gpu_support:
@@ -578,6 +579,60 @@ class TestLoadSave(TestLoadSaveBase):
             num_elems=default_chunk_size + 10,
             chunk_size=0,
             expected_num_chunks=1,
+        )
+
+    def testSaveWithOptions(self) -> None:
+        tmp_folder = self.make_tempdir()
+        tmp_file = str(tmp_folder / "save.output")
+
+        num_elems = 1234
+        blobs = self.create_test_blobs(num_elems)
+
+        # Saves the blobs to a local db.
+        save_op = core.CreateOperator(
+            "Save",
+            [name for name, data in blobs],
+            [],
+            absolute_path=1,
+            db=tmp_file,
+            db_type=self._db_type,
+            chunk_size=40,
+            options=caffe2_pb2.SerializationOptions(
+                options=[
+                    BlobSerializationOptions(
+                        blob_name_regex="int16_data", chunk_size=10
+                    ),
+                    BlobSerializationOptions(
+                        blob_name_regex=".*16_data", chunk_size=20
+                    ),
+                    BlobSerializationOptions(
+                        blob_name_regex="float16_data", chunk_size=30
+                    ),
+                ],
+            ),
+        )
+        self.assertTrue(workspace.RunOperatorOnce(save_op))
+
+        self.load_and_check_blobs(blobs, [tmp_file])
+
+        blob_chunks = self._read_chunk_info(Path(tmp_file))
+        # We explicitly set a chunk_size of 10 for int16_data
+        self.assertEqual(
+            len(blob_chunks["int16_data"]), math.ceil(num_elems / 10)
+        )
+        # uint16_data should match the .*16_data pattern, and get a size of 20
+        self.assertEqual(
+            len(blob_chunks["uint16_data"]), math.ceil(num_elems / 20)
+        )
+        # float16_data should also match the .*16_data pattern, and get a size
+        # of 20.  The explicitly float16_data rule came after the .*16_data
+        # pattern, so it has lower precedence and will be ignored.
+        self.assertEqual(
+            len(blob_chunks["float16_data"]), math.ceil(num_elems / 20)
+        )
+        # int64_data will get the default chunk_size of 40
+        self.assertEqual(
+            len(blob_chunks["int64_data"]), math.ceil(num_elems / 40)
         )
 
 

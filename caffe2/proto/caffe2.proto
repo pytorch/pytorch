@@ -470,3 +470,25 @@ message DBReaderProto {
   // The current key of the DB if the DB supports seeking.
   optional string key = 4;
 }
+
+message BlobSerializationOptions {
+  // This set of options will only apply to blobs whose name matches this
+  // pattern.  If the blob_name_pattern is empty then it will be treated as
+  // matching all blobs.
+  optional string blob_name_regex = 1;
+
+  // Note:
+  // - a chunk_size of 0 means "use the default chunk size".  The default chunk
+  //   size is controlled by the --caffe2_tensor_chunk_size command line flag.
+  // - a chunk size of -1 means to disable chunking, and serialize the blob in
+  //   a single chunk.
+  optional int64 chunk_size = 2;
+}
+
+message SerializationOptions {
+  // A set of options to use when serialializing blobs.
+  // This is a list, sorted from highest to lowest precedence.  When
+  // serializing a blob, the first entry whose blob_name_pattern matches the
+  // blob name will be used.
+  repeated BlobSerializationOptions options = 1;
+}
