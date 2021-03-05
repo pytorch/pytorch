@@ -449,10 +449,21 @@ class DistributedDataParallel(Module):
         # Whether to perform input tensor CPU to GPU copies on a side-stream
         self.use_side_stream_for_tensor_copies = os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
 
-        # Sync params and buffers
+        # Module replication within process (single-process multi device)
+        self._module_copies = self._replicate_modules_within_process()
+        # Build parameters for reducer.
+        parameters, expect_sparse_gradient = self._build_params_for_reducer()
+        # Verify model equivalence.
+        # Corresponding params' layouts (strides) must match across
+        # replicas within this process and across processes.
+        # see Note: "Gradient Layout Contract" in Reducer::initialize_buckets).
+        if self.device_ids is not None and len(self.device_ids) > 1:
+            dist._verify_replicas_within_process(parameters, expect_sparse_gradient)
+        dist._verify_model_across_ranks(self.process_group, parameters)
+        # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
-
-        self._ddp_init_helper()
+        # Builds reducer.
+        self._ddp_init_helper(parameters, expect_sparse_gradient)
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
@@ -466,134 +477,15 @@ class DistributedDataParallel(Module):
                 self.broadcast_bucket_size,
                 authoritative_rank)
 
-    def _ddp_init_helper(self):
+    def _ddp_init_helper(self, parameters, expect_sparse_gradient):
         """
         Initialization helper function that does the following:
-
-        (1) replicating the module from device[0] to the other devices
-        (2) bucketing the parameters for reductions
-        (3) resetting the bucketing states
-        (4) registering the grad hooks
+        (1) bucketing the parameters for reductions
+        (2) resetting the bucketing states
+        (3) registering the grad hooks
+        (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
-
-        def parameters(m, recurse=True):
-            def model_parameters(m):
-                ps = m._former_parameters.values() \
-                    if hasattr(m, "_former_parameters") \
-                    else m.parameters(recurse=False)
-                for p in ps:
-                    yield p
-
-            for m in m.modules() if recurse else [m]:
-                for p in model_parameters(m):
-                    yield p
-
-        if self.device_ids and len(self.device_ids) > 1:
-
-            warnings.warn(
-                "Single-Process Multi-GPU is not the recommended mode for "
-                "DDP. In this mode, each DDP instance operates on multiple "
-                "devices and creates multiple module replicas within one "
-                "process. The overhead of scatter/gather and GIL contention "
-                "in every forward pass can slow down training. "
-                "Please consider using one DDP instance per device or per "
-                "module replica by explicitly setting device_ids or "
-                "CUDA_VISIBLE_DEVICES. "
-            )
-
-            # only create replicas for single-device CUDA modules
-            #
-            # TODO: we don't need to replicate params in here. they're always going to
-            # be broadcasted using larger blocks in broadcast_coalesced, so it might be
-            # better to not pollute the caches with these small blocks
-            self._module_copies = replicate(self.module, self.device_ids, detach=True)
-            self._module_copies[0] = self.module
-
-            for module_copy in self._module_copies[1:]:
-                for param, copy_param in zip(self.module.parameters(), parameters(module_copy)):
-                    # Reducer requires param copies have the same strides across replicas.
-                    # Fixes up copy_param strides in case replicate didn't match param strides.
-                    if param.layout is torch.strided and param.stride() != copy_param.stride():
-                        with torch.no_grad():
-                            copy_param.set_(copy_param.clone()
-                                                      .as_strided(param.size(), param.stride())
-                                                      .copy_(copy_param))
-                    copy_param.requires_grad = param.requires_grad
-
-        else:
-            self._module_copies = [self.module]
-
-        self.modules_params = [list(parameters(m)) for m in self._module_copies]
-        # Collect buffers for modules, filtering out buffers that should be ignored.
-        named_module_buffers = [
-            [(buffer, buffer_name) for buffer_name, buffer in m.named_buffers()]
-            for m in self._module_copies
-        ]
-        self.modules_buffers = [
-            [
-                buffer
-                for (buffer, buffer_name) in module_buffers
-                if buffer_name not in self.parameters_to_ignore
-            ]
-            for module_buffers in named_module_buffers
-        ]
-        # Build tuple of (module, parameter) for all parameters that require grads.
-        if self.device_ids and len(self.device_ids) > 1:
-            # Single-process multi-device mode,does not support self.parameters_to_ignore.
-            if self.parameters_to_ignore:
-                raise ValueError(
-                    "Single-Process multi-device mode does not "
-                    "support ignoring parameters upfront. Please consider "
-                    "using one DDP instance per device."
-                )
-
-            modules_and_parameters = [
-                [
-                    (module, parameter)
-                    for module in replica.modules()
-                    for parameter in filter(
-                        lambda parameter: parameter.requires_grad,
-                        parameters(module, recurse=False))
-                ] for replica in self._module_copies]
-        else:
-            modules_and_parameters = [
-                [
-                    (module, parameter)
-                    for module_name, module in replica.named_modules()
-                    for parameter in [
-                        param
-                        # Note that we access module.named_parameters instead of
-                        # parameters(module). parameters(module) is only needed in the
-                        # single-process multi device case, where it accesses replicated
-                        # parameters through _former_parameters.
-                        for param_name, param in module.named_parameters(recurse=False)
-                        if param.requires_grad
-                        and f"{module_name}.{param_name}" not in self.parameters_to_ignore
-                    ]
-                ]
-                for replica in self._module_copies
-            ]
-
-        # Build list of parameters.
-        parameters = [
-            list(parameter for _, parameter in replica)
-            for replica in modules_and_parameters]
-
-        # Checks if a module will produce a sparse gradient.
-        def produces_sparse_gradient(module):
-            if isinstance(module, torch.nn.Embedding):
-                return module.sparse
-            if isinstance(module, torch.nn.EmbeddingBag):
-                return module.sparse
-            return False
-
-        # Build list of booleans indicating whether or not to expect sparse
-        # gradients for the corresponding parameters.
-        expect_sparse_gradient = [
-            list(produces_sparse_gradient(module) for module, _ in replica)
-            for replica in modules_and_parameters]
-
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -642,7 +534,134 @@ class DistributedDataParallel(Module):
         super(DistributedDataParallel, self).__setstate__(state)
         self.__dict__.setdefault('require_forward_param_sync', True)
         self.__dict__.setdefault('require_backward_grad_sync', True)
-        self._ddp_init_helper()
+        parameters, expect_sparse_gradient = self._build_params_for_reducer()
+        self._ddp_init_helper(parameters, expect_sparse_gradient)
+
+    def _replicate_modules_within_process(self):
+        if self.device_ids and len(self.device_ids) > 1:
+            warnings.warn(
+                "Single-Process Multi-GPU is not the recommended mode for "
+                "DDP. In this mode, each DDP instance operates on multiple "
+                "devices and creates multiple module replicas within one "
+                "process. The overhead of scatter/gather and GIL contention "
+                "in every forward pass can slow down training. "
+                "Please consider using one DDP instance per device or per "
+                "module replica by explicitly setting device_ids or "
+                "CUDA_VISIBLE_DEVICES. "
+            )
+
+            # only create replicas for single-device CUDA modules
+            #
+            # TODO: we don't need to replicate params in here. they're always going to
+            # be broadcasted using larger blocks in broadcast_coalesced, so it might be
+            # better to not pollute the caches with these small blocks
+            module_copies = replicate(self.module, self.device_ids, detach=True)
+            module_copies[0] = self.module
+
+            for module_copy in module_copies[1:]:
+                for param, copy_param in zip(self.module.parameters(), self._get_parameters(module_copy)):
+                    # Reducer requires param copies have the same strides across replicas.
+                    # Fixes up copy_param strides in case replicate didn't match param strides.
+                    if param.layout is torch.strided and param.stride() != copy_param.stride():
+                        with torch.no_grad():
+                            copy_param.set_(copy_param.clone()
+                                                      .as_strided(param.size(), param.stride())
+                                                      .copy_(copy_param))
+                    copy_param.requires_grad = param.requires_grad
+
+            return module_copies
+
+        else:
+            return [self.module]
+
+    def _build_params_for_reducer(self):
+        # Build tuple of (module, parameter) for all parameters that require grads.
+        if self.device_ids and len(self.device_ids) > 1:
+            # Single-process multi-device mode,does not support self.parameters_to_ignore.
+            if self.parameters_to_ignore:
+                raise ValueError(
+                    "Single-Process multi-device mode does not "
+                    "support ignoring parameters upfront. Please consider "
+                    "using one DDP instance per device."
+                )
+
+            modules_and_parameters = [
+                [
+                    (module, parameter)
+                    for module in replica.modules()
+                    for parameter in filter(
+                        lambda parameter: parameter.requires_grad,
+                        self._get_parameters(module, recurse=False))
+                ] for replica in self._module_copies]
+        else:
+            modules_and_parameters = [
+                [
+                    (module, parameter)
+                    for module_name, module in replica.named_modules()
+                    for parameter in [
+                        param
+                        # Note that we access module.named_parameters instead of
+                        # parameters(module). parameters(module) is only needed in the
+                        # single-process multi device case, where it accesses replicated
+                        # parameters through _former_parameters.
+                        for param_name, param in module.named_parameters(recurse=False)
+                        if param.requires_grad
+                        and f"{module_name}.{param_name}" not in self.parameters_to_ignore
+                    ]
+                ]
+                for replica in self._module_copies
+            ]
+
+        # Build list of parameters.
+        parameters = [
+            list(parameter for _, parameter in replica)
+            for replica in modules_and_parameters]
+
+        # Checks if a module will produce a sparse gradient.
+        def produces_sparse_gradient(module):
+            if isinstance(module, torch.nn.Embedding) or isinstance(module, torch.nn.EmbeddingBag):
+                return module.sparse
+            return False
+
+        # Build list of booleans indicating whether or not to expect sparse
+        # gradients for the corresponding parameters.
+        expect_sparse_gradient = [
+            list(produces_sparse_gradient(module) for module, _ in replica)
+            for replica in modules_and_parameters]
+
+        # The following modules_params and modules_buffers are used for
+        # param/buffer sync in _sync_params.
+        self.modules_params = [list(self._get_parameters(m)) for m in self._module_copies]
+        # Collect buffers for modules, filtering out buffers that should be ignored.
+        named_module_buffers = [
+            [(buffer, buffer_name) for buffer_name, buffer in m.named_buffers()]
+            for m in self._module_copies
+        ]
+        self.modules_buffers = [
+            [
+                buffer
+                for (buffer, buffer_name) in module_buffers
+                if buffer_name not in self.parameters_to_ignore
+            ]
+            for module_buffers in named_module_buffers
+        ]
+
+        return parameters, expect_sparse_gradient
+
+    def _get_parameters(self, m, recurse=True):
+        """
+        Returns a generator of module parameters
+        """
+        def model_parameters(m):
+            ps = m._former_parameters.values() \
+                if hasattr(m, "_former_parameters") \
+                else m.parameters(recurse=False)
+            for p in ps:
+                yield p
+
+        for m in m.modules() if recurse else [m]:
+            for p in model_parameters(m):
+                yield p
 
     def _check_default_group(self):
         pickle_not_supported = False
