@@ -11178,9 +11178,9 @@ __global__ void kernel1(
     __shared__ long mem_N[512];
     float in=inp[threadIdx.x*inp.stride[0]+
                         threadIdx.y*inp.stride[1]];
-    float tmp_M2;
-    float tmp_avg;
-    long tmp_N;
+    float tmp_M2=0;
+    float tmp_avg=0;
+    long tmp_N=0;
     blockWelford<false,true,false>(
         tmp_M2,
         tmp_avg,
@@ -11265,9 +11265,9 @@ __global__ void kernel1(
     float in=inp[threadIdx.x*inp.stride[0]+
                         threadIdx.y*inp.stride[1]+
                         threadIdx.z*inp.stride[2]];
-    float tmp_M2;
-    float tmp_avg;
-    long tmp_N;
+    float tmp_M2=0;
+    float tmp_avg=0;
+    long tmp_N=0;
     blockWelford<false,true,true>(
         tmp_M2,
         tmp_avg,
@@ -11328,9 +11328,9 @@ __global__ void kernel1(
     __shared__ float shared_buf_M2[512];
     __shared__ float shared_buf_avg[512];
     __shared__ long shared_buf_N[512];
-    float tmp_M2;
-    float tmp_avg;
-    long tmp_N;
+    float tmp_M2=0;
+    float tmp_avg=0;
+    long tmp_N=0;
     float in = inp[ blockIdx.x  * inp.stride[0]+
                     blockIdx.y  * inp.stride[1]+
                     threadIdx.x * inp.stride[2]];
@@ -11750,7 +11750,6 @@ TEST(NVFuserTest, FusionWelfordShmoo_CUDA) {
           if (rdim > 32768 && dtype == DataType::Half) {
             continue;
           }
-
           testWelford(dtype, axis, odim, rdim);
         }
       }
@@ -13379,6 +13378,69 @@ TEST(NVFuserTest, FusionValidateParallelize5_CUDA) {
   // memory, so it is valid
   FusionExecutor fe;
   fe.compileFusion(&fusion);
+}
+
+TEST(NVFuserTest, FusionBlockReduceInSerialLoop_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  constexpr int M = 10;
+  constexpr int N = 20;
+  constexpr int K = 20;
+
+  auto tv0 = makeSymbolicTensor(3);
+  auto tv1 = sum(tv0, {{1, 2}});
+  fusion.addInput(tv0);
+  fusion.addOutput(tv1);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({M, N, K}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+  at::Tensor aten_output = t0.sum({1, 2});
+  testValidate(
+      &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionBlockWelfordInSerialLoop_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  constexpr int M = 10;
+  constexpr int N = 20;
+  constexpr int K = 20;
+
+  auto tv0 = makeSymbolicTensor(3);
+  auto tvs = Welford(tv0, {{1, 2}});
+  fusion.addInput(tv0);
+  auto tv_M2 = tvs.var;
+  auto tv_avg = tvs.avg;
+  auto tv_N = tvs.n;
+  fusion.addOutput(tv_M2);
+  fusion.addOutput(tv_avg);
+
+  tv_avg->axis(-1)->parallelize(ParallelType::TIDx);
+  tv_avg->axis(0)->parallelize(ParallelType::BIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({M, N, K}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+  at::Tensor aten_M2 = t0.var({1, 2}, false) * N * K;
+  at::Tensor aten_avg = t0.mean({1, 2});
+  testValidate(
+      &fusion, outputs, aten_inputs, {aten_M2, aten_avg}, __LINE__, __FILE__);
 }
 
 } // namespace jit

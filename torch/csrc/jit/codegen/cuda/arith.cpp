@@ -733,6 +733,9 @@ WelfordResult Welford(
   // Initial values for welford op are tensors, so their dims have to match the
   // output dim,
   // i.e. original_dims - dims_to_be_reduced
+  Val* init_var_val = nullptr;
+  Val* init_avg_val = nullptr;
+
   if (!init_N->isZeroInt()) {
     TORCH_CHECK(
         init_avg != nullptr && init_N != nullptr && init_var != nullptr,
@@ -745,6 +748,11 @@ WelfordResult Welford(
         (axes.size() + init_avg->getRootDomain().size()) ==
             tv->getRootDomain().size(),
         "welford op: initial tensor mismatch");
+    init_var_val = init_var;
+    init_avg_val = init_avg;
+  } else {
+    init_var_val = new Double(0);
+    init_avg_val = new Double(0);
   }
 
   // Check and collect reduction axes
@@ -773,8 +781,8 @@ WelfordResult Welford(
       out_var,
       out_avg,
       out_N, /*out var/avg/count */
-      init_var,
-      init_avg,
+      init_var_val,
+      init_avg_val,
       init_N, /*init var/avg/count */
       nullptr,
       tv,

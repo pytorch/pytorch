@@ -89,8 +89,8 @@ __device__ void blockReduce(
     }
   }
   __syncthreads();
-  // for (int factor = np2/2; factor > contig_threads / 2; factor>>=1) {
-  for (int factor = np2 / 2; factor > 0; factor >>= 1) {
+  // loop peel the final iteration to save one syncthread for the end
+  for (int factor = np2 / 2; factor > 1; factor >>= 1) {
     if (reduction_tid < factor) {
       reduction_op(
           shared_mem[linear_tid],
@@ -99,6 +99,13 @@ __device__ void blockReduce(
     __syncthreads();
   }
 
-  if (should_write && read_write_pred)
-    out = shared_mem[linear_tid];
+  if (should_write && read_write_pred) {
+    T result = out;
+    reduction_op(result, shared_mem[linear_tid]);
+    if (reduction_size > 1) {
+      reduction_op(result, shared_mem[linear_tid + 1 * reduction_stride]);
+    }
+    out = result;
+  }
+  __syncthreads();
 }

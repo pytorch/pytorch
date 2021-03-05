@@ -221,8 +221,9 @@ __device__ void gridReduceLastBlock(
   if (rem_size > 1) {
     const int rblock_offset = tid % rblock_size;
     const int rblock_idx = tid / rblock_size;
+    T inp_tmp = init_val;
     blockReduce<false, true, false>(
-        inp,
+        inp_tmp,
         inp,
         reduction_op,
         dim3{(unsigned)rblock_offset, (unsigned)rblock_idx, 0},
@@ -231,6 +232,7 @@ __device__ void gridReduceLastBlock(
         true,
         init_val);
     __syncthreads();
+    inp = inp_tmp;
     if (tid < rblock_size) {
       shared_buf[tid] = inp;
     }
@@ -242,7 +244,7 @@ __device__ void gridReduceLastBlock(
   }
 
   if (should_write && read_write_pred) {
-    out = inp;
+    reduction_op(out, inp);
   }
 }
 

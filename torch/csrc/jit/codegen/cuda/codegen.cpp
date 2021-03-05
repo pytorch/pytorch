@@ -589,8 +589,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     if (has_block_reduce) {
       if (has_grid_reduce) {
         indent() << data_type << " "
-                 << "block_result"
-                 << ";\n";
+                 << "block_result=" << gen(node->init()) << ";\n";
       }
       indent() << "blockReduce<" << (tidx ? "true" : "false") << ", "
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
@@ -662,14 +661,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
       if (has_grid_reduce) {
         // allocate block result
         indent() << data_type << " "
-                 << "block_result_var"
-                 << ";\n";
+                 << "block_result_var = " << gen(node->initVar()) << ";\n";
         indent() << data_type << " "
-                 << "block_result_avg"
-                 << ";\n";
+                 << "block_result_avg = " << gen(node->initAvg()) << ";\n";
         indent() << DataType::Int << " "
-                 << "block_result_n"
-                 << ";\n";
+                 << "block_result_n = " << gen(node->initN()) << ";\n";
       }
       indent() << "blockWelford<" << (tidx ? "true" : "false") << ", "
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")

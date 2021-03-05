@@ -37,6 +37,8 @@ __device__ void blockBroadcast(T& out, T inp_val, T* shared_mem) {
   __syncthreads();
 
   out = shared_mem[shared_offset];
+
+  __syncthreads();
 }
 
 } // namespace broadcast
