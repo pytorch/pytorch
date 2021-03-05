@@ -48,7 +48,7 @@ run_tests() {
     if [[ "${CIRCLE_JOB}" == *10.1* ]]; then
         # nvidia-smi for CUDA <= 10.1
         "/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe"
-    else
+    elif [[ "${CIRCLE_JOB}" == *10.2* ]] || [[ "${CIRCLE_JOB}" == *11* ]]; then
         # nvidia-smi for CUDA >= 10.2
         "/c/Windows/System32/nvidia-smi.exe"
     fi
