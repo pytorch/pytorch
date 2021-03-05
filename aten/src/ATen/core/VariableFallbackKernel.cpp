@@ -52,4 +52,8 @@ TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
+TORCH_LIBRARY_IMPL(_, InplaceOrView, m) {
+      m.fallback(torch::CppFunction::makeFallthrough());
+}
+
 }

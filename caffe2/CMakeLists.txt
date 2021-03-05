@@ -414,6 +414,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_1.cpp"
     )
   endif()
 
@@ -490,7 +492,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_python_functions.py"
     "${TOOLS_PATH}/autograd/gen_variable_factories.py"
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
-    "${TOOLS_PATH}/autograd/gen_inplace_or_viewtype.py"
+    "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 

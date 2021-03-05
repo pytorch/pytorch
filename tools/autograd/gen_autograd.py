@@ -52,11 +52,15 @@ def gen_autograd(
     # Generate VariableType.h/cpp
     from .gen_trace_type import gen_trace_type
     from .gen_variable_type import gen_variable_type
+    from .gen_inplace_or_view_type import gen_inplace_or_view_type
     if not disable_autograd:
         gen_variable_type(out, native_functions_path, fns_with_infos, template_path)
 
         # operator filter not applied as tracing sources are excluded in selective build
         gen_trace_type(out, native_functions_path, template_path)
+
+        gen_inplace_or_view_type(out, native_functions_path, fns_with_infos, template_path)
+
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
