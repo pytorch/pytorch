@@ -10,7 +10,8 @@ import torch.optim
 import torch.utils.data
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS, TemporaryFileName, TemporaryDirectoryName)
+    TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
+    TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
     kineto_available, profile, record_function, DeviceType, ProfilerActivity
@@ -118,7 +119,7 @@ class TestProfiler(TestCase):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self):
-        use_cuda = torch.cuda.is_available()
+        use_cuda = torch.cuda.is_available() and (not TEST_WITH_ROCM)
         with _profile(use_cuda=use_cuda, use_kineto=True):
             self.payload(use_cuda=use_cuda)
 
@@ -147,6 +148,7 @@ class TestProfiler(TestCase):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     def test_kineto_multigpu(self):
         with profile(
             activities=[
