@@ -862,7 +862,7 @@ MemoryPlanner::MemoryPlanner(
     bool out_variants) {
   // collect register indices of outputs of ops with out variant
   std::unordered_set<const Value*> managed_values;
-  std::unordered_set<IValue*> unmanaged_value_set;
+  std::unordered_set<IValue*> unmanaged_ivalue_set;
   for (ProcessedNode& pnode : runtime->get_nodes()) {
     if (canReuseInputsOutputs(pnode.get_node())) {
       for (auto i = 0; i < pnode.outputs().size(); ++i) {
@@ -876,40 +876,31 @@ MemoryPlanner::MemoryPlanner(
           } else if (canOptimizeConstruct(pnode.get_node())) {
             // We "leak" containers of this type
           } else {
-            unmanaged_value_set.insert(&out);
+            unmanaged_ivalue_set.insert(&out);
           }
         } else {
-          unmanaged_value_set.insert(&out);
+          unmanaged_ivalue_set.insert(&out);
         }
       }
     } else {
       for (auto i = 0; i < pnode.outputs().size(); ++i) {
-        unmanaged_value_set.insert(&pnode.Output(i));
+        unmanaged_ivalue_set.insert(&pnode.Output(i));
       }
     }
   }
 
   const InferenceModule* module = runtime->get_inference_module();
 
-  // remove model outputs from managed_values
-  for (IValue* output : runtime->outputs()) {
-    unmanaged_value_set.erase(output);
-  }
-
-  for (IValue* out : unmanaged_value_set) {
-    unmanaged_values_.emplace_back(out);
-  }
-
-  // remove model outputs from managed_values and unmanaged_value_set
+  // remove model outputs from managed_values and unmanaged_ivalue_set
   for (Value* output : module->graph->outputs()) {
     managed_values.erase(output);
   }
   for (IValue* output : runtime->outputs()) {
-    unmanaged_value_set.erase(output);
+    unmanaged_ivalue_set.erase(output);
   }
 
-  // unmanaged_value_set => unmanaged_values_
-  for (IValue* out : unmanaged_value_set) {
+  // unmanaged_ivalue_set => unmanaged_values_
+  for (IValue* out : unmanaged_ivalue_set) {
     unmanaged_values_.emplace_back(out);
   }
 
