@@ -62,6 +62,7 @@ class BasicModule(torch.nn.Module):
         return x - h
 
 
+# This is ignored in IS_WINDOWS or IS_MACOS cases. Hence we need the one in TestBackends.
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
                  "Non-portable load_library call used in test")
 class JitBackendTestCase(JitTestCase):
@@ -417,6 +418,9 @@ class SelectiveLoweringTest(JitBackendTestCase):
             to_test_backend_selective(torch.jit.script(mod), {"forward": ""}, ["sub1.submodule"])
 
 
+# This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
 class TestBackends(JitTestCase):
     """
     This class wraps and invokes all subclasses of JitBackendTestCase so that each one
