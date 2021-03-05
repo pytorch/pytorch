@@ -194,6 +194,7 @@ from distutils.errors import DistutilsArgError
 import setuptools.command.build_ext
 import setuptools.command.install
 import distutils.command.clean
+import distutils.command.sdist
 import distutils.sysconfig
 import filecmp
 import shutil
@@ -238,7 +239,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean' or arg == 'egg_info':
+    if arg in ['clean', 'egg_info', 'sdist']:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -286,10 +287,8 @@ report("Building wheel {}-{}".format(package_name, version))
 
 cmake = CMake()
 
-# all the work we need to do _before_ setup runs
-def build_deps():
-    report('-- Building version ' + version)
 
+def check_submodules():
     def check_file(f):
         if bool(os.getenv("USE_SYSTEM_LIBS", False)):
             return
@@ -310,6 +309,12 @@ def build_deps():
     check_file(os.path.join(third_party_path, 'onnx', 'third_party',
                             'benchmark', 'CMakeLists.txt'))
 
+
+# all the work we need to do _before_ setup runs
+def build_deps():
+    report('-- Building version ' + version)
+
+    check_submodules()
     check_pydep('yaml', 'pyyaml')
 
     build_caffe2(version=version,
@@ -599,7 +604,7 @@ else:
 
 class install(setuptools.command.install.install):
     def run(self):
-        setuptools.command.install.install.run(self)
+        super().run()
 
 
 class clean(distutils.command.clean.clean):
@@ -623,8 +628,14 @@ class clean(distutils.command.clean.clean):
                         except OSError:
                             shutil.rmtree(filename, ignore_errors=True)
 
-        # It's an old-style class in Python 2.7...
-        distutils.command.clean.clean.run(self)
+        super().run()
+
+
+class sdist(distutils.command.sdist.sdist):
+    def run(self):
+        with concat_license_files():
+            super().run()
+
 
 def configure_extension_build():
     r"""Configures extension build options according to system environment and user's choice.
@@ -762,10 +773,11 @@ def configure_extension_build():
         )
 
     cmdclass = {
+        'bdist_wheel': wheel_concatenate,
         'build_ext': build_ext,
         'clean': clean,
         'install': install,
-        'bdist_wheel': wheel_concatenate,
+        'sdist': sdist,
     }
 
     entry_points = {
