@@ -27,6 +27,24 @@ class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
 
+  Scalar(const Scalar& rhs) : tag(rhs.tag), v(rhs.v) {}
+
+  Scalar(Scalar&& rhs) noexcept : tag(rhs.tag), v(rhs.v) {}
+
+  ~Scalar() {}
+
+  Scalar& operator=(const Scalar& rhs) & {
+    tag = rhs.tag;
+    v = rhs.v;
+    return *this;
+  }
+
+  Scalar& operator=(Scalar&& rhs) & noexcept {
+    tag = rhs.tag;
+    v = rhs.v;
+    return *this;
+  }
+
 #define DEFINE_IMPLICIT_CTOR(type, name)      \
   Scalar(type vv) : Scalar(vv, true) { }
 
