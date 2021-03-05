@@ -6,6 +6,10 @@ import unittest
 
 import torch
 import torch.distributed as c10d
+if not c10d.is_available():
+    print('c10d not available, skipping tests', file=sys.stderr)
+    sys.exit(0)
+
 import torch.multiprocessing as mp
 import torch.nn as nn
 
@@ -29,10 +33,6 @@ except ImportError:
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-if not c10d.is_available():
-    print('c10d not available, skipping tests', file=sys.stderr)
-    sys.exit(0)
 
 
 if NO_MULTIPROCESSING_SPAWN:

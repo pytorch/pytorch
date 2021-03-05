@@ -3,6 +3,10 @@ import tempfile
 from sys import platform
 import torch
 import torch.distributed as c10d
+if not c10d.is_available():
+    print('c10d not available, skipping tests', file=sys.stderr)
+    sys.exit(0)
+
 import time
 from datetime import timedelta
 from typing import List
@@ -15,10 +19,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-if not c10d.is_available():
-    print('c10d not available, skipping tests', file=sys.stderr)
-    sys.exit(0)
 
 if platform == 'darwin':
     LOOPBACK = 'lo0'
