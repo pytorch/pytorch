@@ -159,6 +159,22 @@ TEST(StaticRuntime, IndividualOps_pow) {
   testStaticRuntime(pow_script_sca_ten, args2);
 }
 
+TEST(StaticRuntime, IndividualOps_to) {
+  auto test_to =
+      [](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
+        auto a = at::randn({2, 3});
+        std::vector<IValue> args0{a, b, c, d, e};
+        std::vector<IValue> args1{a, b, c, d};
+        testStaticRuntime(to_script_0, args0);
+        testStaticRuntime(to_script_1, args1);
+      };
+
+  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::Contiguous);
+  test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
+  test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
+  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::Preserve);
+}
+
 TEST(StaticRuntime, LongModel) {
   torch::jit::Module mod = getLongScriptModel();
   auto a = torch::randn({2, 2});
