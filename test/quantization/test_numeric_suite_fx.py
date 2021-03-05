@@ -933,7 +933,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger, should_log_inputs=True)
 
         expected_occurrence = {
             # 3 dequantize function calls from the 3 dtype casts for [x, x, x]
@@ -943,6 +943,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(
             mp_shadows_mq, expected_node_occurrence=expected_occurrence)
+        print(mp_shadows_mq)
 
 class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
     """

@@ -408,7 +408,8 @@ def create_a_shadows_b(
                         prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
                         node_b.name, name_b, ref_name_in,
                         NSSingleResultValuesType.NODE_INPUT.value)
-                elif isinstance(node_b.args[0], list):
+                else:
+                    # logging of inputs which are not lists is not supported yet
                     counter = 0
                     for arg in node_b.args[0]:
                         ref_name_in_cur = ref_name + "_" + str(counter)
@@ -465,10 +466,13 @@ def create_a_shadows_b(
                 else:
                     assert isinstance(dtype_cast_node, list)
                     new_loggers = []
+                    counter = 0
                     for dtype_cast_node_inner in dtype_cast_node:
+                        ref_name_in_cur = ref_name + "_" + str(counter)
+                        counter += 1
                         dtype_cast_logger = _insert_logger_after_node(
                             dtype_cast_node_inner, gm_b, logger_cls, '_ns_logger_a_inp_',
-                            ref_node_name, name_b, ref_name_in,
+                            ref_node_name, name_b, ref_name_in_cur,
                             NSSingleResultValuesType.NODE_INPUT.value)
                         new_loggers.append(dtype_cast_logger)
                     dtype_cast_node = new_loggers

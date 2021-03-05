@@ -220,7 +220,9 @@ class OutputLogger(nn.Module):
         return x
 
     def __repr__(self):
-        return f"OutputLogger(ref_name={self.ref_name}, model_name={self.model_name}, prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name})"
+        return f"""OutputLogger(ref_name={self.ref_name}, model_name={self.model_name},
+prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
+results_type={self.results_type})"""
 
 
 def _prepare_single_model_output(
