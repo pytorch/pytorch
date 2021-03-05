@@ -74,6 +74,19 @@ void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%a, %b, %c, %d, %e, %f):
+        %y0 : Tensor = aten::to(%a, %b, %c, %c)
+        %y1 : Tensor = fb::batch_one_hot_lengths(%y0, %d, %e)
+        %res : Tensor = aten::to(%y1, %f, %c, %c)
+        return (%res))IR";
+  std::string fused_pattern2 = R"IR(
+    graph(%a, %b, %c, %d, %e, %f):
+        %res : Tensor = fb::casted_batch_one_hot_lengths(%a, %d, %e)
+        return (%res))IR";
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
 }
 
 void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
