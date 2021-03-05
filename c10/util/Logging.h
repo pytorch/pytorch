@@ -216,19 +216,19 @@ std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
 #define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...)    \
   do {                                                                  \
     using namespace ::c10::enforce_detail;                              \
-    const auto& CAFFE_ENFORCE_THAT_IMPL_lhsRef = lhs;                   \
-    const auto& CAFFE_ENFORCE_THAT_IMPL_rhsRef = rhs;                   \
-    if (C10_UNLIKELY(!(lhs op rhs))) {                                  \
-      ::c10::ThrowEnforceNotMet(                                        \
-          __FILE__,                                                     \
-          __LINE__,                                                     \
-          expr,                                                         \
-          enforceFailMsgImpl(                                           \
-              CAFFE_ENFORCE_THAT_IMPL_lhsRef,                           \
-              CAFFE_ENFORCE_THAT_IMPL_rhsRef,                           \
-              ##__VA_ARGS__),                                           \
-          this);                                                        \
-    }                                                                   \
+    ([this](const auto& lhs_, const auto& rhs_) {                       \
+      if (C10_UNLIKELY(!(lhs_ op rhs_))) {                              \
+        ::c10::ThrowEnforceNotMet(                                      \
+            __FILE__,                                                   \
+            __LINE__,                                                   \
+            expr,                                                       \
+            enforceFailMsgImpl(                                         \
+                lhs_,                                                   \
+                rhs_,                                                   \
+                ##__VA_ARGS__),                                         \
+            this);                                                      \
+      }                                                                 \
+    })(lhs, rhs);                                                       \
   } while (false)
 } // namespace enforce_detail
 
