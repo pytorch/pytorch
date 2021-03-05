@@ -18,6 +18,13 @@ class Logger {
   // "struct DDPLoggingData" of "torch/c10/util/Logging.h".
   c10::DDPLoggingData get_ddp_logging_data();
 
+  // Stream insertion operator for logging data to stream under
+  // TORCH_DISTRIBUTED_DEBUG.
+  friend std::ostream& operator<<(
+    std::ostream& output,
+    const Logger& logger
+  );
+
   // Set environment variables.
   void set_env_variables();
   // Set parameters stats.
