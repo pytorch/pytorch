@@ -20,7 +20,6 @@ namespace jit {
 
 void PrepareGraphForStaticRuntime(std::shared_ptr<torch::jit::Graph> graph) {
   Inline(*graph);
-  SplitOutPrecomputeOpsForSparseNN(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
@@ -439,9 +438,13 @@ void InferenceModule::init() {
 InferenceModule::InferenceModule(const torch::jit::Module& m)
     : module(m.copy()), graph(nullptr), schema(nullptr) {
   module.eval();
-  module = freeze_module(module);
 
   Method method = module.get_method("forward");
+  graph = method.graph();
+  SplitOutPrecomputeOpsForSparseNN(graph);
+
+  module = freeze_module(module);
+  method = module.get_method("forward");
   graph = method.graph();
 
   const c10::FunctionSchema& s = method.function().getSchema();
