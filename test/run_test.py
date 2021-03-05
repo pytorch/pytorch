@@ -510,7 +510,17 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
     if test_module in RUN_PARALLEL_BLOCKLIST:
-        unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
+        # we must remove '--run-parallel' plus the next arg if it is an int
+        new_args = []
+        skip_i = -1
+        for i,arg in enumerate(unittest_args):
+            if arg.startswith('--run-parallel'):
+                skip_i = i+1
+            elif i == skip_i and arg.isnumeric():
+                pass
+            else:
+                new_args.append(arg)
+        unittest_args = new_args
     if extra_unittest_args:
         assert isinstance(extra_unittest_args, list)
         unittest_args.extend(extra_unittest_args)
