@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <mutex>
 #include <typeinfo>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -47,8 +48,6 @@ struct TORCH_API StopOnSignal {
 class TORCH_API Workspace {
  public:
   typedef std::function<bool(int)> ShouldContinue;
-  typedef CaffeMap<string, unique_ptr<Blob> > BlobMap;
-  typedef CaffeMap<string, unique_ptr<NetBase> > NetMap;
   /**
    * Initializes an empty workspace.
    */
@@ -136,10 +135,11 @@ class TORCH_API Workspace {
   template <class Context>
   void CopyForwardedTensors(const std::unordered_set<std::string>& blobs) {
     for (const auto& blob : blobs) {
-      if (!forwarded_blobs_.count(blob)) {
+      auto it = forwarded_blobs_.find(blob);
+      if (it == forwarded_blobs_.end()) {
         continue;
       }
-      const auto& ws_blob = forwarded_blobs_[blob];
+      const auto& ws_blob = it->second;
       const auto* parent_ws = ws_blob.first;
       auto* from_blob = parent_ws->GetBlob(ws_blob.second);
       CAFFE_ENFORCE(from_blob);
@@ -181,13 +181,19 @@ class TORCH_API Workspace {
     // Then, check the forwarding map, then the parent workspace
     if (blob_map_.count(name)) {
       return true;
-    } else if (forwarded_blobs_.count(name)) {
-      const auto parent_ws = forwarded_blobs_.at(name).first;
-      const auto& parent_name = forwarded_blobs_.at(name).second;
+    }
+
+    auto it = forwarded_blobs_.find(name);
+    if (it != forwarded_blobs_.end()) {
+      const auto parent_ws = it->second.first;
+      const auto& parent_name = it->second.second;
       return parent_ws->HasBlob(parent_name);
-    } else if (shared_) {
+    }
+
+    if (shared_) {
       return shared_->HasBlob(name);
     }
+
     return false;
   }
 
@@ -318,7 +324,7 @@ class TORCH_API Workspace {
 
   static std::shared_ptr<Bookkeeper> bookkeeper();
 
-  BlobMap blob_map_;
+  std::unordered_map<string, unique_ptr<Blob>> blob_map_;
   const string root_folder_;
   const Workspace* shared_;
   std::unordered_map<string, std::pair<const Workspace*, string>>
@@ -326,7 +332,7 @@ class TORCH_API Workspace {
   std::unique_ptr<ThreadPool> thread_pool_;
   std::mutex thread_pool_creation_mutex_;
   std::shared_ptr<Bookkeeper> bookkeeper_;
-  NetMap net_map_;
+  std::unordered_map<string, unique_ptr<NetBase>> net_map_;
 
   C10_DISABLE_COPY_AND_ASSIGN(Workspace);
 };
