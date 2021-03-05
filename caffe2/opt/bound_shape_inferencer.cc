@@ -169,6 +169,8 @@ void BoundShapeInferencer::InferOps(
     InferTile(op);
   } else if (op.type() == "SparseLengthsSumSparseLookup") {
     InferSparseLengthsSumSparseLookup(op);
+  } else if (op.type() == "Softmax") {
+    InferSoftmax(op);
   } else {
     InferCommonOp(op);
   }
@@ -897,6 +899,24 @@ void BoundShapeInferencer::InferTile(const OperatorDef& op) {
       op.output(0),
       setDimTypeWithFirst(TensorBoundShape_DimType_BATCH, ndims),
       ConvertToVec(shape.dims()),
+      it->second.shape.data_type(),
+      false);
+}
+
+void BoundShapeInferencer::InferSoftmax(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.input_size(), 1, op.type(), " must have 1 input");
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+
+  auto it = shape_info_.find(op.input(0));
+  if (it == shape_info_.end()) {
+    LOG(WARNING) << "Didn't find shape info for the input of Softmax";
+    return;
+  }
+
+  CheckAndSetTensorBoundShape(
+      op.output(0),
+      setDimTypeWithFirst(it->second.getDimType(0), it->second.shape.dims_size()),
+      ConvertToVec(it->second.shape.dims()),
       it->second.shape.data_type(),
       false);
 }
