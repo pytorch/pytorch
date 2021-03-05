@@ -87,7 +87,7 @@ struct VISIBILITY_HIDDEN PythonFunctionGuard {
 // NB: Need VISIBILITY_HIDDEN for silencing compiler error,
 // 'torch::jit::JitFutureExceptionhandler' declared with greater visibility
 // than the type of its field.
-struct JitFutureExceptionHandler {
+struct VISIBILITY_HIDDEN JitFutureExceptionHandler {
   JitFutureExceptionHandler() {
     DCHECK(PyGILState_Check());
     const char* kJitFutureExceptionHandlerModule =
