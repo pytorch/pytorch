@@ -151,6 +151,7 @@ bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
     // since it does not call ProcessGroup::finish().
     if (ProcessGroup::Work::recordFunctionEndCallback_) {
       ProcessGroup::Work::recordFunctionEndCallback_();
+      ProcessGroup::Work::recordFunctionEndCallback_ = nullptr;
     }
     return true;
   }
@@ -163,6 +164,7 @@ bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
   // since it does not call ProcessGroup::finish().
   if (ProcessGroup::Work::recordFunctionEndCallback_) {
       ProcessGroup::Work::recordFunctionEndCallback_();
+      ProcessGroup::Work::recordFunctionEndCallback_ = nullptr;
   }
 
   if (!ok) {
