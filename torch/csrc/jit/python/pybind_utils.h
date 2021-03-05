@@ -82,6 +82,11 @@ struct VISIBILITY_HIDDEN PythonFunctionGuard {
   py::function func_;
 };
 
+// Handler that runs to raise appropriate python exceptions in future then()
+// callbacks.
+// NB: Need VISIBILITY_HIDDEN for silencing compiler error,
+// 'torch::jit::JitFutureExceptionhandler' declared with greater visibility
+// than the type of its field.
 struct JitFutureExceptionHandler {
   JitFutureExceptionHandler() {
     DCHECK(PyGILState_Check());
