@@ -28,8 +28,9 @@ def _get_device_index(device: Any, optional: bool = False,
                 raise ValueError('Expected a cuda or cpu device, but got: {}'.format(device))
         elif device.type != 'cuda':
             raise ValueError('Expected a cuda device, but got: {}'.format(device))
-    if not torch.jit.is_scripting() and isinstance(device, torch.cuda.device):
-        return device.idx
+    if not torch.jit.is_scripting():
+        if isinstance(device, torch.cuda.device):
+            return device.idx
     return _torch_get_device_index(device, optional, allow_cpu)
 
 
