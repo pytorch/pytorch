@@ -1480,8 +1480,8 @@ def index_copy(g, self, dim, index, source):
 
 def type_as(g, self, other):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            # We don't know the type of other, bail by emitting ATen
-            return g.op("ATen", self, other, operator_s="type_as")
+        # We don't know the type of other, bail by emitting ATen
+        return g.op("ATen", self, other, operator_s="type_as")
 
     self_dtype = sym_help._try_get_scalar_type(self)
     other_dtype = sym_help._try_get_scalar_type(other)
