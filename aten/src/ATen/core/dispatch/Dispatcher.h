@@ -14,6 +14,11 @@
 
 #include <ATen/core/grad_mode.h>
 
+#if C10_MOBILE
+#define C10_DISPATCHER_INLINE_UNLESS_MOBILE inline
+#else
+#define C10_DISPATCHER_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
+#endif
 namespace c10 {
 
 class TORCH_API OperatorHandle;
@@ -291,31 +296,31 @@ public:
   OperatorHandle& operator=(const OperatorHandle&) = default;
 
   const OperatorName& operator_name() const {
-    return operatorIterator_->op.operator_name();
+    return operatorDef_->op.operator_name();
   }
 
   bool hasSchema() const {
-    return operatorIterator_->op.hasSchema();
+    return operatorDef_->op.hasSchema();
   }
 
   const FunctionSchema& schema() const {
-    return operatorIterator_->op.schema();
+    return operatorDef_->op.schema();
   }
 
   const std::string& debug() const {
-    return operatorIterator_->op.debug();
+    return operatorDef_->op.debug();
   }
 
   std::string dumpState() const {
-    return operatorIterator_->op.dumpState();
+    return operatorDef_->op.dumpState();
   }
 
   std::string dumpComputedTable() const {
-    return operatorIterator_->op.dumpComputedTable();
+    return operatorDef_->op.dumpComputedTable();
   }
 
   void checkInvariants() const {
-    return operatorIterator_->op.checkInvariants();
+    return operatorDef_->op.checkInvariants();
   }
 
   template<class FuncType>
@@ -327,7 +332,7 @@ public:
     // in core library this won't happen, because all the static registrations
     // will be done by the time a typed() handle is acquired.
 #if !defined C10_MOBILE
-    operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
+    operatorDef_->op.assertSignatureIsCorrect<FuncType>();
 #endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
@@ -342,10 +347,23 @@ public:
 
 private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
-  : operatorIterator_(std::move(operatorIterator)) {}
+  : operatorDef_(&*operatorIterator), operatorIterator_(operatorIterator)  {}
   friend class Dispatcher;
   template<class> friend class TypedOperatorHandle;
 
+  // Storing a direct pointer to the OperatorDef even though we
+  // already have the iterator saves an instruction in the critical
+  // dispatch path. The iterator is effectively a
+  // pointer-to-std::list-node, and (at least in libstdc++'s
+  // implementation) the element is at an offset 16 bytes from that,
+  // because the prev/next pointers come first in the list node
+  // struct. So, an add instruction would be necessary to convert from the
+  // iterator to an OperatorDef*.
+  Dispatcher::OperatorDef* operatorDef_;
+
+  // We need to store this iterator in order to make
+  // Dispatcher::cleanup() fast -- it runs a lot on program
+  // termination (and presuambly library unloading).
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
@@ -377,7 +395,7 @@ public:
 
 private:
   explicit TypedOperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
-  : OperatorHandle(std::move(operatorIterator)) {}
+  : OperatorHandle(operatorIterator) {}
   friend class OperatorHandle;
 };
 
@@ -396,7 +414,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
   if (C10_UNLIKELY(guard.isActive())) {
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-    if (op.operatorIterator_->op.isObserved()) {
+    if (op.operatorDef_->op.isObserved()) {
       if (guard.needsInputs()) {
         runRecordFunction(guard, op, dispatchKey, impl::boxArgs(args...));
       } else {
@@ -409,15 +427,15 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
 }
 
 template<class Return, class... Args>
-C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
+C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
+  auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(
       DispatchKeySet::FULL,
       args...
     );
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
+  const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet.highestPriorityTypeId());
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // By default, when there're no high-frequency or non-sampled callbacks,
   // RecordFunction is pre-sampled as a perf optimization;
@@ -437,13 +455,13 @@ template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
+  const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
   return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const auto& entry = op.operatorIterator_->op;
+  const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -471,7 +489,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 
 inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const auto& entry = op.operatorIterator_->op;
+  const auto& entry = op.operatorDef_->op;
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
   return kernel.callBoxed(op, dispatchKeySet, stack);
 }
