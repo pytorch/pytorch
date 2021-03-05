@@ -1,6 +1,6 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 
-from typing import Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
 from contextlib import contextmanager
 import torch
@@ -8,6 +8,12 @@ import keyword
 import re
 import builtins
 import math
+import warnings
+
+
+if TYPE_CHECKING:
+    from .graph_module import GraphModule
+
 
 # Mapping of builtins to their `typing` equivalent.
 _origin_type_map = {
@@ -45,6 +51,7 @@ _register_custom_builtin('torch', 'import torch', torch)
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
+
 
 def _snake_case(s: str) -> str:
     """
@@ -253,7 +260,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self):
+    def __init__(self, owning_module: Optional["GraphModule"] = None):
         """
         Construct an empty Graph.
         """
@@ -262,6 +269,18 @@ class Graph:
         self._insert = self._root.prepend
         self._len = 0
         self._graph_namespace = _Namespace()
+        self._owners = 0
+        self._owning_module = owning_module
+
+    @property
+    def owning_module(self):
+        return self._owning_module
+
+    @owning_module.setter
+    def owning_module(self, mod: Optional["GraphModule"]):
+        if mod:
+            self._owning_module = mod if not self._owners else None
+            self._owners += 1
 
     @property
     def nodes(self) -> _node_list:
@@ -480,6 +499,37 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
         """
+        def _get_attr_reference_exists(mod: torch.nn.Module, qualified_name: str) -> bool:
+            module_path, _, name = qualified_name.rpartition(".")
+
+            submod: Optional[torch.nn.Module] = mod.get_submodule(module_path)
+
+            if not submod:
+                return False
+
+            if not hasattr(submod, name):
+                return False
+
+            res = getattr(submod, name)
+
+            if (not isinstance(res, torch.nn.Module)
+                    and not isinstance(res, torch.nn.Parameter)
+                    and name not in submod._buffers):
+                return False
+
+            return True
+
+        if (self.owning_module and 
+                not _get_attr_reference_exists(self.owning_module, qualified_name)):
+            warnings.warn("Attempted to insert a get_attr Node with no "
+                          "underlying reference in the owning "
+                          "GraphModule! Call "
+                          "GraphModule.add_submodule to add the "
+                          "necessary submodule, "
+                          "GraphModule.add_parameter to add the "
+                          "necessary Parameter, or "
+                          "nn.Module.register_buffer to add the "
+                          "necessary buffer")
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
     def call_module(self,
@@ -517,6 +567,13 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
+        if (self.owning_module and 
+                self.owning_module.get_submodule(module_name) is not None):
+            warnings.warn("Attempted to insert a get_attr Node with no "
+                          "underlying reference in the owning "
+                          "GraphModule! Call "
+                          "GraphModule.add_submodule to add the "
+                          "necessary submodule")
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
     def call_method(self,
@@ -897,19 +954,14 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         print(tabulate(node_specs,
               headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
-    def lint(self, root : Optional[torch.nn.Module] = None):
+    def lint(self):
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
         - Checks Nodes have correct ownership (owned by this graph)
         - Checks Nodes appear in topological order
-        - If ``root`` is provided, checks that targets exist in ``root``
-
-        Args:
-
-            root (Optional[torch.nn.Module]): The root module with which to check
-                for targets. This is equivalent to the ``root`` argument that is
-                passed when constructing a ``GraphModule``.
+        - If this Graph has an owning GraphModule, checks that targets 
+        exist in that GraphModule
         """
 
         # Check topo order
@@ -939,12 +991,12 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             seen_names.add(node.name)
 
         # Check targets are legit
-        if root:
+        if self.owning_module:
             for node in self.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
-                    m_itr = root
+                    m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
                         m_itr = getattr(m_itr, atom, None)
                         if m_itr is None:
