@@ -362,6 +362,7 @@ struct DDPLoggingData {
   std::string gloo_device_transport = "";
   std::string nccl_socket_ifname = "";
   std::string nccl_blocking_wait = "";
+  std::string nccl_async_error_handling = "";
   std::string nccl_debug = "";
   std::string nccl_nthreads = "";
   std::string nccl_ib_timeout = "";
@@ -440,6 +441,7 @@ struct DDPLoggingData {
         "nccl_socket_ifname: ", ddp_logging_data.nccl_socket_ifname,
         " nccl_blocking_wait: ", ddp_logging_data.nccl_blocking_wait,
         " nccl_debug: ", ddp_logging_data.nccl_debug,
+        " nccl_async_error_handling: ", ddp_logging_data.nccl_async_error_handling,
         " nccl_nthreads: ", ddp_logging_data.nccl_nthreads,
         " nccl_ib_timeout: ", ddp_logging_data.nccl_ib_timeout
       );
