@@ -1618,12 +1618,12 @@ TEST(LLVM, SimpleParallel) {
     KernelScope kernel_scope;
     const int M = 4;
     const int N = 6;
-    Tensor* tensor = Compute(
+    Tensor* f = Compute(
         "f", {{M, "m"}, {N, "n"}}, [](const VarHandle& m, const VarHandle& n) {
           return cast<float>(m + n);
         });
-    LoopNest loop_nest({tensor});
-    auto const& loops = loop_nest.getLoopStmtsFor(tensor);
+    LoopNest loop_nest({f});
+    auto const& loops = loop_nest.getLoopStmtsFor(f);
     For* m = loops[0];
     For* n = loops[1];
     if (test_cfg & 0x1) {
@@ -1634,8 +1634,7 @@ TEST(LLVM, SimpleParallel) {
     }
     loop_nest.prepareForCodegen();
     Stmt* stmt = loop_nest.root_stmt();
-    Placeholder f_buf(BufHandle(tensor->buf()));
-    LLVMCodeGen cg(stmt, {f_buf});
+    LLVMCodeGen cg(stmt, {f});
 
     PaddedBuffer<float> f_v(M, N, "f_v");
     std::vector<void*> args({f_v.data()});
@@ -1709,13 +1708,9 @@ TEST(LLVM, CompositeParallel) {
         loop_list[i]->set_parallel();
       }
     }
-    Placeholder t1_buf(BufHandle(t1->buf()));
-    Placeholder t2_buf(BufHandle(t2->buf()));
-    Placeholder t3_buf(BufHandle(t3->buf()));
-    Placeholder t4_buf(BufHandle(t4->buf()));
     loop_nest.prepareForCodegen();
     Stmt* stmt = loop_nest.root_stmt();
-    LLVMCodeGen cg(stmt, {t4_buf});
+    LLVMCodeGen cg(stmt, {t4});
 
     PaddedBuffer<float> t4_v(M, N, "t4_v");
     std::vector<void*> args({t4_v.data()});

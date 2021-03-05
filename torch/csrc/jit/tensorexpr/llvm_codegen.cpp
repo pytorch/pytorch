@@ -243,8 +243,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   void optimize(llvm::Module& M);
 };
 
-// TODO: more extensive testing.
-// TODO: benchmarking.
 typedef void (*ParallelCallee)(int index, int8_t* packed_data);
 void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
   // TODO: preserve the func type.
@@ -494,7 +492,6 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
 
 void LLVMCodeGenImpl::emitKernel(
     Stmt* stmt,
-
     const std::vector<llvm::Type*>& params) {
   // Set insert point to the real function.
   bb_ = llvm::BasicBlock::Create(getContext(), "entry", fn_);
@@ -1242,8 +1239,7 @@ void LLVMCodeGenImpl::processParallelFor(const For* v) {
   v->body()->accept(&var_finder);
   const auto& vars = var_finder.vars();
   for (auto& var : vars) {
-    llvm::Value* value = varToValue(var);
-    if (value) {
+    if (llvm::Value* value = varToValue(var)) {
       body_arg_vars.push_back(var);
       body_caller_vals.push_back(value);
     }
