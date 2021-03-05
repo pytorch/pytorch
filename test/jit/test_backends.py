@@ -63,7 +63,7 @@ class BasicModule(torch.nn.Module):
 
 
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
-                "Non-portable load_library call used in test")
+                 "Non-portable load_library call used in test")
 class JitBackendTestCase(JitTestCase):
     """
     A common base class for JIT backend tests that contains common utility
