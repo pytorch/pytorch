@@ -46,6 +46,7 @@ class FunctionCounts(object):
     """
     _data: Tuple[FunctionCount, ...]
     inclusive: bool
+    truncate_rows: bool = True
 
     # For normal use, torch._tensor_str.PRINT_OPTS.linewidth determines
     # the print settings. This is simply to allow hermetic unit tests.
@@ -61,7 +62,7 @@ class FunctionCounts(object):
     def __getitem__(self, item: Any) -> "Union[FunctionCount, FunctionCounts]":
         data: Union[FunctionCount, Tuple[FunctionCount, ...]] = self._data[item]
         return (
-            FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive)
+            FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
             if isinstance(data, tuple) else data
         )
 
@@ -80,7 +81,7 @@ class FunctionCounts(object):
                 fn = fn[:left_len] + " ... " + fn[-(fn_str_len - left_len - 5):]
             lines.append(f"  {c:>{count_len}}  {fn}")
 
-        if len(lines) > 18:
+        if self.truncate_rows and len(lines) > 18:
             lines = lines[:9] + ["...".rjust(count_len + 2)] + lines[-9:]
 
         if not self.inclusive:
@@ -785,7 +786,7 @@ class _ValgrindWrapper(object):
         pass_baseline = (
             "callgrind_bindings._valgrind_toggle()\n"
             f"{block_stmt('pass')}\n"
-            "callgrind_bindings._valgrind_dump_stats()"
+            "callgrind_bindings._valgrind_toggle_and_dump_stats()"
         )
 
         return textwrap.dedent(r"""
