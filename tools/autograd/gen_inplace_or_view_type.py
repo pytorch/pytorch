@@ -1,6 +1,7 @@
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 from tools.codegen.code_template import CodeTemplate
+from tools.codegen.context import with_native_function
 
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
