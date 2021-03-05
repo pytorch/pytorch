@@ -369,7 +369,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
   raw_output_vars.reserve(num_outputs);
   size_t num_tensor_outputs = 0;
   for(int i = 0; i < num_outputs; ++i){
-    PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
+    PyObject* obj = PyTuple_GetItem(raw_output, i);
     // Only process tensors as outputs for autograd purposes.
     if (THPVariable_Check(obj)) {
       raw_output_vars.push_back(((THPVariable*)obj)->cdata);
@@ -382,19 +382,17 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
 
   size_t tensor_output_idx = 0;
   for (int i = 0; i < num_outputs; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
-    bool is_tensor = THPVariable_Check(obj);
-
-    if (is_executable && is_tensor) {
-      self->output_info.emplace_back(wrapped_outputs[tensor_output_idx]);
-    }
+    PyObject* obj = PyTuple_GetItem(raw_output, i);
 
     // Keep the non-tensor outputs as is.
-    if (!is_tensor) {
+    if (!THPVariable_Check(obj)) {
+      if (is_executable) {
+        self->output_info.emplace_back(wrapped_outputs[tensor_output_idx]);
+      }
       Py_INCREF(obj);
-      PyTuple_SET_ITEM(outputs, i, obj);
+      PyTuple_SetItem(outputs, i, obj);
     } else {
-      PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(wrapped_outputs[tensor_output_idx++]));
+      PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_outputs[tensor_output_idx++]));
     }
   }
 }
@@ -569,7 +567,7 @@ static void _trace_post_record(
   for (int i = 0; i < num_outputs; ++i) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
-      auto var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
+      auto var = (THPVariable*)obj;
       Value* value = node->outputs()[i];
       if (var->cdata.defined()) {
         value->inferTypeFrom(var->cdata);
