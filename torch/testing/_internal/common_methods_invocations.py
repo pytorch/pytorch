@@ -1946,8 +1946,12 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            test_complex_grad=False,
            test_inplace_grad=False,
-           supports_tensor_out=True,
-           ),
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/53361
+               SkipInfo('TestGradients', 'test_fn_gradgrad',
+                        device_type='cuda',
+                        dtypes=[torch.float64]),
+           )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
