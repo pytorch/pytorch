@@ -1414,6 +1414,9 @@ AT_ERROR("inverse: MAGMA library not found in "
     self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
     ipiv_array[i] = &ipiv_data[i * n];
   }
+  // magmaLuBatched leaves ipiv_data values unwritten for singular matrices.
+  // Initialize to avoid memory access violations inside magma kernels (gh-51930).
+  std::fill_n(ipiv_data, batch_size * n, 1);
 
   MAGMAQueue magma_queue(self.get_device());
   magmaLuBatched<scalar_t>(

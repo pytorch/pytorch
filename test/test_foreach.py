@@ -211,13 +211,18 @@ class TestForeach(TestCase):
 
     # Separate test for abs due to a lot of special cases
     # Absolute value of a complex number a + bj is defined as sqrt(a^2 + b^2), i.e. a floating point
-    @dtypes(*(torch.testing.floating_and_complex_types_and(torch.bfloat16, torch.half)))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_abs(self, device, dtype):
         for N in N_values:
             tensors1 = self._get_test_data(device, dtype, N)
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
             control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+
+            if dtype == torch.bool and self.device_type == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, r"not implemented for"):
+                    expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
+                continue
 
             expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = torch._foreach_abs(tensors1)
