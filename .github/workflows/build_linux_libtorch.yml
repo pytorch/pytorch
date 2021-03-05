@@ -54,16 +54,6 @@ jobs:
         with:
           path: pytorch
           submodules: recursive
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
       - name: Clone pytorch/builder
         uses: actions/checkout@v2
         with:
