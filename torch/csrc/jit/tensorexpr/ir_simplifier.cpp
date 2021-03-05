@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <limits>
 
 namespace torch {
 namespace jit {
@@ -1718,198 +1717,246 @@ const Expr* polyGCD(const Polynomial* poly) {
   return getImmediateByType(poly->dtype(), GCD);
 }
 
-// Searches the polynomial for Terms that can be merged in the Round + Mod
-// pattern: (x/y) * y + x % y => RoundOff(x,y) + Mod(x, y) => x.
+// A ModRound is a div-mod-mul in which the divisor in div and multiplier in mul
+// are identical. Return (scalar, denominator, divisor, mod_divisor). Example:
+// ((t/7)%9)*7 -> (1, t, 7, 9)
+std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> modRound(
+    const Term* e) {
+  const Div* div{nullptr};
+  const Mod* mod{nullptr};
+  const Expr* denom{nullptr};
+  const Expr* divisor = new IntImm(1);
+  const Expr* mod_divisor{nullptr};
+  const Expr* multiplier = e->scalar();
+  const Expr* scalar = new IntImm(1);
+  const Expr* other(nullptr);
+
+  for (auto* m : e->variables()) {
+    if (m->expr_type() == IRNodeType::kMod) {
+      // TODO: currently only identify terms with one variable being mod; it is
+      // possible to extend this if we have to handle terms like (t/(x%2 * y) %
+      // z) * (x%2 *y).
+      if (!mod) {
+        mod = dynamic_cast<const Mod*>(m);
+      } else {
+        return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+      }
+    } else {
+      // All non-mod vairables are considered as part of the multiplier.
+      multiplier = new Mul(multiplier, m);
+    }
+  }
+  multiplier = IRSimplifier::simplify(multiplier);
+
+  if (!mod) {
+    return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+  }
+
+  mod_divisor = IRSimplifier::simplify(mod->rhs());
+  other = mod->lhs();
+
+  if (!(div = dynamic_cast<const Div*>(other))) {
+    return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+  }
+
+  divisor = IRSimplifier::simplify(div->rhs());
+  other = div->lhs();
+
+  // Deny cases in which divisor=1.
+  if (divisor->isConstant() && immediateEquals(divisor, 1)) {
+    return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+  }
+
+  // Deny cases in which divisor!=multiplier.
+  HashProvider& hasher = e->hasher();
+  if (hasher.hash(divisor) != hasher.hash(multiplier)) {
+    if (divisor->isConstant() && multiplier->isConstant()) {
+      // If both are scalar we may be able to find a common factor which becomes
+      // 'scalar' of the term.
+      if (immediateEquals(evaluateOp(new Mod(multiplier, divisor)), 0)) {
+        Expr* c = evaluateOp(new Div(multiplier, divisor));
+        scalar = evaluateOp(new Mul(c, scalar));
+      } else {
+        return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+      }
+    } else {
+      return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+    }
+  }
+
+  denom = IRSimplifier::simplify(other);
+
+  return std::make_tuple(scalar, denom, divisor, mod_divisor);
+}
+
+// Search the polynomial for Terms that can be merged in
+// (1) Round + Mod pattern: (x/y) * y + x % y => RoundOff(x,y) + Mod(x, y) => x
+// (2) Mod round + Mod pattern: (x/y % z)*y + x%y => ModRound(x, y, z) + Mod(x,
+// y) => x % (y*z)
 const Expr* simplifyRoundModPattern(const Polynomial* poly) {
-  std::set<const Term*> rounds;
-  std::set<const Term*> mods;
+  std::vector<const Term*> rounds;
+  std::vector<const Term*> mods;
+  std::vector<const Term*> mod_rounds;
   std::vector<const Term*> others;
 
-  // Split out the RoundOffs and Mod operations so we can inspect.
+  // Split out the Mod, ModRounds and RoundOffs operations so we can inspect.
   for (auto* c : poly->variables()) {
     if (c->variables().size() > 1) {
-      others.push_back(c);
+      std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> dmm =
+          modRound(c);
+      if (!std::get<0>(dmm)) {
+        others.push_back(c);
+      } else {
+        mod_rounds.push_back(c);
+      }
       continue;
     }
 
     const Expr* e = c->variables()[0];
 
     if (e->expr_type() == IRNodeType::kRoundOff) {
-      rounds.insert(c);
+      rounds.push_back(c);
     } else if (e->expr_type() == IRNodeType::kMod) {
-      mods.insert(c);
+      std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> dmm =
+          modRound(c);
+      if (!std::get<0>(dmm)) {
+        mods.push_back(c);
+      } else {
+        mod_rounds.push_back(c);
+      }
     } else {
       others.push_back(c);
     }
   }
 
-  // Can't continue without at least one RoundOff and one Mod.
-  if (rounds.empty() || mods.empty()) {
+  // Can't continue without at least one RoundOff/ModRound and one Mod.
+  if ((rounds.empty() && mod_rounds.empty()) || mods.empty()) {
     return nullptr;
   }
 
   HashProvider& hasher = poly->hasher();
   bool didAnything = false;
+  std::vector<const Term*> mods_merged;
+  bool repeat = true;
+  // Repeat merging terms till there are no Mods or the terms cannot be merged
+  // any further.
+  while (!mods.empty() && repeat) {
+    repeat = false;
+    for (std::vector<const Term*>::iterator mit = mods.end() - 1;
+         mit != mods.begin() - 1;
+         mit--) {
+      const Term* m = *mit;
+      const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
+      CHECK(mod);
+      const Expr* mod_lhs = IRSimplifier::simplify(mod->lhs());
+      const Expr* mod_rhs = IRSimplifier::simplify(mod->rhs());
+      bool merged = false;
+      for (std::vector<const Term*>::iterator mrit = mod_rounds.end() - 1;
+           mrit != mod_rounds.begin() - 1;
+           mrit--) {
+        const Term* mr = *mrit;
+        std::tuple<const Expr*, const Expr*, const Expr*, const Expr*>
+            mod_round = modRound(mr);
+        const Expr* scalar = std::get<0>(mod_round);
+        const Expr* denom = std::get<1>(mod_round);
+        const Expr* divisor = std::get<2>(mod_round);
+        const Expr* mod_divisor = std::get<3>(mod_round);
+        CHECK(denom);
 
-  for (auto* r : rounds) {
-    bool merged = false;
-    const RoundOff* roundoff = dynamic_cast<const RoundOff*>(r->variables()[0]);
-    CHECK(roundoff);
+        // TODO: for now don't attempt partial factorization of this
+        // optimization. E.g. it's possible to do: 2 * (x/y%z) * y + (x%y) =>
+        // x%(y*z) + (x/y%z) * y
+        if (!immediateEquals(evaluateOp(new Sub(scalar, m->scalar())), 0)) {
+          continue;
+        }
+        // Valid optimization if mod LHS matches denom and mod RHS matches
+        // divisor.
+        if (hasher.hash(denom) == hasher.hash(mod_lhs) &&
+            hasher.hash(divisor) == hasher.hash(mod_rhs)) {
+          const Term* merged_m = new Term(
+              hasher,
+              scalar,
+              IRSimplifier::simplify(
+                  new Mod(denom, new Mul(divisor, mod_divisor))));
+          mods_merged.push_back(merged_m);
+          merged = true;
+          repeat = true;
+          didAnything = true;
+          mods.erase(mit);
+          mod_rounds.erase(mrit);
+          break;
+        }
+      }
 
-    for (auto* m : mods) {
-      // TODO: for now don't attempt partial factorization of this optimization.
-      // E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x + (x/y) * y but
-      // unsure thats actually much better, particulary with CSE.
-      if (!immediateEquals(evaluateOp(new Sub(r->scalar(), m->scalar())), 0)) {
+      if (merged) {
         continue;
       }
 
-      const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
-      CHECK(mod);
+      for (std::vector<const Term*>::iterator rit = rounds.end() - 1;
+           rit != rounds.begin() - 1;
+           rit--) {
+        const Term* r = *rit;
+        const RoundOff* roundoff =
+            dynamic_cast<const RoundOff*>(r->variables()[0]);
+        CHECK(roundoff);
 
-      // Valid optimization if LHS and RHS are equal for both.
-      if (hasher.hash(roundoff->lhs()) == hasher.hash(mod->lhs()) &&
-          hasher.hash(roundoff->rhs()) == hasher.hash(mod->rhs())) {
-        others.push_back(new Term(hasher, r->scalar(), roundoff->lhs()));
-        merged = true;
-        didAnything = true;
-        mods.erase(m);
-        break;
+        // TODO: for now don't attempt partial factorization of this
+        // optimization. E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x +
+        // (x/y) * y but unsure thats actually much better, particulary with
+        // CSE.
+        if (!immediateEquals(
+                evaluateOp(new Sub(r->scalar(), m->scalar())), 0)) {
+          continue;
+        }
+        const Expr* round_lhs =
+            IRSimplifier::simplify(new Mul(r->scalar(), roundoff->lhs()));
+        const Expr* round_rhs = IRSimplifier::simplify(roundoff->rhs());
+        // Valid optimization if LHS and RHS are equal for both.
+        if (hasher.hash(round_lhs) == hasher.hash(mod_lhs) &&
+            hasher.hash(round_rhs) == hasher.hash(mod_rhs)) {
+          const Term* merged_r = new Term(hasher, new IntImm(1), round_lhs);
+          others.push_back(merged_r);
+          merged = true;
+          didAnything = true;
+          mods.erase(mit);
+          rounds.erase(rit);
+          break;
+        }
       }
+
+      // If we didn't merge, move out the Mod.
+      if (!merged) {
+        others.push_back(m);
+        mods.erase(mit);
+      }
+
+    } // end of for-loop
+
+    // Add newly generated Mods for merging opportunities in the next iteration.
+    if (!mods_merged.empty()) {
+      mods.insert(mods.end(), mods_merged.begin(), mods_merged.end());
+      mods_merged.clear();
     }
 
-    // If we didn't merge, keep the roundoff.
-    if (!merged) {
-      others.push_back(r);
-    }
-  }
+  } // end of while-loop
 
   // If we made no changes, just exit.
   if (!didAnything) {
     return nullptr;
   }
 
-  // Keep remaining Mods.
+  // Keep remaining Mods, ModRounds and RoundOffs.
   for (auto* m : mods) {
     others.push_back(m);
   }
+  for (auto* mr : mod_rounds) {
+    others.push_back(mr);
+  }
+  for (auto* r : rounds) {
+    others.push_back(r);
+  }
 
   return new Polynomial(hasher, poly->scalar(), others);
-}
-
-// Identify div-mod-mul terms and split the term into (base, divisor, mod_divisor, multiplier).
-// Example:  ((t/7)%9)*7 -> (t, 7, 9, 7)
-std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> divModMulTerm(const Term* e){
-  const Div* div{nullptr};
-  const Mod* mod{nullptr};
-  const Expr* base{nullptr};
-  const Expr* divisor{nullptr};
-  const Expr* mod_divisor{nullptr};
-  const Expr* multiplier(nullptr);
-  const Expr* other(nullptr);
-
-  if (e->variables().size()==1) {
-      multiplier = e->scalar();
-      other = e->variables()[0];
-
-      // roundoff
-      if (const RoundOff* roundoff = dynamic_cast<const RoundOff*>(other)) {
-        base = roundoff->lhs();
-        divisor = roundoff->rhs();
-        mod_divisor = new IntImm(std::numeric_limits<int>::max());
-        multiplier = roundoff->rhs();
-        return std::make_tuple(base, divisor, mod_divisor, multiplier);
-      }
-
-      // identify multiplier and mod_divisor
-      if ((mod = dynamic_cast<const Mod*>(other))){
-          mod_divisor = mod->rhs();
-          other = mod->lhs();
-      }else{
-          return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
-      }
-
-      // identify divisor
-      if ((div = dynamic_cast<const Div*>(other))){
-          divisor = div->rhs();
-          other = div->lhs();
-      }else{
-          divisor = new IntImm(1);
-      }
-
-      // base
-      base = other;
-      return std::make_tuple(base, divisor, mod_divisor, multiplier);
-  }
-
-  return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
-}
-
-// Searches int polynomials that can be simplified to the form of 1-d index access from the form of N-d indices access for flattened buf.
-// Pattern: dims: (k1, k2, ..., kn), t is in (0, k1*k2*...*kn),
-// t/(kx*k2*...*kn-1)*(kx*k2*...*kn-1) +
-// t/(kx*k2*...*kn-2) % kn-1 * (kx*k2*...*kn-2) +
-// ... +
-// t/(k1*k2) % k3 * (k1*k2) +
-// t/k1 % k2 * k1 +
-// t%k1
-// => t.
-const Expr* simplifyNdIndicesPattern(const Polynomial* poly) {
-  std::vector<std::tuple<int, int>> pattern;
-
-  HashProvider& hasher = poly->hasher();
-  // Expr for 't' in the pattern
-  const Expr* base = nullptr;
-  for (auto* c : poly->variables()) {
-    if (c->variables().size() >= 1) {
-      auto [ _base, _div, _mod, _mul ] = divModMulTerm(c);
-      // If one Term in the input polynomial is not a div-mod-mul then return.
-      if (! _base) {
-        return nullptr;
-      }
-      if(! base) {
-        base = _base;
-      // Check: the base of all div-mod-mul terms have to be equal.
-      }else if(hasher.hash(base) != hasher.hash(_base)){
-        return nullptr;
-      }
-      // Check: the divisor and multiplier in the div-mod-mul term has to be equal.
-      if(hasher.hash(_div) != hasher.hash(_mul)){
-        return nullptr;
-      }
-      // Extract the values of the divisor and mod_divisor.
-      int div=0, mod=0;
-      if(const IntImm* n = dynamic_cast<const IntImm*>(_div)){
-          div=n->value();
-      }
-      if(const IntImm* m = dynamic_cast<const IntImm*>(_mod)){
-          mod=m->value();
-      }
-      pattern.push_back(std::make_tuple(div, mod));
-    }
-  }
-
-  // Sort the (divisor, mod_divisor) tuples based on the value of the divisor.
-  std::sort(pattern.begin(), pattern.end(), [](std::tuple<int, int> a, std::tuple<int, int> b) {return std::get<0>(a) < std::get<0>(b);});
-
-  // Check: the sorted tuples have to satify the pattern listed in the comments before this function.
-  int k=1, kn=1;
-  for (std::tuple<int, int> c : pattern){
-    k *= kn;
-    int d=std::get<0>(c), m=std::get<1>(c);
-    if (k!=d){
-        return nullptr;
-    }
-    kn = m;
-  }
-
-  if(kn != std::numeric_limits<int>::max()){
-      return nullptr;
-  }
-
-  // All checks pass. Simplify the polynominal into one term: 'base'.
-  const Term* t = new Term(hasher, new IntImm(1), {base});
-  return new Polynomial(hasher, poly->scalar(), t);
 }
 
 // Trivially factorize terms by GCD of scalar components.
@@ -1942,13 +1989,6 @@ const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
 const Expr* TermExpander::mutate(const Polynomial* v) {
   if (v->variables().empty()) {
     return v->scalar();
-  }
-
-  // If this Polynomial is in the form of N-d indices access for flattend buf:
-  // simplifiy it to the form of 1-d index access.
-  // This currently only works for constant indices.
-  if (const Expr* simplified = simplifyNdIndicesPattern(v)) {
-    return simplified->accept_mutator(this);
   }
 
   // If this Polynomial can be factorized: do it, then expand the result.

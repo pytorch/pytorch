@@ -2601,7 +2601,7 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
 
   {
     // Partial Factorization.
-    // 32 * (x/y) + 4 * (x % y) => 4 * x.
+    // 32 * (x/8) + 4 * (x % 8) => 4 * x.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     ExprHandle body = ExprHandle(32) * (x / 8) + ExprHandle(4) * (x % 8);
@@ -2691,12 +2691,266 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
         ExprHandle(16) * ((z + ExprHandle(512) * y) / ExprHandle(16));
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "x");
-    IS_NODE_WITH_NAME(Add, add->rhs(), add2);
+    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_NODE_WITH_NAME(Add, add->lhs(), add2);
     IS_VAR_WITH_NAME(add2->lhs(), "z");
     IS_NODE_WITH_NAME(Mul, add2->rhs(), mul);
     IS_IMM_WITH_VAL(Int, mul->lhs(), 512);
     IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+}
+
+TEST(Simplify, SimplifyModRoundModPattern) {
+  KernelScope kernel_scope;
+
+  {
+    // t/7 % 9 * 7 + t % 7 => t%63
+    VarHandle t("t", kInt);
+    ExprHandle body =
+        (t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) + t % ExprHandle(7);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // 2*t/7 % 9 * 7 + 2*t % 7 => 2*t % 63
+    VarHandle t("t", kInt);
+    ExprHandle body =
+        (ExprHandle(2) * t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) +
+        ExprHandle(2) * t % ExprHandle(7);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Mul, mod->lhs(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t/2 /7 % 9 * 7 + t/2 % 7 => t/2 % 63
+    VarHandle t("t", kInt);
+    ExprHandle body =
+        (t / ExprHandle(2) / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) +
+        t / ExprHandle(2) % ExprHandle(7);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Div, mod->lhs(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, div->rhs(), 2);
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t/x % y * x + t % x => t%(x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (t / x % y) * x + t % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // k*t/x % y * x + k*t % x => k*t%(x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = (k * t / x % y) * x + k * t % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Mul, mod->lhs(), mul1);
+    IS_VAR_WITH_NAME(mul1->lhs(), "t");
+    IS_VAR_WITH_NAME(mul1->rhs(), "k");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul2);
+    IS_VAR_WITH_NAME(mul2->lhs(), "x");
+    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+
+  {
+    // t/k/x % y * x + t/k % x => t/k%(x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = (t / k / x % y) * x + t / k % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Div, mod->lhs(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "t");
+    IS_VAR_WITH_NAME(div->rhs(), "k");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Sanity checking we wont do the optimization on floats.
+    VarHandle x("x", kFloat);
+    VarHandle y("y", kFloat);
+    VarHandle z("z", kFloat);
+    ExprHandle body = ((x / y % z) * y) + (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mul, add->lhs(), mul);
+    IS_NODE_WITH_NAME(Mod, mul->lhs(), mod);
+    IS_NODE_WITH_NAME(Div, mod->lhs(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "x");
+    IS_VAR_WITH_NAME(div->rhs(), "y");
+    IS_VAR_WITH_NAME(mod->rhs(), "z");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod2);
+    IS_VAR_WITH_NAME(mod2->lhs(), "x");
+    IS_VAR_WITH_NAME(mod2->rhs(), "y");
+  }
+}
+
+TEST(Simplify, SimplifyModRoundModPatternFactorization) {
+  KernelScope kernel_scope;
+
+  {
+    // 2 * (t /7 % 9 * 7) + 2 * (t % 7) => 2 * (t % 63)
+    VarHandle t("t", kInt);
+    ExprHandle body =
+        ExprHandle(2) * ((t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7)) +
+        ExprHandle(2) * (t % ExprHandle(7));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Mod, mul->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t /7 % 9 * 14 + 2* (t % 7) => 2* (t % 63)
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(14) +
+        ExprHandle(2) * (t % ExprHandle(7));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Mod, mul->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t/(7*3) % 9 * 7*3 + t % (7*3) => t % 189
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / (ExprHandle(3) * ExprHandle(7)) % ExprHandle(9)) *
+            ExprHandle(7) * ExprHandle(3) +
+        t % (ExprHandle(7) * ExprHandle(3));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 189);
+  }
+
+  {
+    // 2*(t/x % y * x) + 2*(t % x) => 2*(t%(x*y))
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body =
+        ExprHandle(2) * ((t / x % y) * x) + ExprHandle(2) * (t % x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Mod, mul->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul2);
+    IS_VAR_WITH_NAME(mul2->lhs(), "x");
+    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+}
+
+TEST(Simplify, SimplifyModRoundModPatternMultivar) {
+  KernelScope kernel_scope;
+
+  {
+    // t/7 % 9 * 7 + t % 7 + t => t % 63 + t
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) +
+        t % ExprHandle(7) + t;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+    IS_VAR_WITH_NAME(add->lhs(), "t");
+  }
+
+  {
+    // t/7 % 9 * 7 + t/8 % 9 * 8 + t % 7 + t % 8  => t % 63 + t % 72
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) +
+        (t / ExprHandle(8) % ExprHandle(9)) * ExprHandle(8) +
+        t % ExprHandle(7) + t % ExprHandle(8);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mod, add->lhs(), mod1);
+    IS_VAR_WITH_NAME(mod1->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod1->rhs(), 63);
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod2);
+    IS_VAR_WITH_NAME(mod2->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod2->rhs(), 72);
+  }
+
+  {
+    // k + t/x % y * x + t % x => k + t%(x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = k + (t / x % y) * x + t % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "k");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // t/x % y * x + t % x + (t/k / x % y) * x + t/k % x => t%(x*y) + t/k %
+    // (x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = (t / x % y) * x + t % x + (t / k / x % y) * x + t / k % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mod, add->lhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod2);
+    IS_NODE_WITH_NAME(Div, mod2->lhs(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "t");
+    IS_VAR_WITH_NAME(div->rhs(), "k");
+    IS_NODE_WITH_NAME(Mul, mod2->rhs(), mul2);
+    IS_VAR_WITH_NAME(mul2->lhs(), "x");
+    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+
+  {
+    // (7 * ((i0_flat / 7) % 9) + i0_flat % 7) + 63 * (i0_flat / 63) => io_flat
+    VarHandle t("io_flat", kInt);
+    ExprHandle body = ExprHandle(7) * (t / ExprHandle(7) % ExprHandle(9)) +
+        t % ExprHandle(7) + ExprHandle(63) * (t / ExprHandle(63));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "io_flat");
   }
 }
 
