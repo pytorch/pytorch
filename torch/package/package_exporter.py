@@ -19,8 +19,15 @@ from urllib.parse import quote
 
 
 class EmptyMatchError(Exception):
-    """This is a exception that is thrown when a mock or extern is marked as
+    """This is an exception that is thrown when a mock or extern is marked as
     allow_empty=False, and is not matched with any module during packaging.
+    """
+    pass
+
+
+class DeniedModuleError(Exception):
+    """This is an exception that is thrown when a pattern added with deny matches
+    a module required during the packaging process.
     """
     pass
 
@@ -405,6 +412,18 @@ node [shape=box];
         """
         self.patterns.append((_GlobGroup(include, exclude), self.save_extern_module, allow_empty))
 
+    def deny(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = ()):
+        """Blocklist modules who names match the given glob patterns from the list of modules the package can import.
+        If a dependency on any matching packages is found, an error is thrown.
+
+        Args:
+            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`
+
+            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+        """
+        self.patterns.append((_GlobGroup(include, exclude), self._reject_denied_module, True))
+
     def save_extern_module(self, module_name: str):
         """Add `module_name` to the list of external modules, regardless of whether it is
         required by other modules.
@@ -424,6 +443,12 @@ node [shape=box];
             self.save_source_file('_mock', str(Path(__file__).parent / '_mock.py'), dependencies=False)
         is_package = hasattr(self._import_module(module_name), '__path__')
         self.save_source_string(module_name, _MOCK_IMPL, is_package, dependencies=False)
+
+    def _reject_denied_module(self, module_name: str):
+        """Throw an exception containing a message that `module_name` was explicitly blocklisted via
+        `deny` and was still required during packaging.
+        """
+        raise DeniedModuleError(f"{module_name} was required during packaging but has been explicitly blocklisted")
 
     def _module_is_already_provided(self, qualified_name: str) -> bool:
         for mod in self.external:
