@@ -181,7 +181,7 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
         )
 
 
-def to_mkldnn(module, dtype=torch.float):
+def to_mkldnn(module, dtype=torch.float, convert_batchnorm=True):
     assert dtype in [torch.float, torch.bfloat16], \
         "MKLDNN only support float or bfloat16 path now"
 
@@ -194,7 +194,7 @@ def to_mkldnn(module, dtype=torch.float):
             return MkldnnConv2d(m, d)
         elif isinstance(m, torch.nn.Conv3d):
             return MkldnnConv3d(m, d)
-        elif isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm3d):
+        elif convert_batchnorm and isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm3d):
             # For batchnorm bf16 path, OneDNN requires weight and bias need fp32 dtype.
             # so it doesn't need dtype argument.
             return MkldnnBatchNorm(m)
