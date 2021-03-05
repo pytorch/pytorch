@@ -65,14 +65,6 @@ then
     exit 1
 fi
 
-if [[ "$cuda_major_version" == "10" ]]; then
-    # nvidia-smi for CUDA <= 10.1
-    nvidia-smi.exe
-else
-    # nvidia-smi for CUDA >= 10.2
-    nvidia-smi.exe
-fi
-
 cd ..
 rm -rf ./${cuda_installer_name}
 rm -f ./${cuda_installer_name}.exe
