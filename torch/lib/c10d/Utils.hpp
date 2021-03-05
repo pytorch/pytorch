@@ -44,22 +44,6 @@ extern const char* kDistDebugDetailLogLevel;
 extern const char* kDistDebugInfoLogLevel;
 extern const char* kDistDebugOffLogLevel;
 
-inline DistributedDebugLevel getDebugLevel(const char * levelStr) {
-
-  static std::unordered_map<std::string, DistributedDebugLevel> mapping = {
-    {kDistDebugOffLogLevel, DistributedDebugLevel::OFF},
-    {kDistDebugInfoLogLevel, DistributedDebugLevel::INFO},
-    {kDistDebugDetailLogLevel, DistributedDebugLevel::DETAIL},\
-  };
-
-  auto it = mapping.find(levelStr);
-  TORCH_CHECK(
-    it != mapping.end(),
-    "Invalid string value for distributed debug mode: ", levelStr
-  );
-  return it->second;
-}
-
 std::string parse_env(const char* env_var_name);
 
 DistributedDebugLevel parseDistDebugLevel();

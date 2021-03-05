@@ -56,8 +56,19 @@ namespace c10d {
       );
       C10_LOG_FIRST_N(INFO, 1) << "TORCH_DISTRIBUTED_DEBUG level parsed as " << levelStr;
     }
-    c10d::DistributedDebugLevel level = c10d::getDebugLevel(levelStr);
-    return level;
+
+    static std::unordered_map<std::string, DistributedDebugLevel> mapping = {
+    {kDistDebugOffLogLevel, DistributedDebugLevel::OFF},
+    {kDistDebugInfoLogLevel, DistributedDebugLevel::INFO},
+    {kDistDebugDetailLogLevel, DistributedDebugLevel::DETAIL}
+  };
+
+  auto it = mapping.find(levelStr);
+  TORCH_CHECK(
+    it != mapping.end(),
+    "Invalid string value for distributed debug mode: ", levelStr
+  );
+  return it->second;
 }
 
 

@@ -184,7 +184,7 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           py::arg("reducer"),
           py::arg("comm_hook_type"));
 
-  shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
+  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
       .def(
           py::init<
               size_t,
@@ -235,19 +235,7 @@ Returns:
 Returns:
     Whether this bucket is the last bucket to allreduce in an iteration.
     This also means that this bucket corresponds to the first few layers in the forward pass.
-)")
-      .def(
-          "get_offsets",
-          &::c10d::GradBucket::getOffsets,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_lengths",
-          &::c10d::GradBucket::getLengths,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_sizes_list",
-          &::c10d::GradBucket::getSizesVec,
-          py::call_guard<py::gil_scoped_release>());
+)");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
 An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
@@ -1259,7 +1247,7 @@ Arguments:
                 ``get_future` API to retrieve a Future associated with the completion of
                 ``allreduce`` work.
 
-                >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
+                >>> def allreduce(state: object, bucket: dist.GradBucket): -> torch._C.Future
                 >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
