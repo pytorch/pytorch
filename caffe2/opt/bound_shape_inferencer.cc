@@ -171,6 +171,8 @@ void BoundShapeInferencer::InferOps(
     InferSparseLengthsSumSparseLookup(op);
   } else if (op.type() == "Softmax") {
     InferSoftmax(op);
+  } else if (op.type() == "LpNorm") {
+    InferLpNorm(op);
   } else {
     InferCommonOp(op);
   }
@@ -919,6 +921,16 @@ void BoundShapeInferencer::InferSoftmax(const OperatorDef& op) {
       ConvertToVec(it->second.shape.dims()),
       it->second.shape.data_type(),
       false);
+}
+
+void BoundShapeInferencer::InferLpNorm(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    it->second.setDimType(std::vector<TensorBoundShape::DimType>(
+        it->second.shape.dims_size(), TensorBoundShape_DimType_CONSTANT));
+  }
 }
 
 void BoundShapeInferencer::InferCommonOp(
