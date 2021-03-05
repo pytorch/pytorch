@@ -33,6 +33,12 @@ std::ostream& operator<<(
     ddp_logging_data->avg_backward_comm_time,
     ddp_logging_data->avg_backward_compute_comm_overlap_time
   );
+
+  if (ddp_logging_data->comm_hook != "") {
+    loggerInfo +=
+        fmt::format("\n Gradient comm. hook: {}", ddp_logging_data->comm_hook);
+  }
+
   return output << loggerInfo;
 }
 
@@ -76,6 +82,10 @@ std::vector<int> Logger::get_bucket_sizes() {
     bucket_sizes.push_back(bucket_size);
   }
   return bucket_sizes;
+}
+
+void Logger::set_comm_hook(const std::string& hook) {
+  ddp_logging_data_->comm_hook = hook;
 }
 
 void Logger::set_construction_data_and_log(

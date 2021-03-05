@@ -322,7 +322,12 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+        .def(
+            "_set_comm_hook_name",
+            &::c10d::Logger::set_comm_hook,
+            py::arg("comm_hook"),
+            py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
       An enum whose values correspond to different debug settings of the
@@ -1332,7 +1337,8 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
           &c10::DDPLoggingData::avg_backward_comm_time)
       .def_readwrite(
           "avg_backward_compute_comm_overlap_time",
-          &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time);
+          &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
+      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook);
 
   module.def(
       "_compute_bucket_assignment_by_size",

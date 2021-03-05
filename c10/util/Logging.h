@@ -373,6 +373,9 @@ struct DDPLoggingData {
   bool find_unused_parameters = false;
   bool gradient_as_bucket_view = false;
 
+  // Communication hook, if set, otherwise, will be builtin_allreduce.
+  std::string comm_hook = "";
+
   // The following runtime stats are collected for the first 10 iterations
   // and then are collected every kDDPRuntimeLoggingSampleRate=100 iterations.
   // Users can get these stats at any iteration of training
@@ -443,15 +446,25 @@ struct DDPLoggingData {
         " nccl_debug: ", ddp_logging_data.nccl_debug,
         " nccl_async_error_handling: ", ddp_logging_data.nccl_async_error_handling,
         " nccl_nthreads: ", ddp_logging_data.nccl_nthreads,
-        " nccl_ib_timeout: ", ddp_logging_data.nccl_ib_timeout
+        " nccl_ib_timeout: ", ddp_logging_data.nccl_ib_timeout,
+        "\n"
       );
     } else if (ddp_logging_data.backend_name == "gloo") {
       backendInfo += c10::str(
         "gloo_socket_ifname: ", ddp_logging_data.gloo_socket_ifname,
-        " gloo_device_transport: ", ddp_logging_data.gloo_device_transport
+        " gloo_device_transport: ", ddp_logging_data.gloo_device_transport,
+        "\n"
       );
     }
     ddpLoggingDataInfo += backendInfo;
+
+    std::string commHookInfo = "";
+    if (ddp_logging_data.comm_hook != "") {
+      commHookInfo += c10::str(
+        "comm_hook: ", ddp_logging_data.comm_hook
+      );
+    }
+    ddpLoggingDataInfo += commHookInfo;
     return output << ddpLoggingDataInfo;
   }
 
