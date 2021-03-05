@@ -7,7 +7,7 @@ This is similar to API's available in the eager mode
 """
 
 import torch
-from typing import Optional, Any
+from typing import Optional
 from torch import device as _device
 
 def get_current_device_index() -> int:
