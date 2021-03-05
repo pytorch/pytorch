@@ -160,6 +160,12 @@ class TestTEFuser(JitTestCase):
         # High-level intermediate representation (IR) - Graph representation
         print(symbolic_traced.graph)
 
+
+    def run_frozen_model_in_ext(self):
+        pass
+
+
+
     def run_frozen_model(self):
 
         temp_counter = 0
@@ -186,9 +192,10 @@ class TestTEFuser(JitTestCase):
 
         def getCOpName(node):
             #return node.kind().replace("aten", "at::native")
-            tmp = node.kind().replace("aten", "at")
+            tmp = node.kind().replace("aten", "at::redispatch")
+            return tmp
             # TODO support inplace ops properly via _out variants
-            return tmp[:-1] if node.kind().endswith("_") else tmp
+            #return tmp[:-1] if node.kind().endswith("_") else tmp
                  
         def processNode(node):
             nonlocal temp_counter
@@ -247,7 +254,7 @@ class TestTEFuser(JitTestCase):
                 
             op_str = "auto " + out_name + " = "
             inputs_str = ",".join([cname(i) for i in node.inputs()])            
-            op_str += getCOpName(node) + '(' + inputs_str + ')' + ';\n'
+            op_str += getCOpName(node) + '(c10::DispatchKeySet{key},' + inputs_str + ')' + ';\n'
             return op_str
 
         def generate_if(n):
@@ -330,6 +337,8 @@ class TestTEFuser(JitTestCase):
             body_str = "{\n"
             body_str += "bool True = true;\n"
             body_str += "bool False = false;\n"
+            body_str += "auto key = c10::DispatchKey::CPU;\n"
+
             body_str += generate_block(graph)
             
             body_str += generate_return(graph) + "\n"
@@ -364,6 +373,8 @@ class TestTEFuser(JitTestCase):
 
         op_source = f"""
 #include <torch/script.h>
+#include "c10/core/DispatchKeySet.h"
+#include <ATen/RedispatchFunctions.h>
 {func}
 TORCH_LIBRARY({module_name}, m) {{
     m.def("{model_name}", &{model_name});
@@ -373,6 +384,7 @@ TORCH_LIBRARY({module_name}, m) {{
         print(op_source)
         torch.utils.cpp_extension.load_inline(
             name=model_name,
+            extra_ldflags=["/raid/villedepommes/pytorches/fail/build/caffe2/CMakeFiles/torch_cpu.dir/__/aten/src/ATen/RedispatchFunctions.cpp.o"],
             cpp_sources=op_source,
             is_python_module=False,
             verbose=True,
@@ -382,10 +394,32 @@ TORCH_LIBRARY({module_name}, m) {{
         mod = getattr(torch.ops, module_name)
         model = getattr(mod, model_name)
 
+        import alexnet_cpp
+        model = alexnet_cpp.forward
+
         x = torch.randn(1, 3, 224, 224)
 
         args =  [1, x] + [val for (k, val) in consts.items()]
         print("allclose = ", torch.allclose(model_jit(x), model(*args)))
+
+        def time_model(m, inputs, n):
+            from time import perf_counter_ns
+            t1_start = perf_counter_ns()  
+    
+            for i in range(n): 
+                m(*inputs)
+            
+            # Stop the stopwatch / counter 
+            t1_stop = perf_counter_ns() 
+            return (t1_stop - t1_start) / (n * 1.)
+
+        
+        WARMUP = 10
+        time_model(model_jit, (x,), WARMUP)
+        time_model(model, args, WARMUP)
+        N = 20
+        print("model_jit=", time_model(model_jit, (x,), N))
+        print("model_cpp=",time_model(model, args, N))
 
 
     def get_frozen_tensor(self):
@@ -782,7 +816,80 @@ TORCH_LIBRARY({module_name}, m) {{
         # get IR
         # generate c++ for each 
 
-        pass
+
+    def test_trace(self):
+
+        pass        
+    def test_add_with_src(self):
+
+        a = torch.rand(10, 10)
+        b = torch.rand(10, 10)
+
+        
+        def add_two(a, b):
+            return a + b
+
+        add_two = torch.jit.script(add_two)
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        c = add_two(a, b)
+        c = add_two(a, b)
+        c = add_two(a, b)
+        with torch.autograd.profiler.profile() as prof:
+            #with profiler.record_function("model_inference"):
+            c = add_two(a, b)
+        prof.export_chrome_trace("trace.json")
+
+    def test_attr(self):
+
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                #self.linear = torch.nn.Linear(4, 5)
+
+            def forward(a):
+                return a
+
+        
+
+        #attributes
+
+    def test_redispatch(self):
+
+        op_source = f"""
+                #include <torch/script.h>
+                #include "c10/core/DispatchKeySet.h"
+                #include <ATen/RedispatchFunctions.h>
+
+                at::Tensor test_redispatch() {{
+
+                auto key = c10::DispatchKey::CPU;
+                auto a = torch::ones({{2, 2}});
+                auto b = at::redispatch::add(c10::DispatchKeySet{{key}}, a, a);
+                return b;
+                }}
+                TORCH_LIBRARY(module1, m) {{
+                    m.def("test_redispatch", &test_redispatch);
+                }}
+        """
+
+        print(op_source)
+
+        # scripted_f = torch.jit.script(test_fuse)
+
+        torch.utils.cpp_extension.load_inline(
+            name="test_redispatch",
+            extra_ldflags=["/raid/villedepommes/pytorches/fail/build/caffe2/CMakeFiles/torch_cpu.dir/__/aten/src/ATen/RedispatchFunctions.cpp.o"],
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
+        
+        print(torch.ops.module1.test_redispatch())
+
+
 
     def test_typecheck(self):
         a = torch.ones(1)
