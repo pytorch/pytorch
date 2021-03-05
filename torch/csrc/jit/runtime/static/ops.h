@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Utils.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
@@ -56,7 +57,45 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 C10_DECLARE_REGISTRY(SRViewOperatorRegistry, SROperatorFunctor);
 
 inline at::Tensor create_empty_from(const at::Tensor& t) {
-  return at::empty({0}, t.options());
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      t.device(),
+      c10::nullopt,
+      c10::nullopt);
+}
+
+inline at::Tensor create_empty(c10::ScalarType dtype) {
+  return at::detail::empty_cpu(
+      {0}, dtype, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::ScalarType dtype) {
+  return at::detail::empty_cpu(
+      {0}, dtype, t.layout(), t.device(), c10::nullopt, c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(const at::Tensor& t, c10::Layout layout) {
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      layout,
+      t.device(),
+      c10::nullopt,
+      c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(const at::Tensor& t, c10::Device device) {
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      device,
+      c10::nullopt,
+      c10::nullopt);
 }
 
 inline bool checkResizedDataPtr(at::Tensor& t) {
@@ -74,6 +113,7 @@ bool canRunOutOfPlace(Node* n);
 bool canReuseInputsOutputs(Node* n);
 bool canReuseInputs(Node* n);
 bool canReuseOutputs(Node* n);
+bool canOptimizeConstruct(Node* n);
 bool isViewOp(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);

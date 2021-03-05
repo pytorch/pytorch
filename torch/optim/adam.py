@@ -73,6 +73,7 @@ class Adam(Optimizer):
             state_sums = []
             max_exp_avg_sqs = []
             state_steps = []
+            beta1, beta2 = group['betas']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -104,7 +105,6 @@ class Adam(Optimizer):
                     # record the step after step update
                     state_steps.append(state['step'])
 
-            beta1, beta2 = group['betas']
             F.adam(params_with_grad,
                    grads,
                    exp_avgs,

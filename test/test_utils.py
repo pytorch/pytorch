@@ -289,7 +289,7 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
 
-class TestDataLoader(TestCase):
+class TestDataLoaderUtils(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
