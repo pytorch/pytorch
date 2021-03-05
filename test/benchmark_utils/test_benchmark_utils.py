@@ -548,7 +548,7 @@ class TestBenchmarkUtils(TestCase):
 
         # Mock `torch.set_printoptions(linewidth=160)`
         wide_linewidth = benchmark_utils.FunctionCounts(
-            stats_no_data.stats(inclusive=False)._data, False, 160)
+            stats_no_data.stats(inclusive=False)._data, False, _linewidth=160)
 
         for l in repr(wide_linewidth).splitlines(keepends=False):
             self.assertLessEqual(len(l), 160)

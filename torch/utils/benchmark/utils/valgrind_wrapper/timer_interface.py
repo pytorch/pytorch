@@ -498,7 +498,7 @@ class _ValgrindWrapper(object):
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 
-        self._baseline_cache: Dict[Tuple[int, int], Tuple[FunctionCounts, FunctionCounts]] = {}
+        self._baseline_cache: Dict[Tuple[int, int], Tuple[FunctionCounts, FunctionCounts, Optional[str]]] = {}
 
     def _validate(self) -> None:
         if not self._supported_platform:
@@ -531,11 +531,11 @@ class _ValgrindWrapper(object):
                         stmt="pass",
                         setup="pass",
                         num_threads=task_spec.num_threads,
-                        retain_out_file=False,
                     ),
                     globals={},
                     number=number,
                     is_python=True,
+                    retain_out_file=False,
                 )
             baseline_inclusive_stats, baseline_exclusive_stats, _ = \
                 self._baseline_cache[cache_key]
