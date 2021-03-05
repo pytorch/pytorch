@@ -359,7 +359,8 @@ class Tanh(Module):
         return torch.tanh(input)
 
 class SiLU(Module):
-    r"""Applies the silu function, element-wise.
+    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    The SiLU function is also known as the swish function.
 
     .. math::
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}

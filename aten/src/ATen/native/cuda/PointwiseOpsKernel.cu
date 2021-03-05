@@ -42,6 +42,23 @@ void smooth_l1_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double be
   });
 }
 
+void huber_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double delta) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_backward_cuda", [&iter, &norm, delta] {
+    auto norm_val = norm.to<scalar_t>();
+    scalar_t delta_val(delta);
+    gpu_kernel(iter, [norm_val, delta_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
+      const auto x = input - target;
+      if (x < -delta_val) {
+        return -norm_val * grad_output * delta_val;
+      } else if (x > delta_val) {
+        return norm_val * grad_output * delta_val;
+      } else {
+        return norm_val * x * grad_output;
+      }
+    });
+  });
+}
+
 void mse_backward_cuda_kernel(TensorIterator& iter, Scalar value) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "mse_backward_cuda", [&]() {
     auto alpha = value.to<scalar_t>();
@@ -54,5 +71,6 @@ void mse_backward_cuda_kernel(TensorIterator& iter, Scalar value) {
 REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cuda_kernel);
 REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
+REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cuda_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel);
 }} // namespace at::native

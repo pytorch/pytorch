@@ -96,7 +96,7 @@ inline Tensor new_qtensor(
     const TensorOptions& options,
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  at::Allocator* allocator = options.device().type() == DeviceType::CUDA
+  at::Allocator* allocator = options.device().is_cuda()
     ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
     : at::getCPUAllocator();
 
