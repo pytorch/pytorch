@@ -207,6 +207,21 @@ class TwoLinLayerNet(nn.Module):
         b = self.b(x)
         return (a, b)
 
+class EmbeddingNet(nn.Module):
+
+    def __init__(self, rank):
+        super().__init__()
+        embedding_dim = 500 if rank == 0 else 50
+        self.embedding = nn.Embedding(
+            num_embeddings=10,
+            embedding_dim=embedding_dim
+        )
+        self.lin = nn.Linear(embedding_dim, 1)
+
+    def forward(self, x):
+        x = self.embedding(x)
+        return self.lin(x)
+
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
@@ -355,6 +370,11 @@ class TestDistBackend(MultiProcessTestCase):
         initialize_temp_directories()
         # initialize Barrier
         Barrier.init()
+        # Skip return code checking for following tests as they are expected to
+        # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
+        self.skip_return_code_checks = [
+            self.test_ddp_model_diff_across_ranks.__wrapped__,
+        ]
 
     def tearDown(self):
         cleanup_temp_dir()
@@ -4865,6 +4885,33 @@ class DistributedTest:
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_model_diff_across_ranks(self):
+            torch.cuda.set_device(self.rank)
+            # Creates network with different sized embedding table on different
+            # ranks. This should throw an error during DDP init.
+            net = EmbeddingNet(self.rank)
+            # When running with NCCL backend, we don't expect an error on rank 0,
+            # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
+            # running with Gloo, we expect the error to be caught inline.
+            rank_0_ctx = (
+                suppress()
+                if dist.get_backend() == dist.Backend.NCCL
+                else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
+            )
+            ctx = (
+                rank_0_ctx
+                if self.rank == 0
+                else self.assertRaisesRegex(RuntimeError, "appears not to match")
+            )
+            with ctx:
+                net = torch.nn.parallel.DistributedDataParallel(
+                    net.to(self.rank), device_ids=[self.rank]
+                )
+                dist.barrier()
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})

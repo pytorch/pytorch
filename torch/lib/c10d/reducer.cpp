@@ -78,12 +78,6 @@ Reducer::Reducer(
   }
   TORCH_INTERNAL_ASSERT(expect_sparse_gradients_.size() == replicas_.size());
 
-  // Corresponding params' layouts (strides) must match across
-  // replicas within this process and across processes.
-  // (see Note:  "Gradient Layout Contract" in initialize_buckets).
-  verify_replicas_within_process();
-  verify_replica0_across_processes();
-
   // Initialize variable bucketing.
   // This can be reinitialized later after capturing runtime information.
   {
@@ -239,109 +233,6 @@ Reducer::~Reducer() noexcept(false) {
     TORCH_CHECK(
         grad_accumulator->del_post_hook(key),
         "Reducer attempts to delete a non-existing hook.");
-  }
-}
-
-// Verifies replicas in this process treat the same number of params,
-// all params require grad, and corresponding params across replicas
-// have the same dtype/size/layout.
-void Reducer::verify_replicas_within_process() {
-  const auto replica_count = replicas_.size();
-  for (size_t replica_index = 0; replica_index < replica_count;
-       replica_index++) {
-    const auto variable_count = replicas_[replica_index].size();
-    TORCH_CHECK(
-        replicas_[replica_index].size() == replicas_[0].size(),
-        "Model replicas must have an equal number of parameters.");
-    TORCH_CHECK(
-        expect_sparse_gradients_[replica_index].size() ==
-            expect_sparse_gradients_[0].size(),
-        "Expected number of entries in expect_sparse_gradients ",
-        "to be equal across replicas.");
-    for (size_t variable_index = 0; variable_index < variable_count;
-         variable_index++) {
-      TORCH_CHECK(
-          replicas_[replica_index][variable_index].requires_grad(),
-          "Variables must require gradients (have `requires_grad` set).");
-      TORCH_CHECK(
-          replicas_[replica_index][variable_index].sizes() ==
-              replicas_[0][variable_index].sizes(),
-          "Variables across model replicas must have identical sizes.");
-      TORCH_CHECK(
-          replicas_[replica_index][variable_index].strides() ==
-              replicas_[0][variable_index].strides(),
-          "Variables across model replicas must have identical strides.");
-      TORCH_CHECK(
-          replicas_[replica_index][variable_index].dtype() ==
-              replicas_[0][variable_index].dtype(),
-          "Variables across model replicas must have identical dtype.");
-      TORCH_CHECK(
-          expect_sparse_gradients_[replica_index][variable_index] ==
-              expect_sparse_gradients_[0][variable_index],
-          "Expected the same variables across replicas to either both ",
-          "or neither expect a sparse gradient.");
-    }
-  }
-}
-
-// Verifies corresponding params in replica 0 have the same sizes/strides
-// across processes.
-void Reducer::verify_replica0_across_processes() {
-  size_t i = 0;
-  for (const auto& t : replicas_[0]) {
-    i += 2 * t.dim();
-  }
-  at::TensorOptions options;
-  options = options.dtype(at::kLong);
-  auto metadata = at::empty({static_cast<long>(i)}, options);
-
-  // Technically, process 0 is the broadcast source, so only process 0 needs
-  // to populate metadata.  But no harm keeping work aligned across processes.
-  auto metadata_accessor = metadata.accessor<int64_t, 1>();
-  i = 0;
-  for (const auto& t : replicas_[0]) {
-    for (const auto& sz : t.sizes()) {
-      metadata_accessor[i++] = sz;
-    }
-    for (const auto& str : t.strides()) {
-      metadata_accessor[i++] = str;
-    }
-  }
-
-  auto metadata_dev = metadata.clone().to(replicas_[0][0].device());
-  std::vector<at::Tensor> vec{metadata_dev};
-  process_group_->broadcast(vec)->wait();
-
-  // Technically, process 0 doesn't need to double-check metadata, because it
-  // was the source.  But no harm keeping work aligned.
-  auto control = at::empty({static_cast<long>(i)}, options);
-  control.copy_(metadata_dev, /*non_blocking=*/false);
-  auto control_accessor = control.accessor<int64_t, 1>();
-  i = 0;
-  for (size_t p = 0; p < replicas_[0].size(); p++) {
-    const auto& t = replicas_[0][p];
-    // I'd like to include which process we are in the message,
-    // but ProcessGroup::getRank is not public!
-    for (const auto& sz : t.sizes()) {
-      TORCH_CHECK(
-          sz == control_accessor[i++],
-          "replicas[0][",
-          p,
-          "] in this process"
-          " with sizes ",
-          t.sizes(),
-          " appears not to match sizes of the same param in process 0.");
-    }
-    for (const auto& str : t.strides()) {
-      TORCH_CHECK(
-          str == control_accessor[i++],
-          "replicas[0][",
-          p,
-          "] in this process"
-          " with strides ",
-          t.strides(),
-          " appears not to match strides of the same param in process 0.");
-    }
   }
 }
 
@@ -1523,8 +1414,8 @@ void Reducer::ensure_prior_reduction_finished() {
       // Parameters may have been unused in forward pass, or not all outputs
       // were used in producing loss.
       kBaseErrorMsg += "You can enable unused parameter detection by passing the "
-      "keyword argument `find_unused_parameters=True` to "
-      "`torch.nn.parallel.DistributedDataParallel`, and by \n";
+          "keyword argument `find_unused_parameters=True` to "
+          "`torch.nn.parallel.DistributedDataParallel`, and by \n";
       kBaseErrorMsg += kOutputsNotUsedInLossErrorMsg;
       kBaseErrorMsg += kDDPBugErrorMsg;
     } else {
@@ -1532,11 +1423,11 @@ void Reducer::ensure_prior_reduction_finished() {
       // since user may have enabled detection but this particular iteration
       // could have used or not used all parameters.
       kBaseErrorMsg += "Since `find_unused_parameters=True` is enabled, this likely "
-      " means that not all `forward` outputs participate in computing loss. You can fix this by ";
+          " means that not all `forward` outputs participate in computing loss. You can fix this by ";
       kBaseErrorMsg += kOutputsNotUsedInLossErrorMsg;
       kBaseErrorMsg += kDDPBugErrorMsg;
     }
-     TORCH_CHECK(false, kBaseErrorMsg);
+    TORCH_CHECK(false, kBaseErrorMsg);
   }
 }
 
@@ -1750,6 +1641,117 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   }
 
   return result;
+}
+
+// Verifies replicas in this process treat the same number of params,
+// all params require grad, and corresponding params across replicas
+// have the same dtype/size/layout.
+void verify_replicas_within_process(
+    std::vector<std::vector<torch::autograd::Variable>> model_replicas,
+    std::vector<std::vector<bool>> expect_sparse_gradients) {
+  const auto replica_count = model_replicas.size();
+  if (replica_count == 1) {
+    // Single device per process, nothing to check.
+    return;
+  }
+  for (size_t replica_index = 0; replica_index < replica_count;
+       replica_index++) {
+    const auto variable_count = model_replicas[replica_index].size();
+    TORCH_CHECK(
+        model_replicas[replica_index].size() == model_replicas[0].size(),
+        "Model replicas must have an equal number of parameters.");
+    TORCH_CHECK(
+        expect_sparse_gradients[replica_index].size() ==
+            expect_sparse_gradients[0].size(),
+        "Expected number of entries in expect_sparse_gradients ",
+        "to be equal across replicas.");
+    for (size_t variable_index = 0; variable_index < variable_count;
+         variable_index++) {
+      TORCH_CHECK(
+          model_replicas[replica_index][variable_index].requires_grad(),
+          "Variables must require gradients (have `requires_grad` set).");
+      TORCH_CHECK(
+          model_replicas[replica_index][variable_index].sizes() ==
+              model_replicas[0][variable_index].sizes(),
+          "Variables across model replicas must have identical sizes.");
+      TORCH_CHECK(
+          model_replicas[replica_index][variable_index].strides() ==
+              model_replicas[0][variable_index].strides(),
+          "Variables across model replicas must have identical strides.");
+      TORCH_CHECK(
+          model_replicas[replica_index][variable_index].dtype() ==
+              model_replicas[0][variable_index].dtype(),
+          "Variables across model replicas must have identical dtype.");
+      TORCH_CHECK(
+          expect_sparse_gradients[replica_index][variable_index] ==
+              expect_sparse_gradients[0][variable_index],
+          "Expected the same variables across replicas to either both ",
+          "or neither expect a sparse gradient.");
+    }
+  }
+}
+
+// Verifies corresponding params in replica 0 have the same sizes/strides
+// across processes.
+void verify_replica0_across_processes(
+    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    std::vector<std::vector<torch::autograd::Variable>> model_replicas) {
+  size_t i = 0;
+  for (const auto& t : model_replicas[0]) {
+    i += 2 * t.dim();
+  }
+  at::TensorOptions options;
+  options = options.dtype(at::kLong);
+  auto metadata = at::empty({static_cast<long>(i)}, options);
+
+  // Technically, process 0 is the broadcast source, so only process 0 needs
+  // to populate metadata.  But no harm keeping work aligned across processes.
+  auto metadata_accessor = metadata.accessor<int64_t, 1>();
+  i = 0;
+  for (const auto& t : model_replicas[0]) {
+    for (const auto& sz : t.sizes()) {
+      metadata_accessor[i++] = sz;
+    }
+    for (const auto& str : t.strides()) {
+      metadata_accessor[i++] = str;
+    }
+  }
+
+  auto metadata_dev = metadata.clone().to(model_replicas[0][0].device());
+  std::vector<at::Tensor> vec{metadata_dev};
+  process_group->broadcast(vec)->wait();
+
+  // Technically, process 0 doesn't need to double-check metadata, because it
+  // was the source.  But no harm keeping work aligned.
+  auto control = at::empty({static_cast<long>(i)}, options);
+  control.copy_(metadata_dev, /*non_blocking=*/false);
+  auto control_accessor = control.accessor<int64_t, 1>();
+  i = 0;
+  for (size_t p = 0; p < model_replicas[0].size(); p++) {
+    const auto& t = model_replicas[0][p];
+    // I'd like to include which process we are in the message,
+    // but ProcessGroup::getRank is not public!
+    for (const auto& sz : t.sizes()) {
+      TORCH_CHECK(
+          sz == control_accessor[i++],
+          "replicas[0][",
+          p,
+          "] in this process"
+          " with sizes ",
+          t.sizes(),
+          " appears not to match sizes of the same param in process 0.");
+    }
+    for (const auto& str : t.strides()) {
+      TORCH_CHECK(
+          str == control_accessor[i++],
+          "replicas[0][",
+          p,
+          "] in this process"
+          " with strides ",
+          t.strides(),
+          " appears not to match strides of the same param in process 0.");
+    }
+  }
 }
 
 } // namespace c10d
