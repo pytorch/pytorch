@@ -43,6 +43,8 @@ jobs:
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       BUILD_PYTHONLESS: 1
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      # TODO: remove this and bake env var into the Docker image
+      DESIRED_DEVTOOLSET: ${{ matrix.devtoolset }}
       PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
     steps:

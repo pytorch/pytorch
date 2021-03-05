@@ -51,8 +51,6 @@ WHEEL_CONTAINER_IMAGES = {
 
 CONDA_CONTAINER_IMAGES = {
     **{
-        # TODO: Re-do manylinux CUDA image tagging scheme to be similar to
-        #       ROCM so we don't have to do this replacement
         gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}"
         for gpu_arch in CUDA_ARCHES
     },
@@ -63,10 +61,15 @@ LIBTORCH_CONTAINER_IMAGES = {
     **{
         # TODO: Re-do manylinux CUDA image tagging scheme to be similar to
         #       ROCM so we don't have to do this replacement
-        gpu_arch: f"pytorch/manylinux-cuda{gpu_arch.replace('.', '')}"
+        (gpu_arch, "pre-cxx11"): f"pytorch/manylinux-cuda{gpu_arch.replace('.', '')}"
         for gpu_arch in CUDA_ARCHES
     },
-    "cpu": "pytorch/manylinux-cpu",
+    **{
+        (gpu_arch, "cxx11-abi"): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}"
+        for gpu_arch in CUDA_ARCHES
+    },
+    ("cpu", "pre-cxx11"): "pytorch/manylinux-cpu",
+    ("cpu", "cxx11-abi"): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
 FULL_PYTHON_VERSIONS = [
@@ -115,12 +118,17 @@ def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
             "python_version": "3.7",
             "gpu_arch_type": arch_type(arch_version),
             "gpu_arch_version": arch_version,
-            "container_image": LIBTORCH_CONTAINER_IMAGES[arch_version],
+            "container_image": LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)],
             "libtorch_variant": libtorch_variant,
+            "devtoolset": abi_version,
         }
         # We don't currently build libtorch for rocm
         for arch_version in ["cpu"] + snip_if(is_pr, CUDA_ARCHES)
         for libtorch_variant in libtorch_variants
+        # one of the values in the following list must be exactly
+        # "cxx11-abi", but the precise value of the other one doesn't
+        # matter
+        for abi_version in ["cxx11-abi", "pre-cxx11"]
     ]
 
 
