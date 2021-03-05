@@ -20,7 +20,6 @@ namespace jit {
 
 void PrepareGraphForStaticRuntime(std::shared_ptr<torch::jit::Graph> graph) {
   Inline(*graph);
-  SplitOutPrecomputeOpsForSparseNN(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
@@ -439,9 +438,17 @@ void InferenceModule::init() {
 InferenceModule::InferenceModule(const torch::jit::Module& m)
     : module(m.copy()), graph(nullptr), schema(nullptr) {
   module.eval();
-  module = freeze_module(module);
 
   Method method = module.get_method("forward");
+  graph = method.graph();
+  // Move this pass to before running the freeze_module pass so that the
+  // sigrid_hash_compute_multipler_shift op can be precomputed and the results
+  // being folded into the module as constants. This is required to enable the
+  // ClipRangesGatherRangesX2SigridHashPrecompute pass. See D26833478
+  SplitOutPrecomputeOpsForSparseNN(graph);
+
+  module = freeze_module(module);
+  method = module.get_method("forward");
   graph = method.graph();
 
   const c10::FunctionSchema& s = method.function().getSchema();
@@ -862,7 +869,7 @@ MemoryPlanner::MemoryPlanner(
     bool out_variants) {
   // collect register indices of outputs of ops with out variant
   std::unordered_set<const Value*> managed_values;
-  std::unordered_set<IValue*> unmanaged_value_set;
+  std::unordered_set<IValue*> unmanaged_ivalue_set;
   for (ProcessedNode& pnode : runtime->get_nodes()) {
     if (canReuseInputsOutputs(pnode.get_node())) {
       for (auto i = 0; i < pnode.outputs().size(); ++i) {
@@ -876,40 +883,31 @@ MemoryPlanner::MemoryPlanner(
           } else if (canOptimizeConstruct(pnode.get_node())) {
             // We "leak" containers of this type
           } else {
-            unmanaged_value_set.insert(&out);
+            unmanaged_ivalue_set.insert(&out);
           }
         } else {
-          unmanaged_value_set.insert(&out);
+          unmanaged_ivalue_set.insert(&out);
         }
       }
     } else {
       for (auto i = 0; i < pnode.outputs().size(); ++i) {
-        unmanaged_value_set.insert(&pnode.Output(i));
+        unmanaged_ivalue_set.insert(&pnode.Output(i));
       }
     }
   }
 
   const InferenceModule* module = runtime->get_inference_module();
 
-  // remove model outputs from managed_values
-  for (IValue* output : runtime->outputs()) {
-    unmanaged_value_set.erase(output);
-  }
-
-  for (IValue* out : unmanaged_value_set) {
-    unmanaged_values_.emplace_back(out);
-  }
-
-  // remove model outputs from managed_values and unmanaged_value_set
+  // remove model outputs from managed_values and unmanaged_ivalue_set
   for (Value* output : module->graph->outputs()) {
     managed_values.erase(output);
   }
   for (IValue* output : runtime->outputs()) {
-    unmanaged_value_set.erase(output);
+    unmanaged_ivalue_set.erase(output);
   }
 
-  // unmanaged_value_set => unmanaged_values_
-  for (IValue* out : unmanaged_value_set) {
+  // unmanaged_ivalue_set => unmanaged_values_
+  for (IValue* out : unmanaged_ivalue_set) {
     unmanaged_values_.emplace_back(out);
   }
 
