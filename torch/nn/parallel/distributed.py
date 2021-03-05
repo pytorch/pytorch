@@ -148,9 +148,16 @@ class DistributedDataParallel(Module):
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``.
 
-    .. note ::
+    .. note::
         Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
         for a brief introduction to all features related to distributed training.
+
+    .. note::
+        ``DistributedDataParallel`` can be used in conjunction with
+        :class:`torch.distributed.optim.ZeroRedundancyOptimizer` to reduce
+        per-rank optimizer states memory footprint. Please refer to
+        `ZeroRedundancyOptimizer recipe <https://pytorch.org/tutorials/recipes/zero_redundancy_optimizer.html>`__
+        for more details.
 
     .. note:: ``nccl`` backend is currently the fastest and highly recommended
         backend when using GPUs. This applies to both single-node and
@@ -1050,7 +1057,7 @@ class DistributedDataParallel(Module):
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
             hook (callable): Averages gradient tensors across workers and defined as:
-                             ``hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future``:
+                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
@@ -1092,7 +1099,7 @@ class DistributedDataParallel(Module):
         Example::
             Below is an example of a noop hook that returns the same tensors.
 
-            >>> def noop(state: object, bucket: dist._GradBucket): -> torch.futures.Future
+            >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future
             >>>     fut = torch.futures.Future()
             >>>     fut.set_result(bucket.get_tensors())
             >>>     return fut
@@ -1103,7 +1110,7 @@ class DistributedDataParallel(Module):
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
-            >>> def encode_and_decode(state: object, bucket: dist._GradBucket): -> torch.futures.Future
+            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future
             >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
             >>>     encoded_tensors = encode(tensors) # encode gradients
             >>>     fut = process_group.allreduce(encoded_tensors).get_future()
@@ -1255,10 +1262,10 @@ class DistributedDataParallel(Module):
         sig = inspect.signature(hook)
         if (
             sig.parameters["bucket"].annotation != inspect._empty
-            and sig.parameters["bucket"].annotation != dist._GradBucket
+            and sig.parameters["bucket"].annotation != dist.GradBucket
         ):
             raise ValueError(
-                "Communication hook: bucket annotation should be dist._GradBucket."
+                "Communication hook: bucket annotation should be dist.GradBucket."
             )
 
         if sig.return_annotation != inspect._empty and (

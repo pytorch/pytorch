@@ -819,6 +819,15 @@ void initJITBindings(PyObject* module) {
             }
             return states;
           })
+      .def(
+          "differentiable_op_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.diff_graph_op_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
       .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
       .def("request_bailout", [](Code& c, size_t index) {
         c.request_bailout(index);
