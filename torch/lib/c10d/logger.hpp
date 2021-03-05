@@ -31,6 +31,8 @@ class Logger {
   void set_parameter_stats();
   // Get size of each bucket (Bytes).
   std::vector<int> get_bucket_sizes();
+  // Set comm. hook, if used
+  void set_comm_hook(const std::string& hook);
 
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.

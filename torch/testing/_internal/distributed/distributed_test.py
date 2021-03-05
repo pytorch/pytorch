@@ -17,6 +17,7 @@ import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+from torch.distributed.algorithms.ddp_comm_hooks import quantization as quantization_hooks
 from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
@@ -3080,6 +3081,68 @@ class DistributedTest:
                         expected_grad,
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_comm_hook_logging(self):
+            hooks = [
+                default.allreduce_hook,
+                default.fp16_compress_hook,
+                powerSGD.powerSGD_hook,
+                powerSGD.batched_powerSGD_hook,
+                quantization_hooks.quantization_pertensor_hook,
+                quantization_hooks.quantization_perchannel_hook,
+            ]
+
+            cpp_builtin_hooks = [
+                dist.BuiltinCommHookType.ALLREDUCE,
+                dist.BuiltinCommHookType.FP16_COMPRESS,
+            ]
+
+            for hook in hooks:
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                    device_ids=[self.rank]
+                )
+                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                # Hook not registered yet, so should be empty
+                self.assertEqual(ddp_logging_data.comm_hook, "")
+                ddp_model.register_comm_hook(None, hook)
+                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                self.assertEqual(ddp_logging_data.comm_hook, hook.__qualname__)
+
+            for hook in cpp_builtin_hooks:
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                    device_ids=[self.rank]
+                )
+                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                # Hook not registered yet, so should be empty
+                self.assertEqual(ddp_logging_data.comm_hook, "")
+                ddp_model._register_builtin_comm_hook(hook)
+                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                self.assertEqual(ddp_logging_data.comm_hook, str(hook))
+
+            # No hook registered
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                device_ids=[self.rank]
+            )
+            ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+            # Hook not registered yet, so should be empty
+            self.assertEqual(ddp_logging_data.comm_hook, "")
+            # After second forward pass, hook should still be empty string
+            for i in range(2):
+                inp = torch.ones(1, 1, device=self.rank)
+                loss = ddp_model(inp).sum()
+                loss.backward()
+
+            ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.comm_hook, "")
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
