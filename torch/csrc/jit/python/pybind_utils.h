@@ -82,6 +82,32 @@ struct VISIBILITY_HIDDEN PythonFunctionGuard {
   py::function func_;
 };
 
+struct JitFutureExceptionHandler {
+  JitFutureExceptionHandler() {
+    DCHECK(PyGILState_Check());
+    const char* kJitFutureExceptionHandlerModule =
+        "torch.jit.exception_handling";
+    const char* kJitFutureExceptionhandlerFunc = "_handle_exception";
+
+    py::object mod = py::module::import(kJitFutureExceptionHandlerModule);
+    pyHandleException_ = mod.attr(kJitFutureExceptionhandlerFunc);
+    TORCH_CHECK(
+        py::isinstance<py::function>(pyHandleException_),
+        "attribute ",
+        kJitFutureExceptionhandlerFunc,
+        " is not a function.");
+  }
+  void handleExceptionGILHeld(
+      const py::object& object,
+      const std::string& err) {
+    pyHandleException_(object, err);
+  }
+
+ private:
+  // Ref to torch.jit.exception_handling._handle_exception
+  py::object pyHandleException_;
+};
+
 // The PythonFutureWrapper for ivalue::Future
 //
 // NB: VISIBILITY_HIDDEN is for silencing compiling error,
@@ -161,15 +187,19 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
                 e.what()));
             {
               pybind11::gil_scoped_acquire ag;
+              py::object exceptionType = e.type();
               // Release ownership on py::objects and also restore Python
               // Error Indicator.
               e.restore();
               // Clear the Python Error Indicator as we has recorded the
               // exception in the response message.
               PyErr_Clear();
+              JitFutureExceptionHandler().handleExceptionGILHeld(
+                  exceptionType, err.what());
             }
-
-            throw err;
+            // python error is already set above, so this is just to satisfy
+            // C++ compiler.
+            return at::IValue();
           }
         },
         PyObjectType::get()));

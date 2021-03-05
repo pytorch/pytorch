@@ -38,7 +38,7 @@ class TestFuture(TestCase):
         f = Future()
         f.set_exception(value_error)  # type: ignore
 
-        with self.assertRaisesRegex(RuntimeError, "Got the following error"):
+        with self.assertRaisesRegex(ValueError, "Got the following error"):
             cb_fut = f.then(cb)
             cb_fut.wait()
 
@@ -63,7 +63,7 @@ class TestFuture(TestCase):
 
         def then_future(f):
             fut = f.then(cb)
-            with self.assertRaisesRegex(RuntimeError, "Got the following error"):
+            with self.assertRaisesRegex(ValueError, "Got the following error"):
                 fut.wait()
 
         f = Future[T]()
@@ -152,13 +152,13 @@ class TestFuture(TestCase):
         for i in range(len(futs)):
             self.assertEqual(futs[i].wait(), torch.ones(2, 2) + i + 1)
 
-    def _test_then_error(self, cb, errMsg):
+    def _test_then_error(self, cb, errMsg, exception_type):
         fut = Future[int]()
         then_fut = fut.then(cb)
 
         fut.set_result(5)
         self.assertEqual(5, fut.wait())
-        with self.assertRaisesRegex(RuntimeError, errMsg):
+        with self.assertRaisesRegex(exception_type, f".*{errMsg}.*"):
             then_fut.wait()
 
     def test_then_wrong_arg(self):
@@ -166,21 +166,29 @@ class TestFuture(TestCase):
         def wrong_arg(tensor):
             return tensor + 1
 
-        self._test_then_error(wrong_arg, "unsupported operand type.*Future.*int")
+        self._test_then_error(
+            wrong_arg,
+            "unsupported operand type.*Future.*int",
+            TypeError,
+        )
 
     def test_then_no_arg(self):
 
         def no_arg():
             return True
 
-        self._test_then_error(no_arg, "takes 0 positional arguments but 1 was given")
+        self._test_then_error(
+            no_arg,
+            "takes 0 positional arguments but 1 was given",
+            TypeError,
+        )
 
     def test_then_raise(self):
 
         def raise_value_error(fut):
             raise ValueError("Expected error")
 
-        self._test_then_error(raise_value_error, "Expected error")
+        self._test_then_error(raise_value_error, "Expected error", ValueError)
 
     def test_add_done_callback_simple(self):
         callback_result = False
@@ -285,7 +293,7 @@ class TestFuture(TestCase):
         # error from add_done_callback's callback is swallowed
         # error from then's callback is not
         self.assertEqual(fut.wait(), torch.ones(2, 2))
-        with self.assertRaisesRegex(RuntimeError, "Expected error"):
+        with self.assertRaisesRegex(ValueError, "Expected error"):
             then_fut.wait()
 
     def test_collect_all(self):
@@ -322,7 +330,7 @@ class TestFuture(TestCase):
         def raise_in_fut(fut):
             raise ValueError("Expected error")
         fut3 = fut1.then(raise_in_fut)
-        with self.assertRaisesRegex(RuntimeError, "Expected error"):
+        with self.assertRaisesRegex(ValueError, "Expected error"):
             torch.futures.wait_all([fut3, fut2])
 
 if __name__ == '__main__':
