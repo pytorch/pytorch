@@ -3,7 +3,6 @@ from typing import Optional, Sequence, List, Tuple
 
 from tools.codegen.api.types import *
 from tools.codegen.model import *
-from tools.codegen.context import with_native_function
 
 # Represents a saved attribute involved in backward calculation.
 # Note that it can be a derived property of an input argument, e.g.:
