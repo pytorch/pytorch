@@ -68,7 +68,8 @@ class TestGradients(TestCase):
     def _get_safe_inplace(self, inplace_variant):
         @wraps(inplace_variant)
         def _fn(t, *args, **kwargs):
-            return inplace_variant(t.clone(), *args, **kwargs)
+            inputs = t.clone() if isinstance(t, torch.Tensor) else [arg.clone() for arg in t]
+            return inplace_variant(inputs, *args, **kwargs)
 
         return _fn
 
@@ -89,19 +90,19 @@ class TestGradients(TestCase):
                 variant_out_fn = variant
 
             def fn(*inputs):
-                output = variant_out_fn(*inputs, **sample.kwargs)
+                output = variant_out_fn(*sample.pack_inputs(inputs), **sample.kwargs)
                 return op.output_func(output)
 
             if check == 'gradcheck':
-                self.assertTrue(gradcheck(fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradcheck(fn, sample.unpack_inputs(),
                                           check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, sample.unpack_inputs(),
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
-                self.assertTrue(gradgradcheck(fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, sample.unpack_inputs(),
                                               gen_non_contig_grad_outputs=True,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
