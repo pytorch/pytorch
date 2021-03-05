@@ -32,6 +32,20 @@ def _orthogonalize(matrix, epsilon=1e-8):
             rest -= torch.sum(col * rest, dim=0) * col
 
 
+def _should_compress(
+    num_rows, num_cols, matrix_approximation_rank, min_compression_rate
+):
+    """
+    Returns whether a 2D tensor described as number of rows and columns is worth compressing,
+    i.e., ``min_compression_rate`` < uncompressed size / compressed size, where
+    uncompressed size = ``num_rows`` * ``num_cols``,
+    and compressed size = (``num_rows`` + ``num_cols``) * ``matrix_approximation_rank``.
+    """
+    return (
+        num_rows + num_cols
+    ) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols
+
+
 class PowerSGDState(object):
     r"""
     Stores both the algorithm's hyperparameters and the internal state for all the gradients during the training.
@@ -50,6 +64,8 @@ class PowerSGDState(object):
 
     To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached.
 
+    3. ``min_compression_rate`` is the minimum compression rate required when a layer is compressed. Due to the computation overheads incurred by the compression, a tensor is worth compressing only if there can be sufficient saving in bandwidth, where `` (num_rows + num_cols) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols``. If the specified compression rate threshold cannot be satisfied, the tensor will be directly allreduced without compression.
+
     .. warning ::
         If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
         This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
@@ -58,9 +74,10 @@ class PowerSGDState(object):
 
     __slots__ = [
         "process_group",
-        # The two fields below are the hyperparameters that should be tuned by the user.
+        # The three fields below are the hyperparameters that should be tuned by the user.
         "matrix_approximation_rank",
         "start_powerSGD_iter",
+        "min_compression_rate",
         # The two fields below are the binary hyperparameters recommended to be turned on for performance.
         "use_error_feedback",
         "warm_start",
@@ -77,15 +94,17 @@ class PowerSGDState(object):
         process_group,
         matrix_approximation_rank=1,
         start_powerSGD_iter=10,
+        min_compression_rate=2,
         use_error_feedback=True,
         warm_start=True,
         random_seed=0,
     ):
         logging.info(
-            "PowerSGD config: matrix_approximation_rank = {}; "
-            "start_powerSGD_iter = {}; use_error_feedback = {}; warm_start = {}.".format(
+            "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
+            "min_compression_rate = {}; use_error_feedback = {}; warm_start = {};".format(
                 matrix_approximation_rank,
                 start_powerSGD_iter,
+                min_compression_rate,
                 use_error_feedback,
                 warm_start,
             )
@@ -110,6 +129,7 @@ class PowerSGDState(object):
                 "because PowerSGD can only be applied after the first two iterations in DDP."
             )
         self.start_powerSGD_iter = start_powerSGD_iter
+        self.min_compression_rate = min_compression_rate
         # Error feedback is usually crucial for both for convergence and generalization,
         # because PowerSGD is a biased compressor,
         # i.e., compressing and decompressing a random gradient does not yield the original in expectation.
@@ -142,7 +162,7 @@ class PowerSGDState(object):
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
-        if bucket.get_index() == 0:
+        if bucket.is_the_last_bucket_to_allreduce():
             self.iter += 1
 
         if self.iter == self.start_powerSGD_iter:
@@ -151,24 +171,30 @@ class PowerSGDState(object):
             )
 
 
-def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
+def powerSGD_hook(
+    state: PowerSGDState, bucket: dist.GradBucket
+) -> torch.futures.Future:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
     Once gradient tensors are aggregated across all workers, this hook applies
     compression as follows:
 
-    1. Views the input flattened 1D gradient tensor as two groups of per-parameter tensors: high-rank tensors and vector-like rank-1 tensors (for biases).
+    1. Views the input flattened 1D gradient tensor as a list of per-parameter tensors, and divides all the tensors into two groups:
 
-    2. Handles rank-1 tensors by allreducing them without compression:
+        1.1 The tensors that should be compressed before allreduce, because the compression can give enough saving in bandwidth.
 
-        2.1. Allocate contiguous memory for those rank-1 tensors, and allreduces all the rank-1 tensors as a batch, without compression;
+        1.2 Rest of the tensors will be directly allreduced without compression, including all the vector tensors (for biases).
 
-        2.2. Copies the individual rank-1 tensors from the contiguous memory back to the input tensor.
+    2. Handles uncompressed tensors:
 
-    3. Handles high-rank tensors by PowerSGD compression:
+        2.1. Allocate contiguous memory for those uncompressed tensors, and allreduces all the uncompressed tensors as a batch, without compression;
 
-        3.1. For each high-rank tensor M, creates two low-rank tensors P and Q for decomposing M,
+        2.2. Copies the individual uncompressed tensors from the contiguous memory back to the input tensor.
+
+    3. Handles the tensors that should be compressed by PowerSGD compression:
+
+        3.1. For each tensor M, creates two low-rank tensors P and Q for decomposing M,
         such that M = PQ^T, where Q is initialized from a standard normal distribution and orthogonalized;
 
         3.2. Computes each P in Ps, which is equal to MQ;
@@ -181,7 +207,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
         3.6. Allreduces Qs as a batch;
 
-        3.7. Computes each M among all the high-rank tensors, which is approximately equal to PQ^T.
+        3.7. Computes each M among all the compressed tensors, which is approximately equal to PQ^T.
 
     Note that this communication hook enforces vanilla allreduce for the first ``state.start_powerSGD_iter`` iterations.
     This not only gives the user more control over the tradeoff between speedup and accuracy,
@@ -189,8 +215,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
-            To tune the compression configs, mainly need to tune `matrix_approximation_rank`` and ``start_powerSGD_iter``.
-        bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
+            To tune the compression configs, mainly need to tune ``matrix_approximation_rank``, ``start_powerSGD_iter``
+            and ``min_compression_rate``.
+        bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
 
@@ -198,7 +225,8 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         Future handler of the communication, which updates the gradients in place.
 
     Example::
-        >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
+        >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1,
+                                  start_powerSGD_iter=10, min_compression_rate=0.5)
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
     """  # noqa
     process_group = state.process_group
@@ -240,36 +268,36 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         input_tensor_cp = torch.clone(input_tensor).detach()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
-    tensors = [
-        input_tensor[offset : offset + length].view(sizes)
-        for offset, length, sizes in zip(
-            bucket.get_offsets(), bucket.get_lengths(), bucket.get_sizes_list()
-        )
-    ]
+    tensors = bucket.get_per_parameter_tensors()
 
-    # Step I: Handle rank-1 tensors.
-    # Allocate contiguous memory for rank-1 tensors to allreduce them without compression efficiently.
-    rank1_tensors = [tensor for tensor in tensors if tensor.ndimension() <= 1]
-    rank1_tensors_memory = (
-        torch.cat([tensor.view(-1) for tensor in rank1_tensors])
-        if rank1_tensors
+    # Step I: Divide all the tensors into two groups,
+    # one will be compressed before allreduce and the other will be directly allreduced without compression.
+    tensors_to_compress, uncompressed_tensors = [], []
+    total_Ps_size = 0
+    total_Qs_size = 0
+    for tensor in tensors:
+        matrix = tensor.view(tensor.shape[0], -1)
+        n, m = matrix.shape
+        matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
+        if _should_compress(
+            n, m, matrix_approximation_rank, state.min_compression_rate
+        ):
+            tensors_to_compress.append(matrix)
+            total_Ps_size += n * matrix_approximation_rank
+            total_Qs_size += m * matrix_approximation_rank
+        else:
+            uncompressed_tensors.append(tensor)
+
+    # Step II: Handle uncompressed tensors.
+    # Allocate contiguous memory for these tensors to allreduce efficiently.
+    uncompressed_tensors_memory = (
+        torch.cat([tensor.view(-1) for tensor in uncompressed_tensors])
+        if uncompressed_tensors
         else torch.tensor([], device=device, dtype=dtype)
     )
 
-    # Step II: Handle high-rank tensors.
-    # Allocate contiguous memory for Ps and Qs to allreduce compressed high-rank tensors efficiently.
-    high_rank_tensors = [
-        tensor.view(tensor.shape[0], -1)
-        for tensor in tensors
-        if tensor.ndimension() > 1
-    ]
-    total_Ps_size = 0
-    total_Qs_size = 0
-    for tensor in high_rank_tensors:
-        n, m = tensor.shape
-        matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
-        total_Ps_size += n * matrix_approximation_rank
-        total_Qs_size += m * matrix_approximation_rank
+    # Step III: Handle the tensors that should be compressed.
+    # Allocate contiguous memory for Ps and Qs to allreduce efficiently.
     # If warm-start is enabled, reuse Ps and Qs from the previous iteration if possible.
     # The memory spaces of Ps and Qs need to be allocated in the first iteration when PowerSGD is applied.
     need_randomize_qs = False
@@ -295,7 +323,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     qs = []
     p_idx = 0
     q_idx = 0
-    for tensor in high_rank_tensors:
+    for tensor in tensors_to_compress:
         n, m = tensor.shape
         matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
         ps.append(
@@ -335,22 +363,22 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                 _orthogonalize(q)
 
     # Compute Ps.
-    for tensor, q, p in zip(high_rank_tensors, qs, ps):
+    for tensor, q, p in zip(tensors_to_compress, qs, ps):
         torch.matmul(tensor, q, out=p)
 
-    # This allreduce is only applied to rank-1 tensors,
-    # so it should have been kicked off before the above computation on the high-rank tensors to hide more communication costs.
+    # This allreduce is only applied to uncompressed tensors,
+    # so it should have been kicked off before the above computation on the compressed tensors to hide more communication costs.
     # However, this somehow requires a separate future chain at this time.
-    allreduce_contiguous_rank1_tensors_fut = dist.all_reduce(
-        rank1_tensors_memory, group=group_to_use, async_op=True
+    allreduce_contiguous_uncompressed_tensors_fut = dist.all_reduce(
+        uncompressed_tensors_memory, group=group_to_use, async_op=True
     ).get_future()
 
-    def unpack_rank1_tensors_and_allreduce_ps(fut):
-        rank1_tensors_memory = fut.value()[0].div_(world_size)
+    def unpack_uncompressed_tensors_and_allreduce_ps(fut):
+        uncompressed_tensors_memory = fut.value()[0].div_(world_size)
         idx = 0
-        for tensor in rank1_tensors:
-            tensor.copy_(rank1_tensors_memory[idx : idx + tensor.shape[0]])
-            idx += tensor.shape[0]
+        for tensor in uncompressed_tensors:
+            tensor.copy_(uncompressed_tensors_memory[idx : idx + tensor.numel()].view_as(tensor))
+            idx += tensor.numel()
 
         # Since these Ps will be orthogonalized later, no need to divide them by world size.
         return [
@@ -367,7 +395,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             _orthogonalize(p)
 
         # Compute Qs.
-        for tensor, p, q in zip(high_rank_tensors, ps, qs):
+        for tensor, p, q in zip(tensors_to_compress, ps, qs):
             torch.matmul(tensor.t(), p, out=q)
 
         # TODO: The above procedure does two matmul+allreduce steps per iteration --
@@ -386,7 +414,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     def decompress(fut):
         state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
 
-        for p, q, tensor in zip(ps, qs, high_rank_tensors):
+        for p, q, tensor in zip(ps, qs, tensors_to_compress):
             torch.matmul(p, q.t(), out=tensor)
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
@@ -403,15 +431,17 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         return [input_tensor]
 
     return (
-        allreduce_contiguous_rank1_tensors_fut.then(
-            unpack_rank1_tensors_and_allreduce_ps
+        allreduce_contiguous_uncompressed_tensors_fut.then(
+            unpack_uncompressed_tensors_and_allreduce_ps
         )
         .then(compute_qs)
         .then(decompress)
     )
 
 
-def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
+def batched_powerSGD_hook(
+    state: PowerSGDState, bucket: dist.GradBucket
+) -> torch.futures.Future:
     r"""
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -454,7 +484,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank`` and ``start_powerSGD_iter``.
-        bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
+        bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
 

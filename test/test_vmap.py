@@ -6,7 +6,6 @@ import functools
 import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
 import types
 
 
@@ -2480,8 +2479,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
-    # Excluding ROCM
-    except_for='cuda' if TEST_WITH_ROCM else None,
+    None,
 )
 
 if __name__ == '__main__':

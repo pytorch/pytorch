@@ -231,10 +231,18 @@ class TORCH_API BufHandle : public ExprHandle {
       const std::vector<ExprHandle>& dims,
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+
   explicit BufHandle(const Buf* node) : ExprHandle(node) {}
   const Buf* node() const {
     return static_cast<const Buf*>(ExprHandle::node());
   }
+
+  template <typename... Ts>
+  inline ExprHandle load(const Ts&... ts) const;
+
+  template <typename T>
+  inline ExprHandle load(const std::vector<T>& args) const;
+
   bool operator==(const BufHandle& other) const {
     return this->node() == other.node();
   }

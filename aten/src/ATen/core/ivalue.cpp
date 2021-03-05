@@ -4,6 +4,7 @@
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <cmath>
@@ -407,7 +408,7 @@ std::ostream& printList(
     const std::string finish,
     IValueFormatter formatter) {
   out << start;
-  for (size_t i = 0; i < list.size(); ++i) {
+  for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
       out << ", ";
     }
@@ -609,7 +610,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
 
       std::vector<IValueComparator> elements_lts;
       elements_lts.reserve(n);
-      for (size_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         elements_lts.push_back(getLessThanComparator(elements[i]));
       }
 
@@ -617,7 +618,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
         const auto& a_elements = a.toTuple()->elements();
         const auto& b_elements = b.toTuple()->elements();
 
-        for (size_t i = 0; i < n; ++i) {
+        for (const auto i : c10::irange(n)) {
           if (elements_lts[i](a_elements[i], b_elements[i])) {
             return true;
           }
@@ -867,7 +868,7 @@ void ivalue::Object::resizeObject(size_t slot) {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (auto i = 0; i < slots_.size(); ++i) {
+  for (const auto i : c10::irange(slots_.size())) {
     object->setSlot(i, slots_[i]);
   }
   return object;
@@ -880,7 +881,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (size_t i = 0; i < slots_.size(); ++i) {
+  for (const auto i : c10::irange(slots_.size())) {
     if (slots_[i].type() == c10::CapsuleType::get()) {
       // If we've gotten here, it means that we have *not* copied this
       // class via __getstate__ and __setstate__. That fact and the
@@ -944,7 +945,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();
-    for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+    for (const auto i : c10::irange(ctx->srcFutures.size())) {
       TORCH_CHECK(i == 0 || *ctx->srcFutures.get(i)->elementType() == *typePtr);
       ctx->srcFutures.get(i)->addCallback(func);
     }
@@ -960,7 +961,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     return res;
   }
   TypePtr typePtr = srcs.get(0)->elementType();
-  for (size_t i = 0, tot = srcs.size(); i < tot; ++i) {
+  for (const auto i : c10::irange(srcs.size())) {
     if (srcs.get(i)->completed()) {
       return srcs.get(i);
     }
@@ -989,7 +990,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       }
     }
   };
-  for (size_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+  for (const auto i : c10::irange(ctx->srcFutures.size())) {
     ctx->srcFutures.get(i)->addCallback([func, i]() { func(i); });
   }
   return ctx->dstFuture;

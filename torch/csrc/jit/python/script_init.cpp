@@ -783,7 +783,43 @@ void initJitScriptBindings(PyObject* module) {
                   if (auto method = self.find_method(name)) {
                     return py::cast(*method);
                   }
+                  if (self.has_property(name)) {
+                    auto prop = self.get_property(name);
+                    // wrap the Method into callable PyObject
+                    auto getter_func = py::cast(prop.getter_func);
+                    return getter_func();
+                  }
                   return toPyObject(self.attr(name));
+                } catch (const ObjectAttributeError& err) {
+                  throw AttributeError("%s", err.what());
+                }
+              })
+          .def(
+              "__setattr__",
+              [](Object& self, const std::string& name, py::object value) {
+                try {
+                  if (self.has_property(name)) {
+                    auto prop = self.get_property(name);
+                    if (!prop.setter_func.has_value()) {
+                      TORCH_CHECK(false, "can't set attribute");
+                    }
+                    // wrap the Method into callable PyObject
+                    auto setter_func = py::cast(prop.setter_func);
+                    setter_func(value);
+                    return;
+                  }
+
+                  if (self.type()->hasConstant(name)) {
+                    TORCH_CHECK(
+                        false,
+                        "Can't set constant '",
+                        name,
+                        "' which has value:",
+                        self.type()->getConstant(name));
+                  }
+                  TypePtr type = self.type()->getAttribute(name);
+                  auto ivalue = toIValue(std::move(value), type);
+                  self.setattr(name, ivalue);
                 } catch (const ObjectAttributeError& err) {
                   throw AttributeError("%s", err.what());
                 }
@@ -1340,6 +1376,11 @@ void initJitScriptBindings(PyObject* module) {
             PythonPrint pp(constants, deps);
             pp.printMethod(self.function());
             return pp.str();
+          })
+      .def(
+          "_debug_flush_compilation_cache",
+          [](Method& self) {
+            return self.get_executor().debugFlushCompilationCache();
           })
       .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::IValue> constants;
