@@ -115,7 +115,6 @@ def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
     ]
     return [
         {
-            "python_version": "3.7",
             "gpu_arch_type": arch_type(arch_version),
             "gpu_arch_version": arch_version,
             "container_image": LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)],

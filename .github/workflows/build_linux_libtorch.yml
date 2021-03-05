@@ -35,7 +35,8 @@ jobs:
     container:
       image: ${{ matrix.container_image }}
     env:
-      DESIRED_PYTHON: ${{ matrix.python_version }}
+      # TODO: remove this var from the libtorch builder script(s)
+      DESIRED_PYTHON: '3.7'
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: ${{ matrix.gpu_arch_version }}
@@ -86,6 +87,6 @@ jobs:
           /builder/manywheel/build_cpu.sh
       - uses: actions/upload-artifact@v2
         with:
-          name: pytorch-libtorch-py${{ matrix.python_version }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
+          name: pytorch-libtorch-${{ matrix.libtorch_variant }}-${{ matrix.devtoolset }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
           path: /remote/**/*.zip
       # TODO: Add a step here for uploading binaries
