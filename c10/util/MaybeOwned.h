@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/in_place.h>
 
@@ -17,7 +16,7 @@ namespace c10 {
 /// no borrow checking. Included here to support
 /// Tensor::expect_contiguous.
 template <typename T>
-class TORCH_API MaybeOwned final {
+class MaybeOwned final {
   bool isBorrowed_;
   union {
     const T *borrow_;
