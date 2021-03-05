@@ -7,12 +7,16 @@
 
 import copy
 import os
+import sys
 from contextlib import suppress
 from typing import List, Any, Type, cast
 
 import numpy as np
 import torch
 import torch.distributed as dist
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
