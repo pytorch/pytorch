@@ -1657,23 +1657,6 @@ std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
   }
 }
 
-std::vector<CodeGen::BufferArg> TensorExprKernel::prepareBufferArgs() {
-  std::vector<CodeGen::BufferArg> params;
-  for (auto const& arg : kernelArgs_) {
-    params.push_back(arg.buffer());
-    for (auto const& size : arg.sizes()) {
-      params.emplace_back(size.var);
-    }
-    for (auto const& stride : arg.strides()) {
-      params.emplace_back(stride.var);
-    }
-  }
-  for (auto& o : tensorOutputs_) {
-    params.emplace_back(o);
-  }
-  return params;
-}
-
 template <typename T>
 static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
   return !a.has_value() || *a == b;
@@ -1764,25 +1747,24 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
                 }
                 return inBuffer.load(idx);
               }));
-      kernelArgs_.emplace_back(
-          inBuffer, std::vector<ShapeArg>(), std::vector<ShapeArg>());
+      bufferArgs_.emplace_back(inBuffer);
       break;
     }
     case TypeKind::FloatType: {
       VarHandle v("v" + input_name_map_[input], kDouble);
-      kernelArgs_.emplace_back(v);
+      bufferArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
     }
     case TypeKind::BoolType: {
       VarHandle v("v" + input_name_map_[input], kBool);
-      kernelArgs_.emplace_back(v);
+      bufferArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
     }
     case TypeKind::IntType: {
       VarHandle v("v" + input_name_map_[input], kLong);
-      kernelArgs_.emplace_back(v);
+      bufferArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
     }
@@ -2213,6 +2195,7 @@ void TensorExprKernel::compile() {
     }
 
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
+    bufferArgs_.emplace_back(tensors_.at(output->unique()));
     tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(tensors_[output->unique()]))
             .device(device_));
@@ -2221,14 +2204,12 @@ void TensorExprKernel::compile() {
 
   BackendType backendType = inferBackendTypeFromDevice(device_);
   Stmt* stmt = transformLoops(backendType, new Block(tensor_stmts));
-  // Set up formal params (inputs, then outputs) for kernel.
-  std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
 
   // Generate code.
   codegen_ = CreateCodeGen(
       getCodeGenName(backendType),
       stmt,
-      params,
+      bufferArgs_,
       device_,
       SubgraphUtils::generateNameForGraph(graph_));
 }

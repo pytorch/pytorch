@@ -128,17 +128,17 @@ class MultiheadAttention(nn.MultiheadAttention):
                                                           weight.requires_grad)
             observed.linear_V.bias = bias
         else:
-            observed.linear_Q = other.q_proj_weight
-            observed.linear_K = other.k_proj_weight
-            observed.linear_V = other.v_proj_weight
+            observed.linear_Q.weight = nn.Parameter(other.q_proj_weight)
+            observed.linear_K.weight = nn.Parameter(other.k_proj_weight)
+            observed.linear_V.weight = nn.Parameter(other.v_proj_weight)
             if other.in_proj_bias is None:
                 observed.linear_Q.bias = None  # type: ignore
                 observed.linear_K.bias = None  # type: ignore
                 observed.linear_V.bias = None  # type: ignore
             else:
-                observed.linear_Q.bias = other.in_proj_bias[0:other.embed_dim]
-                observed.linear_K.bias = other.in_proj_bias[other.embed_dim:(other.embed_dim * 2)]
-                observed.linear_V.bias = other.in_proj_bias[(other.embed_dim * 2):]
+                observed.linear_Q.bias = nn.Parameter(other.in_proj_bias[0:other.embed_dim])
+                observed.linear_K.bias = nn.Parameter(other.in_proj_bias[other.embed_dim:(other.embed_dim * 2)])
+                observed.linear_V.bias = nn.Parameter(other.in_proj_bias[(other.embed_dim * 2):])
         observed.eval()
         # Explicit prepare
         observed = torch.quantization.prepare(observed, inplace=True)
@@ -198,17 +198,17 @@ class MultiheadAttention(nn.MultiheadAttention):
                 assert all(bV == 0)
                 fp.in_proj_bias[_start:] = bV
         else:
-            fp.q_proj_weight = wQ
-            fp.k_proj_weight = wK
-            fp.v_proj_weight = wV
+            fp.q_proj_weight = nn.Parameter(wQ)
+            fp.k_proj_weight = nn.Parameter(wK)
+            fp.v_proj_weight = nn.Parameter(wV)
             if fp.in_proj_bias is None:
                 self.linear_Q.bias = None  # type: ignore
                 self.linear_K.bias = None  # type: ignore
                 self.linear_V.bias = None  # type: ignore
             else:
-                fp.in_proj_bias[0:fp.embed_dim] = self.linear_Q.bias
-                fp.in_proj_bias[fp.embed_dim:(fp.embed_dim * 2)] = self.linear_K.bias
-                fp.in_proj_bias[(fp.embed_dim * 2):] = self.linear_V.bias
+                fp.in_proj_bias[0:fp.embed_dim] = bQ
+                fp.in_proj_bias[fp.embed_dim:(fp.embed_dim * 2)] = bK
+                fp.in_proj_bias[(fp.embed_dim * 2):] = bV
 
         return fp
 
