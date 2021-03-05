@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/Tensor.h>
+
 namespace at {
 namespace autocast {
 

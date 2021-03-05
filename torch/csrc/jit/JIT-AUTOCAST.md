@@ -130,33 +130,6 @@ Also related to the lack of concrete dtype availability, a few specialized
 autocast policies are not yet supported with JIT scripting:
 - [CastPolicy::fp32_append_dtype][5]
 
-#### Mixing eager mode and scripting autocast
-
-Calling scripted functions and models from a eager-mode autocast scope is
-currently not supported. For example, looking at the official [AMP example][6]:
-
-```python
-for epoch in range(epochs):
-    for input, target in zip(data, targets):
-        with torch.cuda.amp.autocast(enabled=use_amp):
-            output = net(input)
-            loss = loss_fn(output, target)
-        ...
-```
-
-A reasonable expectation might be to substitute `net` with the scripted version:
-
-```python
-net_jit = torch.jit.script(net)
-...
-for epoch in range(epochs):
-    for input, target in zip(data, targets):
-        with torch.cuda.amp.autocast(enabled=use_amp):
-            output = net_jit(input) # this will not work
-            loss = loss_fn(output, target)
-       ...
-```
-
 #### Mixing tracing and scripting autocast (script calling traced)
 
 Calling a traced function from a scripted one mostly works, except for the case
@@ -181,7 +154,7 @@ def fn(a, b):
 #### Mixing tracing and scripting autocast (traced calling script)
 
 Calling a scripted function from a trace is similar to calling the scripted
-function from eager mode, with the same limitations noted in this document:
+function from eager mode:
 
 ```python
 @torch.jit.script
@@ -193,7 +166,6 @@ def traced(a, b):
         return fn(a, b)
 
 # running TorchScript with Autocast enabled is not supported
-# (this is the same as scripted called from eager mode)
 torch.jit.trace(traced, (x, y))
 ```
 

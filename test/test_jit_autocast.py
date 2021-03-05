@@ -320,10 +320,12 @@ class TestAutocast(JitTestCase):
         @torch.jit.script
         def fn(a, b):
             return torch.mm(a, b)
-        with autocast(enabled=True):
-            # running TorchScript with Autocast enabled is not supported
-            with self.assertRaises(RuntimeError):
+        for i in range(8):
+            use_autocast = (i % 2 == 0)
+            expected_dtype = torch.float16 if use_autocast else torch.float32
+            with autocast(enabled=use_autocast):
                 result = fn(self.a_fp32, self.b_fp32)
+            self.assertEqual(result.dtype, expected_dtype)
 
     # traced inside scripting
     def test_script_and_tracing(self):
@@ -372,6 +374,7 @@ class TestAutocast(JitTestCase):
         self.assertEqual(result.dtype, torch.float16)
 
     # scripted called from traced with autocast
+    @unittest.skipIf(True, "scripted called from traced TorchScript is not yet working")
     def test_tracing_with_autocast_and_script(self):
         @torch.jit.script
         def fn(a, b):
@@ -381,10 +384,9 @@ class TestAutocast(JitTestCase):
             with autocast(enabled=True):
                 return fn(a, b)
 
-        # running TorchScript with Autocast enabled is not supported
-        # (this is the same as scripted called from eager mode)
-        with self.assertRaises(RuntimeError):
-            torch.jit.trace(traced, (self.a_fp32, self.b_fp32))
+        traced = torch.jit.trace(traced, (self.a_fp32, self.b_fp32))
+        result = traced(self.a_fp32, self.b_fp32)
+        self.assertEqual(result.dtype, torch.float16)
 
     def test_script_module(self):
         class TestModule(torch.nn.Module):

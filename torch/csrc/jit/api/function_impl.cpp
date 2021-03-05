@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
 
+#include <ATen/autocast_mode.h>
+
 namespace torch {
 namespace jit {
 namespace {
@@ -69,6 +71,11 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
     schema_ = std::make_unique<c10::FunctionSchema>(defaultSchemaFor(*this));
   }
   return *schema_;
+}
+
+GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
+  return at::autocast::is_enabled() ? SpecializationKey::AutocastOn
+                                    : SpecializationKey::AutocastOff;
 }
 
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {

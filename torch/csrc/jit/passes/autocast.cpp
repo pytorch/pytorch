@@ -1,6 +1,7 @@
 
 #include <torch/csrc/jit/passes/autocast.h>
 
+#include <ATen/autocast_mode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -314,7 +315,7 @@ void handleBlock(Block* block, bool initial_state) {
 
 void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
-  handleBlock(graph->block(), false);
+  handleBlock(graph->block(), at::autocast::is_enabled());
   GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
 
