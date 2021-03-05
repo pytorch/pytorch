@@ -67,10 +67,10 @@ fi
 
 if [[ "$cuda_major_version" == "10" ]]; then
     # nvidia-smi for CUDA <= 10.1
-    "/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe"
+    nvidia-smi.exe
 else
     # nvidia-smi for CUDA >= 10.2
-    "/c/Windows/System32/nvidia-smi.exe"
+    nvidia-smi.exe
 fi
 
 cd ..
