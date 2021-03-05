@@ -25,12 +25,6 @@ constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
-// Debug logging levels
-extern const char * kDistDebugEnvVar;
-extern const char* kDistDebugDetailLogLevel;
-extern const char* kDistDebugInfoLogLevel;
-extern const char* kDistDebugOffLogLevel;
-
 class Reducer {
  public:
   // The constructor takes a list of variables for every model replica.

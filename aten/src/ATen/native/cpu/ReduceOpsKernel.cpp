@@ -114,7 +114,15 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
 
           // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
           auto log_add_exp = [](scalar_t x, scalar_t y) -> scalar_t {
-            return std::log1p(std::exp(std::min(x, y) - std::max(x, y))) + std::max(x, y);
+            scalar_t min = std::isnan(y) ? y : std::min(x,y); //std::min returns first arg if one of the args is nan
+            scalar_t max = std::isnan(y) ? y : std::max(x,y); //std::max returns first arg if one of the args is nan
+            if (min != max || std::isfinite(min)) {
+              // nan will be propagated here
+              return std::log1p(std::exp(min - max)) + max;
+            } else {
+           // special case to correctly handle infinite cases
+              return x;
+            }
           };
           cum_number = log_add_exp(x, cum_number);
           result_data[i * result_dim_stride] = static_cast<scalar_t>(cum_number);
@@ -347,7 +355,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
       std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
     return;
   }
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "min_values_cpu", [&iter] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
@@ -357,7 +365,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void max_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
