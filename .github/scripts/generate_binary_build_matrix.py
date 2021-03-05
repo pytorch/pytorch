@@ -82,8 +82,11 @@ def is_pull_request() -> bool:
     # return os.environ.get("GITHUB_HEAD_REF")
 
 
-def snip_if(is_pr: bool, l: List[str]) -> List[str]:
-    return [l[-1]] if is_pr else l
+def snip_if(is_pr: bool, versions: List[str]) -> List[str]:
+    """
+    Return the full list of versions, or just the latest if on a PR.
+    """
+    return [versions[-1]] if is_pr else versions
 
 
 def generate_conda_matrix(is_pr: bool) -> List[Dict[str, str]]:
