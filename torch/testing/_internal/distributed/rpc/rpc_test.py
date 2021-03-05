@@ -1036,6 +1036,17 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.api._all_gather(SlowPickleClass(0.5))
 
     @dist_init
+    def test_barrier(self):
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        if info.id % 2:
+            names = set([worker.name for worker in all_worker_info if worker.id % 2])
+            rpc.barrier(names)
+        else:
+            names = set([worker.name for worker in all_worker_info if not worker.id % 2])
+            rpc.barrier(names)
+
+    @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
         """Test graceful termination."""
         self._run_uneven_workload()
