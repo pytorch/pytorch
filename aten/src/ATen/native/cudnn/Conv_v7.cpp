@@ -821,18 +821,27 @@ void raw_cudnn_convolution_backward_weight_out(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
-void raw_cudnn_convolution_bias_relu_out(
+void raw_cudnn_convolution_add_relu_out(
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
+    const Tensor& z,
+    float alpha,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups,
-    bool benchmark,
-    bool deterministic,
-    bool allow_tf32) {
+    int64_t groups) {
+  // This function is currently only called if frozen-model opt is turned on.
+  // The benchmarking and caching mechanism is not ready, so let's set benchmark
+  // to false.
+  bool benchmark = false;
+  // (!benchmark && !deterministic) means later try_all will call
+  // cudnnGetConvolutionForwardAlgorithm_v7 to pick the best convolution
+  // algorithm.
+  bool deterministic = false;
+  bool allow_tf32 = true;
+
   auto dataType = getCudnnDataType(input);
 
   ConvolutionArgs args{input, output, weight};
@@ -862,6 +871,9 @@ void raw_cudnn_convolution_bias_relu_out(
       args.params.groups,
       args.params.allow_tf32);
 
+  TensorDescriptor zdesc;
+  zdesc.set(z);
+
   // See Note [CuDNN broadcast padding].  Handle the left padding
   // ourselves, but use TensorDescriptor's padding argument to do the rest.
   TensorDescriptor bdesc;
@@ -884,7 +896,7 @@ void raw_cudnn_convolution_bias_relu_out(
             args);
 
         Constant one(dataType, 1);
-        Constant zero(dataType, 0);
+        Constant alpha_(dataType, alpha);
 
         AT_CUDNN_CHECK_WITH_SHAPES(
             cudnnConvolutionBiasActivationForward(
@@ -898,17 +910,16 @@ void raw_cudnn_convolution_bias_relu_out(
                 fwdAlgPerf.algo,
                 workspace.data_ptr(),
                 fwdAlgPerf.memory,
-                &zero,
-                args.odesc.desc(), // zDesc
-                output.data_ptr(), // z is not currently used but we have to
-                                   // feed a value
+                &alpha_,
+                zdesc.desc(),
+                z.data_ptr(),
                 bdesc.desc(),
                 bias.data_ptr(),
                 adesc.desc(),
                 args.odesc.desc(),
                 output.data_ptr()),
             args,
-            "Forward algorithm: ",
+            "cudnnConvolutionBiasActivationForward: ",
             static_cast<int>(fwdAlgPerf.algo),
             "\n");
       });

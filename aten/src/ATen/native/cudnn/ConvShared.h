@@ -71,16 +71,15 @@ void raw_cudnn_convolution_backward_weight_out(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32);
 
-void raw_cudnn_convolution_bias_relu_out(
+void raw_cudnn_convolution_add_relu_out(
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
+    const Tensor& z,
+    float alpha,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups,
-    bool benchmark,
-    bool deterministic,
-    bool allow_tf32);
+    int64_t groups);
 }}

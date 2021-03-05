@@ -3854,10 +3854,6 @@
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
-- name: aten::cudnn_convolution_bias_relu
-  depends:
-  - name: aten::eq
-  - name: aten::is_nonzero
 - name: aten::cudnn_grid_sampler
   depends:
   - name: aten::eq
