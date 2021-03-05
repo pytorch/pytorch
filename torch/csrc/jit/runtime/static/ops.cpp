@@ -643,11 +643,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     at::native::copy_(out_t, in0_t, false);
   };
 });
-REGISTER_OPERATOR_FUNCTOR_OPT(
+REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
     quantized_embedding_bag_byte_rowwise_offsets,
-    false, // don't reuse byte inputs
-    true,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const auto& weight = p_node->Input(0).toTensor();
@@ -677,11 +675,9 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             include_last_offset);
       };
     });
-REGISTER_OPERATOR_FUNCTOR_OPT(
+REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_4bit_rowwise_offsets,
     embedding_bag_4bit_rowwise_offsets,
-    false, // don't reuse byte inputs
-    true,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const auto& weight = p_node->Input(0).toTensor();
@@ -918,7 +914,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
-      auto* node = p_node->get_node();
+      auto* node = p_node->node();
       const auto& type = node->output()->type()->expect<TupleType>();
       if (type->name().has_value()) {
         namedTupleConstruct(stack, type, node->inputs().size());
@@ -940,7 +936,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       // run op
       listConstruct(
           stack,
-          p_node->get_node()->output()->type()->expectRef<ListType>(),
+          p_node->node()->output()->type()->expectRef<ListType>(),
           p_node->inputs().size());
       // put output back
       p_node->Output(0) = std::move(stack[0]);
