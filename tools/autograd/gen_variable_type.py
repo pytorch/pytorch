@@ -22,8 +22,6 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from dataclasses import dataclass
-
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
@@ -36,11 +34,10 @@ from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
 import tools.codegen.api.cpp as cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.gen import FileManager
 from tools.codegen.context import with_native_function
 from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
-from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 # We don't set or modify grad_fn on these methods. Generally, they return
@@ -302,17 +299,13 @@ ${statements}
 #endif
 """)
 
-@dataclass(frozen=True)
-class NativeFunctionWithDifferentiabilityInfo:
-    func: NativeFunction
-    info: Optional[DifferentiabilityInfo]
+
 
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
-    differentiability_infos: Sequence[DifferentiabilityInfo],
+    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
-    operator_selector: SelectiveBuilder,
 ) -> None:
 
     """VariableType.h and VariableType.cpp body
@@ -321,11 +314,6 @@ def gen_variable_type(
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
-    fns = list(sorted(filter(
-        operator_selector.is_native_function_selected_for_training,
-        parse_native_yaml(native_yaml_path)), key=lambda f: cpp.name(f.func)))
-    fns_with_infos = match_differentiability_info(fns, differentiability_infos)
-
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     gen_variable_type_shard(fm, fns_with_infos, 'VariableType.h', 'VariableType.h')
 
@@ -368,7 +356,6 @@ def gen_variable_type_shard(
     template_name: str,
     output_name: str,
 ) -> None:
-    type_declarations: List[str] = []
     type_definitions: List[str] = []
     wrapper_registrations: List[str] = []
 
@@ -376,12 +363,6 @@ def gen_variable_type_shard(
         f = fn.func
         name = cpp.name(f.func)
         formals = gen_formals(f)
-
-        type_declarations.append(METHOD_DECLARATION.substitute(
-            return_type=cpp.returns_type(f.func.returns),
-            type_wrapper_name=type_wrapper_name(f),
-            formals=formals,
-        ))
 
         if name not in MANUAL_AUTOGRAD and dispatch_strategy(fn) == 'use_derived':
             type_definitions.append(METHOD_DEFINITION.substitute(
@@ -406,7 +387,6 @@ def gen_variable_type_shard(
 
     fm.write_with_template(output_name, template_name, lambda: {
         'generated_comment': '@' + f'generated from {fm.template_dir}/{template_name}',
-        'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
     })
@@ -934,50 +914,6 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
 
     return body, unpacked_bindings
 
-def dispatch_strategy(fn: NativeFunctionWithDifferentiabilityInfo) -> str:
-    """How are we going to call the underlying implementation of a
-    declaration?  There are two strategies:
-
-        - use_derived: we want to call the implementation on CPUDoubleType
-          (or a similar, derived Type instance).  Because these derived
-          instances deal in Tensors, not Variables (it's a completely different
-          object, so it doesn't dispatch back to VariableType), code on
-          this dispatch path needs to wrap/unwrap tensors.  If the
-          derived implementation takes and returns tensors, the
-          implementation is usually differentiable (although we also use
-          the derived dispatch path for non-differentiable functions
-          that we still want to dispatch on the derived Type instance;
-          e.g., size())
-
-        - use_type: we want to call the implementation on Type, because
-          it is implemented concretely, and the functions it invokes will
-          get dispatched back to VariableType (which will ensure that they
-          are differentiable.)
-    """
-    if fn.func.is_abstract or (fn.info is not None and fn.info.has_derivatives):
-        # If the function is abstract (not implemented on at::Type), we must
-        # call the implementation on the derived type with unpacked tensors.
-
-        # If the function has a derivative specified and is concrete, we could
-        # call either implementation. We prefer the calling the derived
-        # type's implementation with unpacked tensors because it is more
-        # performant in some cases: any internal calls to other ATen functions
-        # won't have the history tracked.
-
-        # If the function has a type dispatched argument (i.e. is a factory),
-        # we prefer calling the derived type's implementation both because it is
-        # more performant and to ensure factory functions return tensors with _version
-        # of 0 (probably not strictly necessary, but nice to have to keeps versions simple
-        # to understand.
-
-        return 'use_derived'
-    else:
-        # If the function is concrete (we don't have to override it) and we
-        # didn't declare it in derivatives.yaml, we'll assume that it is
-        # actually implemented out of differentiable functions. (This
-        # assumption might not hold, but then you'll see gradcheck fail.)
-        return 'use_type'
-
 def is_tensor_type(t: Type) -> bool:
     # TODO: Should handle optional here?
     return t.is_tensor_like() and t.is_list_like() is None
@@ -988,48 +924,3 @@ def is_tensor_list_type(t: Type) -> bool:
 
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
-
-def match_differentiability_info(
-    native_functions: List[NativeFunction],
-    differentiability_infos: Sequence[DifferentiabilityInfo],
-) -> List[NativeFunctionWithDifferentiabilityInfo]:
-    """Sets the "derivative" key on declarations to matching autograd function
-
-    In-place functions will use the out-of-place derivative definition if there
-    is no in-place specific derivative.
-    """
-
-    info_by_schema = {info.func.func: info for info in differentiability_infos}
-    functional_info_by_signature = {
-        info.func.func.signature(strip_default=True): info
-        for info in differentiability_infos
-        if info.func.func.kind() == SchemaKind.functional}
-
-    def find_info(f: NativeFunction) -> Tuple[Optional[DifferentiabilityInfo], bool]:
-        if f.func in info_by_schema:
-            return info_by_schema[f.func], True
-
-        # if there is no exact match look for the out-of-place signature.
-        # i.e mul() for mul_() or mul_out()
-        return functional_info_by_signature.get(f.func.signature(strip_default=True)), False
-
-    result: List[NativeFunctionWithDifferentiabilityInfo] = []
-    for f in native_functions:
-        info, is_exact_match = find_info(f)
-
-        # Currently, the '.strides()' to 'strides_or_error' replacement does not support
-        # 'self' derivatives of an inplace function, so we must check for this case.
-        if f.func.kind() == SchemaKind.inplace and (info is not None):
-            for derivative in info.derivatives:
-                if 'self' in derivative.var_names:
-                    for saved_input in derivative.saved_inputs:
-                        assert 'strides_or_error' not in saved_input.expr, (
-                            "Calling '.strides()' in the 'self' derivative formula of an "
-                            f"in-place function is not supported: {f.func}")
-
-        result.append(NativeFunctionWithDifferentiabilityInfo(
-            func=f,
-            info=info,
-        ))
-
-    return result
