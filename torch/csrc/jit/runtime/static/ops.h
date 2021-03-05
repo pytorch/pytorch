@@ -27,23 +27,14 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 // TODO: reuse_inp reuse_out can be deprecated with further analysis
 // try to avoid this API.
-#define REGISTER_OPERATOR_FUNCTOR_OPT(name, id, reuse_inp, reuse_out, ...) \
-  struct SROperatorFunctor_##id : public SROperatorFunctor {               \
-    const SROpFunctor fn = __VA_ARGS__;                                    \
-    bool CanReuseInput() override {                                        \
-      return reuse_inp;                                                    \
-    }                                                                      \
-    bool CanReuseOutput() override {                                       \
-      return reuse_out;                                                    \
-    }                                                                      \
-    SROperator Generate(Node* n) override {                                \
-      return fn(n);                                                        \
-    }                                                                      \
-  };                                                                       \
+#define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
+  struct SROperatorFunctor_##id : public SROperatorFunctor { \
+    const SROpFunctor fn = __VA_ARGS__;                      \
+    SROperator Generate(Node* n) override {                  \
+      return fn(n);                                          \
+    }                                                        \
+  };                                                         \
   C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
-
-#define REGISTER_OPERATOR_FUNCTOR(name, id, ...) \
-  REGISTER_OPERATOR_FUNCTOR_OPT(name, id, true, true, __VA_ARGS__)
 
 #define REGISTER_VIEW_OPERATOR_FUNCTOR(name, id, ...)        \
   struct SROperatorFunctor_##id : public SROperatorFunctor { \
