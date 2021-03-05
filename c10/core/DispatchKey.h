@@ -162,7 +162,7 @@ enum class DispatchKey : uint8_t {
   // For functional ops it's fallthrough kernel since there's no extra
   // work to do.
   //
-  // See Note [Dream: skip VariableType kernel when requires_grad=false]
+  // Note [Dream: skip VariableType kernel when requires_grad=false]
   //
   // In an ideal world where we can skip VariableType kernel for inputs
   // with requires_grad=false, instead of a fallthrough kernel, we'll

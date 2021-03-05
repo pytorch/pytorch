@@ -125,6 +125,11 @@ ${assign_return_values} ([&]() {
 })();
 """)
 
+THROW_IF_VARIABLETYPE_ON = """
+TORCH_CHECK(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset),
+  "Cannot handle Inference Tensor outside InferenceMode");
+"""
+
 TMP_VAR = 'tmp'
 
 # FIXME: Ideally these functions should be methods on Type class, but we have a
@@ -319,7 +324,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         api_name = sig_group.faithful_signature.name()
     else:
         api_name = sig_group.signature.name()
-    # inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
+    inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
     if modifies_arguments(f):  # inplace op
         inplace_view_body.append(INPLACE_REDISPATCH.substitute(
             api_name=api_name,

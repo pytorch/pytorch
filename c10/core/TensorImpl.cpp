@@ -4,6 +4,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/core/inference_mode.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -86,8 +87,13 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // in the old way of only registering with backend key like DispatchKey::CPU.
   // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
   // add AutogradBackend key when the tensor requires grad.
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
-  key_set_ = key_set.add(getAutogradKeyFromBackend(k)).add(c10::DispatchKey::InplaceOrView);
+  if (c10::InferenceMode::is_enabled()) {
+      key_set_ = key_set;
+  } else {
+    DispatchKey k = key_set.highestPriorityBackendTypeId();
+    key_set_ = key_set.add(getAutogradKeyFromBackend(k)).add(c10::DispatchKey::InplaceOrView);
+  }
+
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
