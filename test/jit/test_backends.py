@@ -62,6 +62,8 @@ class BasicModule(torch.nn.Module):
         return x - h
 
 
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                "Non-portable load_library call used in test")
 class JitBackendTestCase(JitTestCase):
     """
     A common base class for JIT backend tests that contains common utility
@@ -70,8 +72,6 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
-            raise unittest.SkipTest("non-portable load_library call used in test")
         torch_root = Path(__file__).resolve().parent.parent.parent
         p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
         torch.ops.load_library(str(p))
@@ -167,6 +167,7 @@ class BasicModuleTest(JitBackendTestCase):
 
         # Loaded module should produce the same outputs.
         self.test_execution()
+
 
 class BasicModuleUnavailableTest(JitBackendTestCase):
     """
@@ -425,7 +426,7 @@ class TestBackends(JitTestCase):
     def __init__(self, name):
         super().__init__(name)
         self.basic_module_test = BasicModuleTest(name)
-        self.basic_module_unavailable_test = BasicModuleUnavailableTest()
+        self.basic_module_unavailable_test = BasicModuleUnavailableTest(name)
         self.nested_module_test = NestedModuleTest(name)
         self.selective_lowering_test = SelectiveLoweringTest(name)
 
