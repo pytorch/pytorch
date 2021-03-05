@@ -839,7 +839,7 @@ TensorView* TensorView::cache_fork() {
       " this TensorView must be an output with subsequent uses");
 
   // This domain will be the producer, so create the consumer
-  auto root_domain = getRootDomain();
+  auto root_domain = TensorDomain::noReductions(getRootDomain());
   TensorView* new_output = new TensorView(
       new TensorDomain(
           root_domain, std::vector<bool>(root_domain.size(), true)),
