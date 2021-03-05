@@ -85,5 +85,5 @@ jobs:
       - uses: actions/upload-artifact@v2
         with:
           name: pytorch-libtorch-py${{ matrix.python_version }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
-          path: /remote/**/*.bz2
+          path: /remote/**/*.zip
       # TODO: Add a step here for uploading binaries
