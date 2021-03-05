@@ -49,13 +49,22 @@ Operation BroadOp(const Node* node) {
       push(stack, a, b);
     } else {
       auto out_size = at::infer_size(a_size, b_size);
+      size_t out_numel = out_size[0];
+      for (size_t i = 1, end = out_size.size(); i < end; ++i) {
+        out_numel = out_numel * out_size[i];
+      }
+      // mkldnn tensors only support reshape, not expand or view operators
       if (a_size.equals(out_size)) {
         push(stack, a);
+      } else if (out_numel == a.numel()) {
+        push(stack, a.reshape(out_size));
       } else {
         push(stack, a.to_dense().expand(out_size).to_mkldnn());
       }
       if (b_size.equals(out_size)) {
         push(stack, b);
+      } else if (out_numel == b.numel()) {
+        push(stack, b.reshape(out_size).to_mkldnn());
       } else {
         push(stack, b.to_dense().expand(out_size).to_mkldnn());
       }
