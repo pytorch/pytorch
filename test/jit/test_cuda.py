@@ -132,7 +132,7 @@ class TestCUDA(JitTestCase):
 
             # Set the current device to d1 and check if the stream
             # has been set to the default stream on d1
-            with torch.jit.cuda.device(d):
+            with torch.cuda.device(d):
                 s3 = torch.cuda.current_stream(1)
                 check_s3 = s3.id() == s1.id()
                 check_d1 = torch.cuda.current_device() == s3.device_index()
@@ -173,12 +173,12 @@ class TestCUDA(JitTestCase):
         self.assertTrue(test_set_none_stream())
 
         # This test checks if the Device Context manager is a no op
-        # when the device is none for `with torch.jit.cuda.device`
+        # when the device is none for `with torch.cuda.device`
         @torch.jit.script
         def test_set_device_none():
             device_index = torch.cuda.current_device()
             # When device is none, check if this operation is a no-op
-            with torch.jit.cuda.device(None):
+            with torch.cuda.device(None):
                 # Check if the current device is the same
                 is_device_same = torch.cuda.current_device() == device_index
             return is_device_same
@@ -473,7 +473,7 @@ class TestCUDA(JitTestCase):
         def test_wait_event():
             d1 = torch.device('cuda:1')
 
-            with torch.jit.cuda.device(d1):
+            with torch.cuda.device(d1):
                 s0 = torch.cuda.current_stream(1)
                 tensor1 = torch.rand(1000000000, 1000000000, device="cuda")
                 tensor2 = torch.mm(tensor1, tensor1).to("cuda")
