@@ -276,7 +276,7 @@ std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
 
   // Tensor i has dimensions p[i] x p[i + 1]
   std::vector<int64_t> p(n + 1);
-  for (const auto i : c10::irange<size_t>(n)) {
+  for (const auto i : c10::irange(n)) {
     p[i] = tensors[i].size(0);
   }
   p[n] = tensors[n - 1].size(1);
@@ -290,11 +290,11 @@ std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
   std::vector<std::vector<int64_t>> s(n, std::vector<int64_t>(n));
 
   // Compute the optimal multiplication order
-  for (const auto l : c10::irange<size_t>(1, n)) {
-    for (const auto i : c10::irange<size_t>(n - l)) {
+  for (const auto l : c10::irange(1, n)) {
+    for (const auto i : c10::irange(n - l)) {
       const auto j = i + l;
       m[i][j] = std::numeric_limits<int64_t>::max();
-      for (const auto k : c10::irange<size_t>(i, j)) {
+      for (const auto k : c10::irange(i, j)) {
         const auto q = m[i][k] + m[k + 1][j] + p[i] * p[k + 1] * p[j + 1];
         if (q < m[i][j]) {
           m[i][j] = q;
@@ -330,7 +330,7 @@ Tensor matrix_chain_multiplication(
 }
 
 // Implements torch.linalg.multi_dot
-Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
+Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out = c10::nullopt) {
   const size_t n = _tensors.size();
   TORCH_CHECK(n >= 2, "multi_dot(): expected at least 2 tensors but got ", n);
 
@@ -366,7 +366,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   }
 
   // Ensure middle tensors are 2D
-  for (const auto i : c10::irange<size_t>(1, n - 1)) {
+  for (const auto i : c10::irange(1, n - 1)) {
     TORCH_CHECK(
         _tensors[i].dim() == 2,
         "multi_dot(): tensor ",
@@ -381,7 +381,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   // that the shapes can be multiplied
   const auto dtype = tensors[0].dtype();
   const auto device = tensors[0].device();
-  for (const auto i : c10::irange<size_t>(1, n)) {
+  for (const auto i : c10::irange(1, n)) {
     TORCH_CHECK(
         tensors[i].dtype() == dtype,
         "multi_dot(): all tensors must have be the same dtype but tensor 0 is ",
@@ -413,7 +413,8 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
 
   Tensor result;
 
-  if (out.defined()) {
+  if (_out.has_value()) {
+    auto out = *_out;
     TORCH_CHECK(
         dtype == out.dtype(),
         "multi_dot(): expected out tensor to have dtype ",
@@ -442,7 +443,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   // the first and last tensors which we are now viewed as 2D
 
   if (tensors.size() == 2) {
-    return out.defined() ? at::mm_out(result, tensors[0], tensors[1])
+    return _out.has_value() ? at::mm_out(result, tensors[0], tensors[1])
                          : at::mm(tensors[0], tensors[1]).view(out_shape);
   }
 
@@ -463,11 +464,11 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
     const auto cost_2 = (b * d) * (a + c);
 
     if (cost_1 > cost_2) {
-      return out.defined()
+      return _out.has_value()
           ? at::mm_out(result, tensors[0], at::mm(tensors[1], tensors[2]))
           : at::mm(tensors[0], at::mm(tensors[1], tensors[2])).view(out_shape);
     } else {
-      return out.defined()
+      return _out.has_value()
           ? at::mm_out(result, at::mm(tensors[0], tensors[1]), tensors[2])
           : at::mm(at::mm(tensors[0], tensors[1]), tensors[2]).view(out_shape);
     }
@@ -478,7 +479,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
   const int64_t i = 0;
   const int64_t j = n - 1;
 
-  if (out.defined()) {
+  if (_out.has_value()) {
     // We manually implement the first recursive layer here so we can use mm_out
     // for the final multiplication
     return at::mm_out(
@@ -492,8 +493,7 @@ Tensor multi_dot_impl(TensorList _tensors, Tensor& out) {
 } // namespace
 
 Tensor linalg_multi_dot(TensorList tensors) {
-  Tensor undefined;
-  return multi_dot_impl(tensors, undefined);
+  return multi_dot_impl(tensors);
 }
 
 Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
@@ -501,16 +501,15 @@ Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
   return result;
 }
 
-// This will eventually become an alias for multi_dot and will expect at least 2
-// input tensors which is BC-breaking.
+// Alias for multi_dot with the exception that it allows a single input Tensor
 Tensor chain_matmul(TensorList matrices) {
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul: Expected one or more matrices");
+      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
   
   if (matrices.size() == 1) {
-    return matrices[0];
+    return matrices[0].clone();
   }
 
   return at::native::linalg_multi_dot(matrices);
@@ -1966,7 +1965,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, optio
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   Tensor result_;
   auto ord = opt_ord.value_or(2.0).toDouble();
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "matrix norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "matrix norm only supports strided layout, got: ", self.layout());

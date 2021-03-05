@@ -206,7 +206,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    VULKAN_SDK_VERSION=1.2.148.0
+    VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
     ;;
   pytorch-linux-bionic-py3.8-gcc9)
