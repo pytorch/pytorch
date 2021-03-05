@@ -1,6 +1,7 @@
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 from tools.codegen.code_template import CodeTemplate
+from tools.codegen.context import with_native_function
 from tools.codegen.gen import FileManager
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
