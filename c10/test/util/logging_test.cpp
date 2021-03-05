@@ -1,6 +1,7 @@
 #include <algorithm>
 
 #include <gtest/gtest.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
 
 namespace c10_test {
@@ -41,6 +42,44 @@ TEST(LoggingTest, TestEnforceEquals) {
   CAFFE_ENFORCE_THAT(==, ++x, y);
   EXPECT_EQ(x, 6);
   EXPECT_EQ(y, 6);
+}
+
+TEST(LoggingTest, EnforceEqualsObjectWithReferenceToTemporaryWithoutUseOutOfScope) {
+  std::vector<int> x = {1, 2, 3, 4};
+  // This case is a little tricky. We have a temporary
+  // std::initializer_list to which our temporary ArrayRef
+  // refers. Temporary lifetime extension by binding a const reference
+  // to the ArrayRef doesn't extend the lifetime of the
+  // std::initializer_list, just the ArrayRef, so we end up with a
+  // dangling ArrayRef. This test forces the implementation to get it
+  // right.
+  CAFFE_ENFORCE_EQ(x, (at::ArrayRef<int>{1, 2, 3, 4}));
+}
+
+namespace {
+struct Noncopyable {
+  int x;
+
+  explicit Noncopyable(int a) : x(a) {}
+
+  Noncopyable(const Noncopyable&) = delete;
+  Noncopyable(Noncopyable&&) = delete;
+  Noncopyable& operator=(const Noncopyable&) = delete;
+  Noncopyable& operator=(Noncopyable&&) = delete;
+
+  bool operator==(const Noncopyable& rhs) const {
+    return x == rhs.x;
+  }
+};
+
+std::ostream& operator<<(std::ostream& out, const Noncopyable& nc) {
+  out << "Noncopyable(" << nc.x << ")";
+  return out;
+}
+}
+
+TEST(LoggingTest, DoesntCopyComparedObjects) {
+  CAFFE_ENFORCE_EQ(Noncopyable(123), Noncopyable(123));
 }
 
 TEST(LoggingTest, EnforceShowcase) {

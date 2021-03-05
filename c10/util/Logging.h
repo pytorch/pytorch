@@ -196,21 +196,21 @@ std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
   return c10::str(x, " vs ", y, ". ", args...);
 }
 
-#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)                \
-  do {                                                                  \
-    using namespace ::c10::enforce_detail;                              \
-    const auto& CAFFE_ENFORCE_THAT_IMPL_lhsRef = lhs;                   \
-    const auto& CAFFE_ENFORCE_THAT_IMPL_rhsRef = rhs;                   \
-    if (C10_UNLIKELY(!(CAFFE_ENFORCE_THAT_IMPL_lhsRef op CAFFE_ENFORCE_THAT_IMPL_rhsRef))) { \
-      ::c10::ThrowEnforceNotMet(                                        \
-          __FILE__,                                                     \
-          __LINE__,                                                     \
-          expr,                                                         \
-          enforceFailMsgImpl(                                           \
-              CAFFE_ENFORCE_THAT_IMPL_lhsRef,                           \
-              CAFFE_ENFORCE_THAT_IMPL_rhsRef,                           \
-              ##__VA_ARGS__));                                          \
-    }                                                                   \
+#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)        \
+  do {                                                          \
+    using namespace ::c10::enforce_detail;                      \
+    ([](const auto& lhs_, const auto& rhs_) {                   \
+      if (C10_UNLIKELY(!(lhs_ op rhs_))) {                      \
+        ::c10::ThrowEnforceNotMet(                              \
+            __FILE__,                                           \
+            __LINE__,                                           \
+            expr,                                               \
+            enforceFailMsgImpl(                                 \
+                lhs_,                                           \
+                rhs_,                                           \
+                ##__VA_ARGS__));                                \
+      }                                                         \
+    })(lhs, rhs);                                               \
   } while (false)
 
 #define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...)    \
