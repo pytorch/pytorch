@@ -354,6 +354,45 @@ inline Tensor smooth_l1_loss(
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
+inline Tensor huber_loss(
+    const Tensor& input,
+    const Tensor& target,
+    HuberLossFuncOptions::reduction_t reduction,
+    double delta = 1.) {
+  if (target.sizes() != input.sizes()) {
+    TORCH_WARN("Using a target size (", target.sizes(), ") that is different to the input size (", input.sizes(), "). ",
+               "This will likely lead to incorrect results due to broadcasting. ",
+               "Please ensure they have the same size.");
+  }
+
+  std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
+  return torch::huber_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction), delta);
+}
+} // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.huber_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::HuberLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::huber_loss(input, target, F::HuberLossFuncOptions().reduction(torch::kNone).delta(0.5));
+/// ```
+inline Tensor huber_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const HuberLossFuncOptions& options = {}) {
+  return detail::huber_loss(input, target, options.reduction(), options.delta());
+}
+
+// ============================================================================
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail {
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
