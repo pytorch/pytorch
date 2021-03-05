@@ -117,9 +117,9 @@ def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
         {
             "gpu_arch_type": arch_type(arch_version),
             "gpu_arch_version": arch_version,
-            "container_image": LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)],
             "libtorch_variant": libtorch_variant,
             "devtoolset": abi_version,
+            "container_image": LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)],
         }
         # We don't currently build libtorch for rocm
         for arch_version in ["cpu"] + snip_if(is_pr, CUDA_ARCHES)
