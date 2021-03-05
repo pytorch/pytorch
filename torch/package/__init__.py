@@ -6,4 +6,7 @@ from .importer import (
     sys_importer,
 )
 from .package_importer import PackageImporter
-from .package_exporter import PackageExporter
+from .package_exporter import (
+    PackageExporter,
+    EmptyMatchError,
+)
