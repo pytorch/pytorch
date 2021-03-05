@@ -29,7 +29,11 @@ std::unordered_map<std::string, worker_id_t> collectNames(
         nameToId.find(workerName) == nameToId.end(),
         "RPC worker name ",
         workerName,
-        " is not unique.");
+        " is not unique. Workers ",
+        nameToId.find(workerName)->second,
+        " and ",
+        workerId,
+        " share the same name.");
 
     nameToId.emplace(workerName, workerId);
   }
