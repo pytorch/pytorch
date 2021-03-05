@@ -294,6 +294,9 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(len(concat_dp), 15)
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
+        # Test Reset
+        self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
+
         input_dp_nl = IDP_NoLen(range(5))
         concat_dp = input_dp1.concat(input_dp_nl)
         with self.assertRaises(NotImplementedError):
