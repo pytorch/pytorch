@@ -528,24 +528,25 @@ Tensor cudnn_convolution_add_relu(
   Tensor input_contig = input->contiguous(memory_format);
   input_contig.resize_(input_contig.sizes(), memory_format);
 
+  Tensor bias_contig;
+  if (bias_t.has_value()) {
+    TensorArg bias{bias_t.value(), "bias", 3};
+    bias_contig = bias->contiguous(memory_format);
+    bias_contig.resize_(bias_contig.sizes(), memory_format);
+  } else {
+    bias_contig = *output;
+  }
+
   float alpha = 0;
   Tensor z_contig;
   if (z_t.has_value()) {
-    TensorArg z{z_t.value(), "z", 3};
+    TensorArg z{z_t.value(), "z", 4};
     z_contig = z->contiguous(memory_format);
     z_contig.resize_(z_contig.sizes(), memory_format);
     alpha = alpha_t.has_value() ? alpha_t.value().to<float>() : 1;
   } else {
     z_contig = *output;
   }
-
-  TensorArg bias{
-      bias_t.has_value() ? bias_t.value()
-                         : zeros({output_t.size(1)}, output_t.options()),
-      "bias",
-      4};
-  Tensor bias_contig = bias->contiguous(memory_format);
-  bias_contig.resize_(bias_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_add_relu_out(
       *output,
