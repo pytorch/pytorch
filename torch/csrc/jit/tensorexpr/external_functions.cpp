@@ -192,18 +192,18 @@ void nnc_aten_mean(
   }
 }
 
-static RegisterNNCExternalFunction nnc_conv2d(
+const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
-static RegisterNNCExternalFunction nnc_matmul(
+const static RegisterNNCExternalFunction nnc_matmul(
     "nnc_aten_matmul",
     nnc_aten_matmul);
-static RegisterNNCExternalFunction nnc_mv("nnc_aten_mv", nnc_aten_mv);
-static RegisterNNCExternalFunction nnc_mm("nnc_aten_mm", nnc_aten_mm);
-static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
+const static RegisterNNCExternalFunction nnc_mv("nnc_aten_mv", nnc_aten_mv);
+const static RegisterNNCExternalFunction nnc_mm("nnc_aten_mm", nnc_aten_mm);
+const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
-static RegisterNNCExternalFunction nnc_mean("nnc_aten_mean", nnc_aten_mean);
+const static RegisterNNCExternalFunction nnc_mean("nnc_aten_mean", nnc_aten_mean);
 
 } // namespace tensorexpr
 } // namespace jit
