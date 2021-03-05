@@ -8,6 +8,7 @@ import warnings
 from typing import Callable, Union, Optional, Iterable, List
 from torch._vmap_internals import vmap
 import functools
+import math
 
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
@@ -19,16 +20,23 @@ def zero_gradients(x):
             zero_gradients(elem)
 
 
-def make_jacobian(input, num_out):
+def make_jacobian(input, num_out, collapse_inputs=False, collapse_outputs=False):
     if is_tensor_like(input):
         if not input.is_floating_point() and not input.is_complex():
             return None
         if not input.requires_grad:
             return None
-        return input.new_zeros((input.nelement(), num_out), dtype=input.dtype, layout=torch.strided)
+        # if collapse_inputs, set jacobian matrix to always have a single row no matter
+        # what the dim of the input tensor is
+        jacobian_size = (input.nelement(), num_out)
+        if collapse_inputs:
+            jacobian_size = (num_out,)
+        elif collapse_outputs:
+            jacobian_size = (input.nelement(),)
+        return input.new_zeros(jacobian_size, dtype=input.dtype, layout=torch.strided)
     elif isinstance(input, collections.abc.Iterable) and not isinstance(input, str):
         jacobians = list(filter(
-            lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
+            lambda x: x is not None, (make_jacobian(elem, num_out, collapse_inputs, collapse_outputs) for elem in input)))
         if not jacobians:
             return None
         return type(input)(jacobians)  # type: ignore
@@ -45,6 +53,49 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
+
+
+def get_fast_numerical_jacobian(fn, outputs, inputs, inp, u, target=None, eps=1e-3, grad_out=1.0):
+    # Compute J (m x n) * u (n x 1) = J u (m x 1) for each of inputs
+    # where u is a unit vector 
+    output_sizes = [out.numel() for out in outputs]
+    jacobian = make_jacobian(outputs, inp.numel(), False, True)
+
+    # It's much easier to iterate over flattened lists of tensors.
+    # These are reference to the same objects in jacobian, so any changes
+    # will be reflected in it as well.
+
+    def compute_gradient(delta, x, is_mkldnn):
+
+        # we currently assume that the norm of delta equals eps
+        # assert(delta == eps or delta == (eps * 1j))
+        # assert(delta.norm() == eps)
+        def fn_out():
+            if not is_mkldnn:
+                # x is a view into input and so this works
+                return (a.clone() for a in _as_tuple(fn(*inputs)))
+            else: # TODO FIX
+                # convert the dense tensor back to have mkldnn layout
+                return fn([x.to_mkldnn()])
+        delta = delta.reshape(x.shape)
+        orig = x.clone()
+        x += delta
+        gen_outa = fn_out()
+        x -= 2 * delta
+        gen_outb = fn_out()
+        x.copy_(orig)
+
+        def compute(a, b):
+            ret = (a - b) / (2 * eps)
+            return ret.detach().reshape(-1)
+
+        return tuple(compute(a, b) for (a, b) in zip(gen_outa, gen_outb))
+
+    gen_ds_dx = compute_gradient(eps * u, inp.data, False)
+    for ds_dx, d_tensor in zip(gen_ds_dx, iter_tensors(jacobian)):
+        d_tensor.copy_(ds_dx * grad_out)
+
+    return jacobian
 
 def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
     """
@@ -158,6 +209,39 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
                 update_jacobians(x_tensor, x_idx, d_tensor, d_idx)
 
     return jacobian
+
+
+def get_fast_analytic_jacobian(input, output, v, nondet_tol=0.0):
+    # compute v^T * J for each of the inputs
+    # it is easier to call to_dense() on the sparse output than
+    # to modify analytical jacobian
+    if output.is_sparse:
+        raise ValueError('Sparse output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    if output.layout == torch._mkldnn:  # type: ignore
+        raise ValueError('MKLDNN output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    diff_input_list = list(iter_tensors(input, True))
+    jacobian = make_jacobian(input, 1)
+    grad_output = v.reshape(output.shape)
+    correct_grad_sizes = True
+    correct_grad_types = True
+
+    grads_input = torch.autograd.grad(output, diff_input_list, grad_output,
+                                      retain_graph=True, allow_unused=True)
+    for jacobian_x, d_x, x in zip(jacobian, grads_input, diff_input_list):
+        if d_x is not None and d_x.size() != x.size():
+            correct_grad_sizes = False
+        elif d_x is not None and d_x.dtype != x.dtype:
+            correct_grad_types = False
+        elif jacobian_x.numel() != 0:
+            if d_x is None:
+                jacobian_x[:, 0].zero_()
+            else:
+                d_x_dense = d_x.to_dense() if not d_x.layout == torch.strided else d_x
+                assert jacobian_x[:, 0].numel() == d_x_dense.numel()
+                jacobian_x[:, 0] = d_x_dense.contiguous().view(-1)
+    return jacobian, correct_grad_sizes, correct_grad_types
 
 
 def get_analytical_jacobian(input, output, nondet_tol=0.0, grad_out=1.0):
@@ -291,6 +375,33 @@ def _as_tuple(x):
 def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
+def check_requires_grad(tupled_inputs) -> None:
+    # Make sure that gradients are saved for at least one input
+    any_input_requiring_grad = False
+    for idx, inp in enumerate(tupled_inputs):
+        if is_tensor_like(inp) and inp.requires_grad:
+            if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
+                warnings.warn(
+                    f'Input #{idx} requires gradient and '
+                    'is not a double precision floating point or complex. '
+                    'This check will likely fail if all the inputs are '
+                    'not of double precision floating point or complex. ')
+            content = inp._values() if inp.is_sparse else inp
+            # TODO: To cover more problematic cases, replace stride = 0 check with
+            # "any overlap in memory" once we have a proper function to check it.
+            if content.layout is not torch._mkldnn:  # type: ignore
+                if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
+                    raise RuntimeError(
+                        'The {}th input has a dimension with stride 0. gradcheck only '
+                        'supports inputs that are non-overlapping to be able to '
+                        'compute the numerical gradients correctly. You should call '
+                        '.contiguous on the input before passing it to gradcheck.')
+            any_input_requiring_grad = True
+            inp.retain_grad()
+    if not any_input_requiring_grad:
+        raise ValueError(
+            'gradcheck expects at least one input tensor to require gradient, '
+            'but none of the them have requires_grad=True.')
 
 # Note [VarArg of Tensors]
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -371,32 +482,7 @@ def gradcheck(
     if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
         return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
 
-    # Make sure that gradients are saved for at least one input
-    any_input_requiring_grad = False
-    for idx, inp in enumerate(tupled_inputs):
-        if is_tensor_like(inp) and inp.requires_grad:
-            if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
-                warnings.warn(
-                    f'Input #{idx} requires gradient and '
-                    'is not a double precision floating point or complex. '
-                    'This check will likely fail if all the inputs are '
-                    'not of double precision floating point or complex. ')
-            content = inp._values() if inp.is_sparse else inp
-            # TODO: To cover more problematic cases, replace stride = 0 check with
-            # "any overlap in memory" once we have a proper function to check it.
-            if content.layout is not torch._mkldnn:  # type: ignore
-                if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
-                    raise RuntimeError(
-                        'The {}th input has a dimension with stride 0. gradcheck only '
-                        'supports inputs that are non-overlapping to be able to '
-                        'compute the numerical gradients correctly. You should call '
-                        '.contiguous on the input before passing it to gradcheck.')
-            any_input_requiring_grad = True
-            inp.retain_grad()
-    if not any_input_requiring_grad:
-        raise ValueError(
-            'gradcheck expects at least one input tensor to require gradient, '
-            'but none of the them have requires_grad=True.')
+    check_requires_grad(tupled_inputs)
 
     func_out = func(*tupled_inputs)
     output = _differentiable_outputs(func_out)
@@ -579,6 +665,48 @@ def gradcheck(
 
     return True
 
+
+def fast_gradcheck(
+    func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
+    inputs: _TensorOrTensors,
+    eps: float = 1e-6,
+    atol: float = 1e-5,
+    rtol: float = 1e-3
+) -> bool:
+    def fail_test(msg):
+        if raise_exception:
+            raise RuntimeError(msg)
+        return False
+
+    tupled_inputs = _as_tuple(inputs)
+
+    check_requires_grad(tupled_inputs)
+
+    func_out = func(*tupled_inputs)
+    outputs = _differentiable_outputs(func_out)
+
+    def normalize(x):
+        return x / x.norm()
+    all_u = [normalize(torch.rand(input.nelement(), dtype=torch.float64)) for input in tupled_inputs]
+    all_v = [normalize(torch.rand(output.nelement(), dtype=torch.float64)) for output in outputs]
+
+    total_analytical = 0
+    total_numerical = 0
+
+    for i, (out, v) in enumerate(zip(outputs, all_v)):
+        analytical, correct_grad_sizes, correct_grad_types = get_fast_analytic_jacobian(tupled_inputs, out, v)
+
+        for a, u in zip(analytical, all_u):
+            total_analytical += a.T.squeeze(0).dot(u)
+
+    for i, (inp, u) in enumerate(zip(tupled_inputs, all_u)):
+        numerical = get_fast_numerical_jacobian(func, outputs, tupled_inputs, inp, u, eps=eps)
+
+        for a, v in zip(numerical, all_v):
+            total_numerical += a.dot(v)
+
+    print(total_numerical, total_analytical)
+    return torch.allclose(total_analytical, total_numerical, atol, rtol)
 
 def gradgradcheck(
     func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
