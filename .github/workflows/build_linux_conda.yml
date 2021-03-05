@@ -9,14 +9,11 @@ on:
 jobs:
   generate-build-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
       image: python:3.9
-    env:
-      # We don't currently build conda packages for rocm
-      NO_ROCM: 1
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
@@ -24,7 +21,7 @@ jobs:
         id: set-matrix
         run: |
           # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py)
+          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py conda)
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
   build-conda:
@@ -35,7 +32,7 @@ jobs:
       matrix:
         ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
     container:
-      image: ${{ matrix.conda_container_image }}
+      image: ${{ matrix.container_image }}
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
       # TODO: This is a legacy variable that we eventually want to get rid of in

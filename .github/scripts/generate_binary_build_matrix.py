@@ -10,9 +10,9 @@ architectures:
     * Latest ROCM
 """
 
+import argparse
 import json
-import os
-import itertools
+from typing import Dict, List
 
 CUDA_ARCHES = [
     "10.1",
@@ -24,6 +24,16 @@ ROCM_ARCHES = [
     "3.10",
     "4.0"
 ]
+
+
+def arch_type(arch_version: str) -> str:
+    if arch_version in CUDA_ARCHES:
+        return "cuda"
+    elif arch_version in ROCM_ARCHES:
+        return "rocm"
+    else:  # arch_version should always be "cpu" in this case
+        return "cpu"
+
 
 WHEEL_CONTAINER_IMAGES = {
     **{
@@ -67,72 +77,82 @@ FULL_PYTHON_VERSIONS = [
 ]
 
 
-def is_pull_request():
+def is_pull_request() -> bool:
     return False
     # return os.environ.get("GITHUB_HEAD_REF")
 
-def generate_matrix(
-    *,
-    all_pythons=True,
-    include_cuda=True,
-    include_rocm=False,
-):
-    python_versions = FULL_PYTHON_VERSIONS
-    if not all_pythons:
-        python_versions = ["3.7"]
-    cuda_versions = CUDA_ARCHES
-    rocm_versions = ROCM_ARCHES
-    arches = ["cpu"]
-    if is_pull_request():
-        python_versions = [python_versions[-1]]
-        cuda_versions = [cuda_versions[-1]]
-        rocm_versions = [rocm_versions[-1]]
-    if include_cuda:
-        arches += cuda_versions
-    if include_rocm:
-        arches += rocm_versions
-    matrix = []
-    for item in itertools.product(python_versions, arches):
-        python_version, arch_version = item
-        # Not my favorite code here
-        gpu_arch_type = "cuda"
-        if "rocm" in WHEEL_CONTAINER_IMAGES[arch_version]:
-            gpu_arch_type = "rocm"
-        elif "cpu" in WHEEL_CONTAINER_IMAGES[arch_version]:
-            gpu_arch_type = "cpu"
-        matrix.append({
-            "python_version": python_version,
-            "gpu_arch_type": gpu_arch_type,
-            "gpu_arch_version": arch_version,
-            "wheel_container_image": WHEEL_CONTAINER_IMAGES.get(
-                arch_version, ""
-            ),
-            "conda_container_image": CONDA_CONTAINER_IMAGES.get(
-                arch_version, ""
-            ),
-            "libtorch_container_image": LIBTORCH_CONTAINER_IMAGES.get(
-                arch_version, ""
-            ),
-        })
-    return json.dumps({"include": matrix})
 
-def main():
-    all_pythons = True
-    include_cuda = True
-    include_rocm = True
-    if os.environ.get("SINGLE_PYTHON", False):
-        all_pythons = False
-    if os.environ.get("NO_ROCM", False):
-        include_rocm = False
-    if os.environ.get("NO_CUDA", False):
-        include_cuda = False
-    print(
-        generate_matrix(
-            all_pythons=all_pythons,
-            include_cuda=include_cuda,
-            include_rocm=include_rocm
-        )
-    )
+def snip_if(is_pr: bool, l: List[str]) -> List[str]:
+    return [l[-1]] if is_pr else l
+
+
+def generate_conda_matrix(is_pr: bool) -> List[Dict[str, str]]:
+    return [
+        {
+            "python_version": python_version,
+            "gpu_arch_type": arch_type(arch_version),
+            "gpu_arch_version": arch_version,
+            "container_image": CONDA_CONTAINER_IMAGES[arch_version],
+        }
+        for python_version in snip_if(is_pr, FULL_PYTHON_VERSIONS)
+        # We don't currently build conda packages for rocm
+        for arch_version in ["cpu"] + snip_if(is_pr, CUDA_ARCHES)
+    ]
+
+
+def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
+    libtorch_variants = [
+        "shared-with-deps",
+        "shared-without-deps",
+        "static-with-deps",
+        "static-without-deps",
+    ]
+    return [
+        {
+            "python_version": "3.7",
+            "gpu_arch_type": arch_type(arch_version),
+            "gpu_arch_version": arch_version,
+            "container_image": LIBTORCH_CONTAINER_IMAGES[arch_version],
+            "libtorch_variant": libtorch_variant,
+        }
+        # We don't currently build libtorch for rocm
+        for arch_version in ["cpu"] + snip_if(is_pr, CUDA_ARCHES)
+        for libtorch_variant in libtorch_variants
+    ]
+
+
+def generate_wheels_matrix(is_pr: bool) -> List[Dict[str, str]]:
+    arches = ["cpu"]
+    arches += snip_if(is_pr, CUDA_ARCHES)
+    arches += snip_if(is_pr, ROCM_ARCHES)
+    return [
+        {
+            "python_version": python_version,
+            "gpu_arch_type": arch_type(arch_version),
+            "gpu_arch_version": arch_version,
+            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+        }
+        for python_version in snip_if(is_pr, FULL_PYTHON_VERSIONS)
+        for arch_version in arches
+    ]
+
+
+def from_includes(includes: List[Dict[str, str]]) -> str:
+    return json.dumps({"include": includes})
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('mode', choices=['conda', 'libtorch', 'wheels'])
+    args = parser.parse_args()
+
+    is_pr = is_pull_request()
+    print(from_includes({
+        'conda': generate_conda_matrix,
+        'libtorch': generate_libtorch_matrix,
+        'wheels': generate_wheels_matrix,
+    }[args.mode](is_pr)))
+
 
 if __name__ == "__main__":
     main()

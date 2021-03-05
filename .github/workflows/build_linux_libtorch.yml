@@ -15,10 +15,6 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
       image: python:3.9
-    env:
-      SINGLE_PYTHON: 1
-      # We don't currently build libtorch for rocm
-      NO_ROCM: 1
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
@@ -26,7 +22,7 @@ jobs:
         id: set-matrix
         run: |
           # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py)
+          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py libtorch)
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
   build-libtorch:
@@ -37,7 +33,7 @@ jobs:
       matrix:
         ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
     container:
-      image: ${{ matrix.libtorch_container_image }}
+      image: ${{ matrix.container_image }}
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -46,6 +42,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       BUILD_PYTHONLESS: 1
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
       PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
     steps:
