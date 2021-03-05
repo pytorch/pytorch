@@ -1337,7 +1337,7 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
           &c10::DDPLoggingData::avg_backward_comm_time)
       .def_readwrite(
           "avg_backward_compute_comm_overlap_time",
-          &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time);
+          &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
       .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook);
 
   module.def(

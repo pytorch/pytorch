@@ -3082,6 +3082,12 @@ class DistributedTest:
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
 
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
         def test_ddp_comm_hook_logging(self):
             hooks = [
                 default.allreduce_hook,
@@ -3129,14 +3135,14 @@ class DistributedTest:
             ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
             # Hook not registered yet, so should be empty
             self.assertEqual(ddp_logging_data.comm_hook, "")
-            # After second forward pass, hook should be "builtin_allreduce"
+            # After second forward pass, hook should still be empty string
             for i in range(2):
                 inp = torch.ones(1, 1, device=self.rank)
                 loss = ddp_model(inp).sum()
                 loss.backward()
 
             ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
-            self.assertEqual(ddp_logging_data.comm_hook, "builtin_allreduce")
+            self.assertEqual(ddp_logging_data.comm_hook, "")
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
