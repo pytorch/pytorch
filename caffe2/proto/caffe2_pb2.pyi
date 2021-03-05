@@ -77,6 +77,13 @@ class TensorProto(google.protobuf.message.Message):
     ZERO_COLLISION_HASH = TensorProto.DataType.V(14)
     REBATCHING_BUFFER = TensorProto.DataType.V(15)
 
+    class _SerializationFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[SerializationFormat.V], builtins.type):
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
+        FMT_PROTOBUF = TensorProto.SerializationFormat.V(0)
+    class SerializationFormat(metaclass=_SerializationFormat):
+        V = typing.NewType('V', builtins.int)
+    FMT_PROTOBUF = TensorProto.SerializationFormat.V(0)
+
     class Segment(google.protobuf.message.Message):
         DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
         BEGIN_FIELD_NUMBER: builtins.int
@@ -94,6 +101,7 @@ class TensorProto(google.protobuf.message.Message):
 
     DIMS_FIELD_NUMBER: builtins.int
     DATA_TYPE_FIELD_NUMBER: builtins.int
+    DATA_FORMAT_FIELD_NUMBER: builtins.int
     FLOAT_DATA_FIELD_NUMBER: builtins.int
     INT32_DATA_FIELD_NUMBER: builtins.int
     BYTE_DATA_FIELD_NUMBER: builtins.int
@@ -106,6 +114,7 @@ class TensorProto(google.protobuf.message.Message):
     SEGMENT_FIELD_NUMBER: builtins.int
     dims: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int] = ...
     data_type: global___TensorProto.DataType.V = ...
+    data_format: builtins.int = ...
     float_data: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.float] = ...
     int32_data: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int] = ...
     byte_data: builtins.bytes = ...
@@ -125,6 +134,7 @@ class TensorProto(google.protobuf.message.Message):
         *,
         dims : typing.Optional[typing.Iterable[builtins.int]] = ...,
         data_type : typing.Optional[global___TensorProto.DataType.V] = ...,
+        data_format : typing.Optional[builtins.int] = ...,
         float_data : typing.Optional[typing.Iterable[builtins.float]] = ...,
         int32_data : typing.Optional[typing.Iterable[builtins.int]] = ...,
         byte_data : typing.Optional[builtins.bytes] = ...,
@@ -136,8 +146,8 @@ class TensorProto(google.protobuf.message.Message):
         device_detail : typing.Optional[global___DeviceOption] = ...,
         segment : typing.Optional[global___TensorProto.Segment] = ...,
         ) -> None: ...
-    def HasField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_type",b"data_type",u"device_detail",b"device_detail",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_type",b"data_type",u"device_detail",b"device_detail",u"dims",b"dims",u"double_data",b"double_data",u"float_data",b"float_data",u"int32_data",b"int32_data",u"int64_data",b"int64_data",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment",u"string_data",b"string_data"]) -> None: ...
+    def HasField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_format",b"data_format",u"data_type",b"data_type",u"device_detail",b"device_detail",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_format",b"data_format",u"data_type",b"data_type",u"device_detail",b"device_detail",u"dims",b"dims",u"double_data",b"double_data",u"float_data",b"float_data",u"int32_data",b"int32_data",u"int64_data",b"int64_data",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment",u"string_data",b"string_data"]) -> None: ...
 global___TensorProto = TensorProto
 
 class QTensorProto(google.protobuf.message.Message):

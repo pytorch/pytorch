@@ -39,13 +39,34 @@ message TensorProto {
     ZERO_COLLISION_HASH = 14;  // zero-collision hash state
     REBATCHING_BUFFER= 15;     // rebatching buffer
   }
+  // The type of the deserialized tensor data
   optional DataType data_type = 2 [default = FLOAT];
+
+  // The format of the serialized data.
+  enum SerializationFormat {
+    // FMT_PROTOBUF is the existing serialization format from before the
+    // data_format field was introduced. Most data types are serialized using
+    // the protobuf typed fields, although in some cases raw little endian data
+    // is stored in the byte_data field instead.
+    FMT_PROTOBUF = 0;
+  }
+  // data_format is a SerializationFormat enum value.
+  // However, we intentionally store it as an integer value so we can
+  // distinguish between old messages that do not have a data_format value vs
+  // new messages that have a SerializationFormat value that we don't
+  // understand.  If we stored this as an enum then protobuf would deserialize
+  // both of these cases the same way.
+  optional uint32 data_format = 15 [default = 0];
 
   // For float
   repeated float float_data = 3 [packed = true];
   // For int32, uint8, int8, uint16, int16, bool, and float16
   // Note about float16: in storage we will basically convert float16 byte-wise
   // to unsigned short and then store them in the int32_data field.
+  // Note: storing int8 and uint8 values in this field unfortunately results in
+  // larger serialized data than necessary, as protobuf's varint encoding
+  // scheme requires 2 bytes to represent int8 and uint8 values that have the
+  // MSB set.
   repeated int32 int32_data = 4 [packed = true];
   // For bytes
   optional bytes byte_data = 5;
