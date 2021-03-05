@@ -660,8 +660,7 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             p_node->Input(7).toOptional<at::Tensor>();
         const auto include_last_offset = p_node->Input(8).toBool();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) =
-              at::empty({0}, weight.options().dtype(at::kFloat));
+          p_node->Output(0) = create_empty_from(weight, at::kFloat);
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
@@ -695,8 +694,7 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             p_node->Input(7).toOptional<at::Tensor>();
         const auto include_last_offset = p_node->Input(8).toBool();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) =
-              at::empty({0}, weight.options().dtype(at::kFloat));
+          p_node->Output(0) = create_empty_from(weight, at::kFloat);
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
@@ -760,7 +758,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
         const auto& in0_t = p_node->Input(0).toTensor();
         if (p_node->Input(1).isTensor()) {
           dtype = at::native::result_type(in0_t, p_node->Input(1).toTensor());
-          p_node->Output(0) = at::empty({0}, in0_t.options().dtype(dtype));
+          p_node->Output(0) = create_empty_from(in0_t, dtype);
         } else {
           dtype = at::native::result_type(in0_t, p_node->Input(1).toScalar());
           p_node->Output(0) = at::native::empty_like(
@@ -812,8 +810,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
         }
       }
       // See Note [Explicit nullopt MemoryFormat argument]
-      p_node->Output(0) = at::empty(
-          {0}, in0_t.options().dtype(in1_i).memory_format(in4_o), c10::nullopt);
+      p_node->Output(0) = at::detail::empty_cpu(
+          {0}, in1_i, in0_t.layout(), in0_t.device(), c10::nullopt, in4_o);
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
