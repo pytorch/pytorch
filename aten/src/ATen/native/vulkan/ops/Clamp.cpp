@@ -273,8 +273,16 @@ Tensor& relu_(Tensor& self) {
   return ops::clamp_(self, 0, c10::nullopt);
 }
 
+Tensor hardswish(const Tensor& self) {
+  return ops::activation(self, VK_KERNEL(hardswish));
+}
+
 Tensor& hardswish_(Tensor& self) {
   return ops::activation_(self, VK_KERNEL(hardswish_));
+}
+
+Tensor hardsigmoid(const Tensor& self) {
+  return ops::activation(self, VK_KERNEL(hardsigmoid));
 }
 
 Tensor& hardsigmoid_(Tensor& self) {
@@ -286,7 +294,9 @@ Tensor& hardsigmoid_(Tensor& self) {
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("clamp", TORCH_FN(clamp));
   m.impl("clamp_", TORCH_FN(clamp_));
+  m.impl("hardsigmoid", hardsigmoid);
   m.impl("hardsigmoid_", hardsigmoid_);
+  m.impl("hardswish", hardswish);
   m.impl("hardswish_", hardswish_);
   m.impl("hardtanh", hardtanh);
   m.impl("hardtanh_", hardtanh_);

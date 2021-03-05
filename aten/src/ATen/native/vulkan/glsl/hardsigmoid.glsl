@@ -5,8 +5,9 @@ layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict image3D uOutput;
-layout(set = 0, binding = 1)          uniform PRECISION restrict Block {
+layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput;
+layout(set = 0, binding = 2) uniform PRECISION restrict           Block {
   ivec4 size;
 } uBlock;
 
@@ -16,7 +17,7 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
-    vec4 outval = imageLoad(uOutput, pos)/6.0 + 0.5;
+    vec4 outval = texelFetch(uInput, pos, 0)/6.0 + 0.5;
     imageStore(uOutput, pos, clamp(outval, 0.0, 1.0));
   }
 }
