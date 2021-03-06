@@ -1718,18 +1718,36 @@ const Expr* polyGCD(const Polynomial* poly) {
 }
 
 // A ModRound is a div-mod-mul in which the divisor in div and multiplier in mul
-// are identical. Return (scalar, denominator, divisor, mod_divisor). Example:
+// are identical. Return (scalar, denominator, divisor, mod_divisor).
+// Examples:
 // ((t/7)%9)*7 -> (1, t, 7, 9)
-std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> modRound(
-    const Term* e) {
+// ((t/7)%9)*14 -> (2, t, 7, 9)
+class ModRound {
+ public:
+  ModRound(
+      const Expr* scalar,
+      const Expr* denom,
+      const Expr* divisor,
+      const Expr* mod_divisor)
+      : scalar(scalar),
+        denom(denom),
+        divisor(divisor),
+        mod_divisor(mod_divisor) {}
+  const Expr* denom;
+  const Expr* divisor;
+  const Expr* mod_divisor;
+  const Expr* scalar;
+};
+
+c10::optional<class ModRound*> isModRound(const Term* e) {
   const Div* div{nullptr};
   const Mod* mod{nullptr};
   const Expr* denom{nullptr};
-  const Expr* divisor = new IntImm(1);
+  const Expr* divisor{nullptr};
   const Expr* mod_divisor{nullptr};
   const Expr* multiplier = e->scalar();
   const Expr* scalar = new IntImm(1);
-  const Expr* other(nullptr);
+  const Expr* other{nullptr};
 
   for (auto* m : e->variables()) {
     if (m->expr_type() == IRNodeType::kMod) {
@@ -1739,7 +1757,7 @@ std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> modRound(
       if (!mod) {
         mod = dynamic_cast<const Mod*>(m);
       } else {
-        return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+        return c10::nullopt;
       }
     } else {
       // All non-mod vairables are considered as part of the multiplier.
@@ -1749,14 +1767,14 @@ std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> modRound(
   multiplier = IRSimplifier::simplify(multiplier);
 
   if (!mod) {
-    return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+    return c10::nullopt;
   }
 
   mod_divisor = IRSimplifier::simplify(mod->rhs());
   other = mod->lhs();
 
   if (!(div = dynamic_cast<const Div*>(other))) {
-    return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+    return c10::nullopt;
   }
 
   divisor = IRSimplifier::simplify(div->rhs());
@@ -1764,7 +1782,7 @@ std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> modRound(
 
   // Deny cases in which divisor=1.
   if (divisor->isConstant() && immediateEquals(divisor, 1)) {
-    return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+    return c10::nullopt;
   }
 
   // Deny cases in which divisor!=multiplier.
@@ -1777,16 +1795,15 @@ std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> modRound(
         Expr* c = evaluateOp(new Div(multiplier, divisor));
         scalar = evaluateOp(new Mul(c, scalar));
       } else {
-        return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+        return c10::nullopt;
       }
     } else {
-      return std::make_tuple(nullptr, nullptr, nullptr, nullptr);
+      return c10::nullopt;
     }
   }
-
   denom = IRSimplifier::simplify(other);
 
-  return std::make_tuple(scalar, denom, divisor, mod_divisor);
+  return new ModRound(scalar, denom, divisor, mod_divisor);
 }
 
 // Search the polynomial for Terms that can be merged in
@@ -1802,12 +1819,10 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
   // Split out the Mod, ModRounds and RoundOffs operations so we can inspect.
   for (auto* c : poly->variables()) {
     if (c->variables().size() > 1) {
-      std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> dmm =
-          modRound(c);
-      if (!std::get<0>(dmm)) {
-        others.push_back(c);
-      } else {
+      if (auto a = isModRound(c)) {
         mod_rounds.push_back(c);
+      } else {
+        others.push_back(c);
       }
       continue;
     }
@@ -1817,12 +1832,10 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
     if (e->expr_type() == IRNodeType::kRoundOff) {
       rounds.push_back(c);
     } else if (e->expr_type() == IRNodeType::kMod) {
-      std::tuple<const Expr*, const Expr*, const Expr*, const Expr*> dmm =
-          modRound(c);
-      if (!std::get<0>(dmm)) {
-        mods.push_back(c);
-      } else {
+      if (auto a = isModRound(c)) {
         mod_rounds.push_back(c);
+      } else {
+        mods.push_back(c);
       }
     } else {
       others.push_back(c);
@@ -1855,29 +1868,27 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
            mrit != mod_rounds.begin() - 1;
            mrit--) {
         const Term* mr = *mrit;
-        std::tuple<const Expr*, const Expr*, const Expr*, const Expr*>
-            mod_round = modRound(mr);
-        const Expr* scalar = std::get<0>(mod_round);
-        const Expr* denom = std::get<1>(mod_round);
-        const Expr* divisor = std::get<2>(mod_round);
-        const Expr* mod_divisor = std::get<3>(mod_round);
-        CHECK(denom);
+        auto a = isModRound(mr);
+        CHECK(a);
+        const ModRound* mod_round = dynamic_cast<const ModRound*>(*a);
 
         // TODO: for now don't attempt partial factorization of this
         // optimization. E.g. it's possible to do: 2 * (x/y%z) * y + (x%y) =>
         // x%(y*z) + (x/y%z) * y
-        if (!immediateEquals(evaluateOp(new Sub(scalar, m->scalar())), 0)) {
+        if (!immediateEquals(
+                evaluateOp(new Sub(mod_round->scalar, m->scalar())), 0)) {
           continue;
         }
         // Valid optimization if mod LHS matches denom and mod RHS matches
         // divisor.
-        if (hasher.hash(denom) == hasher.hash(mod_lhs) &&
-            hasher.hash(divisor) == hasher.hash(mod_rhs)) {
+        if (hasher.hash(mod_round->denom) == hasher.hash(mod_lhs) &&
+            hasher.hash(mod_round->divisor) == hasher.hash(mod_rhs)) {
           const Term* merged_m = new Term(
               hasher,
-              scalar,
-              IRSimplifier::simplify(
-                  new Mod(denom, new Mul(divisor, mod_divisor))));
+              mod_round->scalar,
+              IRSimplifier::simplify(new Mod(
+                  mod_round->denom,
+                  new Mul(mod_round->divisor, mod_round->mod_divisor))));
           mods_merged.push_back(merged_m);
           merged = true;
           repeat = true;
@@ -1945,15 +1956,13 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
     return nullptr;
   }
 
-  // Keep remaining Mods, ModRounds and RoundOffs.
-  for (auto* m : mods) {
-    others.push_back(m);
+  // Keep remaining ModRounds and RoundOffs.
+  if (!mod_rounds.empty()) {
+    others.insert(others.end(), mod_rounds.begin(), mod_rounds.end());
   }
-  for (auto* mr : mod_rounds) {
-    others.push_back(mr);
-  }
-  for (auto* r : rounds) {
-    others.push_back(r);
+
+  if (!rounds.empty()) {
+    others.insert(others.end(), rounds.begin(), rounds.end());
   }
 
   return new Polynomial(hasher, poly->scalar(), others);

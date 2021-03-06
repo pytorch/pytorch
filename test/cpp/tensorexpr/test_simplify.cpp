@@ -2681,8 +2681,8 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
 
   {
     // Compound.
-    // (x + (z + 512 * y) % 16) + 16 * ((z + 512 * y) / 16)  => x + (z + 512 *
-    // y).
+    // (x + (z + 512 * y) % 16) + 16 * ((z + 512 * y) / 16)
+    // => (z + 512 * y) + x
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
@@ -2706,8 +2706,7 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   {
     // t/7 % 9 * 7 + t % 7 => t%63
     VarHandle t("t", kInt);
-    ExprHandle body =
-        (t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) + t % ExprHandle(7);
+    ExprHandle body = (t / 7 % 9) * 7 + t % 7;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
     IS_VAR_WITH_NAME(mod->lhs(), "t");
@@ -2717,9 +2716,7 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   {
     // 2*t/7 % 9 * 7 + 2*t % 7 => 2*t % 63
     VarHandle t("t", kInt);
-    ExprHandle body =
-        (ExprHandle(2) * t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) +
-        ExprHandle(2) * t % ExprHandle(7);
+    ExprHandle body = (ExprHandle(2) * t / 7 % 9) * 7 + ExprHandle(2) * t % 7;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
     IS_NODE_WITH_NAME(Mul, mod->lhs(), mul);
@@ -2731,9 +2728,7 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   {
     // t/2 /7 % 9 * 7 + t/2 % 7 => t/2 % 63
     VarHandle t("t", kInt);
-    ExprHandle body =
-        (t / ExprHandle(2) / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) +
-        t / ExprHandle(2) % ExprHandle(7);
+    ExprHandle body = (t / 2 / 7 % 9) * 7 + t / 2 % 7;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
     IS_NODE_WITH_NAME(Div, mod->lhs(), div);
@@ -2818,8 +2813,7 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
     // 2 * (t /7 % 9 * 7) + 2 * (t % 7) => 2 * (t % 63)
     VarHandle t("t", kInt);
     ExprHandle body =
-        ExprHandle(2) * ((t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7)) +
-        ExprHandle(2) * (t % ExprHandle(7));
+        ExprHandle(2) * ((t / 7 % 9) * 7) + ExprHandle(2) * (t % 7);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
@@ -2831,8 +2825,7 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   {
     // t /7 % 9 * 14 + 2* (t % 7) => 2* (t % 63)
     VarHandle t("t", kInt);
-    ExprHandle body = (t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(14) +
-        ExprHandle(2) * (t % ExprHandle(7));
+    ExprHandle body = (t / 7 % 9) * 14 + ExprHandle(2) * (t % 7);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
@@ -2844,8 +2837,7 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   {
     // t/(7*3) % 9 * 7*3 + t % (7*3) => t % 189
     VarHandle t("t", kInt);
-    ExprHandle body = (t / (ExprHandle(3) * ExprHandle(7)) % ExprHandle(9)) *
-            ExprHandle(7) * ExprHandle(3) +
+    ExprHandle body = (t / (ExprHandle(7) * ExprHandle(3)) % 9) * 7 * 3 +
         t % (ExprHandle(7) * ExprHandle(3));
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
@@ -2877,8 +2869,7 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   {
     // t/7 % 9 * 7 + t % 7 + t => t % 63 + t
     VarHandle t("t", kInt);
-    ExprHandle body = (t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) +
-        t % ExprHandle(7) + t;
+    ExprHandle body = (t / 7 % 9) * 7 + t % 7 + t;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
     IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
@@ -2890,9 +2881,7 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   {
     // t/7 % 9 * 7 + t/8 % 9 * 8 + t % 7 + t % 8  => t % 63 + t % 72
     VarHandle t("t", kInt);
-    ExprHandle body = (t / ExprHandle(7) % ExprHandle(9)) * ExprHandle(7) +
-        (t / ExprHandle(8) % ExprHandle(9)) * ExprHandle(8) +
-        t % ExprHandle(7) + t % ExprHandle(8);
+    ExprHandle body = (t / 7 % 9) * 7 + (t / 8 % 9) * 8 + t % 7 + t % 8;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
     IS_NODE_WITH_NAME(Mod, add->lhs(), mod1);
@@ -2921,8 +2910,8 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   }
 
   {
-    // t/x % y * x + t % x + (t/k / x % y) * x + t/k % x => t%(x*y) + t/k %
-    // (x*y)
+    // t/x % y * x + t % x + (t/k / x % y) * x + t/k % x
+    // => t%(x*y) + t/k % (x*y)
     VarHandle t("t", kInt);
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
@@ -2945,11 +2934,55 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   }
 
   {
-    // (7 * ((i0_flat / 7) % 9) + i0_flat % 7) + 63 * (i0_flat / 63) => io_flat
+    // 3D: (7 * ((i0_flat / 7) % 9) + i0_flat % 7) + 63 * (i0_flat / 63)
+    // => io_flat
     VarHandle t("io_flat", kInt);
-    ExprHandle body = ExprHandle(7) * (t / ExprHandle(7) % ExprHandle(9)) +
-        t % ExprHandle(7) + ExprHandle(63) * (t / ExprHandle(63));
+    ExprHandle body =
+        ExprHandle(7) * (t / 7 % 9) + t % 7 + ExprHandle(63) * (t / 63);
     ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "io_flat");
+  }
+
+  { // 5D: i0_flat / (11 * 10 * 9 * 7)  * (7 * 9 * 10 * 11) +
+    // (i0_flat / (10 * 9 * 7) % 11)  * 7 * 9 * 10 +
+    // (i0_flat / (9 * 7) % 10) * 7 * 9 +
+    // (i0_flat / 7 % 9)  * 7 +
+    // i0_flat % 7 => io_flat
+    VarHandle t("io_flat", kInt);
+    ExprHandle body = (t / (ExprHandle(11) * 10 * 9 * 7)) * (7 * 9 * 10 * 11) +
+        (t / (ExprHandle(10) * 9 * 7) % 11) * 7 * 9 * 10 +
+        (t / (ExprHandle(9) * 7) % 10) * 7 * 9 + (t / 7 % 9) * 7 + t % 7;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    print(simplified.node());
+    IS_VAR_WITH_NAME(simplified.node(), "io_flat");
+  }
+
+  {
+    // 3D: (m * ((i0_flat / m) % n) + i0_flat % m) + (m * n) *
+    // (i0_flat / (m * n)) => io_flat
+    VarHandle t("io_flat", kInt);
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    ExprHandle body = m * (t / m % n) + t % m + (m * n) * (t / (m * n));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "io_flat");
+  }
+
+  { // 5D: i0_flat / (k * l * n * m)  * (m * n * l * k) +
+    // (i0_flat / (l * n * m) % k)  * m * n * l +
+    // (i0_flat / (n * m) % l) * m * n +
+    // (i0_flat / m % n)  * m +
+    // i0_flat % m => io_flat
+    VarHandle t("io_flat", kInt);
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    VarHandle l("l", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = (t / (k * l * n * m)) * (m * n * l * k) +
+        (t / (l * n * m) % k) * m * n * l + (t / (n * m) % l) * m * n +
+        (t / m % n) * m + t % m;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    print(simplified.node());
     IS_VAR_WITH_NAME(simplified.node(), "io_flat");
   }
 }
