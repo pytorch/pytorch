@@ -89,7 +89,7 @@ class SampleInput(object):
     # tuple of tensors. This is useful for functions like gradcheck that do
     # not work well for TensorList inputs.
     def unpack_inputs(self):
-        result = []
+        result = []  # type: ignore
         for arg in self.input:
             if isinstance(arg, (tuple, list)):
                 result.extend(arg)
@@ -101,7 +101,7 @@ class SampleInput(object):
     # Reverse of #unpack_inputs
     # pack_inputs(unpack_inputs(inputs)) == inputs
     def pack_inputs(self, inputs):
-        result = []
+        result = []  # type: ignore
         i = 0
         for arg in self.input:
             if isinstance(arg, (tuple, list)):
@@ -638,7 +638,7 @@ def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None):
     ]
 
 def sample_inputs_stack(op_info, device, dtype, requires_grad):
-    return (SampleInput([make_tensor((S, S), device, dtype,
+    return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
                          make_tensor((S, S), device, dtype,
@@ -646,11 +646,11 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad):
                                      requires_grad=requires_grad),
                          make_tensor((S, S), device, dtype,
                                      low=None, high=None,
-                                     requires_grad=requires_grad)],
+                                     requires_grad=requires_grad)),
                         args=(0,)),)
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad):
-    return (SampleInput([make_tensor((S, S), device, dtype,
+    return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
                         make_tensor((S, S), device, dtype,
@@ -658,7 +658,7 @@ def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad):
                                     requires_grad=requires_grad),
                         make_tensor((S, S), device, dtype,
                                     low=None, high=None,
-                                    requires_grad=requires_grad)]),)
+                                    requires_grad=requires_grad))),)
 
 def sample_inputs_gather(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((M, S), device, dtype,
