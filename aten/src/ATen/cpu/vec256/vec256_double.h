@@ -113,7 +113,7 @@ public:
     const auto not_nan_mask = _mm256_cmp_pd(values, values, _CMP_EQ_OQ);
     const auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_pd(c10::pi<double>);
-    
+
     const auto neg_mask = _mm256_cmp_pd(values, zero_vec, _CMP_LT_OQ);
     auto angle = _mm256_blendv_pd(zero_vec, pi, neg_mask);
     angle = _mm256_blendv_pd(angle, nan_vec, nan_mask);
