@@ -7,7 +7,7 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 from .. import init
-from ..functional import _no_grad_embedding_renorm_
+from ..functional import _no_grad_embedding_renorm_  # type: ignore
 
 
 class Embedding(Module):
@@ -100,7 +100,7 @@ class Embedding(Module):
 
     num_embeddings: int
     embedding_dim: int
-    padding_idx: Optional[int]
+    padding_idx: int
     max_norm: Optional[float]
     norm_type: float
     scale_grad_by_freq: bool
