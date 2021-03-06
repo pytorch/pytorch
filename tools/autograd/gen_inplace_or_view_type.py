@@ -400,7 +400,12 @@ def gen_inplace_or_view_type_shard(
         'inplace_or_view_wrapper_registrations': list(mapMaybe(inplace_or_view_method_registration, filtered_fns_with_infos)),
     })
 
-def gen_inplace_or_view_type(out: str, native_yaml_path: str, fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo], template_path: str) -> None:
+def gen_inplace_or_view_type(
+    out: str,
+    native_yaml_path: str,
+    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
+    template_path: str
+) -> None:
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
     num_shards = 2
