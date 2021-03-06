@@ -13,7 +13,7 @@ static void lerp_kernel_scalar(
     Tensor& ret,
     const Tensor& self,
     const Tensor& end,
-    Scalar weight) {
+    const Scalar& weight) {
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   auto iter = TensorIterator::binary_op(ret, self, end);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(ret.scalar_type(), "lerp_kernel_scalar", [&] {

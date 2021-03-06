@@ -153,10 +153,10 @@ struct QuantizedCellParams : public CellParamsBase {
       Tensor _packed_hh,
       Tensor _col_offsets_ih,
       Tensor _col_offsets_hh,
-      Scalar _scale_ih,
-      Scalar _scale_hh,
-      Scalar _zero_point_ih,
-      Scalar _zero_point_hh)
+      const Scalar& _scale_ih,
+      const Scalar& _scale_hh,
+      const Scalar& _zero_point_ih,
+      const Scalar& _zero_point_hh)
       : w_ih(std::move(_w_ih)),
         w_hh(std::move(_w_hh)),
         b_ih_(std::move(_b_ih)),
@@ -1811,10 +1811,10 @@ return_type name( \
     const Tensor& packed_hh, \
     const Tensor& col_offsets_ih, \
     const Tensor& col_offsets_hh, \
-    const Scalar scale_ih, \
-    const Scalar scale_hh, \
-    const Scalar zero_point_ih, \
-    const Scalar zero_point_hh) { \
+    const Scalar& scale_ih, \
+    const Scalar& scale_hh, \
+    const Scalar& zero_point_ih, \
+    const Scalar& zero_point_hh) { \
   QuantizedCellParams params( \
       w_ih, \
       w_hh, \

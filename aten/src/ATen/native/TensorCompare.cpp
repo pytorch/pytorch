@@ -201,7 +201,7 @@ namespace {
 
 // DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
 at::Tensor scalar_to_tensor_default_dtype(
-    Scalar s,
+    const Scalar& s,
     const Device device = at::kCPU) {
   if (s.isFloatingPoint()) {
     return at::scalar_tensor(
@@ -228,7 +228,7 @@ at::Tensor scalar_to_tensor_default_dtype(
 // as being below tensor types rather than as the default dtype (perhaps we should?).  This wouldn't matter
 // if we just supported type normal type promotion on torch.where, however.
 Tensor wrapped_scalar_tensor(
-    Scalar scalar,
+    const Scalar& scalar,
     Device device,
     bool use_default_dtype = false) {
   at::Tensor tensor;
@@ -256,15 +256,15 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   return at::_s_where(b_condition, b_self, b_other);
 }
 
-Tensor where(const Tensor& condition, Scalar self, const Tensor& other) {
+Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
   return at::where(condition, wrapped_scalar_tensor(self, other.device()), other);
 }
 
-Tensor where(const Tensor& condition, const Tensor& self, Scalar other) {
+Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
   return at::where(condition, self, wrapped_scalar_tensor(other, self.device()));
 }
 
-Tensor where(const Tensor& condition, Scalar self, Scalar other) {
+Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
   const auto device = condition.device();
   const Tensor& other_t = wrapped_scalar_tensor(other, device, /*use_default_dtype=*/true);
   const Tensor& self_t = wrapped_scalar_tensor(self, device, /*use_default_dtype=*/true);

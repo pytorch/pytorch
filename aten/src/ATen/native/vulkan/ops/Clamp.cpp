@@ -142,15 +142,15 @@ Tensor& clamp_(
 
 Tensor hardtanh(
     const Tensor& self,
-    const Scalar min,
-    const Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   return ops::clamp(self, min, max);
 }
 
 Tensor& hardtanh_(
     Tensor& self,
-    const Scalar min,
-    const Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   return ops::clamp_(self, min, max);
 }
 

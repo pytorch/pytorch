@@ -52,12 +52,12 @@ void PropagateRequiresGradSimpleNode(Node* node) {
       "aten::ge(Tensor self, Tensor other) -> Tensor",
       "aten::eq(Tensor self, Tensor other) -> Tensor",
       "aten::ne(Tensor self, Tensor other) -> Tensor",
-      "aten::lt(Tensor self, Scalar other) -> Tensor",
-      "aten::le(Tensor self, Scalar other) -> Tensor",
-      "aten::gt(Tensor self, Scalar other) -> Tensor",
-      "aten::ge(Tensor self, Scalar other) -> Tensor",
-      "aten::eq(Tensor self, Scalar other) -> Tensor",
-      "aten::ne(Tensor self, Scalar other) -> Tensor",
+      "aten::lt(Tensor self, const Scalar& other) -> Tensor",
+      "aten::le(Tensor self, const Scalar& other) -> Tensor",
+      "aten::gt(Tensor self, const Scalar& other) -> Tensor",
+      "aten::ge(Tensor self, const Scalar& other) -> Tensor",
+      "aten::eq(Tensor self, const Scalar& other) -> Tensor",
+      "aten::ne(Tensor self, const Scalar& other) -> Tensor",
   };
 
   if (node->isMemberOf(comparison_ops)) {

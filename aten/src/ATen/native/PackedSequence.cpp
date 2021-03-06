@@ -119,7 +119,7 @@ Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntArrayRef input_
   return grad_input;
 }
 
-std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor& _batch_sizes, bool batch_first, Scalar padding_value, int64_t total_length) {
+std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor& _batch_sizes, bool batch_first, const Scalar& padding_value, int64_t total_length) {
   auto batch_sizes_t = _batch_sizes.contiguous();
   checkLongTensor(batch_sizes_t);
 

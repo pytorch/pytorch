@@ -771,7 +771,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
   return result;
 }
 
-static inline Tensor _norm(const Tensor &self, Scalar p) {
+static inline Tensor _norm(const Tensor &self, const Scalar& p) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
     // are accessed with a different API than strided tensors
@@ -1373,7 +1373,7 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
   return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
 
-Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
+Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
 }
 

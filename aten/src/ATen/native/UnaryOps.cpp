@@ -123,7 +123,7 @@ Tensor& arccos_out(Tensor& result, const Tensor& self) { return at::acos_out(res
 Tensor arccos(const Tensor& self) { return self.acos(); }
 Tensor& arccos_(Tensor& self) { return self.acos_(); }
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
+static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
@@ -582,7 +582,7 @@ Tensor& clamp_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   return at::clamp_out(self, self, min, max);
 }
 
-Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
+Tensor& clamp_max_out(Tensor& result, const Tensor& self, const Scalar& max) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -590,16 +590,16 @@ Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
   return result;
 }
 
-Tensor clamp_max(const Tensor& self, Scalar max) {
+Tensor clamp_max(const Tensor& self, const Scalar& max) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_max_out(result, self, max);
 }
 
-Tensor& clamp_max_(Tensor& self, Scalar max) {
+Tensor& clamp_max_(Tensor& self, const Scalar& max) {
   return at::clamp_max_out(self, self, max);
 }
 
-Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
+Tensor& clamp_min_out(Tensor& result, const Tensor& self, const Scalar& min) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -607,12 +607,12 @@ Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
-Tensor clamp_min(const Tensor& self, Scalar min) {
+Tensor clamp_min(const Tensor& self, const Scalar& min) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_min_out(result, self, min);
 }
 
-Tensor& clamp_min_(Tensor& self, Scalar min) {
+Tensor& clamp_min_(Tensor& self, const Scalar& min) {
   return at::clamp_min_out(self, self, min);
 }
 

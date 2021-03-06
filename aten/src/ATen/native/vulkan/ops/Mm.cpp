@@ -191,8 +191,8 @@ Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
-    const Scalar beta,
-    const Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   return LinearOpContext::create(
       api::context()->resource().pool,
       weight,

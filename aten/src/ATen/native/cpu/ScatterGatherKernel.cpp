@@ -311,7 +311,7 @@ void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Te
     self, dim, index, src, "scatter_cpu_", tensor_assign);
 }
 
-void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar value) {
+void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }

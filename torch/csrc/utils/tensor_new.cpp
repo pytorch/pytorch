@@ -103,7 +103,7 @@ Tensor dispatch_ones(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, 
   return torch::ones(sizes, options(dispatch_key, scalar_type, device));
 }
 
-Tensor dispatch_full(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Scalar fill_value, const optional<Device>& device, IntArrayRef sizes) {
+Tensor dispatch_full(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, const Scalar& fill_value, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(dispatch_key);
   pybind11::gil_scoped_release no_gil;
   return torch::full(sizes, fill_value, options(dispatch_key, scalar_type, device));

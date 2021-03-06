@@ -38,7 +38,7 @@ TORCH_API double calculate_gain(NonlinearityType nonlinearity, double param = 0.
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
 /// No gradient will be recorded for this operation.
-TORCH_API Tensor constant_(Tensor tensor, Scalar value);
+TORCH_API Tensor constant_(Tensor tensor, const Scalar& value);
 
 /// Fills the given `tensor` with the Dirac delta function in-place, and returns
 /// it. No gradient will be recorded for this operation.

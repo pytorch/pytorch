@@ -339,10 +339,10 @@ struct PeepholeOptimizeImpl {
     // optimizations]
     TORCH_INTERNAL_ASSERT(false);
     if (node->matches(
-            "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+            "aten::add(Tensor self, const Scalar& other, const Scalar& alpha) -> Tensor",
             /*const_inputs=*/{attr::alpha, attr::other}) ||
         node->matches(
-            "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+            "aten::sub(Tensor self, const Scalar& other, const Scalar& alpha) -> Tensor",
             /*const_inputs=*/{attr::alpha, attr::other})) {
       // x + 0 == x - 0 == x
       if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
@@ -355,10 +355,10 @@ struct PeepholeOptimizeImpl {
       }
     } else if (
         node->matches(
-            "aten::mul(Tensor self, Scalar other) -> Tensor",
+            "aten::mul(Tensor self, const Scalar& other) -> Tensor",
             /*const_inputs=*/attr::other) ||
         node->matches(
-            "aten::div(Tensor self, Scalar other) -> Tensor",
+            "aten::div(Tensor self, const Scalar& other) -> Tensor",
             /*const_inputs=*/attr::other)) {
       // x * 1 == x / 1 == x
       if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
@@ -382,7 +382,7 @@ void FuseAddMM(Block* block) {
     // multiple nodes into a different one, then you need to check that they
     // all belong to the given block
     if (node->matches(
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+            "aten::add(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor",
             /*const_inputs=*/attr::alpha)) {
       // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
       // This optimization has been disabled at the moment, because it's not

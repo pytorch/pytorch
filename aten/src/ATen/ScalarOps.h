@@ -11,8 +11,8 @@ namespace detail {
 // Ideally this fast pass should be implemented in TensorIterator,
 // but we also want to skip compute_types which in not avoidable
 // in TensorIterator for now.
-Tensor& scalar_fill(Tensor& self, Scalar value);
-TORCH_API Tensor scalar_tensor_static(Scalar s, c10::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt);
+Tensor& scalar_fill(Tensor& self, const Scalar& value);
+TORCH_API Tensor scalar_tensor_static(const Scalar& s, c10::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt);
 } // namespace detail
 } // namespace at
 

@@ -235,7 +235,7 @@ struct TreeToken {
         matmuls.push_back(BTAT->node());
       } else if (
           n->matches(
-              "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+              "aten::add(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor")) {
         queue.push_back(n->inputs()[0]->node());
         queue.push_back(n->inputs()[1]->node());
       } else {
@@ -263,7 +263,7 @@ void BatchMMTreeReduce(Block* block) {
       }
     } else if (
         node->matches(
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+            "aten::add(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor")) {
       Node* lhs = node->inputs()[0]->node();
       Node* rhs = node->inputs()[1]->node();
       auto lhs_it = tokens.find(lhs);
