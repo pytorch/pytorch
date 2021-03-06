@@ -1904,13 +1904,15 @@ def embedding(
     else:
         padding_idx = -1
     if max_norm is not None:
+        # Note [embedding_renorm contiguous]
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the
         # `embedding` call below too.
         input = input.contiguous()
+        # Note [embedding_renorm set_grad_enabled]
         # XXX: equivalent to
         # with torch.no_grad():
-        #   torch.nembedding_renorm_
+        #   torch.embedding_renorm_
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)

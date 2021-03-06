@@ -146,14 +146,9 @@ class Embedding(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         if self.max_norm is not None:
-            # `embedding_renorm_` will call .contiguous() on input anyways, so we
-            # call it here and take advantage of the improved locality in the
-            # `embedding` call below too.
+            # See Note [embedding_renorm contiguous]
             input = input.contiguous()
-            # XXX: equivalent to
-            # with torch.no_grad():
-            #   torch.nembedding_renorm_
-            # remove once script supports set_grad_enabled
+            # See Note [embedding_renorm set_grad_enabled]
             _no_grad_embedding_renorm_(self.weight, input, self.max_norm, self.norm_type)
         return torch._embedding_module(
             self.weight, input, self.padding_idx, self.scale_grad_by_freq, self.sparse)
