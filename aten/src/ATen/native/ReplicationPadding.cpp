@@ -219,7 +219,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   gradInput.resize_as_(input);
   if (gradInput.numel() == 0) {
     return gradInput;
-  }           
+  }
   gradInput.zero_();
 
   /* backprop */
@@ -522,7 +522,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
   if (gradInput.numel() == 0) {
     return gradInput;
   }
-  
+
   gradInput.zero_();
 
   /* backprop */

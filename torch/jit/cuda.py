@@ -148,15 +148,15 @@ def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext:
     """
     return StreamContext(stream)
 
-def Stream(device: int = -1, priority: int = 0) -> 'torch.classes.cuda.Stream':
+def Stream(device: Optional[torch.device] = None, priority: int = 0) -> 'torch.classes.cuda.Stream':
     r"""Wrapper around a CUDA stream.
     A CUDA stream is a linear sequence of execution that belongs to a specific
     device, independent from other streams.  See :ref:`cuda-semantics` for
     details.
     Arguments:
-        device(int, optional): a device on which to allocate
-            the stream. If :attr:`device` is ``None`` (default) or a negative
-            integer, this will use the current device.
+        device(torch.device, optional): a device on which to allocate
+            the stream. If :attr:`device` is ``None`` (default), stream will be
+            created on the current device.
         priority(int, optional): priority of the stream. Can be either
             -1 (high priority) or 0 (low priority). By default, streams have
             priority 0.

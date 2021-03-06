@@ -7773,7 +7773,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ),
         ("cusparseCreateCsrgemm2Info", ("hipsparseCreateCsrgemm2Info", CONV_MATH_FUNC, API_SPARSE)),
         (
-            "cusparseDestroyCsrgemm2Info", 
+            "cusparseDestroyCsrgemm2Info",
             ("hipsparseDestroyCsrgemm2Info", CONV_MATH_FUNC, API_SPARSE),
         ),
         ("cusparseXcsrgemm2Nnz", ("hipsparseXcsrgemm2Nnz", CONV_MATH_FUNC, API_SPARSE)),
