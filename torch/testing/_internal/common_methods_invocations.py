@@ -387,7 +387,7 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         kwargs=dict(dim=1)),)
 
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
-    test_cases = [
+    test_cases: List[List[Tuple[int, ...]]] = [
         [(S,), (S,)],
         [(1, S), (S, 1)],
         [(S, 0), (0, S)],
