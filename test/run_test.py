@@ -397,9 +397,9 @@ def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, Tuple[float,
 
 
 def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, Tuple[float, int]]) -> List[Tuple[float, List[str]]]:
-    # if there's 'test_cpp_extensions_aot' entry in job_times, add 'test_cpp_extensions_aot_ninja' 
-    # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since 
-    # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that 
+    # if there's 'test_cpp_extensions_aot' entry in job_times, add 'test_cpp_extensions_aot_ninja'
+    # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since
+    # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that
     # both use the test_cpp_extensions_aot.py file.
     if 'test_cpp_extensions_aot' in job_times:
         job_times['test_cpp_extensions_aot_ninja'] = job_times['test_cpp_extensions_aot']
