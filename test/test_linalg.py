@@ -5827,7 +5827,7 @@ else:
         run_test([10, 20, 30, 5])
         run_test([15, 5, 10, 20, 25])
 
-        with self.assertRaisesRegex(RuntimeError, "chain_matmul\(\): Expected one or more matrices"):
+        with self.assertRaisesRegex(RuntimeError, r"chain_matmul\(\): Expected one or more matrices"):
             torch.chain_matmul()
 
     @skipCUDAIfNoMagma
