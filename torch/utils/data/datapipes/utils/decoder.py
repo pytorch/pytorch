@@ -1,16 +1,14 @@
 # This file takes partial of the implementation from NVIDIA's webdataset at here:
 # https://github.com/tmbdev/webdataset/blob/master/webdataset/autodecode.py
 
+import io
+import os
 import pickle
 import re
-import os
-
-import numpy as np
-import PIL
-import PIL.Image
-import json
 import tempfile
-import io
+
+import json
+import torch
 
 
 ################################################################
@@ -38,7 +36,6 @@ def basichandlers(key, data):
         return pickle.loads(data)
 
     if extension in "pt".split():
-        import torch
         stream = io.BytesIO(data)
         return torch.load(stream)
 
@@ -139,6 +136,18 @@ class ImageHandler:
         if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
             return None
 
+        try:
+            import numpy as np
+        except ImportError as e:
+            raise ModuleNotFoundError("Package `numpy` is required to be installed for default image decoder."
+                                      "Please use `pip install numpy` to install the package")
+
+        try:
+            import PIL.Image
+        except ImportError as e:
+            raise ModuleNotFoundError("Package `PIL` is required to be installed for default image decoder."
+                                      "Please use `pip install Pillow` to install the package")
+
         imagespec = self.imagespec
         atype, etype, mode = imagespecs[imagespec]
 
@@ -156,8 +165,6 @@ class ImageHandler:
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
-                import torch
-
                 result = np.asarray(img)
                 assert result.dtype == np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
 
@@ -183,8 +190,13 @@ def torch_video(key, data):
     if extension not in "mp4 ogv mjpeg avi mov h264 mpg webm wmv".split():
         return None
 
-    # add `type: ignore` to avoid mypy's warning on import missing
-    import torchvision.io  # type: ignore
+    try:
+        import torchvision.io
+    except ImportError as e:
+        raise ModuleNotFoundError("Package `torchvision` is required to be installed for default video file loader."
+                                  "Please use `pip install torchvision` or `conda install torchvision -c pytorch`"
+                                  "to install the package")
+
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
         with open(fname, "wb") as stream:
@@ -202,8 +214,13 @@ def torch_audio(key, data):
     if extension not in ["flac", "mp3", "sox", "wav", "m4a", "ogg", "wma"]:
         return None
 
-    # add `type: ignore` to avoid mypy's warning on import missing
-    import torchaudio  # type: ignore
+    try:
+        import torchaudio  # type: ignore
+    except ImportError as e:
+        raise ModuleNotFoundError("Package `torchaudio` is required to be installed for default audio file loader."
+                                  "Please use `pip install torchaudio` or `conda install torchaudio -c pytorch`"
+                                  "to install the package")
+
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
         with open(fname, "wb") as stream:

@@ -291,10 +291,10 @@ class EventList(list):
 
         Args:
             group_by_input_shapes: group entries by
-            (event name, input shapes) rather than just event name.
-            This is useful to see which input shapes contribute to the runtime
-            the most and may help with size-specific optimizations or
-            choosing the best candidates for quantization (aka fitting a roof line)
+                (event name, input shapes) rather than just event name.
+                This is useful to see which input shapes contribute to the runtime
+                the most and may help with size-specific optimizations or
+                choosing the best candidates for quantization (aka fitting a roof line)
 
             group_by_stack_n: group by top n stack trace entries
 

@@ -484,7 +484,7 @@ def fractional_max_pool3d_with_indices(
                      or a tuple `(kT, kH, kW)`
         output_size: the target output size of the form :math:`oT \times oH \times oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number :math:`oH` for a cubic output
-                      :math:`oH \times oH \times oH`
+                     :math:`oH \times oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
@@ -1277,7 +1277,11 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu6, (input,), input, inplace=inplace)
-    return hardtanh(input, 0.0, 6.0, inplace)
+    if inplace:
+        result = torch._C._nn.relu6_(input)
+    else:
+        result = torch._C._nn.relu6(input)
+    return result
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
@@ -1711,9 +1715,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""hardsigmoid(input) -> Tensor
-
-    Applies the element-wise function
+    r"""Applies the element-wise function
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
@@ -1774,7 +1776,8 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
 
 
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the silu function, element-wise.
+    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    The SiLU function is also known as the swish function.
 
     .. math::
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
@@ -2862,6 +2865,36 @@ def smooth_l1_loss(
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
+
+
+def huber_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: str = 'mean',
+    delta: float = 1.0,
+) -> Tensor:
+    r"""Function that uses a squared term if the absolute
+    element-wise error falls below delta and a delta-scaled L1 term otherwise.
+
+    See :class:`~torch.nn.HuberLoss` for details.
+    """
+    if has_torch_function_variadic(input, target):
+        return handle_torch_function(
+            huber_loss,
+            (input, target),
+            input,
+            target,
+            reduction=reduction,
+            delta=delta,
+        )
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    return torch._C._nn.huber_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), delta)
 
 
 def l1_loss(
@@ -4515,13 +4548,13 @@ def multi_head_attention_forward(
     embed_dim_to_check: int,
     num_heads: int,
     in_proj_weight: Tensor,
-    in_proj_bias: Tensor,
+    in_proj_bias: Optional[Tensor],
     bias_k: Optional[Tensor],
     bias_v: Optional[Tensor],
     add_zero_attn: bool,
     dropout_p: float,
     out_proj_weight: Tensor,
-    out_proj_bias: Tensor,
+    out_proj_bias: Optional[Tensor],
     training: bool = True,
     key_padding_mask: Optional[Tensor] = None,
     need_weights: bool = True,

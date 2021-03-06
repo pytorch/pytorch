@@ -40,6 +40,9 @@ jobs:
           rm -r "shellcheck-${scversion}"
           shellcheck --version
           .jenkins/run-shellcheck.sh
+      - name: Ensure no trailing spaces
+        run: |
+          (! git grep -I -l ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
       - name: Ensure no tabs
         run: |
           (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
@@ -93,9 +96,12 @@ jobs:
           check_name: 'flake8-py3'
           linter_output_path: 'flake8-output.txt'
           commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w+\d+) (?<errorDesc>.*)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Catch any other warnings
+        run: |
+          [ ! -s flake8-output.txt ]
 
   clang-tidy:
     if: github.event_name == 'pull_request'

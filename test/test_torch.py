@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import (
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIfNoMagma,
+    skipCUDAIfNoMagma, skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
@@ -996,6 +996,16 @@ class AbstractTestCases:
             self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, [2, 2]), torch.tensor([[1, 2], [3, 4]]))
             self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, torch.Size([2, 2])), torch.tensor([[1, 2], [3, 4]]))
             self.assertEqual(torch.ones(2, 10).unflatten(1, (5, 2)), torch.ones(2, 5, 2))
+            self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, (-1, 2)),
+                             torch.tensor([[1, 2], [3, 4]]))
+            self.assertEqual(torch.ones(2, 10).unflatten(1, (5, -1)),
+                             torch.ones(2, 5, 2))
+            self.assertEqual(torch.ones(2, 10).unflatten(1, (-1,)),
+                             torch.ones(2, 10))
+            self.assertEqual(torch.ones(2, 3 * 4 * 5 * 6).unflatten(1, (3, 4, -1, 6)),
+                             torch.ones(2, 3, 4, 5, 6))
+            self.assertEqual(torch.ones(2, 0, 2).unflatten(1, (3, -1, 4, 5)),
+                             torch.ones(2, 3, 0, 4, 5, 2))
 
             # test invalid args: tensor, str, sizes
             with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
@@ -1012,6 +1022,14 @@ class AbstractTestCases:
                 torch.tensor([1]).unflatten(0, [2, 2])
             with self.assertRaisesRegex(IndexError, r"dimension specified as 0 but tensor has no dimensions"):
                 torch.tensor(1).unflatten(0, [0])
+            with self.assertRaisesRegex(RuntimeError, r"only one dimension can be inferred"):
+                torch.randn(5, 10).unflatten(1, (-1, -1))
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"Provided sizes \[-1, 4\] don't multiply up to the size of dim 1 \(10\)"):
+                torch.randn(5, 10).unflatten(1, (-1, 4))
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"the unspecified dimension size -1 can be any value and is ambiguous"):
+                torch.randn(2, 0).unflatten(1, (2, -1, 0))
 
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):
@@ -2338,6 +2356,32 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertTrue(torch.tensor([1]).is_nonzero())
             self.assertFalse(torch.tensor([[0]]).is_nonzero())
             self.assertTrue(torch.tensor([[1]]).is_nonzero())
+            self.assertTrue(torch.tensor(0.1).is_nonzero())
+            self.assertTrue(torch.tensor(-0.1).is_nonzero())
+            self.assertFalse(torch.tensor(0.0).is_nonzero())
+            self.assertTrue(torch.tensor(True).is_nonzero())
+            self.assertFalse(torch.tensor(False).is_nonzero())
+            self.assertFalse(torch.tensor(0 + 0j).is_nonzero())
+            self.assertTrue(torch.tensor(0 + 0.1j).is_nonzero())
+
+        def test_assert_async(self):
+            with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
+                torch._assert_async(torch.tensor([]))
+            with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with more than one value is ambiguous"):
+                torch._assert_async(torch.tensor([0, 0]))
+            with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
+                torch._assert_async(torch.tensor(0))
+            torch._assert_async(torch.tensor(1))
+            torch._assert_async(torch.tensor(0.1))
+            torch._assert_async(torch.tensor(-0.1))
+            with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
+                torch._assert_async(torch.tensor(0.0))
+            torch._assert_async(torch.tensor(True))
+            with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
+                torch._assert_async(torch.tensor(False))
+            torch._assert_async(torch.tensor(0 + 0.1j))
+            with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
+                torch._assert_async(torch.tensor(0 + 0j))
 
         # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
         # is available, we get a different error.
@@ -2538,8 +2582,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(output3, output2)
 
         def test_empty_meta(self):
-            x = torch.empty_meta(2 ** 20, 2 ** 20)
-            y = torch.empty_meta(2 ** 20)
+            x = torch.empty(2 ** 20, 2 ** 20, device='meta')
+            y = torch.empty(2 ** 20, device='meta')
             z = x + y
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
             self.assertRaises(RuntimeError, lambda: z[0][0].item())
@@ -2550,14 +2594,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # integrated testing strategy
             # NB: Can't make the exponent too big, or it will overflow
             # signed 64-bit integer
-            x = torch.empty_meta(2 * 10 ** 8, 3, 2 * 10 ** 8)
+            x = torch.empty(2 * 10 ** 8, 3, 2 * 10 ** 8, device='meta')
             z = torch.nn.functional.interpolate(x, scale_factor=2)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
             # interpolate doesn't seem to support out=
             # (not sure why passing None here doesn't work? How strange...)
-            z = torch.empty_meta(0)
+            z = torch.empty(0, device='meta')
             torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
@@ -4119,14 +4163,24 @@ class TestTorchDeviceType(TestCase):
         def logcumsumexp(a, axis):
             return torch.cumsum(a.exp(), axis=axis).log_()
 
-        axis = 1
+        axis = -1
         a = torch.randn(100, 100, device=device)
 
-        actual = a.logcumsumexp(1)
+        actual = a.logcumsumexp(axis)
         expected = logcumsumexp(a, axis)
         self.assertEqual(a.dtype, actual.dtype)
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
+
+        # check -inf and nan handling
+        x = torch.tensor([-float('inf'), -float('inf'), 1.0, 1.0, float('inf'),
+                         float('inf'), float('nan'), 1.0, 1.0], device=device)
+        x2d = x.unsqueeze(0).expand(2, -1)
+
+        for inp in (x, x2d):
+            actual = inp.logcumsumexp(axis)
+            expected = logcumsumexp(inp, axis)
+            self.assertEqual(expected, actual)
 
         # Check that out is actually inplace
         b = torch.randn(5, 2, device=device)
@@ -4431,6 +4485,11 @@ class TestTorchDeviceType(TestCase):
         if not x.is_complex():
             with self.assertRaisesRegex(RuntimeError, r"Scalar"):
                 x.index_fill_(1, index, 1 + 1j)
+        # Make sure that the result stays 0-dim while applied to
+        # a 0-dim input
+        x = torch.tensor(1, dtype=dtype, device=device)
+        self.assertEqual(0, x.index_fill(0, index, -1).dim())
+        self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 
     def test_index_select(self, device):
         for dtype in [torch.int, torch.long]:
@@ -6200,7 +6259,7 @@ class TestTorchDeviceType(TestCase):
         try_lazy_inits = (True, False) if device.type == "cuda" else (False,)
         for lazy_init_scale in try_lazy_inits:
             a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
-            self.assertTrue(a.is_enabled() if torch.cuda.is_available() else not a.is_enabled())
+            self.assertTrue(not a.is_enabled() if torch.cuda.amp.common.amp_definitely_not_available() else a.is_enabled())
             if lazy_init_scale:
                 # Dummy a.scale() call lazy-inits a._scale Tensor.
                 a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
@@ -6344,8 +6403,7 @@ class TestTorchDeviceType(TestCase):
 
         self._test_where_scalar_template(device, dtype, checkRaises)
 
-    # See https://github.com/pytorch/pytorch/issues/51980
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA misaligned address error on Windows w/ 11.2')
+    @skipCUDAVersionIn([(11, 2)])  # test fails for 11.2, see https://github.com/pytorch/pytorch/issues/51980
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
@@ -6944,11 +7002,6 @@ tensor_op_tests = [
     ('size', '', _new_t((1, 2, 3, 4)), lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'dim', _new_t((1, 2, 3, 4)), lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', '', _small_3d_unique, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'dim_descending', _small_3d_unique, lambda t, d: [1, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'neg_dim_descending', _small_3d_unique, lambda t, d: [-1, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', '', _small_3d, lambda t, d: [2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'dim', _small_3d, lambda t, d: [2, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'neg_dim', _small_3d, lambda t, d: [2, -3], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -7013,7 +7066,6 @@ tensor_op_tests = [
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.

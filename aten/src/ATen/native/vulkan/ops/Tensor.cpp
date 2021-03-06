@@ -9,6 +9,10 @@ namespace {
 
 using namespace api::utils;
 
+uvec3 image_extents(IntArrayRef);
+bool requires_image(IntArrayRef);
+bool requires_staging(const api::Adapter*);
+
 VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -155,13 +159,7 @@ VkDeviceSize buffer_bytes(
     const caffe2::TypeMeta dtype) {
   VkDeviceSize size = c10::elementSize(c10::typeMetaToScalarType(dtype));
 
-  // Forward declaration
-  bool requires_image(IntArrayRef);
-
   if (requires_image(sizes)) {
-    // Forward declaration
-    uvec3 image_extents(IntArrayRef);
-
     const uvec3 extents = image_extents(sizes);
     size *= extents.data[0u] * extents.data[1u] * (4u * extents.data[2u]);
   }
@@ -187,9 +185,6 @@ vTensor::Buffer allocate_buffer(
 
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
-
-  // Forward declaration
-  bool requires_staging(const api::Adapter*);
 
   const VkFlags usage =
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -795,6 +790,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
       },
       VK_KERNEL(nchw_to_image),
       extents,
+      view_.context_->gpu().adapter->local_work_group_size(),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
@@ -852,6 +848,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
       },
       VK_KERNEL(image_to_nchw),
       view_.extents(),
+      view_.context_->gpu().adapter->local_work_group_size(),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
@@ -1091,6 +1088,12 @@ vTensor::View::State::State(
   }
 }
 
+#ifdef VULKAN_TENSOR_DEBUG
+std::ostream& operator<<(
+    std::ostream&,
+    const vTensor::View::State::Bundle&);
+#endif /* VULKAN_TENSOR_DEBUG */
+
 vTensor::View::State::Transition
 vTensor::View::State::transition(const Bundle bundle) {
   const Bundle from = bundle_;
@@ -1108,15 +1111,10 @@ vTensor::View::State::transition(const Bundle bundle) {
     to.image = bundle.image;
   }
 
-#ifdef DEBUG
-  // Forward declaration
-  std::ostream& operator<<(
-      std::ostream&,
-      const View::State::Bundle&);
-
+#ifdef VULKAN_TENSOR_DEBUG
   std::cout << "From:" << std::endl << from << std::endl;
   std::cout << "To:" << std::endl << to << std::endl;
-#endif /* DEBUG */
+#endif /* VULKAN_TENSOR_DEBUG */
 
   return Transition{
     from,
@@ -1146,6 +1144,8 @@ void verify(const TensorOptions& options) {
 //
 // Debug
 //
+
+#ifdef VULKAN_TENSOR_DEBUG
 
 namespace {
 
@@ -1307,6 +1307,8 @@ std::ostream& operator<<(
 
   return stream;
 }
+
+#endif /* VULKAN_TENSOR_DEBUG */
 
 } // namespace ops
 } // namespace vulkan

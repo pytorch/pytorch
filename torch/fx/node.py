@@ -148,6 +148,10 @@ class Node:
         self._next = self
         self._erased = False
 
+        # If set, use this fn to print this node
+        self._repr_fn : Optional[Callable[[Node], str]] = None
+        self._stack_trace : Optional[str] = None
+
     @property
     def next(self) -> 'Node':
         """
@@ -262,6 +266,20 @@ class Node:
         """
         return list(self._input_nodes.keys())
 
+    @property
+    def stack_trace(self) -> Optional[str]:
+        """
+        Return the Python stack trace that was recorded during tracing, if any.
+        This property is usually populated by `Tracer.create_proxy`. To record
+        stack traces during tracing for debug purposes, set
+        `record_stack_traces = True` on the `Tracer` instance.
+        """
+        return self._stack_trace
+
+    @stack_trace.setter
+    def stack_trace(self, trace : Optional[str]):
+        self._stack_trace = trace
+
     def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
         """
         This API is internal. Do *not* call it directly.
@@ -280,6 +298,8 @@ class Node:
             new_use.users.setdefault(self)
 
     def __repr__(self) -> str:
+        if self._repr_fn:
+            return self._repr_fn(self)
         return self.name
 
     def _pretty_print_target(self, target):

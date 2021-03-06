@@ -52,6 +52,14 @@ CONFIG_TREE_DATA = OrderedDict(
             "3.7",
         ],
     )),
+    macos_arm64=([None], OrderedDict(
+        wheel=[
+            "3.8",
+        ],
+        conda=[
+            "3.8",
+        ],
+    )),
     # Skip CUDA-9.2 builds on Windows
     windows=(
         [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92'] + dimensions.ROCM_VERSION_LABELS],

@@ -347,4 +347,36 @@ static inline void checkUplo(const std::string& uplo) {
     "Expected UPLO argument to be 'L' or 'U', but got ", uplo);
 }
 
+static inline void checkSameDevice(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
+  TORCH_CHECK(
+      result.device() == input.device(),
+      fn_name,
+      ": Expected ", result_name, " and input tensors to be on the same device, but got ",
+      result_name, " on ", result.device(), " and input on ", input.device());
+}
+
+// Check the dtype of result and input tensors (for _out variants).
+// Most linear algebra functions have the same dtype for input and output
+// (either floating or complex type input), so we can check whether input's dtype can be casted to result's dtype.
+// According to https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
+// c10::canCast is used for checking the "safe copy" dtype requirements.
+static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
+  bool can_cast = c10::canCast(input.scalar_type(), result.scalar_type());
+  TORCH_CHECK(
+      can_cast,
+      fn_name,
+      ": Expected ", result_name, " to be safely castable from ", input.scalar_type(), " dtype, but got ",
+      result_name, " with dtype ", result.scalar_type());
+}
+
+// Alternatively, we can check whether the specific expected output type (result_type) can be safely casted to out tensor dtype (out_type)
+static inline void checkLinalgCompatibleDtype(const std::string& fn_name, ScalarType out_type, ScalarType result_type, const std::string& out_name = "result") {
+  bool can_cast = c10::canCast(result_type, out_type);
+  TORCH_CHECK(
+      can_cast,
+      fn_name,
+      ": Expected ", out_name, " to be safely castable from ", result_type, " dtype, but got ",
+      out_name, " with dtype ", out_type);
+}
+
 }}  // namespace at::native

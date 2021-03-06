@@ -1,10 +1,14 @@
+import functools
+import os
 import warnings
-from torch.utils.data import IterDataPipe
-from typing import TypeVar, Optional, Iterator, List, Sized, Callable
+
+from torch.utils.data import IterDataPipe, functional_datapipe
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 
 
+@functional_datapipe('batch')
 class BatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BatchIterDataPipe`.
 
@@ -23,7 +27,6 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
-                 *,
                  batch_size: int,
                  drop_last: bool = False,
                  ) -> None:
@@ -58,6 +61,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         raise NotImplementedError
 
 
+@functional_datapipe('bucket_batch')
 class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BucketBatchIterDataPipe`.
 
@@ -80,7 +84,6 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
-                 *,
                  batch_size: int,
                  drop_last: bool = False,
                  bucket_size_mul: int = 100,
@@ -124,3 +127,114 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
                 self.length = (len(self.datapipe) + self.batch_size - 1) // self.batch_size
             return self.length
         raise NotImplementedError
+
+
+# defaut group key is the file pathname without the extension.
+# Assuming the passed in data is a tuple and 1st item is file's pathname.
+def default_group_key_fn(dataitem: Tuple[str, Any]):
+    return os.path.splitext(dataitem[0])[0]
+
+
+def default_sort_data_fn(datalist: List[Tuple[str, Any]]):
+    txt_ext = ['.json', '.jsn', '.txt', '.text']
+
+    def cmp_fn(a : Tuple[str, Any], b : Tuple[str, Any]):
+        a_is_txt = os.path.splitext(a[0])[1] in txt_ext
+        b_is_txt = os.path.splitext(b[0])[1] in txt_ext
+
+        # if a is txt but b is not, b go front
+        if a_is_txt and not b_is_txt:
+            return 1
+        # if a is not txt but b is txt, a go front
+        if not a_is_txt and b_is_txt:
+            return -1
+        # if a and b both are or are not txt, sort in alphabetic order
+        if a[0] < b[0]:
+            return -1
+        elif a[0] > b[0]:
+            return 1
+        return 0
+
+    return sorted(datalist, key=functools.cmp_to_key(cmp_fn))
+
+
+@functional_datapipe('group_by_key')
+class GroupByKeyIterDataPipe(IterDataPipe):
+    r""" :class:`GroupByKeyIterDataPipe`.
+
+    Iterable datapipe to group data from input iterable by keys which are generated from `group_key_fn`,
+    yields a list with `group_size` items in it, each item in the list is a tuple of key and data
+
+    args:
+        datapipe: Iterable datapipe that provides data. (typically str key (eg. pathname) and data stream in tuples)
+        group_size: the size of group
+        max_buffer_size: the max size of stream buffer which is used to store not yet grouped but iterated data
+        group_key_fn: a function which is used to generate group key from the data in the input datapipe
+        sort_data_fn: a function which is used to sort the grouped data before yielding back
+        length: a nominal length of the datapipe
+    """
+    datapipe: IterDataPipe[Tuple[str, Any]]
+    group_size: int
+    max_buffer_size: int
+    group_key_fn: Callable
+    sort_data_fn: Callable
+    curr_buffer_size: int
+    stream_buffer: Dict[str, List[Tuple[str, Any]]]
+    length: int
+
+    def __init__(
+            self,
+            datapipe: IterDataPipe[Tuple[str, Any]],
+            *,
+            group_size: int,
+            max_buffer_size: Optional[int] = None,
+            group_key_fn: Callable = default_group_key_fn,
+            sort_data_fn: Callable = default_sort_data_fn,
+            length: int = -1):
+        super().__init__()
+
+        assert group_size > 0
+        self.datapipe = datapipe
+        self.group_size = group_size
+
+        # default max buffer size is group_size * 10
+        self.max_buffer_size = max_buffer_size if max_buffer_size is not None else group_size * 10
+        assert self.max_buffer_size >= self.group_size
+
+        self.group_key_fn = group_key_fn  # type: ignore
+        self.sort_data_fn = sort_data_fn  # type: ignore
+        self.curr_buffer_size = 0
+        self.stream_buffer = {}
+        self.length = length
+
+    def __iter__(self) -> Iterator[list]:
+        if self.group_size == 1:
+            for data in self.datapipe:
+                yield [data]
+        else:
+            for data in self.datapipe:
+                key = self.group_key_fn(data)
+                if key not in self.stream_buffer:
+                    self.stream_buffer[key] = []
+                res = self.stream_buffer[key]
+                res.append(data)
+                if len(res) == self.group_size:
+                    yield self.sort_data_fn(res)
+                    del self.stream_buffer[key]
+                    self.curr_buffer_size = self.curr_buffer_size - self.group_size + 1
+                else:
+                    if self.curr_buffer_size == self.max_buffer_size:
+                        raise OverflowError(
+                            "stream_buffer is overflow, please adjust the order of data "
+                            "in the input datapipe or increase the buffer size!")
+                    self.curr_buffer_size = self.curr_buffer_size + 1
+
+            if self.curr_buffer_size > 0:
+                msg = "Not able to group [{}] with group size {}.".format(
+                    ','.join([v[0] for _, vs in self.stream_buffer.items() for v in vs]), str(self.group_size))
+                raise RuntimeError(msg)
+
+    def __len__(self) -> int:
+        if self.length == -1:
+            raise NotImplementedError
+        return self.length

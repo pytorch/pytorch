@@ -27,6 +27,7 @@ import torch.nn.functional as F
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
+import torch.nn.utils.parametrize as parametrize
 import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
@@ -34,7 +35,7 @@ from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
 from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    IS_WINDOWS, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
+    TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -42,7 +43,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
+    dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
     deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest
 from torch.nn import MultiheadAttention
@@ -1939,6 +1940,354 @@ class TestNN(NNTestCase):
         sample = next(model.parameters())[0, 0, 0]
         self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
+    # torch/nn/utils/parametrize
+    def test_register_and_remove_parametrization(self):
+        r"""Test that it is possible to add a few parametrizations
+        on a parameter or a buffer and that removing them restores the initial state
+        It also tests that backpropagating through them works as expected
+        """
+        # Define a couple matrix parametrizations
+        class Skew(nn.Module):
+            def forward(self, X):
+                X = X.tril(-1)
+                return X - X.T
+
+        class Orthogonal(nn.Module):
+            def forward(self, X):
+                # Cayley map
+                # If X is skew-symmetric it returns an orthogonal matrix
+                Id = torch.eye(X.size(0), device=X.device)
+                return torch.solve(Id - X, Id + X).solution
+
+        # Define a couple vector parametrizations
+        class FirstZero(nn.Module):
+            def forward(self, x):
+                return torch.cat([x.new_zeros(1), x[1:]])
+
+        class LastZero(nn.Module):
+            def forward(self, x):
+                return torch.cat([x[:-1], x.new_zeros(1)])
+
+        model = nn.Linear(8, 8)
+        initial_weight_id = id(model.weight)
+        initial_bias_id = id(model.bias)
+        initial_model = deepcopy(model)
+
+        # Test one parametrization
+        parametrize.register_parametrization(model, "weight", Skew())
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        # Result should be skew-symmetric
+        A = model.weight
+        self.assertTrue(torch.allclose(A, -A.T))
+        # Remove and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertEqual(model.__class__, nn.Linear)
+
+        # Test two parametrizations at the same time and removing them
+        parametrize.register_parametrization(model, "weight", Skew())
+        parametrize.register_parametrization(model, "weight", Orthogonal())
+        # Result should be orthogonal
+        X = model.weight
+        Id = torch.eye(X.size(0), device=X.device)
+        self.assertTrue(torch.allclose(X.T @ X, Id))
+        # Structure tests
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertIn("weight", model.parametrizations)
+        self.assertNotIn("weight", model._parameters)
+        # Remove
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+
+        # Add everything
+        parametrize.register_parametrization(model, "weight", Skew())
+        parametrize.register_parametrization(model, "weight", Orthogonal())
+        parametrize.register_parametrization(model, "bias", FirstZero())
+        parametrize.register_parametrization(model, "bias", LastZero())
+
+        # Basic tests
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertTrue(parametrize.is_parametrized(model, "bias"))
+        self.assertEqual(model.bias[0].item(), 0.)
+        self.assertEqual(model.bias[-1].item(), 0.)
+        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happpened
+        # Should not throw
+        (model.weight.T @ model.bias).sum().backward()
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(- p.grad, alpha=0.01)
+
+        # Remove first parametrization.
+        # Check that the model is still parametrized and so is the second parameter
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertTrue(parametrize.is_parametrized(model))  # Still parametrized
+        self.assertFalse(parametrize.is_parametrized(model, "weight"))  # Parametrization removed
+        self.assertTrue(parametrize.is_parametrized(model, "bias"))  # Still parametrized
+        self.assertEqual(model.bias[0].item(), 0.)   # Still parametrized
+        self.assertEqual(model.bias[-1].item(), 0.)  # Still parametrized
+        self.assertNotEqual(model.weight, initial_model.weight)  # Has been updated
+        self.assertEqual(id(model.weight), initial_weight_id)  # Keeps the same id
+        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happened
+        # Should not throw
+        (model.weight.T @ model.bias).sum().backward()
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(- p.grad, alpha=0.01)
+
+        # Remove the second parametrization.
+        # Check that the module is not parametrized
+        parametrize.remove_parametrizations(model, "bias", leave_parametrized=False)
+        self.assertFalse(parametrize.is_parametrized(model))  # Still parametrized
+        self.assertNotEqual(model.bias, initial_model.bias)  # Has been updated
+        self.assertNotEqual(model.bias[0].item(), 0.)   # Still parametrized
+        self.assertNotEqual(model.bias[-1].item(), 0.)  # Still parametrized
+        self.assertEqual(id(model.bias), initial_bias_id)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+        self.assertEqual(len(list(model.parameters())), 2)
+        # Should not throw
+        (model.weight.T @ model.bias).sum().backward()
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(- p.grad, alpha=0.01)
+
+    def test_register_and_remove_buffer_parametrization(self):
+        r"""Test that it is possible to add and remove parametrizations on buffers"""
+        # Define a couple vector parametrizations
+        class FirstZero(nn.Module):
+            def forward(self, x):
+                return torch.cat([x.new_zeros(1), x[1:]])
+
+        class LastZero(nn.Module):
+            def forward(self, x):
+                return torch.cat([x[:-1], x.new_zeros(1)])
+
+        model = nn.Linear(8, 8)
+
+        # Instantiate parametrizations on buffers. It should work as expected
+        delattr(model, "bias")
+        model.register_buffer("bias", torch.ones(8))
+        parametrize.register_parametrization(model, "bias", FirstZero())
+        parametrize.register_parametrization(model, "bias", LastZero())
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "bias"))
+        self.assertEqual(model.bias[0].item(), 0.)
+        self.assertEqual(model.bias[-1].item(), 0.)
+        self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
+        self.assertEqual(len(list(model.parameters())), 1)
+
+        # Remove parametrizations on buffers. It should work as expected
+        parametrize.remove_parametrizations(model, "bias", leave_parametrized=True)
+        self.assertFalse(parametrize.is_parametrized(model))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertEqual(model.bias[0].item(), 0.)
+        self.assertEqual(model.bias[-1].item(), 0.)
+        self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
+        self.assertEqual(len(list(model.parameters())), 1)
+
+    def test_serialization_parametrization(self):
+        r"""Test that it is possible to serialize a parametrized model via state_dict"""
+        # A stateful parametrization
+        class Orthogonal(nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.register_buffer("id", torch.eye(n))
+                self.register_buffer("B", torch.empty(n, n))
+                init.orthogonal_(self.B)
+
+            def forward(self, X):
+                A = X.triu(1)
+                A = A - A.T
+                return self.B @ torch.solve(self.id - A, self.id + A).solution
+
+        def get_model():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(5, 5),
+                torch.nn.ReLU(),
+                torch.nn.Linear(5, 1),
+            )
+
+            parametrize.register_parametrization(model[0], "weight", Orthogonal(5))
+            return model
+
+        model = get_model()
+
+        prev_weight = model[0].weight
+        prev_B = model[0].parametrizations.weight[0].B
+
+        new_model = get_model()
+        with TemporaryFileName() as fname:
+            torch.save(model.state_dict(), fname)
+            new_model.load_state_dict(torch.load(fname))
+
+        # Integrity tests
+        self.assertTrue(parametrize.is_parametrized(new_model[0], "weight"))
+        self.assertEqual(prev_weight, new_model[0].weight)
+        self.assertEqual(prev_B, new_model[0].parametrizations.weight[0].B)
+
+        # Trying to save the whole parametrized model raises
+        with self.assertRaisesRegex(RuntimeError, "state_dict"):
+            with TemporaryFileName() as fname:
+                torch.save(model, fname)
+
+    def test_initialization_parametrization(self):
+        r"""Test that it is possible to initialize a parametrization when it
+            implements a `right_inverse` method
+        """
+        class Skew(nn.Module):
+            def forward(self, X):
+                A = X.triu(1)
+                return A - A.T
+
+            def is_skew(self, A):
+                return torch.allclose(A, -A.T, atol=1e-6)
+
+            def right_inverse(self, X):
+                if not self.is_skew(X):
+                    raise ValueError("The matrix is not skew-symmetric.")
+                return X.triu(1)
+
+        # Implements a Cayley map where right_inverse is not quite the inverse of forward
+        class Orthogonal(nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.register_buffer("B", torch.eye(n))
+
+            def forward(self, A):
+                Id = torch.eye(X.size(0))
+                return self.B @ torch.solve(Id - A, Id + A).solution
+
+            def is_orthogonal(self, X):
+                Id = torch.eye(X.size(0))
+                return torch.allclose(X.T @ X, Id, atol=1e-4)
+
+            def right_inverse(self, X):
+                if not self.is_orthogonal(X):
+                    raise ValueError("The input is not orthogonal.")
+                # cayley(0) == Id, so B @ cayley(0) == B
+                self.B = X
+                return torch.zeros_like(X)
+
+        N = 5
+        model = nn.Linear(N, N)
+        # Register the skew-symmetric onstraint. The result is now skew-symmetric
+        parametrize.register_parametrization(model, "weight", Skew())
+        X = torch.rand(N, N)
+        # X is not skew-symmetric, so it throws an error
+        with self.assertRaises(ValueError):
+            model.weight = X
+        # Make X skew-symmetric
+        X = X - X.T
+        model.weight = X
+        self.assertEqual(model.parametrizations.weight.original, X.triu(1))
+        self.assertEqual(model.weight, X)
+
+        # Having several parametrizations registered should work in the same way
+        parametrize.register_parametrization(model, "weight", Orthogonal(N))
+        # Register now the Cayley map. The result is now orthogonal
+        X = torch.rand(N, N)
+        # X is not orthogonal, so it throws an error
+        with self.assertRaises(ValueError):
+            model.weight = X
+        init.orthogonal_(X)
+        model.weight = X
+        self.assertEqual(model.weight, X)
+        self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
+
+    def test_errors_parametrization(self):
+        # A parametrization shall not change the size of the parameter
+        class ChangeSize(nn.Module):
+            def forward(self, x):
+                return x[:-1]
+
+        # A simple parametrization that does not implement a right_inverse
+        class Double(nn.Module):
+            def forward(self, x):
+                return 2 * x
+
+        module = nn.Linear(3, 4)
+        # This should not throw when registering
+        parametrize.register_parametrization(module, "weight", ChangeSize())
+        # It throws in the forward
+        with self.assertRaisesRegex(RuntimeError, "may not change the size"):
+            module(torch.rand(2))
+        # Undo
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Removing a parametrization from an unparametrized tensor throws
+        with self.assertRaisesRegex(ValueError, "does not have a parametrization"):
+            parametrize.remove_parametrizations(module, "bias")
+        # Nothing odd happens
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Register a parametrization on a non-existing parameter breaks
+        with self.assertRaisesRegex(ValueError, "does not have a parameter"):
+            parametrize.register_parametrization(module, "foo", ChangeSize())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Try to assign to a parametrization that does not implement `right_inverse`
+        parametrize.register_parametrization(module, "weight", Double())
+        with self.assertRaisesRegex(RuntimeError, "right_inverse"):
+            module.weight = torch.rand(4, 3)
+        # Undo
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        self.assertFalse(parametrize.is_parametrized(module))
+
+    def test_caching_parametrization(self):
+        r"""Test the caching system of a parametrization"""
+        # Define a couple matrix parametrizations
+        class Skew(nn.Module):
+            def forward(self, X):
+                X = X.tril(-1)
+                return X - X.T
+
+        class Orthogonal(nn.Module):
+            def forward(self, X):
+                Id = torch.eye(X.size(0), device=X.device)
+                return torch.solve(Id - X, Id + X).solution
+
+        model = nn.Linear(5, 5)
+        parametrize.register_parametrization(model, "weight", Skew())
+        parametrize.register_parametrization(model, "weight", Orthogonal())
+
+        # Test that the caching system works
+        with parametrize.cached():
+            X = model.weight
+            Y = model.weight
+            self.assertEqual(id(X), id(Y))
+
+    def test_dtype_parametrization(self):
+        r"""Test a case that is not allowed when removing a parametrization"""
+        class ChangeType(nn.Module):
+            def forward(self, X):
+                return X.double()
+
+        module = nn.Linear(4, 4).float()
+        input_ = torch.rand(4).double()
+        # It is allowed to register a parametrization that changes the dtype
+        parametrize.register_parametrization(module, "weight", ChangeType())
+        module(input_)
+        # We can remove it leaving the original tensor
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        # But leaving it parametrized breaks
+        parametrize.register_parametrization(module, "weight", ChangeType())
+        with self.assertRaisesRegex(ValueError, "changes the dtype"):
+            parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
+
     # torch/nn/utils/prune.py
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_validate_pruning_amount_init(self):
@@ -3440,24 +3789,6 @@ class TestNN(NNTestCase):
         self.assertTrue(a.ne(torch.arange(1, 7, dtype=a.dtype).view(2, 3)).all())
         self.assertTrue(a.norm(p=opts["norm_type"], dim=1).le(opts["max_norm"]).all())
 
-    def test_fractional_max_pool2d(self):
-        x = torch.randn(1, 2, 7, 7, requires_grad=True)
-        samples = x.new(1, 2, 2).uniform_()
-
-        def func(x):
-            return F.fractional_max_pool2d(
-                x, (2, 2), output_size=(3, 3), _random_samples=samples)
-
-        self.assertEqual(func(x).shape, (1, 2, 3, 3))
-        gradcheck(func, [x])
-        gradgradcheck(func, [x])
-
-        x = torch.randn(2, 7, 7, requires_grad=True)
-        samples = x.new(2, 2).uniform_()
-        self.assertEqual(func(x).shape, (2, 3, 3))
-        gradcheck(func, [x])
-        gradgradcheck(func, [x])
-
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
         input = torch.randn(5000)
@@ -3794,6 +4125,15 @@ class TestNN(NNTestCase):
             # output_2d in shape of [T, 1, D]
             self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
 
+    def test_multihead_attn_no_bias(self):
+        embed_dim = 8
+        num_heads = 4
+        mha = torch.nn.MultiheadAttention(embed_dim, num_heads, bias=False)
+
+        # Verify that bias=False applies to both in and out projection layers.
+        self.assertIsNone(mha.in_proj_bias)
+        self.assertIsNone(mha.out_proj.bias)
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
@@ -3824,6 +4164,14 @@ class TestNN(NNTestCase):
                 input = torch.randn((4,) * (numel + 1))
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
+
+    @unittest.skipIf(TEST_WITH_UBSAN, "signed integer overflow error with UBSAN")
+    def test_adaptive_pooling_size_overflow(self):
+        # 0x0x3fffffffffffffff * 2 * 2 = 0xfffffffffffffffc = -4 as int64_t
+        # Tensor::numel() return int64_t, so following check that negative allocs are correctly handled
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.nn.AdaptiveMaxPool1d(0x3fffffffffffffff)(torch.empty([2, 2, 2])))
 
     def test_adaptive_pooling_avg_nhwc(self):
         device_list = ['cpu']
@@ -4276,6 +4624,37 @@ class TestNN(NNTestCase):
             with torch.backends.mkldnn.flags(enabled=enabled):
                 gradcheck(F.conv2d, (input, mod.weight))
 
+    def test_Conv2d_OneDNN(self):
+        def run_once():
+            group_val = 24
+            ifm = torch.ones([1, group_val, 6, 6], dtype=torch.float32)
+            weights = torch.ones([group_val, 1, 3, 3], dtype=torch.float32)
+            op = torch.nn.Conv2d(
+                in_channels=group_val,
+                out_channels=group_val,
+                kernel_size=[3, 3],
+                stride=[2, 2],
+                padding=[1, 1],
+                dilation=[1, 1],
+                groups=group_val,
+                bias=False,
+                padding_mode='zeros'
+            )
+
+            op.weight.data = weights
+            res = op(ifm)
+            grad_in = torch.ones(res.shape, dtype=torch.float32)
+            res.backward(grad_in)
+            return op.weight.grad
+
+        with torch.backends.mkldnn.flags(enabled=False):
+            without_onednn = run_once()
+
+        with torch.backends.mkldnn.flags(enabled=True):
+            with_onednn = run_once()
+
+        self.assertEqual(without_onednn, with_onednn)
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_cudnn_non_contiguous(self):
@@ -4652,6 +5031,46 @@ class TestNN(NNTestCase):
                                         m2.weight.grad.data], 0),
                              atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_Conv3d_depthwise_naive_groups_cuda(self, dtype=torch.float):
+        for depth_multiplier in [1, 2]:
+            m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
+            i = torch.randn(2, 2, 6, 6, 6, device="cuda", dtype=dtype).div_(2).requires_grad_()
+            output = m(i)
+            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4, 4, device="cuda", dtype=dtype) / 2
+            output.backward(grad_output)
+
+            offset = 1 * depth_multiplier
+
+            m1 = nn.Conv3d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
+            m1.weight.data = m.weight.data[:offset].clone()
+            m1.bias.data = m.bias.data[:offset].clone()
+            i1 = i.detach()[:, :1].clone().requires_grad_()
+            output1 = m1(i1)
+            output1.backward(grad_output[:, :offset].contiguous())
+
+            m2 = nn.Conv3d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
+            m2.weight.data.copy_(m.weight.data[offset:])
+            m2.bias.data.copy_(m.bias.data[offset:])
+            i2 = i.detach()[:, 1:].clone().requires_grad_()
+            output2 = m2(i2)
+            output2.backward(grad_output[:, offset:].contiguous())
+
+            self.assertEqual(output, torch.cat([output1, output2], 1),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            self.assertEqual(i.grad.data,
+                             torch.cat([i1.grad.data, i2.grad.data], 1),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            self.assertEqual(m.bias.grad.data,
+                             torch.cat([m1.bias.grad.data,
+                                        m2.bias.grad.data], 0),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            self.assertEqual(m.weight.grad.data,
+                             torch.cat([m1.weight.grad.data,
+                                        m2.weight.grad.data], 0),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)
@@ -4713,6 +5132,7 @@ class TestNN(NNTestCase):
             'mse_loss': lambda x, y: F.mse_loss(x, y),
             'l1_loss': lambda x, y: F.l1_loss(x, y),
             'smooth_l1_loss': lambda x, y: F.smooth_l1_loss(x, y),
+            'huber_loss': lambda x, y: F.huber_loss(x, y),
             'kl_div': lambda x, y: F.kl_div(x, y),
             'poisson_nll_loss': lambda x, y: F.poisson_nll_loss(x, y),
         }
@@ -6787,10 +7207,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
-        if TEST_WITH_ROCM:
-            dtype = torch.float
-        else:
-            dtype = torch.double
+        dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
@@ -7638,6 +8055,14 @@ class TestNN(NNTestCase):
                          loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target,
                                                                    margin=0.5, reduction='none'))
 
+    def test_cosine_embedding_loss_invalid_target_shape(self):
+        input1 = torch.randn(15, 10)
+        input2 = torch.randn(15, 10)
+        target = torch.randn(15, 1).sign()
+
+        with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
+            F.cosine_embedding_loss(input1, input2, target)
+
     def test_margin_ranking_loss_no_reduce(self):
         input1 = torch.randn(15).mul_(10).requires_grad_()
         input2 = torch.randn(15).mul_(10).requires_grad_()
@@ -7703,6 +8128,7 @@ class TestNN(NNTestCase):
             'mse_loss': lambda x, y, r: F.mse_loss(x, y, reduction=r),
             'l1_loss': lambda x, y, r: F.l1_loss(x, y, reduction=r),
             'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
+            'huber_loss': lambda x, y, r: F.huber_loss(x, y, reduction=r),
         }
 
         input = torch.randn(2, 1, requires_grad=True)
@@ -7729,6 +8155,22 @@ class TestNN(NNTestCase):
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
             F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
+
+    def test_huber_loss_invalid_delta(self):
+        def _test_huber_loss_delta_error_helper(delta):
+            input, target = torch.randn(2, 2), torch.randn(2, 2)
+            loss = torch.nn.HuberLoss(delta=delta)
+            with self.assertRaises(RuntimeError):
+                loss(input, target)
+
+        def test_huber_loss_negative_delta():
+            _test_huber_loss_delta_error_helper(delta=-0.5)
+
+        def test_huber_loss_zero_delta():
+            _test_huber_loss_delta_error_helper(delta=0.0)
+
+        test_huber_loss_negative_delta()
+        test_huber_loss_zero_delta()
 
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
@@ -8643,7 +9085,7 @@ class TestNN(NNTestCase):
             kwargs = dict(mode='bicubic', align_corners=align_corners)
             # test float scale factor up & downsampling
             for device in device_list:
-                for scale_factor in [0.5, 1.5, 2]:
+                for scale_factor in [0.5, 1, 1.5, 2]:
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
                     out_size = int(math.floor(in_t.shape[-1] * scale_factor))
@@ -8948,7 +9390,6 @@ class TestNN(NNTestCase):
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocm
     def test_conv_cudnn_memory_layout_dominance(self):
         # desired behavior here is to have the memory_layout of conv.weight to
         # dominante the layout of output.
@@ -11460,6 +11901,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.multi_margin_loss(input, target, reduction=reduction))
 
             v(lambda: F.kl_div(input, input, reduction=reduction))
+            v(lambda: F.huber_loss(input, input, reduction=reduction))
             v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(cinput, cinput, reduction=reduction))
@@ -11487,6 +11929,68 @@ class TestNNDeviceType(NNTestCase):
             # FIXME: should we allow derivatives on these?
             v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.detach(), reduction=reduction))
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
+
+    @onlyOnCPUAndCUDA
+    def test_smooth_l1_loss_vs_huber_loss(self, device):
+        def _make_test_tensor(shape, contiguous=True):
+            if contiguous:
+                test_tensor = torch.randn(shape, device=device)
+            else:
+                # Select every other element in the innermost dimension to
+                # make it non-contiguous.
+                doubled_shape = list(shape)
+                doubled_shape[-1] *= 2
+                test_tensor = torch.randn(doubled_shape, device=device)
+                test_tensor = test_tensor[..., ::2]
+            return test_tensor
+
+        def _test_smooth_l1_loss_vs_huber_loss_helper(input, target, beta, require_equal):
+            for reduction in ['mean', 'sum', 'none']:
+                smooth_l1 = torch.nn.SmoothL1Loss(beta=beta, reduction=reduction)
+                # beta hyper-parameter is called delta for Huber
+                huber = torch.nn.HuberLoss(delta=beta, reduction=reduction)
+                smooth_l1_loss = smooth_l1(input, target)
+                huber_loss = huber(input, target)
+
+                if require_equal:
+                    self.assertEqual(smooth_l1_loss, huber_loss)
+                else:
+                    # Huber loss should be larger than smooth L1 loss by a factor of beta.
+                    self.assertEqual(smooth_l1_loss * beta, huber_loss)
+
+        def _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta, require_equal):
+            # Test the non-vectorized case.
+            shape = (2, 2)
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape),
+                                                      target=_make_test_tensor(shape),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+            # Test the vectorized case (innermost dim > 32).
+            shape = (64, 64)
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape),
+                                                      target=_make_test_tensor(shape),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+            # Test the non-contiguous case.
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape, contiguous=False),
+                                                      target=_make_test_tensor(shape, contiguous=False),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+        def test_equal_when_beta_is_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=1.0, require_equal=True)
+
+        def test_unequal_when_beta_is_less_than_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=0.5, require_equal=False)
+
+        def test_unequal_when_beta_is_greater_than_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=1.5, require_equal=False)
+
+        test_equal_when_beta_is_one()
+        test_unequal_when_beta_is_less_than_one()
+        test_unequal_when_beta_is_greater_than_one()
 
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
@@ -11921,6 +12425,25 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(output, ref_output)
                         self.assertEqual(grad_input, ref_grad_input)
                         self.assertEqual(input.grad, ref_input.grad)
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.float, torch.half)
+    @largeTensorTest("20GB")
+    @precisionOverride({torch.half: 0.001})
+    def test_softmax_64bit_indexing(self, device, dtype):
+        def run_test(*shape):
+            x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
+            y = F.log_softmax(x, dim=-1, dtype=dtype)
+            y.backward(y)
+            with torch.no_grad():
+                xx = x.cpu().requires_grad_()
+            yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
+            yy.backward(yy)
+            self.assertEqual(y, yy)
+            self.assertEqual(x.grad, xx.grad)
+
+        run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
+        run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
@@ -12698,7 +13221,6 @@ class TestNNDeviceType(NNTestCase):
         for mode, trainable in itertools.product(modes, trainable_scale):
             test_per_sample_weights(mode, trainable)
 
-    @unittest.skipIf(IS_WINDOWS, "FIXME: CUDA error: too many resources requested on 11.2")
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
     @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
@@ -12733,7 +13255,6 @@ class TestNNDeviceType(NNTestCase):
         for mode, trainable in itertools.product(modes, trainable_scale):
             test_per_sample_weights(mode, trainable)
 
-    @unittest.skipIf(IS_WINDOWS, "FIXME: CUDA error: too many resources requested on 11.2")
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
     @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
@@ -13371,6 +13892,77 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
+    @onlyOnCPUAndCUDA
+    def test_fractional_max_pool2d(self, device):
+        x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
+        samples = x.new(1, 2, 2).uniform_()
+
+        def func(x):
+            return F.fractional_max_pool2d(
+                x, (2, 2), output_size=(3, 3), _random_samples=samples)
+
+        self.assertEqual(func(x).shape, (1, 2, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        x = torch.randn(2, 7, 7, requires_grad=True, device=device)
+        self.assertEqual(func(x).shape, (2, 3, 3))
+        if self.device_type != 'cuda':
+            # Reference: https://github.com/pytorch/pytorch/issues/52427
+            # Raises -> RuntimeError: TensorAccessor expected 4 dims but tensor has 3
+            # on CUDA in gradcheck
+            gradcheck(func, [x])
+            gradgradcheck(func, [x])
+
+        for kernel_size in [(), (1,)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
+                # Incorrect kernel_size
+                F.fractional_max_pool2d(x, kernel_size=kernel_size, output_size=(3, 3), _random_samples=samples)
+
+        err_large_msg = "too large relative to input "
+        err_out_size_msg = "output_size must either"
+        for output_size, msg in [((9, 3), err_large_msg + "height"),
+                                 ((3, 9), err_large_msg + "width"),
+                                 ((3,), err_out_size_msg),
+                                 ((), err_out_size_msg)]:
+            with self.assertRaisesRegex(RuntimeError, msg):
+                # Incorrect output_size
+                F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
+
+    @onlyOnCPUAndCUDA
+    def test_fractional_max_pool3d(self, device):
+        x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
+        samples = x.new(1, 2, 3).uniform_()
+
+        def func(x):
+            return F.fractional_max_pool3d(
+                x, (2, 2, 2), output_size=(3, 3, 3), _random_samples=samples)
+
+        self.assertEqual(func(x).shape, (1, 2, 3, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        x = torch.randn(2, 7, 7, 7, requires_grad=True, device=device)
+        self.assertEqual(func(x).shape, (2, 3, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        for kernel_size in [(), (1,), (1, 1)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
+                # Incorrect kernel_size
+                F.fractional_max_pool3d(x, kernel_size=kernel_size, output_size=(3, 3, 3), _random_samples=samples)
+
+        err_large_msg = "too large relative to input "
+        err_out_size_msg = "output_size must either"
+        for output_size, msg in [((9, 3, 3), err_large_msg + "time"),
+                                 ((3, 9, 3), err_large_msg + "height"),
+                                 ((3, 3, 9), err_large_msg + "width"),
+                                 ((3, 3), err_out_size_msg),
+                                 ((3,), err_out_size_msg),
+                                 ((), err_out_size_msg)]:
+            with self.assertRaisesRegex(RuntimeError, msg):
+                # Incorrect output_size
+                F.fractional_max_pool3d(x, (2, 2, 2), output_size=output_size, _random_samples=samples)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
@@ -13743,7 +14335,6 @@ class TestNNDeviceType(NNTestCase):
     # returning CUDNN_STATUS_BAD_PARAM
     # Disabling that specific test for now [see issue # 33918]
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double)
     def test_conv_cudnn_nhwc_support(self, device, dtype):
@@ -14356,11 +14947,13 @@ class TestLazyModules(TestCase):
     def test_linear(self):
         module = nn.LazyLinear(10)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
         module(input)
         self.assertIsInstance(module, nn.Linear)
         self.assertNotIsInstance(module, nn.LazyLinear)
         self.assertTrue(module.weight.shape == (10, 5))
+        self.assertTrue(module.bias.shape == (10,))
         y = module(input)
         self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
 
@@ -14368,9 +14961,11 @@ class TestLazyModules(TestCase):
     def test_lazy_linear_pickle(self):
         module = nn.LazyLinear(10)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         module = pickle.loads(pickle.dumps(module))
         self.assertIsInstance(module, nn.LazyLinear)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
         module(input)  # fully materialized
         new_module = pickle.loads(pickle.dumps(module))
@@ -14378,6 +14973,8 @@ class TestLazyModules(TestCase):
         self.assertNotIsInstance(new_module, nn.LazyLinear)
         self.assertTrue(new_module.weight.shape == (10, 5))
         self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+        self.assertTrue(new_module.bias.shape == (10,))
+        self.assertNotIsInstance(new_module.bias, UninitializedParameter)
 
     @suppress_warnings
     def test_linear_state(self):
@@ -14389,29 +14986,40 @@ class TestLazyModules(TestCase):
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertTrue(lazy_module.weight.shape == (10, 5))
+        self.assertTrue(lazy_module.bias.shape == (10,))
 
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
 
-    def _check_lazy_conv(self, cls, lazy_cls, func, init_args, input_shape, expected_weight_shape):
+    def _check_lazy_conv(self, cls, lazy_cls, func, init_args, input_shape,
+                         expected_weight_shape, expected_bias_shape):
         module = lazy_cls(*init_args)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(*input_shape)
         module(input)
         self.assertIsInstance(module, cls)
         self.assertNotIsInstance(module, lazy_cls)
         self.assertEqual(module.weight.shape, expected_weight_shape)
+        if module.bias is not None:
+            self.assertEqual(module.bias.shape, expected_bias_shape)
         y = module(input)
         self.assertTrue(torch.equal(func(input, module.weight, module.bias), y))
 
-    def _check_lazy_conv_pickle(self, cls, lazy_cls, init_args, input_shape, expected_weight_shape):
+    def _check_lazy_conv_pickle(self, cls, lazy_cls, init_args, input_shape,
+                                expected_weight_shape, expected_bias_shape):
         module = lazy_cls(*init_args)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         module = pickle.loads(pickle.dumps(module))
         self.assertIsInstance(module, lazy_cls)
         self.assertIsInstance(module.weight, UninitializedParameter)
+        if module.bias is not None:
+            self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(*input_shape)
         module(input)  # fully materialized
         new_module = pickle.loads(pickle.dumps(module))
@@ -14419,8 +15027,12 @@ class TestLazyModules(TestCase):
         self.assertNotIsInstance(new_module, lazy_cls)
         self.assertEqual(new_module.weight.shape, expected_weight_shape)
         self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+        if new_module.bias is not None:
+            self.assertEqual(new_module.bias.shape, expected_bias_shape)
+            self.assertNotIsInstance(new_module.bias, UninitializedParameter)
 
-    def _check_lazy_conv_state(self, gen_module, gen_lazy_module, expected_weight_shape):
+    def _check_lazy_conv_state(self, gen_module, gen_lazy_module,
+                               expected_weight_shape, expected_bias_shape):
         module = gen_module()
         lazy_module = gen_lazy_module()
         lazy_module.load_state_dict(module.state_dict())
@@ -14429,6 +15041,8 @@ class TestLazyModules(TestCase):
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertEqual(lazy_module.weight.shape, expected_weight_shape)
+        if lazy_module.bias is not None:
+            self.assertEqual(lazy_module.bias.shape, expected_bias_shape)
 
         module = gen_module()
         lazy_module = gen_lazy_module()
@@ -14438,92 +15052,98 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv1d(self):
         self._check_lazy_conv(nn.Conv1d, nn.LazyConv1d, torch.nn.functional.conv1d,
-                              (32, 2), (192, 16, 50), (32, 16, 2))
+                              (32, 2), (192, 16, 50), (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv1d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv1d, nn.LazyConv1d, (32, 2), (192, 16, 50), (32, 16, 2))
+        self._check_lazy_conv_pickle(nn.Conv1d, nn.LazyConv1d, (32, 2), (192, 16, 50),
+                                     (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv1d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv1d(16, 32, 2),
                                     lambda: nn.LazyConv1d(32, 2),
-                                    (32, 16, 2))
+                                    (32, 16, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d(self):
         self._check_lazy_conv(nn.Conv2d, nn.LazyConv2d, torch.nn.functional.conv2d,
-                              (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+                              (32, 2), (192, 16, 8, 6), (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv2d, nn.LazyConv2d, (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+        self._check_lazy_conv_pickle(nn.Conv2d, nn.LazyConv2d, (32, 2), (192, 16, 8, 6),
+                                     (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv2d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv2d(16, 32, 2),
                                     lambda: nn.LazyConv2d(32, 2),
-                                    (32, 16, 2, 2))
+                                    (32, 16, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d(self):
         self._check_lazy_conv(nn.Conv3d, nn.LazyConv3d, torch.nn.functional.conv3d,
-                              (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+                              (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d_pickle(self):
-        self._check_lazy_conv_pickle(nn.Conv3d, nn.LazyConv3d, (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+        self._check_lazy_conv_pickle(nn.Conv3d, nn.LazyConv3d, (32, 2), (192, 16, 8, 7, 6),
+                                     (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv3d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv3d(16, 32, 2),
                                     lambda: nn.LazyConv3d(32, 2),
-                                    (32, 16, 2, 2, 2))
+                                    (32, 16, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transposed1d(self):
         self._check_lazy_conv(nn.ConvTranspose1d, nn.LazyConvTranspose1d, torch.nn.functional.conv_transpose1d,
-                              (32, 2), (192, 16, 50), (16, 32, 2))
+                              (32, 2), (192, 16, 50), (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose1d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose1d, nn.LazyConvTranspose1d, (32, 2), (192, 16, 50), (16, 32, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose1d, nn.LazyConvTranspose1d, (32, 2),
+                                     (192, 16, 50), (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose1d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose1d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose1d(32, 2),
-                                    (16, 32, 2))
+                                    (16, 32, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d(self):
         self._check_lazy_conv(nn.ConvTranspose2d, nn.LazyConvTranspose2d, torch.nn.functional.conv_transpose2d,
-                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose2d, nn.LazyConvTranspose2d, (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose2d, nn.LazyConvTranspose2d, (32, 2),
+                                     (192, 16, 8, 6), (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose2d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose2d(32, 2),
-                                    (16, 32, 2, 2))
+                                    (16, 32, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d(self):
         self._check_lazy_conv(nn.ConvTranspose3d, nn.LazyConvTranspose3d, torch.nn.functional.conv_transpose3d,
-                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d_pickle(self):
-        self._check_lazy_conv_pickle(nn.ConvTranspose3d, nn.LazyConvTranspose3d, (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+        self._check_lazy_conv_pickle(nn.ConvTranspose3d, nn.LazyConvTranspose3d, (32, 2),
+                                     (192, 16, 8, 7, 6), (16, 32, 2, 2, 2), (32,))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose3d(16, 32, 2),
                                     lambda: nn.LazyConvTranspose3d(32, 2),
-                                    (16, 32, 2, 2, 2))
+                                    (16, 32, 2, 2, 2), (32,))
 
     def _check_lazy_batchnorm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
@@ -14679,7 +15299,9 @@ class TestLazyModules(TestCase):
         net = MyNetwork()
         net(torch.ones(5, 10))
         self.assertTrue(net.linear_1.weight.shape == (15, 10))
+        self.assertTrue(net.linear_1.bias.shape == (15,))
         self.assertTrue(net.linear_2.weight.shape == (10, 15))
+        self.assertTrue(net.linear_2.bias.shape == (10,))
 
     @suppress_warnings
     def test_optimizer_pass(self):
@@ -14736,6 +15358,14 @@ class TestLazyModules(TestCase):
 
         with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
             param + param
+
+class TestFunctionalPickle(TestCase):
+
+    # issue gh-38137
+    def test_pickle_softsign(self):
+        # Make sure it does not throw an exception
+        s = pickle.dumps(F.softsign)
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 

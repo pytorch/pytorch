@@ -48,9 +48,9 @@ class _NormBase(Module):
             self.register_buffer('running_var', torch.ones(num_features))
             self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         else:
-            self.register_parameter('running_mean', None)
-            self.register_parameter('running_var', None)
-            self.register_parameter('num_batches_tracked', None)
+            self.register_buffer('running_mean', None)
+            self.register_buffer('running_var', None)
+            self.register_buffer('num_batches_tracked', None)
         self.reset_parameters()
 
     def reset_running_stats(self) -> None:
@@ -145,13 +145,18 @@ class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
 
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
         super(_LazyBatchNorm, self).__init__(
-            0, eps, momentum, affine, track_running_stats)
+            # affine and track_running_stats are hardcoded to False to
+            # avoid creating tensors that will soon be overwritten.
+            0, eps, momentum, False, False)
+        self.affine = affine
+        self.track_running_stats = track_running_stats
         if self.affine:
             self.weight = UninitializedParameter()
             self.bias = UninitializedParameter()
         if self.track_running_stats:
             self.running_mean = UninitializedBuffer()
             self.running_var = UninitializedBuffer()
+            self.num_batches_tracked = torch.tensor(0, dtype=torch.long)
 
     def reset_parameters(self) -> None:
         if not self.has_uninitialized_params() and self.num_features != 0:
@@ -248,6 +253,8 @@ class LazyBatchNorm1d(_LazyBatchNorm):
     r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm1d` that is inferred
     from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -350,6 +357,8 @@ class LazyBatchNorm2d(_LazyBatchNorm):
     r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm2d` that is inferred
     from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -453,6 +462,8 @@ class LazyBatchNorm3d(_LazyBatchNorm):
     r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm3d` that is inferred
     from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -554,7 +565,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> # creating process group (optional)
         >>> # ranks is a list of int identifying rank ids.
         >>> ranks = list(range(8))
-        >>> r1, r2 = ranks[:4], ranks[4:] 
+        >>> r1, r2 = ranks[:4], ranks[4:]
         >>> # Note: every rank calls into new_group for every
         >>> # process group created, even if that rank is not
         >>> # part of the group.
@@ -594,6 +605,10 @@ class SyncBatchNorm(_BatchNorm):
             raise ValueError('expected at least 2D input (got {}D input)'
                              .format(input.dim()))
 
+    def _check_non_zero_input_channels(self, input):
+        if input.size(1) == 0:
+            raise ValueError('SyncBatchNorm number of input channels should be non-zero')
+
     def _specify_ddp_gpu_num(self, gpu_size):
         if gpu_size > 1:
             raise ValueError('SyncBatchNorm is only supported for DDP with single GPU per process')
@@ -605,6 +620,7 @@ class SyncBatchNorm(_BatchNorm):
             raise ValueError('SyncBatchNorm expected input tensor to be on GPU')
 
         self._check_input_dim(input)
+        self._check_non_zero_input_channels(input)
 
         # exponential_average_factor is set to self.momentum
         # (when it is available) only so that it gets updated
@@ -690,7 +706,7 @@ class SyncBatchNorm(_BatchNorm):
             >>> # creating process group (optional)
             >>> # ranks is a list of int identifying rank ids.
             >>> ranks = list(range(8))
-            >>> r1, r2 = ranks[:4], ranks[4:] 
+            >>> r1, r2 = ranks[:4], ranks[4:]
             >>> # Note: every rank calls into new_group for every
             >>> # process group created, even if that rank is not
             >>> # part of the group.

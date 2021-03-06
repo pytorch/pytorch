@@ -114,6 +114,21 @@ class JitTestCase(JitCommonTestCase):
             del self.stringio
             sys.stdout = self.sys_stdout
 
+    class capture_stderr(list):
+        """
+        Replace sys.stderr with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stderr = sys.stderr
+            self.stringio = StringIO()
+            sys.stderr = self.stringio
+            return self
+
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stderr = self.sys_stderr
+
     def setHooks(self):
         torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
 
@@ -148,7 +163,7 @@ class JitTestCase(JitCommonTestCase):
                 elif node.kind() == 'prim::DifferentiableGraph':
                     get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
                 elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or 
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or
                                                     node.inputs().__next__().node().kind() == 'prim::RequiresGradCheck'):
                     get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
                 else:
@@ -412,6 +427,7 @@ class JitTestCase(JitCommonTestCase):
                     rtol=None):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
+                extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
@@ -463,6 +479,8 @@ class JitTestCase(JitCommonTestCase):
                 else:
                     # profiling run
                     script_outputs = scripted_fn(*recording_inputs)
+                    if inputs_requires_grad or extra_profile_runs:
+                        opt_script_outputs = scripted_fn(*recording_inputs)
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
                     if TEST_BAILOUTS:
@@ -647,10 +665,12 @@ def _trace(*args, **kwargs):
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
         torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
         try:
             fn(*args, **kwargs)
         finally:
             torch._C._jit_override_can_fuse_on_cpu(False)
+            torch._C._jit_set_te_must_use_llvm_cpu(True)
     return wrapper
 
 
@@ -678,7 +698,7 @@ def attrs_with_prefix(module, prefix):
             if x.startswith(prefix)]
 
 def warmup_backward(f, *args):
-    profiling_count = 2
+    profiling_count = 3
     results = []
     for i in range(profiling_count):
         if len(args) > 0:

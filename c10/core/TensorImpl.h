@@ -451,7 +451,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Avoid using this method if possible; try to use only Tensor APIs to perform
    * operations.
    */
-  virtual const Storage& storage() const;
+  TENSORIMPL_MAYBE_VIRTUAL const Storage& storage() const {
+    if (C10_UNLIKELY(storage_access_should_throw_)) {
+      throw_storage_access_error();
+    }
+    return storage_;
+  }
 
   /**
    * The number of elements in a tensor.
@@ -522,6 +527,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::QuantizedXPU);
   }
 
+  bool is_xla() const {
+    return key_set_.has(DispatchKey::XLA);
+  }
+
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::HIP) ||
@@ -538,6 +547,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_metal() const {
     return key_set_.has(DispatchKey::Metal);
+  }
+
+  bool is_mlc() const {
+    return key_set_.has(DispatchKey::MLC);
   }
 
   // TODO: remove this once we don't automatically enabled Autograd dispatch keys
@@ -781,6 +794,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_offset_;
   }
 
+ protected:
+  /**
+   * Returns the human-readable name of the actual type of this object (e.g.,
+   * TensorImpl, BatchedTensorImpl, etc.). Used for error messages.
+   */
+  virtual const char* tensorimpl_type_name() const {
+    return "TensorImpl";
+  }
+
+ private:
+  [[noreturn]] void throw_storage_access_error() const;
+
+ public:
   /**
    * True if a tensor has no elements (e.g., numel() == 0).
    */
@@ -957,7 +983,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return named_tensor_meta_.get();
   }
 
-  bool has_named_tensor_meta() {
+  bool has_named_tensor_meta() const {
     return named_tensor_meta_ != nullptr;
   }
 
@@ -1388,12 +1414,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         auto size = numel_;
         auto dtor = data_type_.placementDelete();
         auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
-        storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
+        storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.placementNew()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
-        storage_.set_data_ptr(
+        storage_.set_data_ptr_noswap(
             allocator->allocate(numel_ * data_type_.itemsize()));
       }
       storage_.set_nbytes(numel_ * data_type_.itemsize());
@@ -1685,6 +1711,10 @@ protected:
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
   static const char * const err_msg_tensor_metadata_change_not_allowed;
 
+  void set_storage_access_should_throw() {
+    storage_access_should_throw_ = true;
+  }
+
   Storage storage_;
 
 private:
@@ -1762,6 +1792,9 @@ protected:
 
   // Tensor is contiguous
   bool is_contiguous_ = true;
+
+  // Tensor is a subclass that does not permit storage access.
+  bool storage_access_should_throw_ = false;
 
   // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
   inline void init_bitfields() {
@@ -1879,7 +1912,7 @@ protected:
 //    SizesAndStrides strides (pre-allocated 4)
 //    storage offset
 //    numel
-//    data type, device_opt, is_contiguous, bitfields
+//    data type, device, is_contiguous, storage_access_should_throw_, bitfields
 //    DispatchKeySet
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...

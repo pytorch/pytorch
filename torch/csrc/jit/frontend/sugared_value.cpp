@@ -111,6 +111,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_sparse", "prim"},
            {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
+           {"is_mlc", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
            {"is_meta", "prim"},
@@ -308,6 +309,10 @@ void SimpleValue::setAttr(
         MethodValue(value_, prop->setter->name())
             .call(loc, m, {newValue}, {}, /*n_binders=*/1);
         return;
+      }
+
+      if (prop && !prop->setter) {
+        throw ErrorReport(loc) << "Tried to set read-only attribute: " << field;
       }
 
       throw ErrorReport(loc)
