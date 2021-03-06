@@ -23,10 +23,12 @@ torch/csrc/autograd/generated/
 
 import argparse
 import os
+import tools.codegen.api.cpp as cpp
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.selective_build.selector import SelectiveBuilder
+from typing import List
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
