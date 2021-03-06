@@ -1,5 +1,5 @@
-#import <ATen/native/metal/MetalTensor.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
+#import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>
 
@@ -10,7 +10,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-class API_AVAILABLE(ios(10.0), macos(10.13)) MetalTensor::Impl {
+class API_AVAILABLE(ios(10.0), macos(10.13)) MetalTensorImplStorage::Impl {
  public:
   Impl(const std::vector<int64_t>& sizes, const std::vector<int64_t>& strides)
       : _sizes(sizes),
@@ -47,83 +47,63 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MetalTensor::Impl {
   std::unique_ptr<MPSImageWrapper> _textureImpl;
 };
 
-MetalTensor::MetalTensor(const std::vector<int64_t>& sizes)
-    : MetalTensor(sizes, compute_strides(sizes)) {}
+MetalTensorImplStorage::MetalTensorImplStorage(
+    const std::vector<int64_t>& sizes)
+    : MetalTensorImplStorage(sizes, compute_strides(sizes)) {}
 
-MetalTensor::MetalTensor(
+MetalTensorImplStorage::MetalTensorImplStorage(
     const std::vector<int64_t>& sizes,
     const std::vector<int64_t>& strides)
     : _impl(std::make_shared<Impl>(std::move(sizes), std::move(strides))) {}
 
-bool MetalTensor::defined() const {
+bool MetalTensorImplStorage::defined() const {
   return static_cast<bool>(_impl);
 }
 
-at::Tensor MetalTensor::toTensor(
-    MetalTensor&& mt,
-    const TensorOptions& options) {
-  using MetalTensorImpl = at::MetalTensorImpl<MetalTensor>;
-  auto sizes = mt.sizes(); // sizes is stored in TensorImpl
-  auto strides = mt.strides(); // strides is stored in MetalTensorImpl
-  return detail::make_tensor<MetalTensorImpl>(
-      DispatchKeySet(DispatchKey::Metal),
-      options.dtype(),
-      at::Device(at::kMetal),
-      std::move(mt),
-      std::vector<int64_t>(sizes.begin(), sizes.end()),
-      std::vector<int64_t>(strides.begin(), strides.end()));
-}
-
-MetalTensor& MetalTensor::fromTensor(const at::Tensor& tensor) {
-  using MetalTensorImpl = at::MetalTensorImpl<MetalTensor>;
-  TORCH_INTERNAL_ASSERT(
-      tensor.is_metal(), "unbox expects Metal tensor as inputs");
-  MetalTensorImpl* impl =
-      static_cast<MetalTensorImpl*>(tensor.unsafeGetTensorImpl());
-  return impl->unsafe_opaque_handle();
-}
-
-std::shared_ptr<MetalTensor::Impl> MetalTensor::impl() {
+std::shared_ptr<MetalTensorImplStorage::Impl> MetalTensorImplStorage::impl() {
   return _impl;
 }
 
-std::shared_ptr<const MetalTensor::Impl> MetalTensor::impl() const {
+std::shared_ptr<const MetalTensorImplStorage::Impl> MetalTensorImplStorage::
+    impl() const {
   return _impl;
 }
 
-IntArrayRef MetalTensor::sizes() const {
+IntArrayRef MetalTensorImplStorage::sizes() const {
   return impl()->sizes();
 }
 
-IntArrayRef MetalTensor::strides() const {
+IntArrayRef MetalTensorImplStorage::strides() const {
   return impl()->strides();
 }
 
-int64_t MetalTensor::dim() const {
+int64_t MetalTensorImplStorage::dim() const {
   return impl()->dim();
 }
 
-int64_t MetalTensor::numel() const {
+int64_t MetalTensorImplStorage::numel() const {
   return impl()->numel();
 }
 
-void MetalTensor::set_data_from_host(const float* inputData) {
+void MetalTensorImplStorage::set_data_from_host(const float* inputData) {
   impl()->set_data_from_host(inputData);
 }
 
-void MetalTensor::copy_data_to_host(float* hostData) {
+void MetalTensorImplStorage::copy_data_to_host(float* hostData) {
   impl()->copy_data_to_host(hostData);
 }
 
 API_AVAILABLE(ios(10.0))
-MPSImageWrapper* MetalTensor::texture() const {
+MPSImageWrapper* MetalTensorImplStorage::texture() const {
   return impl()->texture();
 }
 
-std::ostream& operator<<(std::ostream& output, const MetalTensor& mt) {
+std::ostream& operator<<(
+    std::ostream& output,
+    const MetalTensorImplStorage& mt) {
   auto&& sizes = mt.sizes();
   auto&& strides = mt.strides();
-  output << "[MetalTensor] | Size:{";
+  output << "[MetalTensorImplStorage] | Size:{";
   std::ostringstream oss;
   std::copy(
       sizes.begin(), sizes.end() - 1, std::ostream_iterator<int>(oss, ","));

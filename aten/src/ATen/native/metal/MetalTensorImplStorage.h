@@ -6,27 +6,26 @@ namespace native {
 namespace metal {
 
 class MPSImageWrapper;
-class MetalTensor final {
+class MetalTensorImplStorage final {
   class Impl;
 
  public:
-  MetalTensor(){};
-  explicit MetalTensor(const std::vector<int64_t>& sizes);
-  explicit MetalTensor(
+  MetalTensorImplStorage(){};
+  explicit MetalTensorImplStorage(const std::vector<int64_t>& sizes);
+  explicit MetalTensorImplStorage(
       const std::vector<int64_t>& sizes,
       const std::vector<int64_t>& strides);
-  ~MetalTensor() = default;
+  ~MetalTensorImplStorage() = default;
 
-  MetalTensor(MetalTensor&&) = default;
-  MetalTensor& operator=(MetalTensor&&) = default;
+  MetalTensorImplStorage(MetalTensorImplStorage&&) = default;
+  MetalTensorImplStorage& operator=(MetalTensorImplStorage&&) = default;
 
-  MetalTensor(const MetalTensor&) = default;
-  MetalTensor& operator=(const MetalTensor&) = default;
+  MetalTensorImplStorage(const MetalTensorImplStorage&) = default;
+  MetalTensorImplStorage& operator=(const MetalTensorImplStorage&) = default;
 
-  friend std::ostream& operator<<(std::ostream& output, const MetalTensor& mt);
-
-  static at::Tensor toTensor(MetalTensor&& mt, const TensorOptions& options);
-  static MetalTensor& fromTensor(const at::Tensor& tensor);
+  friend std::ostream& operator<<(
+      std::ostream& output,
+      const MetalTensorImplStorage& mt);
 
   bool defined() const;
   IntArrayRef sizes() const;

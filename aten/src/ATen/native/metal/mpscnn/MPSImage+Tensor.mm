@@ -15,8 +15,8 @@ using namespace at::native;
   auto contiguousTensor = tensor.contiguous();
   float* src = tensor.data_ptr<float>();
   std::vector<int64_t> sizes = tensor.sizes().vec();
-  auto c4 = metal::NCHW_to_NC4(src, sizes);
-  auto c4fp16 = metal::fp32_to_fp16(c4);
+  auto c4 = metal::NCHWToNC4(src, sizes);
+  auto c4fp16 = metal::Fp32ToFp16(c4);
   return [self imageFromFp16Array:c4fp16.data() Sizes:sizes];
 }
 
@@ -97,8 +97,8 @@ using namespace at::native;
 - (at::Tensor)toCPUTensor {
   auto outputSize = [self sizes];
   std::vector<uint16_t> fp16 = [self toFp16Array];
-  auto fp32 = metal::fp16_to_fp32(fp16);
-  std::vector<float> fp32_nchw = metal::NC4_to_NCHW(fp32.data(), outputSize);
+  auto fp32 = metal::Fp16ToFp32(fp16);
+  std::vector<float> fp32_nchw = metal::NC4ToNCHW(fp32.data(), outputSize);
   auto tensor = at::empty(outputSize);
   int64_t size_bytes = c10::multiply_integers(outputSize) * sizeof(float);
   memcpy(tensor.data_ptr(), fp32_nchw.data(), size_bytes);
