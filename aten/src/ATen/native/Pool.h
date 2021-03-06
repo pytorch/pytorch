@@ -68,7 +68,7 @@ pool2d_shape_check(
   TORCH_CHECK(dilationH > 0 && dilationW > 0,
               "dilation should be greater than zero, but got ",
               "dilationH: ", dilationH, " dilationW: ", dilationW);
-  
+
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
   if (memory_format == at::MemoryFormat::ChannelsLast){
     // Expect tensor in NHWC format and allow 0-dim only for N.
@@ -81,7 +81,7 @@ pool2d_shape_check(
       "Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:",
       input.sizes());
   }
-  
+
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
               "pad should be smaller than or equal to half of kernel size, but got ",
               "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);

@@ -94,7 +94,7 @@ TORCH_API Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, b
 //   new_indices = [ 3, 1, 3 ]  # uncoalesced
 TORCH_API Tensor flatten_indices_by_dims(const Tensor& indices, const IntArrayRef& sizes, const IntArrayRef& dims_to_flatten);
 
-// Find the CSR representation for a row `indices` from the COO format 
+// Find the CSR representation for a row `indices` from the COO format
 TORCH_API Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz);
 
 }} // namespace at::sparse
