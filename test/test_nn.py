@@ -12366,6 +12366,14 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0][2].sum(), 0)
         self.assertEqual(output[1][1].sum(), 0)
 
+        # change padding vector
+        padding_vector = torch.ones(20, dtype=dtype)
+        embedding = nn.Embedding(10, 20, padding_idx=2, sparse=True).to(device, dtype)
+        embedding.weight.data[2] = padding_vector
+        input = torch.tensor([0, 2], dtype=torch.long).to(device)
+        output = embedding(input)
+        self.assertEqual(output[1], padding_vector)
+
         # out of bounds check for padding_idx
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=-25)

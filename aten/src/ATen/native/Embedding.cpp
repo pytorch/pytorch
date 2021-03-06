@@ -11,22 +11,17 @@
 
 namespace at { namespace native {
 
-Tensor embedding(const Tensor & weight, const Tensor & indices,
-                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+template <typename Func>
+Tensor _embedding_helper(const Tensor & weight, const Tensor & indices,
+                 Func padding_func, bool scale_grad_by_freq, bool sparse){
   TORCH_CHECK(weight.dim() >= 1, "'weight' must be at least 1-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
-  auto zerofill_padding = [&](Tensor& embedding) {
-    if (padding_idx >= 0) {
-      embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
-    }
-  };
-
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
     auto out = weight.index_select(0, indices);
-    zerofill_padding(out);
+    padding_func(out);
     return out;
   }
 
@@ -36,8 +31,27 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
   }
 
   auto out = weight.index_select(0, indices.reshape(-1));
-  zerofill_padding(out);
+  padding_func(out);
   return out.view(size);
+};
+
+Tensor _embedding_module(const Tensor & weight, const Tensor & indices,
+                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+  auto no_op = [](Tensor& embedding) {};
+  return _embedding_helper(
+      weight, indices, no_op, scale_grad_by_freq, sparse);
+}
+
+Tensor embedding(const Tensor & weight, const Tensor & indices,
+                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+  auto zerofill_padding = [&](Tensor& embedding) {
+    if (padding_idx >= 0) {
+      embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+    }
+  };
+
+  return _embedding_helper(
+      weight, indices, zerofill_padding, scale_grad_by_freq, sparse);
 }
 
 Tensor embedding_backward(
