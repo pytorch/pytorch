@@ -3285,8 +3285,21 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.cfloat)
-    @precisionOverride({torch.float: 1e-02, torch.cfloat: 1e-02})
+    @dtypes(torch.double)
+    def test_chain_matmul(self, device, dtype):
+        # chain_matmul accepts a single input tensor while multi_dot does not
+        t = make_tensor((2, 2), device, dtype)
+        self.assertEqual(t, torch.chain_matmul(t))
+        with self.assertRaisesRegex(RuntimeError, r"chain_matmul\(\): Expected one or more matrices"):
+            torch.chain_matmul()
+
+        # chain_matmul expects all tensors to be 2D whereas multi_dot allows the first and last tensors to
+        # be either 1D or 2D
+        with self.assertRaisesRegex(RuntimeError, r"Tensor dimension is 1, expected 2 instead"):
+            torch.chain_matmul(make_tensor(1, device, dtype), make_tensor(1, device, dtype))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double, torch.cdouble)
     def test_multi_dot(self, device, dtype):
         def check(*shapes, discontiguous=False):
             tensors = [make_tensor(shape, device, dtype, discontiguous=discontiguous) for shape in shapes]
@@ -3318,9 +3331,11 @@ class TestLinalg(TestCase):
 
         # test large tensors
         check([10, 100], [100, 5], [5, 50])
+        check([10, 20], [20, 30], [30, 5])
 
         # test discontiguous input
         check([3, 2], [2, 2], [2, 3], [3, 4], discontiguous=True)
+        check([15, 5], [5, 10], [10, 20], [20, 25], discontiguous=True)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float)
@@ -5810,25 +5825,6 @@ else:
         run_test(3, 3, 3, 3)
         run_test(3, 3, 4, 4)
         run_test(3, 3, 5, 5)
-
-    @dtypes(torch.double)
-    def test_chain_matmul(self, device, dtype):
-        def product(matrices):
-            for mat in matrices[1:]:
-                matrices[0] = matrices[0].mm(mat)
-            return matrices[0]
-
-        def run_test(p):
-            matrices = []
-            for (pi, pi_1) in zip(p[:-1], p[1:]):
-                matrices.append(torch.randn(pi, pi_1, dtype=dtype, device=device))
-            self.assertEqual(torch.chain_matmul(*matrices), product(matrices))
-
-        run_test([10, 20, 30, 5])
-        run_test([15, 5, 10, 20, 25])
-
-        with self.assertRaisesRegex(RuntimeError, r"chain_matmul\(\): Expected one or more matrices"):
-            torch.chain_matmul()
 
     @skipCUDAIfNoMagma
     @skipCUDAIfRocm

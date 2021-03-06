@@ -387,18 +387,22 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         kwargs=dict(dim=1)),)
 
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
+    # Each test case consists of the sizes in the chain of multiplications
+    # e.g. [2, S, 2, S] generates matrices (2, S) @ (S, 2) @ (2, S)
     test_cases = [
-        [(S,), (S,)],
-        [(1, S), (S, 1)],
-        [(S, 0), (0, S)],
-        [(0, S), (S, 2)],
-        [(2, S), (S, 2), (2, S)],
+        [1, S, 1],
+        [S, 0, S],
+        [0, S, 2],
+        [2, S, 2, S],
+        [2, 3, 4, 5],
+        [5, 4, 0, 2],
+        [2, 4, 3, 5, 3, 2]
     ]
 
     result = []
-    for test_case in test_cases:
+    for sizes in test_cases:
         tensors = []
-        for size in test_case:
+        for size in zip(sizes[:-1], sizes[1:]):
             t = make_tensor(size, device, dtype, requires_grad=requires_grad)
             tensors.append(t)
         result.append(SampleInput(tensors))
