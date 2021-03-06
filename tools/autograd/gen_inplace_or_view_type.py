@@ -2,6 +2,8 @@ from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
+from tools.codegen.model import *
+from typing import List, Optional, Sequence, Tuple
 
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
@@ -220,7 +222,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
         is_view_with_metadata_change=is_view_with_metadata_change,
         replay_view_func=replay_view_func)
 
-def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> List[str]:
+def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tuple[str, str]:
     # See NOTE [ Autograd View Variables ] in variable.h for details.
     f = fn.func
     base_name = get_base_name(f)

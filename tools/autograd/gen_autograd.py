@@ -24,10 +24,12 @@ torch/csrc/autograd/generated/
 
 import argparse
 import os
+import tools.codegen.api.cpp as cpp
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.selective_build.selector import SelectiveBuilder
+from typing import List
 
 def gen_autograd(
     aten_path: str,

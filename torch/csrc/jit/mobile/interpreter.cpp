@@ -208,7 +208,13 @@ bool InterpreterState::run(Stack& stack) {
       } break;
       case WARN: {
         drop(stack, 1);
-        TORCH_WARN(pop(stack).toStringRef());
+        // Note: Please don't move the pop(stack) code below into the TORCH_WARN
+        // macro since TORCH_WARN fails to evaluate its arguments when
+        // STRIP_ERROR_MESSAGES is defined (which happens for production
+        // mobile builds). This will cause the stack to be in an inconsistent
+        // state. It has previously resulted in a SEV (S22350).
+        auto sref = pop(stack).toStringRef();
+        TORCH_WARN(sref);
         ++pc;
       } break;
       default:
