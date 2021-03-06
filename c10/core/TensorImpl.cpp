@@ -88,7 +88,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
   // add AutogradBackend key when the tensor requires grad.
   if (c10::InferenceMode::is_enabled()) {
-      key_set_ = key_set;
+    key_set_ = key_set;
   } else {
     DispatchKey k = key_set.highestPriorityBackendTypeId();
     key_set_ = key_set.add(getAutogradKeyFromBackend(k)).add(c10::DispatchKey::InplaceOrView);
