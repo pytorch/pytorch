@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+import re
 from typing import Optional, Sequence, List, Tuple
 
+import tools.codegen.api.cpp as cpp
 from tools.codegen.api.types import *
 from tools.codegen.model import *
+from tools.codegen.utils import IDENT_REGEX
 
 # Represents a saved attribute involved in backward calculation.
 # Note that it can be a derived property of an input argument, e.g.:
@@ -227,7 +230,7 @@ def match_differentiability_info(
 
     return result
 
-def is_differentiable(name: str, type: Type, info: DifferentiabilityInfo) -> bool:
+def is_differentiable(name: str, type: Type, info: Optional[DifferentiabilityInfo]) -> bool:
     return type.is_tensor_like() and (info is None or name not in info.non_differentiable_arg_names)
 
 def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> List[DifferentiableOutput]:
