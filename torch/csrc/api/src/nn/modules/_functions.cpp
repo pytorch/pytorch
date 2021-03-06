@@ -7,7 +7,7 @@ namespace nn {
 namespace functions {
 
 Variable CrossMapLRN2d::forward(
-    AutogradContext *ctx, 
+    AutogradContext *ctx,
     const Variable& input,
     const CrossMapLRN2dOptions& options){
   ctx->saved_data["size"] = options.size();
@@ -19,7 +19,7 @@ Variable CrossMapLRN2d::forward(
   TORCH_CHECK(input.dim() == 4);
 
   ctx->saved_data["scale"] = ctx->saved_data["scale"].toTensor().defined() ? ctx->saved_data["scale"] : torch::empty({0}, input.options());
-  
+
   torch::Tensor output = torch::empty({0}, input.options());
 
   int64_t batch_size = input.size(0);
@@ -87,16 +87,16 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
   int64_t input_height = input.size(2);
   int64_t input_width = input.size(3);
 
-  auto padded_ratio = torch::empty({channels + ctx->saved_data["size"].toInt() - 1, input_height, input_width}, 
+  auto padded_ratio = torch::empty({channels + ctx->saved_data["size"].toInt() - 1, input_height, input_width},
                                     input.options());
-  auto accum_ratio = torch::empty({input_height, input_width}, 
+  auto accum_ratio = torch::empty({input_height, input_width},
                                     input.options());
   double cache_ratio_value = 2 * ctx->saved_data["alpha"].toDouble() * ctx->saved_data["beta"].toDouble() / ctx->saved_data["size"].toInt();
   int64_t inversePrePad = static_cast<int64_t>(ctx->saved_data["size"].toInt() - (ctx->saved_data["size"].toInt() - 1) / 2);
 
   grad_input.resize_as_(input);
   torch::pow_out(grad_input, ctx->saved_data["scale"].toTensor(), -ctx->saved_data["beta"].toDouble()).mul_(grad_output);
-  
+
   padded_ratio.zero_();
   auto padded_ratio_center = padded_ratio.narrow(0, inversePrePad, channels);
 
@@ -104,7 +104,7 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
     torch::mul_out(padded_ratio_center, grad_output[n], output[n]);
     padded_ratio_center.div_(ctx->saved_data["scale"].toTensor()[n]);
     torch::sum_out(
-        accum_ratio, 
+        accum_ratio,
         padded_ratio.narrow(0, 0, ctx->saved_data["size"].toInt() - 1),
         0, /*keepdim=*/false);
     for (int64_t c = 0; c < channels; ++c) {
@@ -113,7 +113,7 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
       accum_ratio.add_(padded_ratio[c], -1);
     }
   }
-  
+
   return variable_list{grad_input, Variable(), Variable(), Variable(), Variable()};
 }
 

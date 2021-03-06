@@ -765,7 +765,7 @@ int main()
 
     test_THDoubleVector_fill_VSX();
     test_THFloatVector_fill_VSX();
- 
+
     test_THDoubleVector_muls_VSX();
     test_THFloatVector_muls_VSX();
 
