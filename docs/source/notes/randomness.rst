@@ -111,7 +111,7 @@ deterministic implementation will be used::
     tensor([[[ 1.1900, -2.3409],
              [ 0.4796,  0.8003]],
             [[ 0.1509,  1.8027],
-             [ 0.0333, -1.1444]]], device='cuda:0') 
+             [ 0.0333, -1.1444]]], device='cuda:0')
 
 Furthermore, if you are using CUDA tensors, and your CUDA version is 10.2 or greater, you
 should set the environment variable `CUBLAS_WORKSPACE_CONFIG` according to CUDA documentation:
