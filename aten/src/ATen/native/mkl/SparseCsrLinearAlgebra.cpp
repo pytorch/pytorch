@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseCsrTensorUtils.h>
 
-#if !AT_MKL_ENABLED()
+// Don't compile with MKL for VS code since linking the sparse MKL routines needs some build fixes.
+// https://github.com/pytorch/pytorch/pull/50937#issuecomment-778732740
+#if !AT_MKL_ENABLED() || _MSC_VER
 
 namespace at { namespace native {
     using namespace at::sparse;

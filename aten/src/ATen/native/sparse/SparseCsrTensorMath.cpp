@@ -8,7 +8,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
-#include <TH/THBlasUtils.h>
+#include <ATen/native/CPUBlas.h>
 
 #include <algorithm>
 #include <iostream>
@@ -17,6 +17,14 @@ namespace at { namespace native {
 
 // Functions for matrix multiplication.
 using namespace at::sparse;
+
+bool is_vs_code() {
+#ifdef _MSC_VER
+  return true;
+#else
+  return false;
+#endif
+}
 
 Tensor& addmm_out_sparse_csr_dense_cpu(
     Tensor& out,
@@ -66,7 +74,8 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     }
   });
 
-  if (at::hasMKL()) {
+  // Do not use MKL for Windows due to linking issues with sparse MKL routines.
+  if (at::hasMKL() && !is_vs_code()) {
     at::_sparse_mm_mkl_(out, op1, op2, expand_self, alpha, beta);
   }
   else {
@@ -99,7 +108,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
             auto val = values_accessor[i];
             auto icol = col_indices_accessor[i];
 
-            THBlas_axpy<scalar_t>(dim_k,
+            at::native::cpublas::axpy<scalar_t>(dim_k,
               cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,
               out_ptr + irow * out_stride0, out_stride1);
           }

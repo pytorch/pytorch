@@ -9,8 +9,6 @@
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseCsrTensorUtils.h>
 
-#include <TH/THBlasUtils.h>
-
 namespace at { namespace native {
 
 using namespace at::sparse;
