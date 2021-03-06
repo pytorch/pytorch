@@ -21,7 +21,7 @@ if (( $num_gpus == 0 )); then
 fi
 if (( $num_gpus >= 1 )); then
     "$PYTHON" "$caffe2_pypath/python/examples/imagenet_trainer.py" --train_data null --batch_size 128 --epoch_size 12800 --num_epochs 2 --num_gpus 1
-    # Let's skip the fp16 bench runs for now, as it recompiles the miopen kernels and can take 10+min to run. 
+    # Let's skip the fp16 bench runs for now, as it recompiles the miopen kernels and can take 10+min to run.
     # We can resume when we (1) bindmount the miopen cache folder in jenkins; (2) install the pre-compiled miopen kernel library in the docker
     # "$PYTHON" "$caffe2_pypath/python/examples/imagenet_trainer.py" --train_data null --batch_size 256 --epoch_size 25600 --num_epochs 2 --num_gpus 1 --float16_compute --dtype float16
 fi

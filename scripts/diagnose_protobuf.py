@@ -22,7 +22,7 @@ try:
     import google.protobuf
     python_version = google.protobuf.__version__
     python_protobuf_installed = True
-except ImportError: 
+except ImportError:
     print("DEBUG: cannot find python protobuf install.")
     python_protobuf_installed = False
 

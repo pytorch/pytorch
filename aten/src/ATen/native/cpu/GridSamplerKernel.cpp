@@ -844,14 +844,14 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     auto mask_x = must_in_bound ? iVec(-1) : (ix > iVec(-1)) & (ix < iVec(inp_W));
     auto mask_y = must_in_bound ? iVec(-1) : (iy > iVec(-1)) & (iy < iVec(inp_H));
     auto mask = cast<scalar_t>(mask_x & mask_y);
-    
+
     auto offset = iy * iVec(inp_sH) + ix * iVec(inp_sW);
 
     auto val = mask_gather<sizeof(scalar_t)>(Vec(0), data, offset, mask);
     return val;
   }
 
-  inline void add_value_bounded(scalar_t* data, int64_t len, const Vec& x, const Vec&y, 
+  inline void add_value_bounded(scalar_t* data, int64_t len, const Vec& x, const Vec&y,
                                const Vec& delta) const {
 
     auto ix = convert_to_int_of_same_size(compute_W.compute_coordinates(x));
@@ -860,7 +860,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     auto mask_x = must_in_bound ? iVec(-1) : (ix > iVec(-1)) & (ix < iVec(inp_W));
     auto mask_y = must_in_bound ? iVec(-1) : (iy > iVec(-1)) & (iy < iVec(inp_H));
     auto mask = cast<scalar_t>(mask_x & mask_y);
-    
+
     auto i_gInp_offset = iy * iVec(inp_W) + ix;
     integer_t i_gInp_offset_arr[iVec::size()];
     i_gInp_offset.store(i_gInp_offset_arr);
@@ -899,7 +899,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
       // Interpolate the 4 values in the x direction
       Vec interp_x[4];
       for (int64_t i = 0; i < 4; ++i) {
-        interp_x[i] = 
+        interp_x[i] =
           coeff_x[0] * get_value_bounded(inp_slice_C_ptr, ix - Vec(1), iy + Vec(-1 + i)) +
           coeff_x[1] * get_value_bounded(inp_slice_C_ptr, ix + Vec(0), iy + Vec(-1 + i)) +
           coeff_x[2] * get_value_bounded(inp_slice_C_ptr, ix + Vec(1), iy + Vec(-1 + i)) +
